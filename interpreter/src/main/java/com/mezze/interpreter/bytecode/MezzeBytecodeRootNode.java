@@ -502,7 +502,9 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      *
      * <p>This does NOT touch the insert cliff. `map::insert` from a base map
      * somebody else still holds costs 5.41 µs at 4 000 keys because
-     * `LongHashMapStorage.putLong` clones both arrays when it is not the owner.
+     * `LongHashMapStorage.putLong` cloned both arrays when it was not the owner.
+     * (That storage is gone — see LongTrieMapStorage and BUG 38 — and the cliff
+     * with it; the note stands as the record of what the row measured.)
      * That is a datastructures problem — a structure that shares instead of an
      * owner token that copies on branch — and no amount of dispatch removal
      * touches it.

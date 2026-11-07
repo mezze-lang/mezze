@@ -1,10 +1,13 @@
 # Known bugs — polyglot dot-chaining, codec, dispatch, and DX
 
-**STATUS 2026-11-07: TWO open bugs — BUG 38 and BUG 35.** BUG 38 is the serious
-one: replacing a value in a Map corrupts the map it was derived FROM, silently,
-in plain single-threaded Mezze, at any size that reaches the array storage. BUG
-35 is a recursive LOCAL lambda that calls a function handling its own effect.
-Everything else below is closed.
+**STATUS 2026-11-07: TWO open bugs — BUG 38 (PARTLY FIXED) and BUG 35.** BUG 38
+is the serious one: a derivation corrupts the Map or Set it came from, silently,
+in plain single-threaded Mezze, at any size that reaches the array storage. It
+is FIXED for `long` keys — `Int`-keyed Maps and Sets are now persistent tries
+with structural sharing — and still OPEN for the String, Double and generic
+Object storages, which keep the in-place write. BUG 35 is a recursive LOCAL
+lambda that calls a function handling its own effect. Everything else below is
+closed.
 
 **STATUS 2026-10-30: no open bugs at that date.** BUG 34 is fixed in both halves — the
 printed row is WRITABLE (`<..., *>` parses, P0137 names the wrong order) and
@@ -3900,7 +3903,7 @@ argument instead. The perf question is still open and is the smaller of the
 two findings.
 
 
-## BUG 38 — OPEN 2026-11-07: replacing a value in a Map corrupts the map it was derived FROM
+## BUG 38 — FIXED for `long` keys 2026-11-07, OPEN for String/Double/Object keys: a derivation corrupts the Map or Set it came FROM
 
 A map still in scope changes under you when another map is derived from it by
 replacing an existing key. Minimal repro, plain Mezze, no threads, no effects:
@@ -4092,8 +4095,52 @@ shared-base case becomes dramatically faster.
 Either closes the other known defect on this surface at the same time:
 `map::insert` from a base somebody else holds costs 5.41 µs at 4 000 keys and is
 unbounded in map size (PERF-LOG, "a 338x cliff when the base map is shared").
-Both are the same missing property. **That makes the structure work urgent
-rather than merely valuable, and it is the ranked next item.**
+Both are the same missing property.
+
+### FIXED for `long` keys — `LongTrieMapStorage` / `LongTrieSetStorage`
+
+`LongHashMapStorage` and `LongHashSetStorage` are DELETED. In their place,
+hash-array-mapped tries with structural sharing: every field final, nothing
+overwritten, an update copying only one root-to-leaf path. All twelve tests in
+`PersistentReplaceSoundnessTest` pass with nothing disabled.
+
+What it cost and bought, at 1 000 keys:
+
+```
+  map::get (hit)            10 640 -> 13 460    1.27x slower
+  map::contains_key          5 172 ->  7 545    1.46x slower
+  map::size                    473 ->    489    flat
+  map::insert chain         13 702 -> 44 704    3.26x slower
+  set::contains              4 783 ->  4 765    flat
+  set::add chain             6 292 ->  6 286    flat
+
+  map::insert, SHARED base   250 keys    1 000      4 000
+    table                     278 611  1 305 284  5 407 531
+    trie                       32 251     44 816     63 164
+                                 8.6x        29x      85.6x FASTER
+```
+
+The shared-base slope went from linear to 1.4x per 4x the keys. And the number
+that says the structure is right: the trie's shared-base insert (44 816) equals
+its own chain insert (44 704), where the table had a **95x spread** between
+them. It was fast when the program threw the base away and wrong when it kept
+it; a persistent map costs the same either way.
+
+Two things fell out for free. **No collision nodes** — the 64-bit mix is a
+bijection, so distinct keys cannot share a full hash and must part within 64
+bits; depth is bounded at 13 and the impossible branch throws. **No sentinels**
+— the table reserved `Long.MIN_VALUE` and `MIN_VALUE+1` as empty/deleted
+markers and promoted any map using one as a key to boxed storage; that
+promotion is gone, with a test pinning it.
+
+### STILL OPEN for the other six storages
+
+`StringHashMapStorage`, `DoubleHashMapStorage`, `HashMapStorage` and the three
+Set equivalents keep the in-place write and therefore keep this bug. Their class
+comments now say so. The repro is the same program with `Str` keys. Porting is
+mechanical for Double (same bijective-mix trick on the raw bits) but a
+general-key trie needs collision nodes, because `hashCode` is not a bijection —
+so it is not a copy-paste and is not claimed as done.
 
 ### Discovered by
 

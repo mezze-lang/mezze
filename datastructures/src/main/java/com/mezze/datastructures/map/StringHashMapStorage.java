@@ -5,7 +5,8 @@ import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 /**
  * Open-addressing hash map specialized for {@code String} keys.
  *
- * Sister of {@link LongHashMapStorage}. Keys live in a {@code String[]} so
+ * Sister of {@link LongTrieMapStorage}, but still an open-addressed table:
+ * see known-bugs BUG 38, which this storage still has. Keys live in a {@code String[]} so
  * the hot lookup path can call {@link String#equals(Object)} directly
  * (devirtualized — no {@code Objects.equals} dispatch through the {@code Object[]}
  * static type) and read the cached {@code String.hashCode()}.

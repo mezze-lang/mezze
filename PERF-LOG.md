@@ -9436,3 +9436,93 @@ the tests are satisfiable, a measured reason to stop looking for a cheap fix,
 and the knowledge that `map::insert`'s 13.5 ns is only available to a structure
 that mutates — so a HAMT's insert will be slower than it, and that is the
 correct trade rather than a regression to apologise for.
+
+### LEDGER UPDATE 2026-11-07 — the Map and Set become PERSISTENT: BUG 38 closed, and the 338x cliff with it
+
+`LongHashMapStorage` and `LongHashSetStorage` are deleted. In their place
+`LongTrieMapStorage` and `LongTrieSetStorage`: hash-array-mapped tries with
+structural sharing, every field final, nothing ever overwritten.
+
+This is the fix the previous entry argued was the only one left, after the
+diff-chain family was measured and discarded.
+
+#### What it cost and what it bought
+
+```
+  row (1 000 keys)                  table      trie     verdict
+  map::get   (hit)                 10 640    13 460     1.27x slower
+  map::get   (miss)                 6 545     8 223     1.26x slower
+  map::contains_key                 5 172     7 545     1.46x slower
+  map::size                           473       489     flat
+  map::insert chain (replace)      13 702    44 704     3.26x slower
+  set::contains                     4 783     4 765     flat
+  set::insert PRESENT-key           7 072     8 171     1.16x slower
+  set::add PRESENT, chain           6 292     6 286     flat
+
+  map::insert from a SHARED base    250 keys    1 000      4 000
+    table                           278 611  1 305 284  5 407 531
+    trie                             32 251     44 816     63 164
+    verdict                            8.6x        29x      85.6x FASTER
+```
+
+The shared-base slope went from linear — 4.7x then 4.1x per 4x the keys — to
+**1.39x and 1.41x**, which is log32 doing what log32 does.
+
+#### The number that says the structure is right
+
+The trie's shared-base insert is **44 816** and its own chain insert is
+**44 704**. They are the same operation now, because a trie has no notion of
+owning its storage. The table they replace had a **95x spread** between those
+two rows at 1 000 keys: it was fast when the program threw the base away, and
+wrong when it kept it. A persistent map should cost the same either way, and
+now it does.
+
+That reframes the 3.26x on the chain insert. It is not a regression from 13 702
+to 44 704 — it is the disappearance of a number that was only ever available to
+a structure that mutates. The honest comparison for "insert into a map" is
+44 704 against the old pair of 13 702-when-lucky and 1 305 284-when-not.
+
+#### BUG 38, closed for Long keys
+
+All twelve tests in `PersistentReplaceSoundnessTest` pass with **nothing
+disabled** — the Map replace, the Map new-key insert and the Set new-key insert
+that were `@Disabled` against this bug, plus the nine that were already
+passing.
+
+#### The trie earns trust from a differential, not from cases
+
+`LongTrieMapStorageTest`, 18 tests. The load-bearing one is **random inserts,
+replaces and removes against a `java.util.HashMap` kept in step** — four seeds,
+8 000 operations each, the whole contents re-verified every 500 operations, and
+a version snapshotted at operation 4 000 and re-checked at the end to prove it
+never drifted. A new data structure earns trust by agreeing with one that is
+already trusted; the named cases are there so that when the differential says
+"seed 42, operation 4 071" something also says which shape broke.
+
+The named cases cover the depths deliberately — 1, 2, 8, 31, 32, 33, 64, 1 000
+and 5 000 entries, because 5 bits per level means a node spills at 32 and a bug
+in the data/node split or the bitmap indexing appears exactly there.
+
+#### Two things that fell out for free
+
+**No collision nodes.** `mix` is the murmur3 64-bit finalizer, which is a
+BIJECTION: distinct keys cannot share a full hash, so two keys travel together
+only while their hashes agree and must part within 64 bits. Depth is bounded at
+13 and the "same hash, different key" case a general HAMT needs collision nodes
+for cannot arise. The branch that would handle it throws instead of looping.
+
+**The sentinels are gone.** The table reserved `Long.MIN_VALUE` and
+`MIN_VALUE+1` as empty/deleted markers, so a program using one as a key had its
+whole map promoted to boxed storage. A trie stores no markers, so `isStorable`
+is unconditionally true and that promotion no longer exists. There is a test
+pinning it, because it is the kind of property that would be lost silently.
+
+#### What is NOT fixed
+
+BUG 38 affects eight storages. This closes the two for `long` keys —
+the common case, and the one every `Int`-keyed map and set uses. Still open:
+`StringHashMapStorage`, `DoubleHashMapStorage`, `HashMapStorage` and the three
+Set equivalents, all of which keep the in-place write and therefore the bug.
+Their class comments now say so. Porting them is mechanical — the trie's shape
+transfers — but a general-key trie needs collision nodes, because `hashCode` is
+not a bijection, so it is not a copy-paste and it is not claimed as done.

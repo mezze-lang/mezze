@@ -5,7 +5,8 @@ import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 /**
  * Open-addressing hash map specialized for primitive {@code double} keys.
  *
- * Mirrors {@link LongHashMapStorage} but stores keys as the raw {@code long}
+ * Mirrors the open-addressed table {@link LongTrieMapStorage} replaced — and
+ * still has BUG 38 — but stores keys as the raw {@code long}
  * bit pattern of each {@code double} (via {@link Double#doubleToRawLongBits}).
  * This makes every probe a primitive {@code ==} on a {@code long[]} — no
  * boxing, no virtual {@code Objects.equals} dispatch.

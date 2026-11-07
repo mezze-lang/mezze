@@ -53,16 +53,16 @@ public final class SmallFlatSetStorage implements SetStorage {
             return new SmallFlatSetStorage(newElements);
         }
 
-        // Transition to LongHashSetStorage if every element is a primitive-storable Long
+        // Transition to LongTrieSetStorage if every element is a Long
         // (no sentinel collision), HashSetStorage otherwise.
         return transitionToBestHash(elem);
     }
 
     private SetStorage transitionToBestHash(Object newElem) {
         if (allLongElementsStorable(newElem)) {
-            LongHashSetStorage out = new LongHashSetStorage();
+            SetStorage out = new LongTrieSetStorage();
             for (Object e : elements) {
-                out = (LongHashSetStorage) out.addLong((Long) e);
+                out = ((LongTrieSetStorage) out).addLong((Long) e);
             }
             return out.add(newElem);
         }
@@ -84,9 +84,9 @@ public final class SmallFlatSetStorage implements SetStorage {
     }
 
     private boolean allLongElementsStorable(Object newElem) {
-        if (!(newElem instanceof Long ne) || !LongHashSetStorage.isStorable(ne)) return false;
+        if (!(newElem instanceof Long ne) || !LongTrieSetStorage.isStorable(ne)) return false;
         for (Object e : elements) {
-            if (!(e instanceof Long le) || !LongHashSetStorage.isStorable(le)) return false;
+            if (!(e instanceof Long le) || !LongTrieSetStorage.isStorable(le)) return false;
         }
         return true;
     }

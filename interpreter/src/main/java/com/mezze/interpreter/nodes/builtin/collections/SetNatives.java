@@ -300,7 +300,7 @@ public final class SetNatives {
         // every element only to unbox it again one line later. MEASURED: that
         // boxing IS the set fold's remaining cost once the guest callback is
         // gone (7 447 ps/elem on `fuseall` kernel 7).
-        if (set.storage() instanceof com.mezze.datastructures.set.LongHashSetStorage ls) {
+        if (set.storage() instanceof com.mezze.datastructures.set.LongTrieSetStorage ls) {
             return ls.sumLongs();
         }
         long total = 0;

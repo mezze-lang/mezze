@@ -24,11 +24,14 @@ import org.junit.jupiter.api.BeforeEach
  * fell below every `head` reading with no overlap, which is a separation rather
  * than noise.
  *
- * WHAT THIS DOES NOT TOUCH. Inserting from a base map somebody else still holds
- * costs 5.41 µs at 4 000 keys because `LongHashMapStorage.putLong` clones both
- * arrays when `ownerToken[0] != this`. That row is unchanged here and its cost
- * is the clone, not the dispatch — a datastructures problem, recorded in
- * PERF-LOG as the largest thing left on the map surface.
+ * WHAT THIS DID NOT TOUCH, AND WHAT SINCE FIXED IT. Inserting from a base map
+ * somebody else still held cost 5.41 µs at 4 000 keys, because
+ * `LongHashMapStorage.putLong` cloned both arrays when `ownerToken[0] != this`.
+ * That was a datastructures problem and not a dispatch one, and it is now gone:
+ * that storage was replaced by `LongTrieMapStorage`, a persistent trie, which
+ * also closed BUG 38. The same row reads 63 164 ps at 4 000 keys — 85.6x — and
+ * no longer depends on who holds the base. The numbers above still stand; they
+ * were taken against the storage of the day.
  *
  * WHAT THESE GUARD. Three operands have to arrive in the right order: a
  * swapped key and value would store the key under the value and every lookup

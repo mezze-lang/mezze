@@ -8,7 +8,7 @@ public sealed interface SetStorage permits
         SingleElemSetStorage,
         SmallFlatSetStorage,
         LongSetStorage,
-        LongHashSetStorage,
+        LongTrieSetStorage,
         DoubleHashSetStorage,
         StringHashSetStorage,
         HashSetStorage,

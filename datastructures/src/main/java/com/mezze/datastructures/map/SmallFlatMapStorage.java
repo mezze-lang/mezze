@@ -74,17 +74,17 @@ public final class SmallFlatMapStorage implements MapStorage {
             return new SmallFlatMapStorage(newKeys, newValues);
         }
 
-        // Transition to LongHashMapStorage if every key is a primitive-storable Long
-        // (no sentinel collision), HashMapStorage otherwise. The Long-specialized
-        // storage skips boxing and Objects.equals on every probe.
+        // Transition to LongTrieMapStorage if every key is a Long,
+        // HashMapStorage otherwise. The Long-specialized storage skips boxing
+        // and Objects.equals on every probe.
         return transitionToBestHash(newKey, newValue);
     }
 
     private MapStorage transitionToBestHash(Object newKey, Object newValue) {
         if (allLongKeysStorable(newKey)) {
-            LongHashMapStorage out = new LongHashMapStorage();
+            MapStorage out = new LongTrieMapStorage();
             for (int i = 0; i < keys.length; i++) {
-                out = (LongHashMapStorage) out.putLong((Long) keys[i], values[i]);
+                out = ((LongTrieMapStorage) out).putLong((Long) keys[i], values[i]);
             }
             return out.put(newKey, newValue);
         }
@@ -105,10 +105,17 @@ public final class SmallFlatMapStorage implements MapStorage {
         return transitionToHash().put(newKey, newValue);
     }
 
+    /**
+     * Every Long key qualifies now. The open-addressed table this used to
+     * promote to reserved two values as empty/deleted sentinels, so a map whose
+     * keys included {@code Long.MIN_VALUE} had to go to boxed storage instead;
+     * a trie stores no sentinels, so {@code isStorable} is unconditionally true
+     * and that promotion is gone.
+     */
     private boolean allLongKeysStorable(Object newKey) {
-        if (!(newKey instanceof Long nk) || !LongHashMapStorage.isStorable(nk)) return false;
+        if (!(newKey instanceof Long nk) || !LongTrieMapStorage.isStorable(nk)) return false;
         for (Object k : keys) {
-            if (!(k instanceof Long lk) || !LongHashMapStorage.isStorable(lk)) return false;
+            if (!(k instanceof Long lk) || !LongTrieMapStorage.isStorable(lk)) return false;
         }
         return true;
     }

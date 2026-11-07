@@ -9,7 +9,8 @@ import kotlin.test.assertEquals
  * `set::sum` over a set of Ints reads the storage's `long[]` directly instead of
  * boxing every element on the way out.
  *
- * `LongHashSetStorage` already holds its elements unboxed, but every way OUT of
+ * `LongTrieSetStorage` (then `LongHashSetStorage`) already holds its elements
+ * unboxed, but every way OUT of
  * it — the iterator and `toArray()` — hands back `Object`, so a sum boxed two
  * million longs only to unbox them one line later. MEASURED on
  * `bench/cases/fuseall` kernel 7 at n=2M, min of 5: **7 447 → 4 938 ps/elem**,

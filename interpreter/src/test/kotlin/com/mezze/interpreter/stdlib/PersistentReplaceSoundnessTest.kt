@@ -19,7 +19,14 @@ import org.junit.jupiter.api.BeforeEach
  *
  * These tests state the required behaviour for both implementations rather than
  * assuming either. They were written while making a sorted-map replace take the
- * owner fast path, precisely because that change is the one that could break it.
+ * owner fast path, precisely because that change is the one that could break it
+ * — and it did, which is how the Map's own version of the bug was found.
+ *
+ * STATUS: all twelve pass. The three that were disabled against BUG 38 — the
+ * Map replace, the Map new-key insert and the Set insert — pass since the
+ * `long`-keyed Map and Set became persistent tries. The other hash storages
+ * (String, Double, generic Object) still carry the in-place write and therefore
+ * still carry the bug; these tests use Int keys and so never reach them.
  */
 class PersistentReplaceSoundnessTest {
 
@@ -51,23 +58,23 @@ class PersistentReplaceSoundnessTest {
     }
 
     /**
-     * THE SAME QUESTION AT A SIZE THAT REACHES THE ARRAY STORAGE, and it FAILS
-     * — this is BUG 38.
+     * THE SAME QUESTION AT A SIZE THAT REACHES THE ARRAY STORAGE. This was
+     * BUG 38, and it is the test that found it.
      *
      * A one-entry hash map is a SingleEntry storage, which allocates per put and
-     * so cannot mutate anything in place; the test above would pass whatever
-     * `LongHashMapStorage` does, which is why it proves nothing on its own. 64
-     * entries crosses into `LongHashMapStorage`, whose replace path writes
-     * `workValues[idx]` directly while it owns the arrays and hands the token
-     * on — so the base observes a value the program never wrote to it.
+     * so cannot mutate anything in place; the test above would pass whatever the
+     * array storage does, which is why it proves nothing on its own. 64 entries
+     * crosses into it, and the open-addressed table that used to live there
+     * wrote `workValues[idx]` directly while it owned the arrays and handed the
+     * token on — so the base observed a value the program never wrote to it.
      *
-     * Disabled rather than deleted: see `planned_features/known-bugs.md`,
-     * BUG 38, for the repro, why the ownership comment does not cover reads of
-     * the old map, and why the fix is a sharing structure rather than a clone
-     * on this branch (a clone is three lines and correct, and costs 50-100x on
-     * a replace chain).
+     * It passes now: `long`-keyed Maps and Sets are persistent tries
+     * (`LongTrieMapStorage`, `LongTrieSetStorage`) with structural sharing, so
+     * no version can observe another's write. See `known-bugs.md` BUG 38 for
+     * the repro, why the ownership contract never covered READS of the old map,
+     * and the diff-chain fix that was correct and had to be discarded because
+     * it retained every later version.
      */
-    @org.junit.jupiter.api.Disabled("BUG 38 — a derivation is observable in the base map/set")
     @Test
     fun `hash map - a 64-entry base is unchanged by a replace derived from it`() {
         assertEquals(1L, MezzeTestHelper.run("""
@@ -93,7 +100,6 @@ class PersistentReplaceSoundnessTest {
      * `keys` array by hash until it meets `EMPTY_KEY`, and an in-place insert
      * writes into the first empty slot of exactly that probe sequence.
      */
-    @org.junit.jupiter.api.Disabled("BUG 38 — a derivation is observable in the base map/set")
     @Test
     fun `hash map - a 64-entry base does not acquire a key inserted into a derived map`() {
         assertEquals(1L, MezzeTestHelper.run("""
@@ -122,7 +128,6 @@ class PersistentReplaceSoundnessTest {
     }
 
     /** BLAST-RADIUS PROBE 3 — the Set, which has the same storage family. */
-    @org.junit.jupiter.api.Disabled("BUG 38 — a derivation is observable in the base map/set")
     @Test
     fun `hash set - a 64-element base does not acquire an element added to a derived set`() {
         assertEquals(1L, MezzeTestHelper.run("""
