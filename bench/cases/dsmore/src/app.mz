@@ -129,7 +129,14 @@ let l_sm_contains = { i, acc, m, keys } -> if i <= 0 then acc
   else l_sm_contains { i = i - 1, m = m, keys = keys,
                        acc = acc + (if sorted_map::contains_key { m = m, k = (i % keys) + 1 } then 1 else 0) }
 
-## ── 3. sorted_map::insert along a CHAIN — rebind, as building one does ──────
+## ── 3. sorted_map::insert along a CHAIN, keys already PRESENT ───────────────
+## RELABELLED: the keys are (i % keys) + 1 over a map built with 1..keys, so
+## every one is a REPLACE and not an insertion. That matters twice over. The
+## slope says so — 339 715 / 605 126 / 2 171 071 ps at 250 / 1 000 / 4 000 keys,
+## which is LINEAR in map size for an operation that changes one value — and
+## the reason is that a replace copies both arrays. It is the same trap
+## mapsurface fell into with set::insert, and the same fix: say PRESENT in the
+## label.
 let l_sm_insert_chain = { i, acc, m, keys } -> if i <= 0 then acc
   else l_sm_insert_chain { i = i - 1, acc = acc + 1, keys = keys,
                            m = sorted_map::insert { m = m, k = (i % keys) + 1, v = i } }
@@ -143,7 +150,10 @@ let l_ss_contains = { i, acc, s, keys } -> if i <= 0 then acc
   else l_ss_contains { i = i - 1, s = s, keys = keys,
                        acc = acc + (if sorted_set::contains { s = s, x = (i % keys) + 1 } then 1 else 0) }
 
-## ── 6. sorted_set::add along a CHAIN, keys already PRESENT ──────────────────
+## ── 6. sorted_set::add along a CHAIN, elements already PRESENT ──────────────
+## Its slope is LOGARITHMIC — 235 989 / 308 860 / 390 235 at 250 / 1 000 / 4 000
+## — because adding an element that is already there returns the set unchanged,
+## so this row times the SEARCH and nothing else.
 let l_ss_add_chain = { i, acc, s, keys } -> if i <= 0 then acc
   else l_ss_add_chain { i = i - 1, acc = acc + 1, keys = keys,
                         s = sorted_set::add { s = s, x = (i % keys) + 1 } }
@@ -200,13 +210,13 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
   report { idx = 2, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "sorted_map::contains_key", thunk = {} -> l_sm_contains { i = n, acc = 0, m = sm, keys = keys } }
   report { idx = 3, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
-           label = "sorted_map::insert chain", thunk = {} -> l_sm_insert_chain { i = n, acc = 0, m = sm, keys = keys } }
+           label = "sm::insert PRESENT, chain", thunk = {} -> l_sm_insert_chain { i = n, acc = 0, m = sm, keys = keys } }
   report { idx = 4, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "sorted_map::size NO-cmp", thunk = {} -> l_sm_size { i = n, acc = 0, m = sm } }
   report { idx = 5, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "sorted_set::contains   ", thunk = {} -> l_ss_contains { i = n, acc = 0, s = ss, keys = keys } }
   report { idx = 6, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
-           label = "sorted_set::add chain  ", thunk = {} -> l_ss_add_chain { i = n, acc = 0, s = ss, keys = keys } }
+           label = "ss::add PRESENT, chain ", thunk = {} -> l_ss_add_chain { i = n, acc = 0, s = ss, keys = keys } }
   report { idx = 7, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "deque::size NO-cmp     ", thunk = {} -> l_dq_size { i = n, acc = 0, d = dq } }
   report { idx = 8, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,

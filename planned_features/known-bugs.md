@@ -1,7 +1,10 @@
 # Known bugs — polyglot dot-chaining, codec, dispatch, and DX
 
-**STATUS 2026-11-04: ONE open bug — BUG 35**, a recursive LOCAL lambda that
-calls a function handling its own effect. Everything else below is closed.
+**STATUS 2026-11-07: TWO open bugs — BUG 38 and BUG 35.** BUG 38 is the serious
+one: replacing a value in a Map corrupts the map it was derived FROM, silently,
+in plain single-threaded Mezze, at any size that reaches the array storage. BUG
+35 is a recursive LOCAL lambda that calls a function handling its own effect.
+Everything else below is closed.
 
 **STATUS 2026-10-30: no open bugs at that date.** BUG 34 is fixed in both halves — the
 printed row is WRITABLE (`<..., *>` parses, P0137 names the wrong order) and
@@ -3895,3 +3898,87 @@ the control and whose cause I expected to be the char-at-a-time conversion. It
 is, but reading the call site to confirm that turned up the missing `Locale`
 argument instead. The perf question is still open and is the smaller of the
 two findings.
+
+
+## BUG 38 — OPEN 2026-11-07: replacing a value in a Map corrupts the map it was derived FROM
+
+A map still in scope changes under you when another map is derived from it by
+replacing an existing key. Minimal repro, plain Mezze, no threads, no effects:
+
+```mezze
+use std::collections::map
+use std::option
+let fill = { i, m } -> if i <= 0 then m
+  else fill { i = i - 1, m = map::insert { m = m, k = i, v = i * 10 } }
+let base = fill { i = 64, m = map::empty {} }
+let derived = map::insert { m = base, k = 30, v = 777 }
+option::get_or { opt = map::get { m = base, k = 30 }, def = 0 }
+```
+
+**Prints 777. Must print 300.** `base` was never written to by the program.
+
+### Why 64 entries, and why this has been invisible
+
+At one entry a Map is a `SingleEntry` storage, which allocates on every put and
+so cannot mutate anything in place; the same program at that size answers
+correctly. 64 entries crosses into `LongHashMapStorage`, whose copy-on-write
+ownership token lets a storage that still OWNS its arrays write into them and
+hand the token to the derived storage.
+
+For an INSERT of a NEW key that is safe even when the base is still live,
+because the base's own `size` bounds what it can see and the write lands outside
+it. **A REPLACE writes INSIDE the base's visible extent**, and nothing bounds it
+away.
+
+### The design hole, in the design's own words
+
+`HashMapStorage`:
+
+> Copy-on-write ownership token. A map owns its table if ownerToken is non-null
+> and ownerToken[0] == this. On put/remove, ownership transfers to the new map
+> by setting ownerToken[0] = newMap. The old map's ownership check fails
+> (ownerToken[0] != this), so it will clone.
+
+Every clause is about the old map MUTATING afterwards — it "will clone" on its
+next write. The case the comment never considers is the old map being READ after
+the transfer. `getLong` does call `revokeOwnership()`, but the corruption has
+already happened by then: it occurs at the derivation, not at the read.
+
+So the token establishes "only one map may mutate these arrays", which is not
+the property a persistent map needs. It needs "no map may observe a mutation it
+did not make".
+
+### Regression tests, already written
+
+`interpreter/src/test/kotlin/.../stdlib/PersistentReplaceSoundnessTest.kt`. The
+two failing cases are `@Disabled` with a pointer here so the suite stays green;
+everything else in that file passes and pins the behaviour that IS correct —
+the derived map's value, a one-entry base, and the SortedMap equivalents.
+
+### What it would take, and why no quick fix was shipped
+
+Making the replace branch clone instead of mutating is three lines and is
+CORRECT, but it makes every replace O(n). That is not a small cost:
+`bench/cases/mapsurface` row 8 measures a chain of replaces at 13 535 ps, and it
+is that fast precisely because of the in-place write — so the honest version of
+the fix is a visible 50-100x regression on a common operation at 1 000 keys.
+Shipping a silent wrong value is worse than shipping a slow correct one, but
+there is a third option that is better than both and already on the perf
+backlog.
+
+A structure that SHARES rather than copying on branch — a HAMT, path-copying on
+update — gives a correct O(log n) replace and simultaneously closes the other
+known defect on this surface: `map::insert` from a base somebody else holds
+costs 5.41 µs at 4 000 keys and is unbounded in map size (PERF-LOG, "a 338x
+cliff when the base map is shared"). Both are the same missing property, so both
+want the same change. **That makes the structure work urgent rather than merely
+valuable, and it is the ranked next item.**
+
+### Discovered by
+
+Trying to give `MezzeSortedMap`'s replace path the same in-place fast path —
+which measured 5.63x at 4 000 keys and turned a linear slope logarithmic, and
+then failed its own soundness test with `expected: <10> but was: <20>`. That
+change was reverted. The test written to check it is what found the Map bug,
+and the first version of that test PASSED because it used a one-entry base: a
+soundness test at a size that cannot reach the code under test proves nothing.

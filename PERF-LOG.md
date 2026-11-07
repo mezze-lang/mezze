@@ -9230,3 +9230,116 @@ are all writes or indexing:
 - `deque::get by index` at 222 ns is most likely O(n) by construction rather
   than dispatch; its representation needs reading before anything is said
   about it.
+
+### LEDGER UPDATE 2026-11-07 — the write rows, measured by SLOPE: one of them found a soundness bug (BUG 38)
+
+The entry above left three untouched rows and said their nature had to be
+established before anything was claimed about them. Measuring each at 250,
+1 000 and 4 000 keys settles all three, relabels two of them, and turned up a
+silent wrong-value bug in the hash Map.
+
+```
+  row                        250 keys   1 000    4 000   per 4x    shape
+  sorted_map::insert chain    339 715  605 126  2 171 071  3.59x   LINEAR
+  sorted_set::add chain       235 989  308 860    390 235  1.26x   LOG
+  deque::get by index          71 933  221 294    839 410  3.79x   LINEAR
+```
+
+#### Two rows were mislabelled, and the slope is what said so
+
+Both write rows use `(i % keys) + 1` over a structure built with `1..keys`, so
+**every operation is a REPLACE, not an insertion** — the same trap `mapsurface`
+fell into with `set::insert`, caught there and not here. The labels now say
+PRESENT.
+
+It matters beyond honesty, because the two shapes then disagree for a reason:
+
+- `sorted_set::add` of an element already present returns the set unchanged, so
+  that row times the SEARCH and nothing else — hence logarithmic, and hence a
+  candidate for the same guest-search treatment the lookups got.
+- `sorted_map::insert` of a key already present is LINEAR, which is absurd for
+  an operation that changes one value. That is the thread that led to BUG 38.
+
+`deque::get by index` is O(n) by construction — 3.79x per 4x size. Not
+dispatch, not a comparator: the representation. Nothing on this surface fixes
+it.
+
+#### The replace path, and an in-place fast path that measured 5.63x and was WRONG
+
+`MezzeSortedMap.putObject`'s update-existing branch clones BOTH arrays
+unconditionally, even when the map owns them — and its comment claims it clones
+only values, which it does not. Meanwhile the new-key paths beside it have
+owner fast paths that mutate in place.
+
+Giving the replace the same fast path required a second fix first, and the
+reason is worth keeping: every mutating native begins with
+`map = map.withComparator(ElementComparator.of(cmpFn))`, a fresh comparator
+never equals the stored one, and `withComparator` handed back a map with a NULL
+owner token. **So the owner fast paths in `putObject` were unreachable from
+guest code entirely** — dead for every insert any Mezze program has ever done.
+Making `withComparator` MOVE the token, and making the copying branch claim
+ownership of the arrays it had just allocated, made them reachable.
+
+The first attempt measured nothing at all, which was the clue: the copy handed
+back a non-owner, so a chain could never re-acquire ownership and the fast path
+never fired once. With all three in place:
+
+```
+  keys    before        after     verdict
+   250   339 715      240 986      1.41x
+  1 000  605 126      317 309      1.91x
+  4 000  2 171 071    385 300      5.63x
+```
+
+and the slope went from 3.59x per 4x size to **1.21-1.32x** — linear to
+logarithmic, with the advantage unbounded in map size.
+
+**It was reverted, because it is unsound.** An append writes OUTSIDE the base
+map's visible extent, so a base that is still referenced cannot see it. A
+replace writes INSIDE it. The test written to check exactly that failed with
+`expected: <10> but was: <20>`: deriving a replace corrupted the map it was
+derived from.
+
+#### What that test then found in the Map that ships — BUG 38
+
+The same test against the hash `Map` **fails**, with no change of mine involved:
+
+```mezze
+let base = fill { i = 64, m = map::empty {} }
+let derived = map::insert { m = base, k = 30, v = 777 }
+map::get { m = base, k = 30 }      ## prints 777, must print 300
+```
+
+`LongHashMapStorage`'s replace branch writes `workValues[idx]` while it owns the
+arrays and hands the token on, so the base observes a value the program never
+wrote to it. Filed as **BUG 38**, with the design's own comment quoted: every
+clause of the ownership contract is about the old map MUTATING afterwards —
+"it will clone" on its next write — and the case it never considers is the old
+map being READ after the transfer. `getLong` does revoke on read, but the
+corruption happened at the derivation.
+
+So the token establishes "only one map may mutate these arrays". What a
+persistent map needs is "no map may observe a mutation it did not make".
+
+**AND IT MEANS A NUMBER IN THIS LEDGER RESTS ON IT.** `mapsurface` row 8, the
+chain of replaces at 13 535 ps, is that fast *because* of the in-place write.
+The three-line correct fix — clone on the replace branch — is a 50-100x
+regression on it at 1 000 keys. A sharing structure (HAMT, path-copying) gives a
+correct O(log n) replace instead, and closes the shared-base insert cliff
+(5.41 µs at 4 000 keys, unbounded) at the same time, because both are the same
+missing property. **That is now the ranked next item, and the bug makes it
+urgent rather than merely valuable.**
+
+#### The method lesson, which cost nothing this time only by luck
+
+The first version of that soundness test used a ONE-ENTRY base map and PASSED.
+A one-entry Map is a `SingleEntry` storage that allocates on every put, so it
+cannot mutate anything in place: the test could not reach the code it was
+written to interrogate, and said "correct". Raising it to 64 entries — enough
+to cross into the array storage — turned the same assertion red.
+
+**A soundness test at a size that cannot reach the code under test proves
+nothing, and reads exactly like a test that proves something.** The
+storage-progression habit already in use for performance rows (0/1/2/8/64) is
+not a thoroughness flourish; for structures that change representation with
+size, it is the difference between a test and a decoration.
