@@ -161,11 +161,12 @@ public class LongTrieMapStorageTest {
     }
 
     /**
-     * THE SENTINEL KEYS. The table this replaces reserved `Long.MIN_VALUE` and
-     * `MIN_VALUE+1` as empty/deleted markers and had to promote the whole map
-     * to boxed storage when a program used one as a key. A trie stores no
-     * markers, so they are ordinary keys — asserted so the property is not lost
-     * silently later.
+     * THE OLD SENTINEL KEYS. The table this replaces reserved
+     * `Long.MIN_VALUE` and `MIN_VALUE+1` as empty/deleted markers and had to
+     * promote the whole map to boxed storage when a program used one as a key.
+     * A trie stores no markers, so they are ordinary keys — asserted here
+     * BEHAVIOURALLY, by storing and reading them back, so the property survives
+     * even though the predicate that used to express the restriction is gone.
      */
     @Test
     public void theOldSentinelValuesAreOrdinaryKeys() {
@@ -179,7 +180,6 @@ public class LongTrieMapStorageTest {
         assertEquals(2L, m.get(Long.MIN_VALUE + 1));
         assertEquals(3L, m.get(Long.MAX_VALUE));
         assertEquals(4L, m.get(0L));
-        assertTrue(LongTrieMapStorage.isStorable(Long.MIN_VALUE));
     }
 
     @Test

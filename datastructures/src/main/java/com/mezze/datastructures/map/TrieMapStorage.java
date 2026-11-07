@@ -1,11 +1,13 @@
 package com.mezze.datastructures.map;
 
+import com.mezze.datastructures.util.TrieHash;
+
 import java.util.Objects;
 
 /**
  * A persistent hash-array-mapped trie for arbitrary keys — the general-key
  * sister of {@link LongTrieMapStorage}, replacing the open-addressed
- * {@code HashMapStorage} and {@code StringHashMapStorage}.
+ * generic and String-keyed tables (both now deleted).
  *
  * <p>Same reason as the Long version: those tables mutated their arrays while
  * they still held an ownership token and handed the token to the derived
@@ -71,18 +73,6 @@ public final class TrieMapStorage implements MapStorage {
         return out;
     }
 
-    /** The murmur3 32-bit finalizer over {@code hashCode()} — the same spread
-     *  the tables this replaces applied, so key distribution is unchanged. */
-    static int hashOf(Object key) {
-        int h = key == null ? 0 : key.hashCode();
-        h ^= h >>> 16;
-        h *= 0x85ebca6b;
-        h ^= h >>> 13;
-        h *= 0xc2b2ae35;
-        h ^= h >>> 16;
-        return h;
-    }
-
     sealed interface Node permits Bitmap, Collision {}
 
     /** One trie level. Entries and children sit compactly in bitmap order. */
@@ -124,7 +114,7 @@ public final class TrieMapStorage implements MapStorage {
 
     @Override
     public Object get(Object key) {
-        int hash = hashOf(key);
+        int hash = TrieHash.mix32(key);
         Node n = root;
         for (int shift = 0; ; shift += BITS) {
             if (n instanceof Collision c) {
@@ -160,7 +150,7 @@ public final class TrieMapStorage implements MapStorage {
     @Override
     public MapStorage put(Object key, Object value) {
         int[] grew = new int[1];
-        Node newRoot = insert(root, key, value, hashOf(key), 0, grew);
+        Node newRoot = insert(root, key, value, TrieHash.mix32(key), 0, grew);
         if (newRoot == root) return this;
         return new TrieMapStorage(newRoot, size + grew[0]);
     }
@@ -181,7 +171,7 @@ public final class TrieMapStorage implements MapStorage {
                 return new Bitmap(b.dataMap, b.nodeMap, b.keys, values, b.nodes);
             }
             grew[0]++;
-            Node child = merge(had, b.values[i], hashOf(had), key, value, hash, shift + BITS);
+            Node child = merge(had, b.values[i], TrieHash.mix32(had), key, value, hash, shift + BITS);
             return dataToNode(b, bit, i, child);
         }
 
@@ -294,7 +284,7 @@ public final class TrieMapStorage implements MapStorage {
     @Override
     public MapStorage remove(Object key) {
         boolean[] gone = new boolean[1];
-        Node newRoot = delete(root, key, hashOf(key), 0, gone);
+        Node newRoot = delete(root, key, TrieHash.mix32(key), 0, gone);
         if (!gone[0]) return this;
         if (size - 1 == 0) return EmptyMapStorage.INSTANCE;
         return new TrieMapStorage(newRoot, size - 1);

@@ -190,7 +190,7 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
 
     /**
      * Creates a MezzeSet from a mutable HashSet (internal use).
-     * Optimized: builds HashSetStorage directly instead of adding one by one.
+     * Builds the trie in one pass rather than adding one element at a time.
      */
     @SuppressWarnings("unchecked")
     private static <A> MezzeSet<A> fromMutableSet(java.util.HashSet<A> mutable) {
@@ -199,7 +199,7 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
             return of(mutable.iterator().next());
         }
 
-        // Build HashSetStorage directly from collection (O(n) vs O(n^2))
+        // Build the trie from the collection in one pass
         return new MezzeSet<>(TrieSetStorage.fromCollection(mutable));
     }
 
@@ -322,7 +322,7 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
 
     /**
      * Maps over elements.
-     * Optimized: builds HashSetStorage directly from collection.
+     * Builds the trie from the collection in one pass.
      */
     @TruffleBoundary
     public <B> MezzeSet<B> map(Function<A, B> fn) {
@@ -338,7 +338,7 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
 
     /**
      * Creates a MezzeSet from a mutable HashSet of any type (internal use).
-     * Optimized: builds HashSetStorage directly instead of adding one by one.
+     * Builds the trie in one pass rather than adding one element at a time.
      */
     @SuppressWarnings("unchecked")
     private static <B> MezzeSet<B> fromMutableSetGeneric(java.util.HashSet<B> mutable) {
@@ -347,7 +347,7 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
             return of(mutable.iterator().next());
         }
 
-        // Build HashSetStorage directly from collection (O(n) vs O(n^2))
+        // Build the trie from the collection in one pass
         return new MezzeSet<>(TrieSetStorage.fromCollection(mutable));
     }
 
@@ -525,70 +525,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
             return longStorage.toLongArray();
         }
         throw new UnsupportedOperationException("toLongArray requires Long elements");
-    }
-
-    // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
-
-    /**
-     * Creates a mutable copy of this set.
-     * Used by to_mut to get a fresh copy that can be mutated.
-     */
-    public MezzeSet<A> copyToMutable() {
-        if (storage instanceof HashSetStorage hashStorage) {
-            return new MezzeSet<>(hashStorage.copyToMutable());
-        }
-        // For other storage types, convert to HashSetStorage first
-        java.util.HashSet<Object> temp = new java.util.HashSet<>();
-        for (A elem : this) {
-            temp.add(elem);
-        }
-        return new MezzeSet<>(HashSetStorage.fromCollection(temp).copyToMutable());
-    }
-
-    /**
-     * Creates a mutable set with given initial capacity.
-     * Use this when you know the approximate final size.
-     */
-    public static <A> MezzeSet<A> mutableWithCapacity(int capacity) {
-        // Pre-create a HashSetStorage with enough room
-        java.util.HashSet<Object> temp = new java.util.HashSet<>(capacity);
-        return new MezzeSet<>(HashSetStorage.fromCollection(temp).copyToMutable());
-    }
-
-    /**
-     * In-place add - mutates the underlying storage.
-     * Only safe within LocalMut context.
-     * Returns true if element was new, false if already present.
-     */
-    public boolean mutAdd(A elem) {
-        if (storage instanceof HashSetStorage hashStorage) {
-            return hashStorage.mutAdd(elem);
-        }
-        throw new UnsupportedOperationException("mutAdd requires HashSetStorage - use copyToMutable() first");
-    }
-
-    /**
-     * In-place remove - mutates the underlying storage.
-     * Only safe within LocalMut context.
-     * Returns true if element was found and removed.
-     */
-    public boolean mutRemove(A elem) {
-        if (storage instanceof HashSetStorage hashStorage) {
-            return hashStorage.mutRemove(elem);
-        }
-        throw new UnsupportedOperationException("mutRemove requires HashSetStorage - use copyToMutable() first");
-    }
-
-    /**
-     * In-place clear - mutates the underlying storage.
-     * Only safe within LocalMut context.
-     */
-    public void mutClear() {
-        if (storage instanceof HashSetStorage hashStorage) {
-            hashStorage.mutClear();
-        } else {
-            throw new UnsupportedOperationException("mutClear requires HashSetStorage - use copyToMutable() first");
-        }
     }
 
     // ===== INTERNAL =====

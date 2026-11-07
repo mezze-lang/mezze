@@ -122,7 +122,7 @@ public final class LongSetStorage implements SetStorage {
             return fromSorted(newElements);
         }
 
-        // Transition to HashSetStorage
+        // Transition to the trie
         return transitionToHash().add(elem);
     }
 
@@ -382,7 +382,7 @@ public final class LongSetStorage implements SetStorage {
     }
 
     /** Promote to {@link LongTrieSetStorage} (primitive-keyed, no boxing) when
-     *  every element is sentinel-safe; fall back to {@link HashSetStorage} otherwise. */
+     *  no element can disqualify, since a trie reserves no sentinels. */
     private SetStorage transitionToHash() {
         // No element can disqualify any more: the table this used to promote to
         // reserved two sentinel values and sent such sets to boxed storage

@@ -1,5 +1,7 @@
 package com.mezze.datastructures.map;
 
+import com.mezze.datastructures.util.TrieHash;
+
 /**
  * A persistent hash-array-mapped trie keyed on primitive {@code long}.
  *
@@ -61,30 +63,6 @@ public final class LongTrieMapStorage implements MapStorage {
     }
 
     /**
-     * Every {@code long} is storable. The table this replaces reserved
-     * {@code Long.MIN_VALUE} and {@code MIN_VALUE+1} as empty/deleted
-     * sentinels and had to promote a map to boxed storage when a program used
-     * one as a key; a trie stores no sentinels, so that promotion is gone.
-     */
-    public static boolean isStorable(long key) {
-        return true;
-    }
-
-    /**
-     * The murmur3 64-bit finalizer — a bijection, which is what lets this trie
-     * do without collision nodes. See the class comment.
-     */
-    static long mix(long key) {
-        long x = key;
-        x ^= x >>> 33;
-        x *= 0xff51afd7ed558ccdL;
-        x ^= x >>> 33;
-        x *= 0xc4ceb9fe1a85ec53L;
-        x ^= x >>> 33;
-        return x;
-    }
-
-    /**
      * One trie level. {@code dataMap} marks the slots holding an inline entry
      * and {@code nodeMap} the slots holding a child; a slot is in at most one.
      * Entries and children are stored compactly in bitmap order, so a node is
@@ -118,7 +96,7 @@ public final class LongTrieMapStorage implements MapStorage {
 
     public Object getLong(long key) {
         Node n = root;
-        long hash = mix(key);
+        long hash = TrieHash.mix64(key);
         for (int shift = 0; ; shift += BITS) {
             int bit = 1 << (int) ((hash >>> shift) & MASK);
             if ((n.dataMap & bit) != 0) {
@@ -159,7 +137,7 @@ public final class LongTrieMapStorage implements MapStorage {
 
     public MapStorage putLong(long key, Object value) {
         int[] grew = new int[1];
-        Node newRoot = insert(root, key, value, mix(key), 0, grew);
+        Node newRoot = insert(root, key, value, TrieHash.mix64(key), 0, grew);
         if (newRoot == root) return this;
         return new LongTrieMapStorage(newRoot, size + grew[0]);
     }
@@ -178,7 +156,7 @@ public final class LongTrieMapStorage implements MapStorage {
             }
             // Two distinct keys want the same slot: push both one level down.
             grew[0]++;
-            Node child = merge(had, n.values[i], mix(had), key, value, hash, shift + BITS);
+            Node child = merge(had, n.values[i], TrieHash.mix64(had), key, value, hash, shift + BITS);
             return dataToNode(n, bit, i, child);
         }
 
@@ -212,7 +190,7 @@ public final class LongTrieMapStorage implements MapStorage {
         }
         if (shift >= 64) {
             throw new IllegalStateException(
-                "two distinct long keys with an identical 64-bit mix — mix() is not a bijection");
+                "two distinct long keys with an identical 64-bit mix — TrieHash.mix64() is not a bijection");
         }
         Node child = merge(k1, v1, h1, k2, v2, h2, shift + BITS);
         return new Node(0, 1 << i1, NO_KEYS, NO_VALUES, new Node[]{child});
@@ -260,7 +238,7 @@ public final class LongTrieMapStorage implements MapStorage {
 
     public MapStorage removeLong(long key) {
         boolean[] gone = new boolean[1];
-        Node newRoot = delete(root, key, mix(key), 0, gone);
+        Node newRoot = delete(root, key, TrieHash.mix64(key), 0, gone);
         if (!gone[0]) return this;
         if (size - 1 == 0) return EmptyMapStorage.INSTANCE;
         return new LongTrieMapStorage(newRoot, size - 1);

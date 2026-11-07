@@ -24,7 +24,7 @@ import kotlin.test.assertEquals
  *
  * WHAT THE TESTS ARE FOR. The fast path skips two sentinel values that encode
  * "empty" and "deleted", so the risks are an element wrongly skipped and a
- * sentinel wrongly counted. `isStorable` keeps the sentinels out of this storage
+ * sentinel wrongly counted. the trie that replaced it stores no sentinels at all
  * — a set that would contain them falls back to a boxed storage and the generic
  * path — and a removal leaves `DELETED_SLOT` behind, which the scan must skip.
  */

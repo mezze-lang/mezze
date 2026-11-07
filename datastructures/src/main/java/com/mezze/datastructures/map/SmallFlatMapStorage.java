@@ -74,14 +74,13 @@ public final class SmallFlatMapStorage implements MapStorage {
             return new SmallFlatMapStorage(newKeys, newValues);
         }
 
-        // Transition to LongTrieMapStorage if every key is a Long,
-        // HashMapStorage otherwise. The Long-specialized storage skips boxing
-        // and Objects.equals on every probe.
+        // Every key a Long -> the long-keyed trie, which stores keys unboxed
+        // and compares them with ==; anything else -> the general trie.
         return transitionToBestHash(newKey, newValue);
     }
 
     private MapStorage transitionToBestHash(Object newKey, Object newValue) {
-        if (allLongKeysStorable(newKey)) {
+        if (allLongKeys(newKey)) {
             MapStorage out = new LongTrieMapStorage();
             for (int i = 0; i < keys.length; i++) {
                 out = ((LongTrieMapStorage) out).putLong((Long) keys[i], values[i]);
@@ -107,32 +106,16 @@ public final class SmallFlatMapStorage implements MapStorage {
     }
 
     /**
-     * Every Long key qualifies now. The open-addressed table this used to
-     * promote to reserved two values as empty/deleted sentinels, so a map whose
-     * keys included {@code Long.MIN_VALUE} had to go to boxed storage instead;
-     * a trie stores no sentinels, so {@code isStorable} is unconditionally true
-     * and that promotion is gone.
+     * Being a Long is the whole condition. The table this used to promote to
+     * reserved {@code Long.MIN_VALUE} and {@code MIN_VALUE+1} as empty/deleted
+     * sentinels, so a map using one as a key had to go to boxed storage
+     * instead; a trie stores no sentinels, and the extra predicate that used to
+     * express that is gone rather than left returning true.
      */
-    private boolean allLongKeysStorable(Object newKey) {
-        if (!(newKey instanceof Long nk) || !LongTrieMapStorage.isStorable(nk)) return false;
+    private boolean allLongKeys(Object newKey) {
+        if (!(newKey instanceof Long)) return false;
         for (Object k : keys) {
-            if (!(k instanceof Long lk) || !LongTrieMapStorage.isStorable(lk)) return false;
-        }
-        return true;
-    }
-
-    private boolean allDoubleKeys(Object newKey) {
-        if (!(newKey instanceof Double)) return false;
-        for (Object k : keys) {
-            if (!(k instanceof Double)) return false;
-        }
-        return true;
-    }
-
-    private boolean allStringKeys(Object newKey) {
-        if (!(newKey instanceof String)) return false;
-        for (Object k : keys) {
-            if (!(k instanceof String)) return false;
+            if (!(k instanceof Long)) return false;
         }
         return true;
     }

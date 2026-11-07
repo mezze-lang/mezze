@@ -1,12 +1,13 @@
 package com.mezze.datastructures.set;
 
+import com.mezze.datastructures.util.TrieHash;
+
 import java.util.Objects;
 
 /**
  * A persistent hash-array-mapped trie for arbitrary elements — the general
  * sister of {@link LongTrieSetStorage}, replacing the open-addressed
- * {@code HashSetStorage}, {@code StringHashSetStorage} and
- * {@code DoubleHashSetStorage}.
+ * generic, String-keyed and Double-keyed tables (all now deleted).
  *
  * <p>Same reason as everywhere else on this surface: those tables mutated their
  * table while holding an ownership token and handed the token on, so a
@@ -46,7 +47,7 @@ public final class TrieSetStorage implements SetStorage {
 
     /**
      * Bulk build from a collection — the persistent counterpart of
-     * {@code HashSetStorage.fromCollection}, which the Set's transforms
+     * the deleted table's bulk builder, which the Set's transforms
      * ({@code map}, {@code filter}, {@code flatMap}) used to call.
      *
      * <p>That mattered more than it looks: rerouting only the SmallFlat
@@ -64,17 +65,6 @@ public final class TrieSetStorage implements SetStorage {
         for (Object e : items) out = out.add(e);
         return out;
     }
-
-    static int hashOf(Object elem) {
-        int h = elem == null ? 0 : elem.hashCode();
-        h ^= h >>> 16;
-        h *= 0x85ebca6b;
-        h ^= h >>> 13;
-        h *= 0xc2b2ae35;
-        h ^= h >>> 16;
-        return h;
-    }
-
     sealed interface Node permits Bitmap, Collision {}
 
     static final class Bitmap implements Node {
@@ -111,7 +101,7 @@ public final class TrieSetStorage implements SetStorage {
 
     @Override
     public boolean contains(Object elem) {
-        int hash = hashOf(elem);
+        int hash = TrieHash.mix32(elem);
         Node n = root;
         for (int shift = 0; ; shift += BITS) {
             if (n instanceof Collision c) {
@@ -139,7 +129,7 @@ public final class TrieSetStorage implements SetStorage {
     @Override
     public SetStorage add(Object elem) {
         int[] grew = new int[1];
-        Node newRoot = insert(root, elem, hashOf(elem), 0, grew);
+        Node newRoot = insert(root, elem, TrieHash.mix32(elem), 0, grew);
         if (newRoot == root) return this;
         return new TrieSetStorage(newRoot, size + grew[0]);
     }
@@ -165,7 +155,7 @@ public final class TrieSetStorage implements SetStorage {
             Object had = b.elems[i];
             if (Objects.equals(had, elem)) return b;
             grew[0]++;
-            Node child = merge(had, hashOf(had), elem, hash, shift + BITS);
+            Node child = merge(had, TrieHash.mix32(had), elem, hash, shift + BITS);
             return dataToNode(b, bit, i, child);
         }
 
@@ -241,7 +231,7 @@ public final class TrieSetStorage implements SetStorage {
     @Override
     public SetStorage remove(Object elem) {
         boolean[] gone = new boolean[1];
-        Node newRoot = delete(root, elem, hashOf(elem), 0, gone);
+        Node newRoot = delete(root, elem, TrieHash.mix32(elem), 0, gone);
         if (!gone[0]) return this;
         if (size - 1 == 0) return EmptySetStorage.INSTANCE;
         return new TrieSetStorage(newRoot, size - 1);

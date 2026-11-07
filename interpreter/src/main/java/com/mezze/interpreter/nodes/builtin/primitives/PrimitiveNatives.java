@@ -497,7 +497,7 @@ public final class PrimitiveNatives {
      * The STRUCTURAL hash of a value — what a derived {@code Hash} instance means.
      *
      * This is already what every hash container computes for its keys
-     * ({@code HashSetStorage} calls {@code elem.hashCode()}), so a type whose
+     * (the hash containers call {@code elem.hashCode()}), so a type whose
      * {@code Hash} is derived hashes exactly as it does today: adding the ability
      * changes no behaviour and costs no performance for the common case. A type
      * that writes its own {@code Hash} overrides this, which is the point — a

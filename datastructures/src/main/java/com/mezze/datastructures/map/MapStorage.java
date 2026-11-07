@@ -10,9 +10,6 @@ public sealed interface MapStorage permits
         LongKeyMapStorage,
         LongTrieMapStorage,
         TrieMapStorage,
-        DoubleHashMapStorage,
-        StringHashMapStorage,
-        HashMapStorage,
         // Buckets by the KEY'S own hashing rather than its runtime representation.
         // Chosen for a key type that wrote its own `Eq`/`Hash`; never promoted away
         // from — see EvidenceMapStorage.

@@ -9603,3 +9603,70 @@ Stated plainly because the two are not the same:
 
 That is the next thing to do on this surface: a `Str`-keyed row, so the claim
 stops resting on an argument.
+
+#### Cleanup: the open-addressed storages and the dead MUT layer, deleted — 2 300 lines
+
+With every Map and Set on a persistent trie, the tables they replaced had one
+thing keeping them alive, and it turned out to be nothing.
+
+**The mutable-builder API had no callers at all.** `MezzeMap.copyToMutable`,
+`mutableWithCapacity`, `mutPut`, `mutRemove` and `MezzeSet`'s equivalents —
+documented "for LocalMut effect", "used by `to_mut`" — are referenced only by
+each other. Nothing in the interpreter, the stdlib natives or the tests calls
+them. That is the layer PERF-LOG already records as dead ("73 MUT_* ops NEVER
+fire; delete it"), and it was the last thing holding `HashMapStorage` and
+`HashSetStorage` in the tree.
+
+Deleted, in one pass:
+
+```
+  six storage classes      HashMapStorage, StringHashMapStorage,
+                           DoubleHashMapStorage and the three Set equivalents
+  the MUT layer            copyToMutable / mutableWithCapacity / mutPut /
+                           mutAdd / mutRemove / mutClear on Map and Set
+  four type predicates     allDoubleKeys, allStringKeys, allDoubleElements,
+                           allStringElements — nothing routed to those
+                           storages any more, so nothing asked
+  two vacuous predicates   isStorable, which returned an unconditional true
+                           once the sentinels were gone; the callers now test
+                           `instanceof Long` and say why that is the whole
+                           condition
+```
+
+**2 318 deletions against 93 insertions.** The sealed `MapStorage` hierarchy
+went from nine implementations to six, and `SetStorage` the same.
+
+#### Two small things that were wrong rather than merely redundant
+
+**Four copies of the hash functions.** Each trie carried its own `mix`/`hashOf`.
+They are now `util/TrieHash.mix64` and `mix32`, in one place with the reason
+written down: `mix64` is a BIJECTION, and that is not a performance detail —
+it is what lets the `long`-keyed tries omit collision nodes entirely. Changing
+it to a non-bijection would make them silently WRONG rather than slow, which is
+exactly the kind of fact that should not be sitting in four copies waiting to
+drift.
+
+**`MezzeMap.getLong` was boxing.** Its fast path tested only
+`LongKeyMapStorage`, so once the open-addressed table became
+`LongTrieMapStorage` the method documented as "unboxed get for long keys" fell
+through to `get(Long.valueOf(key))` for every Long-keyed map above SmallFlat —
+the sizes where it matters. It now covers the trie. Found by reading the
+references while deleting, not by a measurement, and it is a correctness-of-
+intent fix rather than a perf claim: no number is attached to it.
+
+#### Stale comments repointed rather than left
+
+Four structures (`MezzeSortedMap`, `MezzeSortedSet`, `MezzeBitSet`,
+`MezzeDeque`) documented their ownership flag as "see
+HashMapStorage.ownershipRevoked for rationale" — a class that no longer exists.
+Those comments now carry the rationale themselves and point at BUG 38 for why
+the family that hosted it is gone. `PrimitiveNatives` and two tests had the
+same kind of dangling reference.
+
+**Those four structures still use owner tokens**, which is worth noting rather
+than burying in a comment edit: they were not part of BUG 38 as measured —
+`MezzeSortedMap`'s replace path was tested and passes, because installing a
+comparator dropped the token and made its in-place paths unreachable — but
+`MezzeDeque` and `MezzeBitSet` have not been probed for the same class of
+defect. That is an open question, not a known bug, and it is recorded here so
+it stays one rather than becoming an assumption.

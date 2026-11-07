@@ -152,11 +152,19 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
 
     /**
      * Unboxed get for long keys.
+     *
+     * <p>Both long-keyed storages are covered. The trie was added to this
+     * check when it replaced the open-addressed table: without it the method
+     * boxed on every Long-keyed map above SmallFlat, which is the size at
+     * which it matters and the opposite of what the name says.
      */
     @SuppressWarnings("unchecked")
     public V getLong(long key) {
         if (storage instanceof LongKeyMapStorage longStorage) {
             return (V) longStorage.getLong(key);
+        }
+        if (storage instanceof LongTrieMapStorage trie) {
+            return (V) trie.getLong(key);
         }
         return get((K) Long.valueOf(key));
     }
@@ -205,7 +213,7 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
 
     /**
      * Creates a MezzeMap from a mutable HashMap (internal use).
-     * Optimized: builds HashMapStorage directly instead of adding one by one.
+     * Builds the trie in one pass rather than putting one entry at a time.
      */
     @SuppressWarnings("unchecked")
     private static <K, V> MezzeMap<K, V> fromMutableMap(java.util.HashMap<K, V> mutable) {
@@ -215,7 +223,7 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
             return of(entry.getKey(), entry.getValue());
         }
 
-        // Build HashMapStorage directly from map (O(n) vs O(n^2))
+        // Build the trie from the java map in one pass
         return new MezzeMap<>(TrieMapStorage.fromMap(mutable));
     }
 
@@ -288,7 +296,7 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
 
     /**
      * Creates a MezzeMap from a mutable LinkedHashMap (internal use).
-     * Optimized: builds HashMapStorage directly instead of adding one by one.
+     * Builds the trie in one pass rather than putting one entry at a time.
      */
     @SuppressWarnings("unchecked")
     private static <K, V> MezzeMap<K, V> fromMutableLinkedMap(java.util.LinkedHashMap<K, V> mutable) {
@@ -298,7 +306,7 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
             return of(entry.getKey(), entry.getValue());
         }
 
-        // Build HashMapStorage directly from map (O(n) vs O(n^2))
+        // Build the trie from the java map in one pass
         return new MezzeMap<>(TrieMapStorage.fromMap(mutable));
     }
 
@@ -478,78 +486,6 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
             result.put(entry.key, entry.value);
         }
         return result;
-    }
-
-    // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
-
-    /**
-     * Creates a mutable copy of this map.
-     * Used by to_mut to get a fresh copy that can be mutated.
-     */
-    public MezzeMap<K, V> copyToMutable() {
-        if (storage instanceof HashMapStorage hashStorage) {
-            return new MezzeMap<>(hashStorage.copyToMutable());
-        }
-        // For other storage types, convert to HashMap first
-        return new MezzeMap<>(HashMapStorage.fromMap(toJavaMap()).copyToMutable());
-    }
-
-    /**
-     * Creates a mutable map with given initial capacity.
-     * Use this when you know the approximate final size.
-     */
-    public static <K, V> MezzeMap<K, V> mutableWithCapacity(int capacity) {
-        // Pre-create a HashMapStorage with enough room
-        java.util.HashMap<Object, Object> temp = new java.util.HashMap<>(capacity);
-        return new MezzeMap<>(HashMapStorage.fromMap(temp).copyToMutable());
-    }
-
-    /**
-     * In-place put - mutates the underlying storage.
-     * Only safe within LocalMut context.
-     * Returns true if key was new, false if updated.
-     */
-    public boolean mutPut(K key, V value) {
-        if (storage instanceof HashMapStorage hashStorage) {
-            return hashStorage.mutPut(key, value);
-        }
-        throw new UnsupportedOperationException("mutPut requires HashMapStorage - use copyToMutable() first");
-    }
-
-    /**
-     * In-place remove - mutates the underlying storage.
-     * Only safe within LocalMut context.
-     * Returns true if key was found and removed.
-     */
-    public boolean mutRemove(K key) {
-        if (storage instanceof HashMapStorage hashStorage) {
-            return hashStorage.mutRemove(key);
-        }
-        throw new UnsupportedOperationException("mutRemove requires HashMapStorage - use copyToMutable() first");
-    }
-
-    /**
-     * In-place update - mutates the underlying storage.
-     * Only safe within LocalMut context.
-     * Returns true if key was found and updated.
-     */
-    public boolean mutUpdate(K key, V value) {
-        if (storage instanceof HashMapStorage hashStorage) {
-            return hashStorage.mutUpdate(key, value);
-        }
-        throw new UnsupportedOperationException("mutUpdate requires HashMapStorage - use copyToMutable() first");
-    }
-
-    /**
-     * In-place clear - mutates the underlying storage.
-     * Only safe within LocalMut context.
-     */
-    public void mutClear() {
-        if (storage instanceof HashMapStorage hashStorage) {
-            hashStorage.mutClear();
-        } else {
-            throw new UnsupportedOperationException("mutClear requires HashMapStorage - use copyToMutable() first");
-        }
     }
 
     // ===== INTERNAL =====

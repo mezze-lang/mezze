@@ -1,5 +1,7 @@
 package com.mezze.datastructures.set;
 
+import com.mezze.datastructures.util.TrieHash;
+
 /**
  * A persistent hash-array-mapped trie of primitive {@code long} elements — the
  * Set sister of {@link com.mezze.datastructures.map.LongTrieMapStorage}, and
@@ -45,22 +47,6 @@ public final class LongTrieSetStorage implements SetStorage {
         this.size = size;
     }
 
-    /** Every {@code long} is storable — a trie reserves no sentinel values. */
-    public static boolean isStorable(long elem) {
-        return true;
-    }
-
-    /** The murmur3 64-bit finalizer — a bijection. See the class comment. */
-    static long mix(long elem) {
-        long x = elem;
-        x ^= x >>> 33;
-        x *= 0xff51afd7ed558ccdL;
-        x ^= x >>> 33;
-        x *= 0xc4ceb9fe1a85ec53L;
-        x ^= x >>> 33;
-        return x;
-    }
-
     /** One trie level; every field final, which is the whole point. */
     static final class Node {
         final int dataMap;
@@ -85,7 +71,7 @@ public final class LongTrieSetStorage implements SetStorage {
 
     public boolean containsLong(long elem) {
         Node n = root;
-        long hash = mix(elem);
+        long hash = TrieHash.mix64(elem);
         for (int shift = 0; ; shift += BITS) {
             int bit = 1 << (int) ((hash >>> shift) & MASK);
             if ((n.dataMap & bit) != 0) {
@@ -128,7 +114,7 @@ public final class LongTrieSetStorage implements SetStorage {
 
     public SetStorage addLong(long elem) {
         int[] grew = new int[1];
-        Node newRoot = insert(root, elem, mix(elem), 0, grew);
+        Node newRoot = insert(root, elem, TrieHash.mix64(elem), 0, grew);
         if (newRoot == root) return this;
         return new LongTrieSetStorage(newRoot, size + grew[0]);
     }
@@ -141,7 +127,7 @@ public final class LongTrieSetStorage implements SetStorage {
             long had = n.elems[i];
             if (had == elem) return n;          // already present — share
             grew[0]++;
-            Node child = merge(had, mix(had), elem, hash, shift + BITS);
+            Node child = merge(had, TrieHash.mix64(had), elem, hash, shift + BITS);
             return dataToNode(n, bit, i, child);
         }
 
@@ -170,7 +156,7 @@ public final class LongTrieSetStorage implements SetStorage {
         }
         if (shift >= 64) {
             throw new IllegalStateException(
-                "two distinct long elements with an identical 64-bit mix — mix() is not a bijection");
+                "two distinct long elements with an identical 64-bit mix — TrieHash.mix64() is not a bijection");
         }
         return new Node(0, 1 << i1, NO_ELEMS, new Node[]{merge(e1, h1, e2, h2, shift + BITS)});
     }
@@ -209,7 +195,7 @@ public final class LongTrieSetStorage implements SetStorage {
 
     public SetStorage removeLong(long elem) {
         boolean[] gone = new boolean[1];
-        Node newRoot = delete(root, elem, mix(elem), 0, gone);
+        Node newRoot = delete(root, elem, TrieHash.mix64(elem), 0, gone);
         if (!gone[0]) return this;
         if (size - 1 == 0) return EmptySetStorage.INSTANCE;
         return new LongTrieSetStorage(newRoot, size - 1);

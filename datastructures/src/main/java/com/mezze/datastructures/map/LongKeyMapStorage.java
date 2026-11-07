@@ -158,7 +158,7 @@ public final class LongKeyMapStorage implements MapStorage {
             return fromSorted(newKeys, newValues);
         }
 
-        // Transition to HashMapStorage
+        // Transition to the trie
         return transitionToHash().put(key, value);
     }
 

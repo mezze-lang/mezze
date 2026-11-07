@@ -10,9 +10,6 @@ public sealed interface SetStorage permits
         LongSetStorage,
         LongTrieSetStorage,
         TrieSetStorage,
-        DoubleHashSetStorage,
-        StringHashSetStorage,
-        HashSetStorage,
         // Buckets by the ELEMENT'S own hashing rather than the runtime
         // representation. Chosen for an element type that wrote its own `Eq`/`Hash`,
         // and never promoted away from — see EvidenceSetStorage.

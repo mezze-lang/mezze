@@ -59,7 +59,7 @@ public final class SmallFlatSetStorage implements SetStorage {
     }
 
     private SetStorage transitionToBestHash(Object newElem) {
-        if (allLongElementsStorable(newElem)) {
+        if (allLongElements(newElem)) {
             SetStorage out = new LongTrieSetStorage();
             for (Object e : elements) {
                 out = ((LongTrieSetStorage) out).addLong((Long) e);
@@ -82,26 +82,15 @@ public final class SmallFlatSetStorage implements SetStorage {
         return transitionToHash().add(newElem);
     }
 
-    private boolean allLongElementsStorable(Object newElem) {
-        if (!(newElem instanceof Long ne) || !LongTrieSetStorage.isStorable(ne)) return false;
+    /**
+     * Being a Long is the whole condition — see the note on the Map's copy: a
+     * trie reserves no sentinel values, so the predicate that used to express
+     * that restriction is gone rather than left returning true.
+     */
+    private boolean allLongElements(Object newElem) {
+        if (!(newElem instanceof Long)) return false;
         for (Object e : elements) {
-            if (!(e instanceof Long le) || !LongTrieSetStorage.isStorable(le)) return false;
-        }
-        return true;
-    }
-
-    private boolean allDoubleElements(Object newElem) {
-        if (!(newElem instanceof Double)) return false;
-        for (Object e : elements) {
-            if (!(e instanceof Double)) return false;
-        }
-        return true;
-    }
-
-    private boolean allStringElements(Object newElem) {
-        if (!(newElem instanceof String)) return false;
-        for (Object e : elements) {
-            if (!(e instanceof String)) return false;
+            if (!(e instanceof Long)) return false;
         }
         return true;
     }
