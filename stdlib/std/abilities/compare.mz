@@ -1,4 +1,10 @@
 ## Equality comparison. Desugars `==` and `!=` operators.
+##
+## NOT auto-derived for a `newtype`: a newtype is a distinct type from what it
+## wraps and is erased to its payload at runtime, so a derived equality would
+## silently be the WRAPPED type's. The author says what equality means. `Hash`
+## and `Inspect` ARE derived, because neither claims anything about equality.
+#{ missing: "`Eq` and `Hash` are ONE decision — a hash container buckets by hash and settles ties by equality, so a `Map` key or `Set` element needs both, and writing only `Eq` is refused. Implement both: `impl Eq for T where { eq = { it, r } -> ..., neq = { it, r } -> ... }` and `impl Hash for T where { hash = { it } -> ... }`. For a newtype, unwrap to compare the payload: `eq = { it, r } -> match it is T.(a) -> match r is T.(b) -> a == b`." }
 ability Eq for 'a where {
   ## Returns True if the two values are equal.
   eq: { it: 'a, r: 'a } -> Bool,
