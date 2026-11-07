@@ -29,8 +29,12 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     @CompilationFinal
     private final MapStorage storage;
 
+    /** Retest: with the native dispatch gone, does the interface call matter? */
+    private final int cachedSize;
+
     private MezzeMap(MapStorage storage) {
         this.storage = storage;
+        this.cachedSize = storage.size();
     }
 
     /**
@@ -106,7 +110,7 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
      * Returns the number of entries.
      */
     public int size() {
-        return storage.size();
+        return cachedSize;
     }
 
     /**

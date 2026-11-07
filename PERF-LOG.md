@@ -8141,3 +8141,96 @@ present design cannot express without more care.
 | `map::get` / `contains_key` / `set::contains` | **ABOVE FLOOR by the native floor**, 7.8-12.4 ns of which ~4.8 is call overhead |
 | Set insert on NEW elements | **UNKNOWN** — the rows that looked like it measured an early return |
 | SortedMap · SortedSet · Deque · NonEmptyList | **still UNKNOWN** |
+
+#### `map::size` 4 022 -> 429 ps, 9.4x — parity with `str::size`, in two steps, and the first step looked like a failure
+
+The entry above ranked the ~4.8 ns floor under every map operation as the next
+target and attributed it to "the record-ABI natives still unported". **That
+attribution was wrong, and checking it was the whole of the work.**
+
+`__native_map_size` and `__native_string_size` are registered as IDENTICAL
+scalar `NativeOp`s — one `OBJECT` param, `LONG` return, `pure = true` — and
+NEITHER `MapNatives.size` nor `MezzeMap.size()` crosses a `@TruffleBoundary`.
+The ABI is the same. What `str::size` has and `map::size` lacked is a dedicated
+PE-transparent operation that `BytecodeCompiler` emits by name:
+
+```java
+  @Operation
+  public static final class InlineStringSize {
+      @Specialization
+      public static long doSize(String s) { return (long) s.length(); }
+  }
+```
+
+Four lines. `InlineMapSize` is its peer, with a `MezzeMap` and a `MezzeSet`
+specialization, emitted at the three sites that already special-case
+`__native_string_size` (the `{ m }` record form needed its own scan — the
+existing single-field block looks for a field named `s`, which is the string
+natives' parameter name).
+
+#### Measured by INTERLEAVING TWO STANDALONE JARS, because the machine was not quiet
+
+Another worktree was running its test suite — load 28 at the worst, top
+processes `worktrees/type-soundness` gradle workers, not mine. A first reading
+taken then showed every row 2-4x worse INCLUDING `map::get`, which cannot touch
+this code path; that reading was discarded. Waiting for the load to clear was
+not working, so the A/B was interleaved instead: `mez build` produces a
+standalone jar, so each variant was kept as its own `.build-X` directory and the
+two were run alternately. Drift then hits both equally, which is the rule this
+ledger already had for kernels and applies just as well to builds.
+
+```
+  step                                     ps/op    control    verdict
+  B  baseline                               4 022    208-219
+  C  + InlineMapSize                        1 749    215-221    2.3x
+  D  + cached count in MezzeMap               429    211-215    3.9x more
+                                                                9.4x total
+  str::size, for scale                        416              parity
+```
+
+Controls matched across every pair. `map::get` 13 026 against 12 793 and
+`map::contains_key` 7 636 against 7 450 — flat within 2.5%, as they must be,
+since neither reads the size. Checksum `sum=2000000000` unchanged. The ratio to
+the in-process control went from **x2008 to x214**.
+
+#### THE FIRST STEP WAS MEASURED AS A NULL RESULT AND NEARLY DISCARDED
+
+Caching the count in `MezzeMap` was tried FIRST, on the hypothesis that
+`storage.size()` could not devirtualise through a ten-implementation interface.
+Interleaved against the unmodified build it read **3 992 against 4 024 — 0.8%**,
+with controls matching. Refuted, and reverted.
+
+Then `InlineMapSize` removed the generic native dispatch, and the same cached
+count was worth **3.9x**. It was not a null result; it was masked. 4 ns of
+dispatch sat in front of a ~1.2 ns interface call, and no A/B could see past it.
+
+**The rule that earns: a null A/B is only valid in the regime it was measured
+in.** Removing a dominant cost can make a previously-null change significant,
+so a change refuted "on top of" something slow is worth re-testing once the slow
+thing is gone. Recorded because the cached count was within one command of being
+thrown away for good.
+
+#### Correctness
+
+Caching a count is sound only because every `MapStorage.size()` returns a stored
+field, a constant, or `keys.length` over a **final** array — checked across all
+ten implementations, with `SmallFlatMapStorage` and `LongKeyMapStorage` the two
+`keys.length` cases and both `private final`.
+
+`MapSizeInlineTest`, 11 tests, walking the storage progression
+(Empty -> SingleEntry -> SmallFlat -> LongHash at 0/1/2/8/64 entries), insert of
+a new and an existing key, remove present and absent, `Str` keys for a different
+storage, `is_empty` riding on size, the Set path, a warm loop, and the
+stale-count case — a base map kept live while a derived one is built, each
+reporting its own count. **Coverage evidenced by a sentinel**: with
+`InlineMapSize.doMap` returning a fixed value, 10 of the 11 fail, the eleventh
+being the Set case that goes through `doSet`.
+
+#### What is left on the map rows
+
+`map::get` at 12.4 ns and `contains_key` at 7.8 ns still go through the generic
+native path, and the ~4 ns this change removed from `size` is presumably in both
+of them too. They cannot take the same fix as-is — they are two-argument and
+have to hash the key — but the shape is now known to be worth ~4 ns, which
+makes a typed two-argument inline operation for the lookups the next thing on
+this row rather than a guess.

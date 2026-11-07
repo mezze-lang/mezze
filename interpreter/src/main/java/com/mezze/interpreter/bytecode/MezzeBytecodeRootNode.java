@@ -439,6 +439,41 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * {@code map::size} and {@code set::size} without the generic native path.
+     *
+     * <p>WHY. `str::size` costs 416 ps and `map::size` 4 519 — eleven times as
+     * much for the same shape of work, reading a stored count out of a
+     * container. Both are registered as identical scalar `NativeOp`s (one
+     * OBJECT param, LONG return, pure) and NEITHER crosses a
+     * `@TruffleBoundary`, so the ABI is not the difference. What `str::size`
+     * has and `map::size` lacks is a dedicated PE-transparent operation that
+     * `BytecodeCompiler` emits by name — {@link InlineStringSize}, directly
+     * above. This is its peer.
+     *
+     * <p>WHAT IT IS NOT, established by measurement rather than argument. The
+     * first hypothesis was that `MezzeMap.size()` delegating through the
+     * ten-implementation `MapStorage` interface could not devirtualise.
+     * Caching the size in a final field on `MezzeMap` was built and measured
+     * INTERLEAVED against the unmodified build — two standalone jars,
+     * alternated, because the machine was under load from another worktree:
+     * 3 992 ps against 4 024, with the in-process controls matching at 213 and
+     * 210. 0.8%, so the interface call is not the cost; that change was
+     * reverted. See PERF-LOG.
+     */
+    @Operation
+    public static final class InlineMapSize {
+        @Specialization
+        public static long doMap(com.mezze.datastructures.map.MezzeMap<?, ?> m) {
+            return (long) m.size();
+        }
+
+        @Specialization
+        public static long doSet(com.mezze.datastructures.set.MezzeSet<?> s) {
+            return (long) s.size();
+        }
+    }
+
+    /**
      * Inline unary string operations: TRIM(0), TO_UPPER(1), TO_LOWER(2),
      * REVERSE(3), TRIM_START(4), TRIM_END(5).
      * Bypasses MakeRecord + NativeDispatch for single-arg string natives.

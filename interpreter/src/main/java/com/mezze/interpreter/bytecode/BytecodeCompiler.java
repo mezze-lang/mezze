@@ -3713,6 +3713,22 @@ public final class BytecodeCompiler {
                             return;
                         }
                     }
+                    // ── Single-field { m } map natives ──
+                    // map::size { m } → InlineMapSize. Separate from the { s }
+                    // block below because that one scans for the string
+                    // natives' parameter name; `map::size` declares `m`.
+                    if (mr.getFields().size() == 1 && "__native_map_size".equals(recName)) {
+                        NodeIR mNode = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("m".equals(fld.getName())) mNode = fld.getValue();
+                        }
+                        if (mNode != null) {
+                            b.beginInlineMapSize();
+                            emitNode(mNode, b, argCount, localMap);
+                            b.endInlineMapSize();
+                            return;
+                        }
+                    }
                     // ── Single-field { s } string natives ──
                     if (mr.getFields().size() == 1) {
                         NodeIR sNode = null;
@@ -3725,6 +3741,14 @@ public final class BytecodeCompiler {
                                 b.beginInlineStringSize();
                                 emitNode(sNode, b, argCount, localMap);
                                 b.endInlineStringSize();
+                                return;
+                            }
+                            // set::size { s } → InlineMapSize. Declares `s`, so
+                            // it rides this scan rather than the `m` one above.
+                            if ("__native_set_size".equals(recName)) {
+                                b.beginInlineMapSize();
+                                emitNode(sNode, b, argCount, localMap);
+                                b.endInlineMapSize();
                                 return;
                             }
                             // str::trim/to_upper/to_lower/reverse/trim_start/trim_end → InlineStringUnary
@@ -3820,6 +3844,13 @@ public final class BytecodeCompiler {
                     b.beginInlineStringSize();
                     emitNode(arg0, b, argCount, localMap);
                     b.endInlineStringSize();
+                    return;
+                }
+                // map::size / set::size → InlineMapSize, same reasoning.
+                if ("__native_map_size".equals(name) || "__native_set_size".equals(name)) {
+                    b.beginInlineMapSize();
+                    emitNode(arg0, b, argCount, localMap);
+                    b.endInlineMapSize();
                     return;
                 }
                 // {int,float,nat,bool}::to_str → InlineScalarInspect
