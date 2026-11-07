@@ -8399,3 +8399,195 @@ insert cliff**, 5.41 µs at 4 000 keys against 16 ns along the owner chain, and
 unbounded in map size. It is a datastructures change — a structure that shares,
 rather than an owner token that copies on branch — and none of the seven wins
 above are a precedent for it.
+
+### LEDGER UPDATE 2026-11-07 — the churned effect tier, 2.53x, and a boundary that is load-bearing in the GOOD direction
+
+The entry above closed with its own next step: *"The verify tier costs ~8.7 ns
+over the no-check tier (9 521 against 815) ... Narrowing it means making
+`resolveHandler` cheaper — a per-effect slot rather than a scan, which is a
+separate change with its own measurement."* This is that measurement, and the
+first two guesses about where the 8.7 ns lives were both wrong.
+
+Why this row matters more than its position in the table suggests:
+`StabilityAssumption.CHURN_LIMIT` is 8 and the back-off is permanent, so a
+process that installs more than eight handlers over its whole life — which is
+every real program — spends the rest of its life in this tier. It is not an
+edge case; it is the steady state.
+
+#### Guess one: the boundary. REFUTED, and expensively so
+
+`PerformD.doCachedShared` calls `resolveHandler(effectHash)` **in its guard**,
+on every op, and that method is `@TruffleBoundary`. A boundary crossing per
+effect operation is a plausible ~8 ns, so the first experiment removed it from
+`resolveHandler` and from `peekHandlerForEffect` underneath.
+
+```
+  kernel 9, op after churn    head  9 769      no boundary  56 862     5.8x WORSE
+```
+
+Not a null result — a **5.8x regression**. The annotation was not a cost being
+paid, it was a cost being avoided: it keeps a `ThreadLocal` probe, a stack scan
+and `Hash.equals` out of the compiled graph at every perform site. Removing it
+hands all of that to the host inliner at each one.
+
+That is a third category to go beside the two the previous entry recorded. A
+null result behind a dominant cost is masked; a null result after the dominant
+cost is gone is refuted; and **a boundary can be load-bearing in the direction
+you did not test** — the experiment that removes one has to be able to come
+back worse, not just flat.
+
+#### Guess two: bound the prize before building anything
+
+With the boundary staying, the remaining candidates are all inside the method:
+`STATE.get()`, the walk down the handler stack, and `Hash.equals` — which
+matters more than it looks, because `Hash` is a data class wrapping a 128-char
+hex string. Its `equals` fast-rejects on a precomputed int, but on a MATCH —
+the case the hot path always takes — it falls through to a full `String.equals`.
+
+Rather than guess which, a measurement-only probe replaced the whole body with
+a static one-entry identity memo (unsound: it ignores the chain ever changing,
+and was never going to be committed):
+
+```
+  kernel 9    real body  9 768      body replaced by a memo  1 723
+```
+
+So ~8 of the ~9 ns is the BODY and under 1 ns is the crossing plus the guard
+structure. One build, and it turned "make `resolveHandler` cheaper" from a
+direction into a number.
+
+#### The sound form of the probe
+
+A one-entry memo on `EffectState` — per-thread, so no cross-thread hazard —
+keyed on `(effect hash IDENTITY, depth, generation)`.
+
+The key is sound because **every site that changes chain contents also changes
+depth, generation or both.** That was audited rather than assumed: every write
+to `handlers[]`/`effectHashes[]` is paired with a depth change, and the two
+depth changes that skip the generation bump (`clearHandlerChain`,
+`popHandlerChain`) both move depth. It is the same invariant
+`snapshotHandlerChainEntries` immediately above already relies on, which is why
+it was the natural key to reach for.
+
+Identity rather than equality on the hash is deliberate: a different-but-equal
+`Hash` object misses and rescans, which is slower and never wrong. A null
+result is memoised too — "no handler in scope" is the answer the guard needs
+most cheaply when it is about to fall through to the generic path.
+
+```
+  kernel                                  before     after    verdict
+  9  op after churning the SAME effect    9 719     3 841     2.53x
+  3  op, pristine                 (ctrl)    820       849     flat
+  7  chain of four handlers       (ctrl)     945       877     flat
+  10 op after churning another    (ctrl)     893       839     flat
+  5  install a handler per iteration     51 724    53 985     4.4% WORSE
+```
+
+Checksums identical (`sum=2000001000000`), so the memo is not answering faster
+by answering differently.
+
+#### Kernel 5 is the MISS control, and its 4.4% is real
+
+Kernel 5 installs a handler every iteration, so the generation always differs
+and the memo **can never hit**: it pays the four field writes and the key
+comparison, and gets nothing back. That makes it the miss-path control this
+change needed, already in the case — no new kernel required.
+
+It was tempting to file 4.4% as noise, which is what the first six-reading run
+would have supported. Twelve readings in each of two separate runs agree on
+both sign and size (5.0% then 4.4%), so it is a real cost and is recorded as
+the price of the row rather than hidden inside it: **2.53x on the steady state
+of every long-lived process, against 4.4% on a loop that installs a handler
+every iteration.** 4.4% of 51.7 ns is ~2.3 ns, which is more than four field
+writes should cost, so part of it is the extra branch and part is presumably
+`EffectState` growing; that split was not measured and is not claimed.
+
+#### A control scare that was undersampling, and the rule it produces
+
+The first run of this A/B read kernel 3 at **+16%** and kernel 7 at **+24%** —
+two controls moving, which by the standing rule voids the table. The obvious
+story was available and wrong: the memo adds four fields to `EffectState`, so
+"cache layout perturbation on the pristine path" would have explained it
+nicely.
+
+Twelve readings each instead of six:
+
+```
+  kernel 3   +16%  ->  +3.5%
+  kernel 7   +24%  ->   -7%      (now FASTER, opposite sign)
+```
+
+Both inside noise, and kernel 7 changed sign — which is what undersampling
+looks like, not what a layout effect looks like. These controls run at ~820
+ps/iter; a 15% difference there is 120 picoseconds, and six process-level
+readings cannot resolve it. **The rule: the number of readings a row needs
+scales with how small the row is.** The map rows at 5-16 ns were settled by
+five interleaved pairs; sub-nanosecond controls need twelve, and the previous
+entry's "min of nine" was already near the floor for them.
+
+#### Coverage, stated as the sentinel supports it
+
+`HandlerMemoCorrectnessTest`, 7 tests. The shape that would break is shadowing:
+an inner handler for the same effect pushes, is memoised, pops, and the outer
+perform must re-resolve rather than read the inner answer back. Three tests put
+an outer operation, an inner one and a second outer one in a single extent;
+one of them warm, because the compiled path is where the memo is supposed to
+pay. The rest cover sequential extents with different handlers, two effects
+alternating (which a one-entry memo thrashes — correctness must not depend on
+it hitting), a chain of four effects, and re-entering one handler repeatedly.
+
+A sentinel dropping `depth` and `generation` from the key — a memo that always
+hits once warm — fails **4 of 7**. The three it does not fail install exactly
+ONE handler for the effect they query, so a stale entry holds the right answer
+anyway. That count was guessed as five before it was run, and the comment in
+the test file now states four.
+
+Unlike `EffectHandlerChurnCorrectnessTest` these need no 2000-iteration loops:
+the memo is read by `YieldDispatch` on the generic path as well as by the cached
+tiers' guard, so a short program reaches it.
+
+#### What is left on this row, ranked — and why the previous entry's ruling-out needs amending
+
+3 841 against a pristine 820 is still **4.7x**, and there are two levers of
+very different size.
+
+**First, and worth the whole 4.7x: let a quiet program go BACK to the free
+tier.** The entry above ruled out the entire class of "make the assumption
+recover" on the grounds that `get()` is called at specialization time only, so
+a node that has stopped consulting an assumption cannot notice it coming back.
+That reasoning was about `EffectBinding.doGeneric`. For `PerformD` the
+conclusion still holds but **the cause is now different, and it is a cause this
+very row created**: `StabilityAssumption.reset()` already exists ("start over,
+as if never churned", no callers in `src/main`) and it invalidates the cyclic
+assumption first precisely so that anything holding it is knocked out. But
+`doCachedShared` deliberately holds NO assumption any more — that is what made
+it survive churn and win 2.6x — so `reset()` cannot dislodge it, it keeps
+matching, and the DSL never re-specializes to the tier that needs no check.
+**A working cheaper-but-not-cheapest tier is now the thing blocking recovery.**
+
+The shape that fixes it: give `doCachedShared` a SECOND assumption that churn
+does not invalidate and recovery does. Then `reset()` drops the churned tier,
+the DSL re-specializes, `getEffectStableAssumption` hands out a fresh valid
+assumption, and dispatch lands back in `doCachedSingleThreaded` at 820.
+
+And the trigger is already in place as of this entry: **the memo is a
+quiescence detector.** A memo HIT means depth and generation have not moved, so
+N consecutive hits for an effect is proof the chain has been stable for N
+operations. Counting them costs a field increment on per-thread state already
+behind the boundary, and the mechanism is self-limiting — a kernel-5-style loop
+that installs every iteration never hits, so the counter never arms and there
+is no tier thrash to pay for.
+
+**Second, worth about 1.9x: drop the `ThreadLocal` probe.** The probe used
+STATIC fields and read 1 723 where the sound version reads per-thread state via
+`STATE.get()`, so roughly 2 of the remaining 3 ns is the probe. The lever is
+per-thread state without one — a Truffle `ContextThreadLocal`, or an immutable
+single-entry memo published in a static and validated with
+`Thread.currentThread()` (an intrinsic). The latter needs the memo object to be
+immutable with final fields, because a torn pair of statics across two threads
+would compare one thread's depth against another's state; that in turn means an
+allocation per MISS, which is why it must be measured against kernel 5 and not
+only kernel 9.
+
+Neither is a precedent for the other, and the first should go first: it ends
+the row rather than narrowing it.
