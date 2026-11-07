@@ -1,0 +1,217 @@
+## WHAT SORTEDMAP, SORTEDSET AND DEQUE COST — the rest of the collections block.
+##
+## PERF-LOG listed under UNKNOWN: "Collections. Map · Set · SortedMap ·
+## SortedSet · Deque · NonEmptyList, every op". `bench/cases/mapsurface` closed
+## Map and Set and seven dispatch wins came straight out of it, every one
+## because the operation had a native registration and no `BytecodeCompiler`
+## special case. These four types have 179 natives between them and ZERO
+## special cases, so the same question is open for all of them.
+##
+## AND THERE IS A SECOND THING TO MEASURE HERE, found while reading the stdlib
+## rather than the profiler. Every ordered operation is written like this:
+##
+##   pub let get: { m: SortedMap 'k 'v, k: 'k } with Ord 'k -> Option 'v = { m, k } ->
+##     get_with_cmp { m = m, k = k, cmp = { a, b } -> if a < b then 0 - 1 else ... }
+##
+## so each call ALLOCATES A COMPARATOR CLOSURE, and the native then calls back
+## into guest code once per comparison — O(log n) guest calls for one lookup.
+## `size` and `is_empty` carry no `with Ord` and no closure, which makes them
+## the control for exactly that cost: if the ordered rows are far worse than
+## their unordered equivalents in mapsurface while `sorted_map::size` is not,
+## the comparator is the cost and not the dispatch.
+##
+## METHOD, the same as surface, ds_matrix, asyncsurface and mapsurface:
+##   - per OPERATION, as a ratio to a CONTROL timed in this same process — a
+##     counted loop over the same arithmetic with no collection in it.
+##   - min over k measured passes after `warm` warmup passes; a row whose
+##     median exceeds twice its minimum prints UNDER-WARMED, and one whose
+##     slowest WARMUP pass exceeds 10x its minimum prints WARMUP-DOMINATED.
+##   - ONE ROW PER PROCESS (`dsmore <n> <row>`): sharing a process lets the
+##     collector run while the timer does, measured elsewhere as a 6x artefact.
+##
+## EVERY ROW NEEDS TWO SIZES OF n AND MUST CONVERGE. Not advice — the rule the
+## async bench's retraction was written to enforce, where a row sized by
+## guesswork read 7 309 335 ps/op at n=800 and 61 861 at n=80 000 and the
+## smaller figure was published as a finding.
+##
+## PERSISTENT, NOT MUTABLE: every insert returns a new structure, so the insert
+## rows measure a persistent update and must never be read against a Java
+## TreeMap.put.
+##
+## EVERY ROW CHECKSUMS: the accumulator is printed, so a row that got fast by
+## not doing the work reads as a different number.
+##
+## NonEmptyList IS STILL NOT COVERED: its only constructor is
+## `from_list: { xs } -> Option (NonEmptyList 'a)`, and there is no NEL to fall
+## back to in the None branch, so a row cannot be written without inventing one.
+## Recorded as still-UNKNOWN rather than approximated.
+use std::effects::log::{ println, Console }
+use std::effects::args::{ SystemArgs, argv }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::collections::seq
+use std::collections::sorted_map
+use std::collections::sorted_set
+use std::collections::deque
+use std::int
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_one = { thunk } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = thunk {}
+  let t1 = monotonic {}
+  { ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }, sum = r }
+
+let time_k_go = { thunk, k, acc, last } -> if k == 0
+  then { times = acc, sum = last }
+  else do
+    let r = time_one { thunk = thunk }
+    time_k_go { thunk = thunk, k = k - 1, acc = seq::push { xs = acc, x = r.ns }, last = r.sum }
+
+let nth_or_zero = { xs, i } -> match seq::get { xs = xs, i = i } is
+  Some { val } -> val
+  None -> 0
+
+let min_of = { thunk, warm, k } -> do
+  let w = time_k_go { thunk = thunk, k = warm, acc = [], last = 0 }
+  let ws = seq::sort { xs = w.times }
+  let warm_max = nth_or_zero { xs = ws, i = seq::size { xs = ws } - 1 }
+  let run = time_k_go { thunk = thunk, k = k, acc = [], last = 0 }
+  let sorted = seq::sort { xs = run.times }
+  let half = seq::size { xs = sorted } / 2
+  { min = nth_or_zero { xs = sorted, i = 0 },
+    med = nth_or_zero { xs = sorted, i = half },
+    warm_max = warm_max,
+    sum = run.sum }
+
+## THE FLOOR: one loop iteration and one add, no collection at all.
+let control_loop = { i, acc } -> if i <= 0 then acc else control_loop { i = i - 1, acc = acc + i }
+
+let report = { idx, sel, label, thunk, floor_ps, n, warm, k } -> perform Console in perform SystemTime in
+  if sel != 0 && sel != idx then {} else do
+    let t = min_of { thunk = thunk, warm = warm, k = k }
+    let ps_per_op = (t.min * 1000) / n
+    let ratio = if floor_ps == 0 then 0 else (ps_per_op * 100) / floor_ps
+    let warm_ratio = if t.min == 0 then 0 else t.warm_max / t.min
+    let warn = if t.med > (t.min * 2) then "   UNDER-WARMED (raise n or passes)"
+      else if warm_ratio > 10 then "   WARMUP-DOMINATED"
+      else ""
+    let ps_s = int::to_str { n = ps_per_op }
+    let ratio_s = int::to_str { n = ratio }
+    let sum_s = int::to_str { n = t.sum }
+    println { msg = "  $(label): $(ps_s) ps/op  x$(ratio_s)/100 floor  sum=$(sum_s)$(warn)" }
+
+## ── build each structure once, outside every timed loop ─────────────────────
+let build_smap = { i, m } -> if i <= 0 then m
+  else build_smap { i = i - 1, m = sorted_map::insert { m = m, k = i, v = i } }
+
+let build_sset = { i, s } -> if i <= 0 then s
+  else build_sset { i = i - 1, s = sorted_set::add { s = s, x = i } }
+
+let build_deque = { i, d } -> if i <= 0 then d
+  else build_deque { i = i - 1, d = deque::push_back { d = d, x = i } }
+
+## ── 1. sorted_map::get, key PRESENT — with Ord, so a closure per call ───────
+let l_sm_get = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let v = match sorted_map::get { m = m, k = (i % keys) + 1 } is
+      Some { val } -> val
+      None -> 0
+    l_sm_get { i = i - 1, acc = acc + v, m = m, keys = keys }
+
+## ── 2. sorted_map::contains_key — with Ord ──────────────────────────────────
+let l_sm_contains = { i, acc, m, keys } -> if i <= 0 then acc
+  else l_sm_contains { i = i - 1, m = m, keys = keys,
+                       acc = acc + (if sorted_map::contains_key { m = m, k = (i % keys) + 1 } then 1 else 0) }
+
+## ── 3. sorted_map::insert along a CHAIN — rebind, as building one does ──────
+let l_sm_insert_chain = { i, acc, m, keys } -> if i <= 0 then acc
+  else l_sm_insert_chain { i = i - 1, acc = acc + 1, keys = keys,
+                           m = sorted_map::insert { m = m, k = (i % keys) + 1, v = i } }
+
+## ── 4. sorted_map::size — NO `with Ord`, so NO closure. The control for it. ─
+let l_sm_size = { i, acc, m } -> if i <= 0 then acc
+  else l_sm_size { i = i - 1, acc = acc + sorted_map::size { m = m }, m = m }
+
+## ── 5. sorted_set::contains — with Ord ──────────────────────────────────────
+let l_ss_contains = { i, acc, s, keys } -> if i <= 0 then acc
+  else l_ss_contains { i = i - 1, s = s, keys = keys,
+                       acc = acc + (if sorted_set::contains { s = s, x = (i % keys) + 1 } then 1 else 0) }
+
+## ── 6. sorted_set::add along a CHAIN, keys already PRESENT ──────────────────
+let l_ss_add_chain = { i, acc, s, keys } -> if i <= 0 then acc
+  else l_ss_add_chain { i = i - 1, acc = acc + 1, keys = keys,
+                        s = sorted_set::add { s = s, x = (i % keys) + 1 } }
+
+## ── 7. deque::size — no closure, no dictionary ──────────────────────────────
+let l_dq_size = { i, acc, d } -> if i <= 0 then acc
+  else l_dq_size { i = i - 1, acc = acc + deque::size { d = d }, d = d }
+
+## ── 8. deque::push_back along a CHAIN ───────────────────────────────────────
+let l_dq_push_chain = { i, acc, d } -> if i <= 0 then acc
+  else l_dq_push_chain { i = i - 1, acc = acc + 1, d = deque::push_back { d = d, x = i } }
+
+## ── 9. deque::first ─────────────────────────────────────────────────────────
+let l_dq_first = { i, acc, d } -> if i <= 0 then acc
+  else do
+    let v = match deque::first { d = d } is
+      Some { val } -> val
+      None -> 0
+    l_dq_first { i = i - 1, acc = acc + v, d = d }
+
+## ── 10. deque::get by index ─────────────────────────────────────────────────
+let l_dq_get = { i, acc, d, keys } -> if i <= 0 then acc
+  else do
+    let v = match deque::get { d = d, i = i % keys } is
+      Some { val } -> val
+      None -> 0
+    l_dq_get { i = i - 1, acc = acc + v, d = d, keys = keys }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let n = arg_at { args = args, i = 0, def = 1000000 }
+  let sel = arg_at { args = args, i = 1, def = 0 }
+  let keys = arg_at { args = args, i = 2, def = 1000 }
+  let floor_n = arg_at { args = args, i = 3, def = 40000000 }
+  let warm = 4
+  let k = 9
+  let sm = build_smap { i = keys, m = sorted_map::empty {} }
+  let ss = build_sset { i = keys, s = sorted_set::empty {} }
+  let dq = build_deque { i = keys, d = deque::empty {} }
+  let floor = min_of { thunk = {} -> control_loop { i = floor_n, acc = 0 }, warm = warm, k = k }
+  let floor_ps = (floor.min * 1000) / floor_n
+  let n_s = int::to_str { n = n }
+  let keys_s = int::to_str { n = keys }
+  let floor_s = int::to_str { n = floor_ps }
+  println { msg = "dsmore (n=$(n_s) ops, $(keys_s) keys): $(int::to_str { n = warm }) warmup + $(int::to_str { n = k }) measured, MIN per row" }
+  println { msg = "control: a counted loop + add = $(floor_s) ps/op. Rows below are xNNN/100 of it." }
+  if floor.med > (floor.min * 2) then
+    println { msg = "!! the CONTROL is under-warmed, so every ratio below is suspect — raise n" }
+  else
+    println { msg = "" }
+
+  report { idx = 1, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "sorted_map::get (hit)  ", thunk = {} -> l_sm_get { i = n, acc = 0, m = sm, keys = keys } }
+  report { idx = 2, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "sorted_map::contains_key", thunk = {} -> l_sm_contains { i = n, acc = 0, m = sm, keys = keys } }
+  report { idx = 3, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "sorted_map::insert chain", thunk = {} -> l_sm_insert_chain { i = n, acc = 0, m = sm, keys = keys } }
+  report { idx = 4, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "sorted_map::size NO-cmp", thunk = {} -> l_sm_size { i = n, acc = 0, m = sm } }
+  report { idx = 5, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "sorted_set::contains   ", thunk = {} -> l_ss_contains { i = n, acc = 0, s = ss, keys = keys } }
+  report { idx = 6, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "sorted_set::add chain  ", thunk = {} -> l_ss_add_chain { i = n, acc = 0, s = ss, keys = keys } }
+  report { idx = 7, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "deque::size NO-cmp     ", thunk = {} -> l_dq_size { i = n, acc = 0, d = dq } }
+  report { idx = 8, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "deque::push_back chain ", thunk = {} -> l_dq_push_chain { i = n, acc = 0, d = dq } }
+  report { idx = 9, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "deque::first           ", thunk = {} -> l_dq_first { i = n, acc = 0, d = dq } }
+  report { idx = 10, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "deque::get by index    ", thunk = {} -> l_dq_get { i = n, acc = 0, d = dq, keys = keys } }

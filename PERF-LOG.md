@@ -8725,3 +8725,132 @@ only for the window before recovery and for programs that genuinely churn
 forever. `PerformMutMutateAct` has the same `doCachedShared` shape and has NOT
 been given the gate — deliberately, so that one measured change covers one
 dispatch site; it is the cheapest remaining extension and needs its own number.
+
+### LEDGER UPDATE 2026-11-07 — the ORDERED collections are 29-60x the hash ones, and a bounded 10-13x of it is one method
+
+PERF-LOG has listed under UNKNOWN: *"Collections. Map · Set · SortedMap ·
+SortedSet · Deque · NonEmptyList, every op"*. `mapsurface` closed Map and Set
+and seven dispatch wins came straight out of it. `bench/cases/dsmore` is new
+and closes SortedMap, SortedSet and Deque, with the same method: per
+operation, a ratio to an in-process control, one row per process, min over 9
+passes after 4 warmups, a checksum per row, **and every figure taken at two
+sizes of n and required to converge.**
+
+```
+  row                            n=small    n=large    converged
+  sorted_map::get (hit)          317 092    318 895    317 000
+  sorted_map::contains_key       308 033    309 087    308 500
+  sorted_map::insert (chain)     583 382    571 670    577 000
+  sorted_map::size (NO cmp)        8 931      8 937      8 934
+  sorted_set::contains           330 946    309 494    ~310 000
+  sorted_set::add (chain)        303 742    309 527    307 000
+  deque::size (NO cmp)             9 007      8 914      8 960
+  deque::push_back (chain)        35 894     12 061    NOT CONVERGED
+  deque::first                    12 300     12 252     12 276
+  deque::get by index            220 170    223 304    222 000
+```
+
+`deque::push_back` is struck rather than reported: the row GROWS the deque by
+n elements, so changing n changes the subject and the two readings are not
+measuring the same operation. It needs a fixed-size formulation.
+
+**NonEmptyList is still UNKNOWN**, deliberately: its only constructor is
+`from_list: { xs } -> Option (NonEmptyList 'a)` and there is no NEL to return
+in the `None` branch, so a row cannot be written without inventing one.
+
+#### Against the hash equivalents, with the regime proved rather than assumed
+
+Comparing two benches is the mistake the cross-kernel rule exists to catch, so
+`mapsurface` was REBUILT with the same compiler and its rows retaken in the
+same machine state. Both benches report the same control floor — 208-228 ps/op
+in their own processes — which is the regime evidence.
+
+```
+  operation          hash      ordered     ratio
+  get (hit)        10 640      317 000      29.8x
+  contains_key      5 172      308 500      59.6x
+  size                429        8 934      20.8x
+```
+
+#### `size` carries no comparator, which splits the cost in two
+
+Every ordered operation is written like this:
+
+```
+  pub let get: { m: SortedMap 'k 'v, k: 'k } with Ord 'k -> Option 'v = { m, k } ->
+    get_with_cmp { m = m, k = k, cmp = { a, b } -> if a < b then 0 - 1 else ... }
+```
+
+so each call allocates a comparator closure and the native calls back into
+guest code once per comparison. `size` and `is_empty` have no `with Ord` and no
+closure — which makes them the control for exactly that cost, and they still
+read **20.8x** the hash `map::size`. So there are two independent costs:
+
+- **a base cost of ~9 ns on every ordered and Deque operation**, with no
+  comparator anywhere near it. These natives are registered in the record-ABI
+  `HANDLERS` map — a **string-keyed HashMap lookup per call** — and 179 natives
+  across these four modules have ZERO `BytecodeCompiler` special cases. That is
+  the exact position `map::size` was in at 4 022 ps before its inline operation
+  took it to 429.
+- **~300 ns on top of that for the ordered lookups**, which is the comparator.
+
+#### The comparator, and the prize bounded by measurement
+
+`ElementComparator.compare` is `@TruffleBoundary` and, PER COMPARISON:
+
+```java
+Object[] closureValues = cmpFn.getClosureValues();
+Object[] args = new Object[closureValues.length + 1];   // allocation
+System.arraycopy(...);
+args[closureValues.length] = MezzeRecord.wrapAB(a, b);  // allocation
+Object result = cmpFn.getCallTarget().call(args);       // UNCACHED call
+```
+
+Two allocations and an uncached `CallTarget.call` — no `DirectCallNode`, no
+inline cache, no splitting — about ten times per lookup on a 1 000-key map.
+
+Guessing a cause has been refuted twice today, so this was bounded rather than
+argued. An **unsound measurement-only probe** returned `Long.compare` directly
+whenever both operands were Long, skipping the guest callback entirely (wrong
+for any key type whose `Ord` is not canonical ascending; never committed):
+
+```
+  row                        before    callback skipped    bound
+  sorted_map::get (hit)     317 000              30 000    10.6x
+  sorted_map::contains_key  308 500              24 500    12.6x
+  sorted_set::contains      310 000              24 400    12.7x
+  sorted_map::insert chain  577 000             633 000    NO GAIN
+```
+
+Both probe columns converged across two sizes of n.
+
+**`insert` not moving is the most useful number there.** It says the comparator
+is the LOOKUPS' cost and not insert's, so `sorted_map::insert` at 43x the hash
+insert is a separate problem — persistent path copying, or the
+`map.withComparator(ElementComparator.of(cmpFn))` that every one of these
+natives performs on entry — and the 10-13x lever does not touch it.
+
+#### Why the fix is not the probe, and what it has to be instead
+
+The probe is unsound because the comparator IS the user's `Ord` instance: a
+newtype over Int with a reversed `Ord` has Long values at runtime, and a native
+Long compare would silently ignore the ordering the program asked for.
+
+It also cannot be fixed by making the callback faster in place. These natives
+run as HOST code behind a boundary, so a guest callback from inside them can
+never be inlined by Graal however it is called — ten callbacks per lookup will
+always cost ten full Truffle calls. Caching a `DirectCallNode` and dropping the
+two allocations is worth some of the 10x, not most of it.
+
+So the win requires the comparisons not to call guest code at all, which means
+the ordered structures must be able to obtain a NATIVE comparator for key types
+whose `Ord` is the canonical one — decided from the `Ord` impl's identity,
+which is available, and never from its name. That is a design change to how
+ordered collections acquire their ordering, not a patch to `ElementComparator`,
+and it is ranked first on this surface at 10-13x on every ordered lookup.
+
+Second on the surface, and contained: the ~9 ns base cost. `sorted_map::size`,
+`deque::size`, `deque::first`, `is_empty` and their peers are string-keyed
+`HANDLERS` entries with no special case, which is precisely the lever that paid
+1.2-9.4x seven times on `mapsurface`. It needs no design decision, only the
+same work.
