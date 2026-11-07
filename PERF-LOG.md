@@ -7768,3 +7768,76 @@ task` (n=800) and `join` (unconverged) stay UNVERIFIED. The JVM baseline
 (`Thread.ofVirtual()` start+join, 4.68 µs) stands — same min-over-k, and a plain
 Java loop with no warmup cliff of this shape — so spawn + await at roughly 2-3x
 the JVM round trip is the surviving claim, and it was never the alarming one.
+
+#### Loom's `StructuredTaskScope` as a replacement for our `scoped` — measured, and the answer is no
+
+Asked directly, so measured directly rather than reasoned about. JDK 25
+(GraalVM CE 25.0.2), same machine, same min-over-k-after-warmup estimator as
+every row above, n=20 000 so both sides are converged:
+
+```
+  StructuredTaskScope.open() + join(), nothing forked      112 727 ps/op   113 ns
+  StructuredTaskScope.open() + fork(() -> 1L) + join()   3 582 961 ps/op  3.58 µs
+
+  --- the references already in this ledger ---
+  Mezze  scoped, EMPTY                                                      ~62 ns
+  Java   newVirtualThreadPerTaskExecutor() open + close                     264 ns
+  Java   Thread.ofVirtual() start + join                                   4.68 µs
+```
+
+**For the scope itself, adopting it would be a REGRESSION.** Ours is ~62 ns
+against `StructuredTaskScope`'s 113 — we are already 1.8x faster than the JDK's
+structured-concurrency construct and 4x faster than the executor-based one.
+There is no performance case for replacing `AsyncNatives.scoped`.
+
+**The one number that IS interesting is on the other path.** `StructuredTaskScope`
+runs scope-plus-one-task in 3.58 µs — *faster than raw* `Thread.ofVirtual()`
+start+join at 4.68 µs, so its fork/join route is better than the primitive it
+is built on. Against Mezze's `spawn + await` at ~10-13 µs that suggests roughly
+3x available. But that is the SPAWN/AWAIT path, not `scoped`, and our 10-13 µs
+is the weakly-supported figure from two agreeing sizes that could not be pushed
+further. **Do not act on that gap until spawn + await has had the convergence
+treatment** — that is precisely the step whose absence produced the retraction
+above.
+
+#### The blocker is practical, and it was confirmed rather than assumed
+
+Reflection said the class was present and carried no preview annotation:
+
+```
+  FOUND   java.util.concurrent.StructuredTaskScope
+          annotated-preview=false  methods=8
+```
+
+`javac` disagreed:
+
+```
+  error: StructuredTaskScope is a preview API and is disabled by default.
+    (use --enable-preview to enable preview APIs)
+```
+
+So the annotation check was a FALSE NEGATIVE and only trying to compile it
+settled the question — the same shape of error as trusting a benchmark's default
+`n`. It needs `--enable-preview` at compile AND run time, and preview class
+files are pinned to the exact JDK that produced them. For a runtime that ships
+a jar and a native image (`project_mez_distribution_pipeline`) that is a
+distribution constraint, not a detail, and preview APIs under native-image are
+further risk on top of the SVM blocklist issues this repo already tracks.
+
+#### And a semantics mismatch that matters more than the flags
+
+`StructuredTaskScope` requires `fork` on the scope-owning thread and `join()`
+before `close()`. Our `scoped` hands a `Scope` VALUE to guest code, which can
+spawn from it (`Async.scope_spawn`) and is not constrained to the owning thread.
+Adopting STS would narrow that contract and could break guest programs that
+rely on the looser model.
+
+#### Verdict
+
+**No, not now, and not for the scope's cost.** Revisit when it leaves preview,
+at which point the argument stops being "go faster" — it cannot be — and
+becomes "delete concurrency code we should not own". That argument has some
+force: `AsyncNatives.scoped` hand-rolls parent/child linkage for transitive
+cancellation (#252), cancel-all on four exception paths, and await-all on exit,
+and this file already has a history of cancellation and per-thread-state bugs.
+Recorded so the comparison does not have to be re-derived.
