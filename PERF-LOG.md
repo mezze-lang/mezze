@@ -8047,3 +8047,97 @@ and a pristine program, and it is 2.6x better than the generic path it replaces
 rather than closed. Narrowing it means making `resolveHandler` cheaper — a
 per-effect slot rather than a scan — which is a separate change with its own
 measurement.
+
+### LEDGER UPDATE 2026-11-07 — MAP HAS ITS FIRST NUMBERS, and a 338x cliff when the base map is shared
+
+PERF-LOG listed under UNKNOWN: *"Collections. Map · Set · SortedMap · SortedSet
+· Deque · NonEmptyList, every op"*. `ds_matrix` covers seq and List; nothing
+covered Map, which is in every program. `bench/cases/mapsurface` is new, with
+the method the retraction above enforced: per-operation, a ratio to an
+in-process control, one row per process, min over 9 passes after 4 warmups, a
+checksum per row, **and every figure taken at two sizes of n and required to
+converge**.
+
+#### The lookup surface, converged at n=1e6 and n=4e6, 1 000 keys
+
+```
+  row                       n=1e6      n=4e6     taken as      x control
+  map::get   (hit)          12 504     12 357     12.4 ns          5 800
+  map::get   (miss)          8 145      8 978      8.6 ns          3 950
+  map::contains_key          7 380      8 192      7.8 ns          3 660
+  map::size  (O(1))          4 519      5 045      4.8 ns          2 100
+  set::contains              6 494      7 308      6.9 ns          3 010
+```
+
+**The first thing to read here is `map::size`.** It returns a stored count — one
+field load — and it costs **4.8 ns**. That is 22x the control, and 11x
+`str::size`'s 416 ps, which is a Bytecode-DSL operation rather than a record-ABI
+native. So ~4.8 ns is the per-call floor under EVERY map operation before any
+hashing happens, and `map::get`'s 12.4 ns is only 2.6x that floor. The hash
+probe is the smaller half of a map lookup.
+
+That is the ledger's existing ABOVE FLOOR row — *"the record-ABI natives still
+unported"* — with a number on it at last, and Map is the most valuable instance.
+
+#### The insert surface, and a claim I had to correct before publishing it
+
+`LongHashMapStorage.putLong` mutates its two arrays IN PLACE when this storage
+is the owner, and CLONES both when it is not:
+
+```java
+  if (isOwner()) { workKeys = keys;         workValues = values; }
+  else           { workKeys = keys.clone(); workValues = values.clone(); }
+```
+
+So there are two insert costs, and which one you get depends on whether anybody
+else still holds the map:
+
+```
+  keys        insert along a CHAIN      insert from a SHARED base
+              (rebind `m`; O(1))        (keep `m`; O(size))
+    250            12 365 ps                    278 611 ps
+  1 000            16 901                     1 305 284
+  4 000            16 091                     5 407 531      <- 338x
+```
+
+**Building a map is O(1) per insert and NOT quadratic.** I measured the shared
+row first, saw 1.11/1.31/1.35 ns per entry across the key sweep, and wrote down
+"building an N-entry map is O(N²)". That was wrong: building rebinds `m`, which
+is the owner path, and it is flat. Reading `putLong` is what corrected it,
+before it was published.
+
+What IS real is the cliff: **338x at 4 000 keys, and unbounded in map size, the
+moment the base map is still referenced** — which is precisely the situation a
+persistent map exists to support. `let m2 = map::insert { m = m, … }` while `m`
+stays live is ordinary functional code, and it copies the whole table.
+
+#### The Set comparison is STRUCK, not merely caveated
+
+The set rows looked like the clean counter-example — flat and cheap whether
+chained or branching, suggesting Map alone had the cliff. They measure nothing
+of the kind. `LongHashSetStorage.addLong` opens with:
+
+```java
+  if (containsLongInternal(elem)) return this;
+```
+
+and the bench inserts elements the set ALREADY CONTAINS. So those rows are a
+contains plus an early return, never an insert, while `map::insert` on a present
+key must still update the value. The two are not comparable and the conclusion
+"Set has no cliff" has no evidence behind it. The rows are relabelled
+`set::insert PRESENT-key` so they cannot be misread again.
+
+Whether Set would show the same cliff on genuinely new elements is **UNKNOWN**
+and needs a row that does not change the set's size while inserting — which the
+present design cannot express without more care.
+
+#### Ranked
+
+| row | state |
+|---|---|
+| the ~4.8 ns record-ABI floor under every map op | **ABOVE FLOOR, cause named.** `map::size` is one field load for 4.8 ns against `str::size`'s 416 ps as a BDSL operation. Porting the map natives to the scalar ABI is the lever, and it lifts every row at once |
+| `map::insert` from a shared base | **ABOVE FLOOR, 338x at 4 000 keys, cause read from the code.** The owner optimisation does not share structure, so a branch copies the table. A structure that shares (HAMT or similar) is the real fix and is a datastructures change, not a tuning one |
+| `map::insert` along a chain | **AT FLOOR-ish, O(1), ~16 ns**, sitting on the 4.8 ns native floor |
+| `map::get` / `contains_key` / `set::contains` | **ABOVE FLOOR by the native floor**, 7.8-12.4 ns of which ~4.8 is call overhead |
+| Set insert on NEW elements | **UNKNOWN** — the rows that looked like it measured an early return |
+| SortedMap · SortedSet · Deque · NonEmptyList | **still UNKNOWN** |

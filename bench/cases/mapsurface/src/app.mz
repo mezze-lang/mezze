@@ -1,0 +1,217 @@
+## WHAT MAP AND SET COST — first numbers for the ledger's collections block.
+##
+## PERF-LOG lists under UNKNOWN: "Collections. Map · Set · SortedMap ·
+## SortedSet · Deque · NonEmptyList, every op". `ds_matrix` covers seq and List;
+## nothing covered Map, which is in every program.
+##
+## METHOD, the same as bench/cases/surface, ds_matrix and asyncsurface:
+##   - per OPERATION, and as a ratio to a CONTROL timed in this same process —
+##     a counted loop over the same arithmetic with no collection in it.
+##   - min over k measured passes after `warm` warmup passes; a row whose
+##     median exceeds twice its minimum prints UNDER-WARMED, and one whose
+##     slowest WARMUP pass exceeds 10x its minimum prints WARMUP-DOMINATED.
+##   - ONE ROW PER PROCESS (`mapsurface <n> <row>`): sharing a process lets the
+##     collector run while the timer does, measured elsewhere as a 6x artefact.
+##
+## EVERY ROW NEEDS TWO SIZES OF n AND MUST CONVERGE. That is not advice, it is
+## the rule that the async bench's retraction was written to enforce: a row
+## sized by guesswork read 7 309 335 ps/op at n=800 and 61 861 at n=80 000, and
+## the smaller figure was published as a finding. The flags cannot save a row
+## where EVERY pass is slow — only convergence across n can.
+##
+## PERSISTENT, NOT MUTABLE. `map::insert` returns a new Map, so an insert row
+## measures a persistent update and should be read against that, never against
+## a Java HashMap.put. The lookup rows are the ones comparable to a hash probe.
+##
+## AND THERE ARE TWO INSERT COSTS, which is the point of rows 4 and 8.
+## `LongHashMapStorage.putLong` mutates its arrays IN PLACE when this storage is
+## the owner, and CLONES both when it is not:
+##
+##   row 8  insert along a CHAIN (rebind `m` each time, as building a map does)
+##          -> owner path, O(1):  12 365 / 16 901 / 16 091 ps at 250/1k/4k keys
+##   row 4  insert from a SHARED base (keep `m`, discard the result)
+##          -> clone path, O(size): 278 611 / 1 305 284 / 5 407 531 ps
+##
+## So building a map is O(1) per insert and NOT quadratic — an earlier reading of
+## row 4 alone was published as "O(N^2) to build a map" and that was wrong. What
+## is real is a 338x cliff at 4 000 keys when the base map is still held by
+## someone else, which is exactly what a persistent map is for.
+##
+## EVERY ROW CHECKSUMS: the accumulator is printed, so a row that got fast by
+## not doing the work reads as a different number.
+use std::effects::log::{ println, Console }
+use std::effects::args::{ SystemArgs, argv }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::collections::seq
+use std::collections::map
+use std::collections::set
+use std::int
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_one = { thunk } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = thunk {}
+  let t1 = monotonic {}
+  { ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }, sum = r }
+
+let time_k_go = { thunk, k, acc, last } -> if k == 0
+  then { times = acc, sum = last }
+  else do
+    let r = time_one { thunk = thunk }
+    time_k_go { thunk = thunk, k = k - 1, acc = seq::push { xs = acc, x = r.ns }, last = r.sum }
+
+let nth_or_zero = { xs, i } -> match seq::get { xs = xs, i = i } is
+  Some { val } -> val
+  None -> 0
+
+let min_of = { thunk, warm, k } -> do
+  let w = time_k_go { thunk = thunk, k = warm, acc = [], last = 0 }
+  let ws = seq::sort { xs = w.times }
+  let warm_max = nth_or_zero { xs = ws, i = seq::size { xs = ws } - 1 }
+  let run = time_k_go { thunk = thunk, k = k, acc = [], last = 0 }
+  let sorted = seq::sort { xs = run.times }
+  let half = seq::size { xs = sorted } / 2
+  { min = nth_or_zero { xs = sorted, i = 0 },
+    med = nth_or_zero { xs = sorted, i = half },
+    warm_max = warm_max,
+    sum = run.sum }
+
+## THE FLOOR: one loop iteration and one add, no collection at all.
+let control_loop = { i, acc } -> if i <= 0 then acc else control_loop { i = i - 1, acc = acc + i }
+
+let report = { idx, sel, label, thunk, floor_ps, n, warm, k } -> perform Console in perform SystemTime in
+  if sel != 0 && sel != idx then {} else do
+    let t = min_of { thunk = thunk, warm = warm, k = k }
+    let ps_per_op = (t.min * 1000) / n
+    let ratio = if floor_ps == 0 then 0 else (ps_per_op * 100) / floor_ps
+    let warm_ratio = if t.min == 0 then 0 else t.warm_max / t.min
+    let warn = if t.med > (t.min * 2) then "   UNDER-WARMED (raise n or passes)"
+      else if warm_ratio > 10 then "   WARMUP-DOMINATED"
+      else ""
+    let ps_s = int::to_str { n = ps_per_op }
+    let ratio_s = int::to_str { n = ratio }
+    let sum_s = int::to_str { n = t.sum }
+    println { msg = "  $(label): $(ps_s) ps/op  x$(ratio_s)/100 floor  sum=$(sum_s)$(warn)" }
+
+## ── build a map once, outside every timed loop ──────────────────────────────
+let build_map = { i, m } -> if i <= 0 then m
+  else build_map { i = i - 1, m = map::insert { m = m, k = i, v = i } }
+
+let build_set = { i, s } -> if i <= 0 then s
+  else build_set { i = i - 1, s = set::insert { s = s, x = i } }
+
+## ── 1. map::get, key PRESENT ────────────────────────────────────────────────
+let l_get = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let v = match map::get { m = m, k = (i % keys) + 1 } is
+      Some { val } -> val
+      None -> 0
+    l_get { i = i - 1, acc = acc + v, m = m, keys = keys }
+
+## ── 2. map::get, key ABSENT ─────────────────────────────────────────────────
+let l_get_miss = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let v = match map::get { m = m, k = 0 - ((i % keys) + 1) } is
+      Some { val } -> val
+      None -> 1
+    l_get_miss { i = i - 1, acc = acc + v, m = m, keys = keys }
+
+## ── 3. map::contains_key ────────────────────────────────────────────────────
+let l_contains = { i, acc, m, keys } -> if i <= 0 then acc
+  else l_contains { i = i - 1, m = m, keys = keys,
+                    acc = acc + (if map::contains_key { m = m, k = (i % keys) + 1 } then 1 else 0) }
+
+## ── 4. map::insert — PERSISTENT, so this allocates a new map per op ─────────
+let l_insert = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let m2 = map::insert { m = m, k = (i % keys) + 1, v = i }
+    l_insert { i = i - 1, acc = acc + map::size { m = m2 }, m = m, keys = keys }
+
+## ── 5. map::size, an O(1) reference point ───────────────────────────────────
+let l_size = { i, acc, m } -> if i <= 0 then acc
+  else l_size { i = i - 1, acc = acc + map::size { m = m }, m = m }
+
+## ── 6. set::contains ────────────────────────────────────────────────────────
+let l_set_contains = { i, acc, s, keys } -> if i <= 0 then acc
+  else l_set_contains { i = i - 1, s = s, keys = keys,
+                        acc = acc + (if set::contains { s = s, x = (i % keys) + 1 } then 1 else 0) }
+
+## ── 7. set::insert, persistent ──────────────────────────────────────────────
+let l_set_insert = { i, acc, s, keys } -> if i <= 0 then acc
+  else do
+    let s2 = set::insert { s = s, x = (i % keys) + 1 }
+    l_set_insert { i = i - 1, acc = acc + set::size { s = s2 }, s = s, keys = keys }
+
+## -- 8. map::insert ALONG A CHAIN -------------------------------------------
+## Row 4 keeps the original `m` and throws the result away, so every insert
+## branches off a map someone else still holds. `LongHashMapStorage.putLong`
+## has a single-OWNER optimisation — it mutates in place when this storage is
+## the owner and CLONES both arrays otherwise — so row 4 measures the clone
+## path by construction.
+##
+## This row rebinds `m` to the result, which is how a map is actually built: a
+## linear chain where each storage is the owner of the next. Only existing keys
+## are inserted, so the size never changes and no growth or rehash enters the
+## figure. Row 8 against row 4 is the owner path against the clone path, and
+## row 8 against the key count says whether the owner path is O(1).
+let l_insert_chain = { i, acc, m, keys } -> if i <= 0 then acc
+  else l_insert_chain { i = i - 1, acc = acc + 1, keys = keys,
+                        m = map::insert { m = m, k = (i % keys) + 1, v = i } }
+
+## The Set counterpart, and READ ITS LABEL. These rows insert elements the set
+## ALREADY CONTAINS, and `LongHashSetStorage.addLong` opens with
+## `if (containsLongInternal(elem)) return this;` — so they measure a contains
+## and an early return, never an insert. They are NOT comparable with the
+## map::insert rows, which must still update the value for a present key. The
+## first version of this file compared them and concluded "Set has no cliff";
+## that conclusion was unfounded and is struck.
+let l_set_insert_chain = { i, acc, s, keys } -> if i <= 0 then acc
+  else l_set_insert_chain { i = i - 1, acc = acc + 1, keys = keys,
+                            s = set::insert { s = s, x = (i % keys) + 1 } }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let n = arg_at { args = args, i = 0, def = 1000000 }
+  let sel = arg_at { args = args, i = 1, def = 0 }
+  let keys = arg_at { args = args, i = 2, def = 1000 }
+  let floor_n = arg_at { args = args, i = 3, def = 40000000 }
+  let warm = 4
+  let k = 9
+  let m = build_map { i = keys, m = map::empty {} }
+  let s = build_set { i = keys, s = set::empty {} }
+  let floor = min_of { thunk = {} -> control_loop { i = floor_n, acc = 0 }, warm = warm, k = k }
+  let floor_ps = (floor.min * 1000) / floor_n
+  let n_s = int::to_str { n = n }
+  let keys_s = int::to_str { n = keys }
+  let floor_s = int::to_str { n = floor_ps }
+  println { msg = "mapsurface (n=$(n_s) ops, $(keys_s) keys): $(int::to_str { n = warm }) warmup + $(int::to_str { n = k }) measured, MIN per row" }
+  println { msg = "control: a counted loop + add = $(floor_s) ps/op. Rows below are xNNN/100 of it." }
+  if floor.med > (floor.min * 2) then
+    println { msg = "!! the CONTROL is under-warmed, so every ratio below is suspect — raise n" }
+  else
+    println { msg = "" }
+
+  report { idx = 1, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::get  (hit)      ", thunk = {} -> l_get { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 2, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::get  (miss)     ", thunk = {} -> l_get_miss { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 3, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::contains_key    ", thunk = {} -> l_contains { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 4, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::insert (persist)", thunk = {} -> l_insert { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 5, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::size (O(1) ref) ", thunk = {} -> l_size { i = n, acc = 0, m = m } }
+  report { idx = 6, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::contains        ", thunk = {} -> l_set_contains { i = n, acc = 0, s = s, keys = keys } }
+  report { idx = 7, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::insert PRESENT-key", thunk = {} -> l_set_insert { i = n, acc = 0, s = s, keys = keys } }
+  report { idx = 8, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::insert (chain)  ", thunk = {} -> l_insert_chain { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 9, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::ins PRESENT, chain", thunk = {} -> l_set_insert_chain { i = n, acc = 0, s = s, keys = keys } }
