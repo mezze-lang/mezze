@@ -216,7 +216,7 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
         }
 
         // Build HashMapStorage directly from map (O(n) vs O(n^2))
-        return new MezzeMap<>(HashMapStorage.fromMap(mutable));
+        return new MezzeMap<>(TrieMapStorage.fromMap(mutable));
     }
 
     /**
@@ -299,7 +299,7 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
         }
 
         // Build HashMapStorage directly from map (O(n) vs O(n^2))
-        return new MezzeMap<>(HashMapStorage.fromMap(mutable));
+        return new MezzeMap<>(TrieMapStorage.fromMap(mutable));
     }
 
     /**

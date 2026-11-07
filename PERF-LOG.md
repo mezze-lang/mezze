@@ -9526,3 +9526,80 @@ Set equivalents, all of which keep the in-place write and therefore the bug.
 Their class comments now say so. Porting them is mechanical — the trie's shape
 transfers — but a general-key trie needs collision nodes, because `hashCode` is
 not a bijection, so it is not a copy-paste and it is not claimed as done.
+
+#### BUG 38 closed for the REST of the key types — and a hole that routing alone left
+
+The entry above closed the bug for `long` keys and listed six storages still
+carrying it. `TrieMapStorage` and `TrieSetStorage` are the general-key
+counterparts, and every remaining key kind now reaches one.
+
+Collision nodes are needed here and were not in the Long version: that one
+hashes through a bijection, so distinct keys provably cannot share a full hash.
+This one hashes `hashCode()` into 32 bits, which is not injective — two unequal
+keys genuinely can agree on all of it and must then share a node.
+
+#### THE HOLE: rerouting the promotion is not rerouting every constructor
+
+Routing `SmallFlatMapStorage`/`SmallFlatSetStorage` to the tries looked like the
+whole job. It was not. The TRANSFORMS — `map`, `filter`, `flatMap`,
+`mapValues` — do not promote: they collect into a `java.util.HashMap`/`HashSet`
+and then call `HashMapStorage.fromMap` / `HashSetStorage.fromCollection` to
+build the result in one pass. Those bulk constructors were untouched, so **a
+mapped Map or Set still carried BUG 38** while every promotion path was fixed.
+
+A test found that, not an argument. `BulkBuildSoundnessTest` builds through
+`map`/`mapValues` and then derives:
+
+```
+  before: aBulkBuiltSetIsUnchangedByADerivation   FAILED (base acquired the element)
+          twoDerivationsFromOneBulkBuiltBase      FAILED
+  after:  all four pass
+```
+
+Worth keeping as a shape: when a structure has more than one way in, fixing the
+one you were thinking about leaves the others exactly as broken, and the
+"routed everything" claim reads identically either way. `fromMap` and
+`fromCollection` now have persistent counterparts — O(n log32 n) where the
+tables were O(n), paid once per transform.
+
+#### What the old storages are still reachable through, and why that is fine
+
+`HashMapStorage`, `HashSetStorage` and the String/Double variants are no longer
+reachable as the storage of a persistent Map or Set. What still uses them is the
+explicit `copyToMutable()` / `mutAdd` / `mutRemove` API — opt-in mutability, the
+same pattern `MezzeSeq`, `MezzeBytes` and the sorted structures have, with no
+callers in the interpreter. That is not BUG 38: the bug was a PERSISTENT value
+changing underneath a program that never asked for mutation. They are therefore
+kept rather than deleted, and the two `long` storages that had no such excuse
+were deleted in the previous commit.
+
+#### Double keys now BOX, and that is the deliberate trade
+
+The specialised table stored Doubles as raw bits in a `long[]`. The trie boxes
+them. Semantics are unaffected and that is tested rather than asserted:
+`Double.equals` and `doubleToLongBits` agree on the only two cases that could
+differ — every NaN folds to one key, and `-0.0` stays distinct from `0.0` —
+and `DoubleStorageSmokeTest` now pins both. A Double-specialised trie would
+have avoided the boxing; Float-keyed maps are rare enough that a fifth trie was
+not worth carrying, and the choice is recorded here rather than left to be
+discovered.
+
+#### What is MEASURED and what is only TESTED
+
+Stated plainly because the two are not the same:
+
+- **`long` keys: measured.** Every row in the table above — reads 1.26-1.46x
+  slower, replace chain 3.26x slower, shared-base insert 8.6-85.6x faster, sets
+  flat.
+- **String, Double and generic keys: tested, NOT measured.** 14 trie tests
+  including forced collisions and a differential against `java.util.HashMap`
+  with colliders in the key mix, plus the bulk-path and promotion tests. No
+  benchmark covers a `Str`-keyed Map, so the cost of replacing the
+  String-specialised table — which read a cached `String.hashCode` and called
+  `String.equals` directly — is UNKNOWN. The trie reads the same cached
+  hashCode and `Objects.equals` devirtualizes on a String receiver, so there is
+  reason to expect it to be close; reason to expect is not a number, and
+  `mapsurface` uses Int keys throughout.
+
+That is the next thing to do on this surface: a `Str`-keyed row, so the claim
+stops resting on an argument.

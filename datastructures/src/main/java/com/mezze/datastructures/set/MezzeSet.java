@@ -200,7 +200,7 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
         }
 
         // Build HashSetStorage directly from collection (O(n) vs O(n^2))
-        return new MezzeSet<>(HashSetStorage.fromCollection(mutable));
+        return new MezzeSet<>(TrieSetStorage.fromCollection(mutable));
     }
 
     /**
@@ -348,7 +348,7 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
         }
 
         // Build HashSetStorage directly from collection (O(n) vs O(n^2))
-        return new MezzeSet<>(HashSetStorage.fromCollection(mutable));
+        return new MezzeSet<>(TrieSetStorage.fromCollection(mutable));
     }
 
     /**

@@ -379,13 +379,13 @@ public final class LongTrieMapStorage implements MapStorage {
         for (Node child : n.nodes) walkLong(child, consumer);
     }
 
-    /** Promote to {@link HashMapStorage} when a non-Long key arrives. */
-    private HashMapStorage transitionToGeneric() {
-        HashMapStorage out = new HashMapStorage();
+    /** Promote to {@link TrieMapStorage} when a non-Long key arrives. */
+    private MapStorage transitionToGeneric() {
+        MapStorage out = new TrieMapStorage();
         Object[] ks = keys();
         Object[] vs = values();
         for (int i = 0; i < ks.length; i++) {
-            out = (HashMapStorage) out.put(ks[i], vs[i]);
+            out = out.put(ks[i], vs[i]);
         }
         return out;
     }

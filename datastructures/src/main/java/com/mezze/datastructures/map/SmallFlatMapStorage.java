@@ -88,20 +88,21 @@ public final class SmallFlatMapStorage implements MapStorage {
             }
             return out.put(newKey, newValue);
         }
-        if (allDoubleKeys(newKey)) {
-            DoubleHashMapStorage out = new DoubleHashMapStorage();
-            for (int i = 0; i < keys.length; i++) {
-                out = (DoubleHashMapStorage) out.putDouble((Double) keys[i], values[i]);
-            }
-            return out.put(newKey, newValue);
-        }
-        if (allStringKeys(newKey)) {
-            StringHashMapStorage out = new StringHashMapStorage();
-            for (int i = 0; i < keys.length; i++) {
-                out = (StringHashMapStorage) out.putString((String) keys[i], values[i]);
-            }
-            return out.put(newKey, newValue);
-        }
+        // DOUBLE KEYS GO TO THE GENERAL TRIE TOO. The specialised table stored
+        // them as raw bits in a long[], which the trie gives up — a Double is
+        // boxed here. That is deliberate: the table carried BUG 38 and the only
+        // fix is structural sharing, so the choice was a Double-specialised
+        // trie or this. Semantics are identical either way, because
+        // Double.equals and doubleToLongBits agree on the two cases that could
+        // differ (both fold every NaN together, both keep -0.0 apart from 0.0),
+        // and Float-keyed maps are rare enough that one more class was not
+        // worth carrying for them.
+        // String keys go to the general trie as well. The String-specialised
+        // TABLE existed to read a cached String.hashCode and call
+        // String.equals directly; the trie reads the same cached hashCode and
+        // Objects.equals devirtualizes to String.equals on a String receiver,
+        // so there is nothing left for a separate storage to specialise — and
+        // the table carried BUG 38.
         return transitionToHash().put(newKey, newValue);
     }
 
@@ -198,10 +199,10 @@ public final class SmallFlatMapStorage implements MapStorage {
         return values[index];
     }
 
-    private HashMapStorage transitionToHash() {
-        HashMapStorage hash = new HashMapStorage();
+    private MapStorage transitionToHash() {
+        MapStorage hash = new TrieMapStorage();
         for (int i = 0; i < keys.length; i++) {
-            hash = (HashMapStorage) hash.put(keys[i], values[i]);
+            hash = hash.put(keys[i], values[i]);
         }
         return hash;
     }

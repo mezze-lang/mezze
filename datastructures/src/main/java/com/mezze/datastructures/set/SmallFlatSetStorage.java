@@ -66,20 +66,19 @@ public final class SmallFlatSetStorage implements SetStorage {
             }
             return out.add(newElem);
         }
-        if (allDoubleElements(newElem)) {
-            DoubleHashSetStorage out = new DoubleHashSetStorage();
-            for (Object e : elements) {
-                out = (DoubleHashSetStorage) out.addDouble((Double) e);
-            }
-            return out.add(newElem);
-        }
-        if (allStringElements(newElem)) {
-            StringHashSetStorage out = new StringHashSetStorage();
-            for (Object e : elements) {
-                out = (StringHashSetStorage) out.addString((String) e);
-            }
-            return out.add(newElem);
-        }
+        // DOUBLE KEYS GO TO THE GENERAL TRIE TOO. The specialised table stored
+        // them as raw bits in a long[], which the trie gives up — a Double is
+        // boxed here. That is deliberate: the table carried BUG 38 and the only
+        // fix is structural sharing, so the choice was a Double-specialised
+        // trie or this. Semantics are identical either way, because
+        // Double.equals and doubleToLongBits agree on the two cases that could
+        // differ (both fold every NaN together, both keep -0.0 apart from 0.0),
+        // and Float-keyed maps are rare enough that one more class was not
+        // worth carrying for them.
+        // String elements likewise: the specialised table read a cached
+        // String.hashCode and called String.equals directly, and the trie does
+        // both — Objects.equals devirtualizes on a String receiver — so there
+        // was nothing left for it to specialise.
         return transitionToHash().add(newElem);
     }
 
@@ -154,10 +153,10 @@ public final class SmallFlatSetStorage implements SetStorage {
         return elements[index];
     }
 
-    private HashSetStorage transitionToHash() {
-        HashSetStorage hash = new HashSetStorage();
+    private SetStorage transitionToHash() {
+        SetStorage hash = new TrieSetStorage();
         for (Object elem : elements) {
-            hash = (HashSetStorage) hash.add(elem);
+            hash = hash.add(elem);
         }
         return hash;
     }

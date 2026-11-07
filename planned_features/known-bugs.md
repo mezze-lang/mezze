@@ -1,13 +1,10 @@
 # Known bugs — polyglot dot-chaining, codec, dispatch, and DX
 
-**STATUS 2026-11-07: TWO open bugs — BUG 38 (PARTLY FIXED) and BUG 35.** BUG 38
-is the serious one: a derivation corrupts the Map or Set it came from, silently,
-in plain single-threaded Mezze, at any size that reaches the array storage. It
-is FIXED for `long` keys — `Int`-keyed Maps and Sets are now persistent tries
-with structural sharing — and still OPEN for the String, Double and generic
-Object storages, which keep the in-place write. BUG 35 is a recursive LOCAL
-lambda that calls a function handling its own effect. Everything else below is
-closed.
+**STATUS 2026-11-07: ONE open bug — BUG 35**, a recursive LOCAL lambda that
+calls a function handling its own effect. BUG 38 is FIXED: every persistent Map
+and Set is now a hash-array-mapped trie with structural sharing, for every key
+type, so a derivation can no longer be observed in the structure it came from.
+Everything else below is closed.
 
 **STATUS 2026-10-30: no open bugs at that date.** BUG 34 is fixed in both halves — the
 printed row is WRITABLE (`<..., *>` parses, P0137 names the wrong order) and
@@ -3903,7 +3900,7 @@ argument instead. The perf question is still open and is the smaller of the
 two findings.
 
 
-## BUG 38 — FIXED for `long` keys 2026-11-07, OPEN for String/Double/Object keys: a derivation corrupts the Map or Set it came FROM
+## BUG 38 — FIXED 2026-11-07: a derivation corrupted the Map or Set it came FROM
 
 A map still in scope changes under you when another map is derived from it by
 replacing an existing key. Minimal repro, plain Mezze, no threads, no effects:
@@ -4133,14 +4130,38 @@ bits; depth is bounded at 13 and the impossible branch throws. **No sentinels**
 markers and promoted any map using one as a key to boxed storage; that
 promotion is gone, with a test pinning it.
 
-### STILL OPEN for the other six storages
+### FIXED for every other key type too — `TrieMapStorage` / `TrieSetStorage`
 
-`StringHashMapStorage`, `DoubleHashMapStorage`, `HashMapStorage` and the three
-Set equivalents keep the in-place write and therefore keep this bug. Their class
-comments now say so. The repro is the same program with `Str` keys. Porting is
-mechanical for Double (same bijective-mix trick on the raw bits) but a
-general-key trie needs collision nodes, because `hashCode` is not a bijection —
-so it is not a copy-paste and is not claimed as done.
+General-key persistent tries, WITH collision nodes: the Long version hashes
+through a bijection and provably cannot collide, while `hashCode()` is 32 bits
+and not injective, so two unequal keys can agree on all of it and must share a
+node. String, Double and generic keys all reach these now.
+
+**ROUTING THE PROMOTION WAS NOT ENOUGH, and a test is what said so.** The
+transforms (`map`, `filter`, `flatMap`, `mapValues`) do not promote — they
+collect into a `java.util.HashMap`/`HashSet` and call
+`HashMapStorage.fromMap` / `HashSetStorage.fromCollection` to build the result
+in one pass. Those constructors were untouched by the routing change, so a
+MAPPED Map or Set still carried this bug while every promotion path was fixed.
+`BulkBuildSoundnessTest` caught it; both bulk builders now have persistent
+counterparts. When a structure has more than one way in, fixing the one you were
+thinking about leaves the others exactly as broken.
+
+Double keys now BOX, where the specialised table held raw bits. Semantics are
+unaffected and tested, not asserted: `Double.equals` and `doubleToLongBits`
+agree on the only two cases that could differ — every NaN folds to one key, and
+`-0.0` stays distinct from `0.0` — and `DoubleStorageSmokeTest` pins both.
+
+The old storages remain in the tree, reachable ONLY through the explicit
+`copyToMutable()`/`mutAdd`/`mutRemove` API: opt-in mutability, the same pattern
+`MezzeSeq`, `MezzeBytes` and the sorted structures have, with no callers in the
+interpreter. That is not this bug, which was a PERSISTENT value changing
+underneath a program that never asked for mutation. The two `long` storages,
+which had no such excuse, were deleted.
+
+NOT MEASURED: the `long` rows are, in PERF-LOG. A `Str`-keyed Map has no
+benchmark row at all, so the cost of replacing the String-specialised table is
+unknown — expected to be small, which is not a number.
 
 ### Discovered by
 

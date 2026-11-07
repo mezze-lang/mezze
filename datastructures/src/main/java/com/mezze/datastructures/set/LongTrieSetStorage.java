@@ -279,11 +279,11 @@ public final class LongTrieSetStorage implements SetStorage {
         for (Node child : n.nodes) collect(child, out, at);
     }
 
-    /** Promote to {@link HashSetStorage} when a non-Long element arrives. */
-    private HashSetStorage transitionToGeneric() {
-        HashSetStorage out = new HashSetStorage();
+    /** Promote to {@link TrieSetStorage} when a non-Long element arrives. */
+    private SetStorage transitionToGeneric() {
+        SetStorage out = new TrieSetStorage();
         for (Object e : toArray()) {
-            out = (HashSetStorage) out.add(e);
+            out = out.add(e);
         }
         return out;
     }
