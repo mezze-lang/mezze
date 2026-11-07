@@ -7583,6 +7583,20 @@ this `min_of` shape. It did not mislead there, because those rows are
 nanoseconds and their warmup is milliseconds; it is a latent hole in both and
 worth closing the same way.
 
+**And the new flag does not close the blind spot that matters most, which was
+checked rather than assumed.** At n=30 `spawn + await` reads 157 954 500 ps/op —
+12x the converged figure — and **neither flag fires**. Correctly, too: both are
+SPREAD tests, and at n=30 every pass is uniformly slow, so the median is within
+2x the minimum and the warmup is within 10x it. A within-run spread test can
+only see warmup it has escaped from.
+
+So for rows at this cost the only trustworthy method is the one the string rows
+already forced: **measure at two sizes of n and require the per-op figure to
+converge.** That is what the numbers above rest on — n=800 and n=1600 agreeing
+at 10-12.5 µs, n=1600 twice at 12.5 and 12.95, and the empty scope reading
+8.7 µs at n=200 against 7.3 at n=800. The flags are a backstop against one
+failure mode; convergence across n is the test.
+
 #### What this leaves
 
 | row | state |
