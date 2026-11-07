@@ -460,6 +460,56 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * 210. 0.8%, so the interface call is not the cost; that change was
      * reverted. See PERF-LOG.
      */
+    /**
+     * {@code map::contains_key} and {@code set::contains} without the generic
+     * native path — the two-operand peer of {@link InlineMapSize}.
+     *
+     * <p>ORDER MATTERS HERE, and getting it wrong once is why this comment
+     * exists. The first attempt on these rows was to drop the
+     * `@TruffleBoundary` from `MapNatives.containsKey`, on the evidence that
+     * `size`/`isEmpty` carry none and are far cheaper. Interleaved, that
+     * measured 7 605 ps against the baseline's 7 444 — no gain. The boundary
+     * was not the cost because the GENERIC DISPATCH in front of it was, and
+     * the same thing had just happened with `size`: the cached-count change
+     * read as a null result until `InlineMapSize` removed the dispatch, after
+     * which it was worth 3.9x. So the dispatch comes out first, and the
+     * boundary is re-tested on top of this rather than before it.
+     *
+     * <p>The natives are still called, so their `@TruffleBoundary` and every
+     * check inside them is untouched — this removes the dispatch, nothing else.
+     */
+    /**
+     * {@code map::get} without the generic native path — the same removal as
+     * {@link InlineMapContainsKey}, on the largest row of the map surface
+     * (12.4 ns against `contains_key`'s 7.8).
+     *
+     * <p>`get` does strictly more than `contains_key` and the extra is not
+     * dispatch: on a MISS it probes twice (`map.get` then `map.containsKey`,
+     * to tell a stored null from an absent key) and on a HIT it allocates a
+     * `MezzeVariant` for the `Some`. The allocation cannot go away — the
+     * signature returns `Option v` — so this takes out the one layer that can.
+     */
+    @Operation
+    public static final class InlineMapGet {
+        @Specialization
+        public static Object doMap(com.mezze.datastructures.map.MezzeMap<?, ?> m, Object k) {
+            return com.mezze.interpreter.nodes.builtin.collections.MapNatives.get(m, k);
+        }
+    }
+
+    @Operation
+    public static final class InlineMapContainsKey {
+        @Specialization
+        public static boolean doMap(com.mezze.datastructures.map.MezzeMap<?, ?> m, Object k) {
+            return com.mezze.interpreter.nodes.builtin.collections.MapNatives.containsKey(m, k);
+        }
+
+        @Specialization
+        public static boolean doSet(com.mezze.datastructures.set.MezzeSet<?> s, Object x) {
+            return com.mezze.interpreter.nodes.builtin.collections.SetNatives.contains(s, x);
+        }
+    }
+
     @Operation
     public static final class InlineMapSize {
         @Specialization

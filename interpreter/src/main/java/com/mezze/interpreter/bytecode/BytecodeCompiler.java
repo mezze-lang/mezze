@@ -3713,6 +3713,43 @@ public final class BytecodeCompiler {
                             return;
                         }
                     }
+                    // map::get { m, k } → InlineMapGet
+                    if (mr.getFields().size() == 2 && "__native_map_get".equals(recName)) {
+                        NodeIR gContNode = null, gKeyNode = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("m".equals(fld.getName())) gContNode = fld.getValue();
+                            else if ("k".equals(fld.getName())) gKeyNode = fld.getValue();
+                        }
+                        if (gContNode != null && gKeyNode != null) {
+                            b.beginInlineMapGet();
+                            emitNode(gContNode, b, argCount, localMap);
+                            emitNode(gKeyNode, b, argCount, localMap);
+                            b.endInlineMapGet();
+                            return;
+                        }
+                    }
+                    // map::contains_key { m, k } / set::contains { s, x }
+                    // → InlineMapContainsKey. Same reason as InlineMapSize:
+                    // the generic native dispatch in front is the cost.
+                    if (mr.getFields().size() == 2
+                            && ("__native_map_contains_key".equals(recName)
+                                || "__native_set_contains".equals(recName))) {
+                        boolean isMapCk = "__native_map_contains_key".equals(recName);
+                        String ckContName = isMapCk ? "m" : "s";
+                        String ckKeyName = isMapCk ? "k" : "x";
+                        NodeIR ckContNode = null, ckKeyNode = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if (ckContName.equals(fld.getName())) ckContNode = fld.getValue();
+                            else if (ckKeyName.equals(fld.getName())) ckKeyNode = fld.getValue();
+                        }
+                        if (ckContNode != null && ckKeyNode != null) {
+                            b.beginInlineMapContainsKey();
+                            emitNode(ckContNode, b, argCount, localMap);
+                            emitNode(ckKeyNode, b, argCount, localMap);
+                            b.endInlineMapContainsKey();
+                            return;
+                        }
+                    }
                     // ── Single-field { m } map natives ──
                     // map::size { m } → InlineMapSize. Separate from the { s }
                     // block below because that one scans for the string
@@ -3896,6 +3933,23 @@ public final class BytecodeCompiler {
                     emitNode(cn.getArgs().get(0), b, argCount, localMap);
                     emitNode(cn.getArgs().get(1), b, argCount, localMap);
                     b.endInlineStringPredicate();
+                    return;
+                }
+                // map::get → InlineMapGet
+                if ("__native_map_get".equals(name)) {
+                    b.beginInlineMapGet();
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    emitNode(cn.getArgs().get(1), b, argCount, localMap);
+                    b.endInlineMapGet();
+                    return;
+                }
+                // map::contains_key / set::contains → InlineMapContainsKey
+                if ("__native_map_contains_key".equals(name)
+                        || "__native_set_contains".equals(name)) {
+                    b.beginInlineMapContainsKey();
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    emitNode(cn.getArgs().get(1), b, argCount, localMap);
+                    b.endInlineMapContainsKey();
                     return;
                 }
             }

@@ -8234,3 +8234,87 @@ of them too. They cannot take the same fix as-is — they are two-argument and
 have to hash the key — but the shape is now known to be worth ~4 ns, which
 makes a typed two-argument inline operation for the lookups the next thing on
 this row rather than a guess.
+
+#### The map LOOKUPS, 1.22-1.46x — and the ordering lesson repaid in both directions
+
+The entry above left `map::get` at 12.4 ns and `contains_key` at 7.8 ns, noting
+that "the ~4 ns this change removed from `size` is presumably in both of them
+too". It is. `InlineMapContainsKey` and `InlineMapGet` are the two-operand peers
+of `InlineMapSize`, emitted at the record form and in the existing arity-2
+block.
+
+```
+  row                          before      after    verdict
+  map::get   (hit)            13 253     10 827     1.22x
+  map::get   (miss)            8 388      6 545     1.28x
+  map::contains_key            7 550      5 166     1.46x
+  set::contains                6 473      4 783     1.35x
+  map::size          (control)   447        479     flat
+```
+
+Interleaved against a saved baseline jar, controls matching at 207-234
+throughout.
+
+`get` gains least and that is expected rather than disappointing: it also
+allocates a `MezzeVariant` for the `Some`, which cannot go away while the
+signature returns `Option v`, and on a miss it probes twice — `map.get` then
+`map.containsKey` — to tell a stored value from an absent key.
+
+#### THE SAME ORDERING MISTAKE, MADE AGAIN, AND THEN USED PROPERLY
+
+The first move on these rows was to drop the `@TruffleBoundary` from
+`MapNatives.containsKey`, reasoning from the fact that `size`/`isEmpty` carry
+none and are far cheaper. Interleaved: **7 605 against 7 444 — nothing.** The
+boundary was not the cost, because the generic dispatch in front of it was,
+which is precisely what had happened to the cached count on `size` one entry
+earlier.
+
+So the rule got applied in the other direction too. With the dispatch removed by
+these operations, the boundary removal was **re-tested on top**: 5 189 against
+5 151, **0.7%**. So it is genuinely not the cost even in the regime where it
+could have been, and the boundary stays — dropping one for no measured gain only
+adds SVM risk for nothing.
+
+That is the complete form of the lesson, and worth stating once:
+
+- a null result measured *behind* a dominant cost is **masked, not refuted** —
+  `cachedSize` was 0.8% before `InlineMapSize` and 3.9x after;
+- a null result measured *after* the dominant cost is gone is **refuted** — the
+  boundary was 0.7% with the dispatch out, and that is the end of it.
+
+The only way to tell the two apart is to re-run the experiment in the second
+regime, which costs one build.
+
+#### Coverage, and why it took two sentinels to state honestly
+
+`MapLookupInlineTest`, 9 tests: present and absent keys, `get` returning the
+right value rather than a neighbour's, the storage progression at 0/1/2/8/64
+entries both for hits and for misses, `Str` keys for a different storage, the
+Set path, and a warm loop.
+
+A sentinel returning `None`/`false` failed only **5 of 9** — because those are
+the expected answers in the negative tests, so the sentinel agreed with them by
+accident. Inverting it to `Some(777)`/`true` failed **7**. The union covers
+**8 of 9**; the ninth is the Set case, which goes through the `doSet`
+specialization that was never sentineled. Reporting the first number alone would
+have understated the coverage and reporting it as "all 9" would have overstated
+it.
+
+#### Where the map surface stands
+
+```
+  op                   before today    now      total
+  map::size                  4 022     429      9.4x
+  map::contains_key          7 550   5 166      1.46x
+  set::contains              6 473   4 783      1.35x
+  map::get (hit)            13 253  10 827      1.22x
+  map::get (miss)            8 388   6 545      1.28x
+  map::insert (chain)       16 091  16 091      untouched, O(1)
+  map::insert (shared base)  5.41 µs at 4k keys untouched, O(size)
+```
+
+**NEXT on this row: the shared-base insert cliff**, which is now the largest
+thing left on the map surface by a wide margin — 5.41 µs at 4 000 keys against
+16 ns along the owner chain, and unbounded in map size. That is a
+datastructures change (a structure that shares, rather than an owner token that
+copies on branch), not a dispatch one, so none of today's levers apply to it.
