@@ -537,6 +537,32 @@ fun ErrorCode.explain(): String = when (this) {
         "Types form a circular dependency. " +
         "Break the cycle by introducing an indirection (e.g., via a type parameter)."
 
+    ErrorCode.V0711_UNINHABITED_TYPE ->
+
+        "The type is recursive with no BASE CASE, so no value of it can ever " +
+
+            "be built: every value would need another value of the same type " +
+
+            "inside it, forever.\n\n" +
+
+            "Recursion needs somewhere to STOP. A variant stops at an arm that " +
+
+            "does not recurse; a record stops by making the recursive field " +
+
+            "optional or a sequence, since both can be empty:\n\n" +
+
+            "    type Tree = | Leaf, Node { l: Tree, r: Tree } |\n" +
+
+            "    type Node = { n: Int, next: Option Node }\n" +
+
+            "    type Tree = { kids: [Tree] }\n\n" +
+
+            "Refused at the DECLARATION because the alternative is worse: the " +
+
+            "type checks fine and the error arrives at construction, as a " +
+
+            "mismatch about the innermost value rather than about the type."
+
     ErrorCode.V0710_TOP_LEVEL_EXPRESSION ->
         "The top level of a program is for DECLARATIONS — `let`, `type`, `effect`, " +
         "`ability`, `impl`, `use`. A bare expression here (like a call `f { ... }`) " +

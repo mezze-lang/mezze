@@ -153,6 +153,7 @@ enum class ErrorCode {
     V0707_CONSTRUCTOR_MUST_BE_UPPERCASE,
     V0708_SPREAD_ONLY_RECORD_FORBIDDEN,
     V0709_CIRCULAR_TYPE_DEPENDENCY,
+    V0711_UNINHABITED_TYPE, // `type Endless = { next: Endless }` — recursion with no base case; no value of it can be built
     V0710_TOP_LEVEL_EXPRESSION, // a bare expression at the top level of a program (only decls allowed); fine in the REPL
 
     // ─── Typechecker: misc syntax/desugar (T04xx) ────────────────────────

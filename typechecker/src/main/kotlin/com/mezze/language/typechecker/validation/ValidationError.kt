@@ -22,6 +22,56 @@ sealed interface ValidationError {
     val fixHints: List<FixHint>
         get() = emptyList()
 
+    /**
+     * A cycle of pure type aliases: `type Loop = Loop`, or `type A = B` with
+     * `type B = A`.
+     *
+     * [path] is the cycle, closed — `[A, B, A]` — so the message can show it as
+     * a path rather than asserting that one exists.
+     */
+    data class CyclicTypeAlias(val path: List<String>, val loc: Loc? = null) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0709_CIRCULAR_TYPE_DEPENDENCY
+        override val hints: List<String>
+            get() = listOf(
+                "recursion DOES work when it passes through a field, which gives it " +
+                    "somewhere to stop: `type ${path.first()} = { next: Option ${path.first()} }`",
+                "for a distinct nominal type: `newtype ${path.first()} = …`",
+            )
+
+        override fun message(): String {
+            val shown = path.joinToString(" → ")
+            val self = path.size == 2
+            return "`${path.first()}` is a cycle of type aliases: $shown. " +
+                (if (self) "It is defined as itself, so " else "Each one is defined as the next, so ") +
+                "expanding it never ends — a `type` is a SPELLING, and using it substitutes " +
+                "its definition, so there is nothing `${path.first()}` can stand for."
+        }
+
+        override fun location(): Loc? = loc
+    }
+
+    /**
+     * A type that is recursive with no base case, so it has no values.
+     *
+     * [escape] is phrased for the declaration's own shape — a variant wants a
+     * non-recursive arm, a record wants an optional or sequence field — because
+     * a generic "add a base case" leaves the author to work out which.
+     */
+    data class UninhabitedType(
+        val name: String,
+        val escape: String,
+        val loc: Loc? = null,
+    ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0711_UNINHABITED_TYPE
+        override val hints: List<String> get() = listOf(escape)
+
+        override fun message(): String =
+            "`$name` is recursive with no base case, so no value of it can be built: " +
+                "every one would have to contain another `$name`, forever."
+
+        override fun location(): Loc? = loc
+    }
+
     /** A bare expression at the top level of a PROGRAM (flagged only in
      *  `strictTopLevel` mode; a REPL/eval evaluates a bare expression on purpose). */
     data class TopLevelExpression(val loc: Loc? = null) : ValidationError {

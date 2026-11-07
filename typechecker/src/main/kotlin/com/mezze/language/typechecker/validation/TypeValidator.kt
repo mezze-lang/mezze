@@ -34,6 +34,7 @@ class TypeValidator(
     private val matchValidator = MatchValidator(typeDeclarations, registry)
     private val performValidator = PerformValidator(typeDeclarations, implDeclarations)
     private val unknownTypeValidator = UnknownTypeValidator(registry)
+    private val recursiveTypeValidator = RecursiveTypeValidator()
     private val aliasEffectRowValidator = AliasEffectRowValidator()
     private val codecGenerator = CodecGenerator()
 
@@ -57,6 +58,7 @@ class TypeValidator(
             typedModule?.let { buildDecidedScrutineeTypes(it) } ?: emptyMap()
 
         errors.addAll(unknownTypeValidator.validate(module))
+        errors.addAll(recursiveTypeValidator.validate(module))
         errors.addAll(aliasEffectRowValidator.validate(module))
 
         // Where each binding was written, so an error about one can be squiggled
