@@ -194,6 +194,59 @@ class SortedSetGuestSearchTest {
         """.trimIndent()))
     }
 
+    /**
+     * ADDING AN ELEMENT ALREADY PRESENT is now decided entirely in guest code:
+     * `add` asks `find_index` first and returns the set untouched, never
+     * reaching the native. 20.7x on `dsmore` row 6 (306 932 -> 14 786), which
+     * is the same cost as `contains` because it is the same search.
+     *
+     * The risk the short-circuit creates is answering "present" for something
+     * absent and silently dropping the insertion, so these check the size and
+     * the membership on both sides of the branch.
+     */
+    @Test
+    fun `adding a present element leaves the set and its size alone`() {
+        assertEquals(1L, MezzeTestHelper.run("""
+            $prelude
+            $fill
+            let s = fill { i = 40, s = sorted_set::empty {} }
+            let again = sorted_set::add { s = s, x = 25 }
+            if sorted_set::size { s = again } == 40 && sorted_set::contains { s = again, x = 25 }
+            then 1 else 0
+        """.trimIndent()))
+    }
+
+    @Test
+    fun `adding an absent element still grows the set`() {
+        assertEquals(1L, MezzeTestHelper.run("""
+            $prelude
+            $fill
+            let s = fill { i = 40, s = sorted_set::empty {} }
+            let grown = sorted_set::add { s = s, x = 999 }
+            if sorted_set::size { s = grown } == 41 &&
+               sorted_set::contains { s = grown, x = 999 } &&
+               sorted_set::contains { s = s, x = 999 }.not {} then 1 else 0
+        """.trimIndent()))
+    }
+
+    /**
+     * Interleaved present and absent adds, so a short-circuit that answered
+     * the wrong way round would show up as a wrong SIZE rather than only a
+     * wrong membership. 40 present re-adds change nothing; 40 absent ones add
+     * 40.
+     */
+    @Test
+    fun `interleaved present and absent adds end at the right size`() {
+        assertEquals(80L, MezzeTestHelper.run("""
+            $prelude
+            $fill
+            let go = { i, s } -> if i <= 0 then s
+              else go { i = i - 1, s = sorted_set::add { s = sorted_set::add { s = s, x = i }, x = i + 1000 } }
+            let s = go { i = 40, s = fill { i = 40, s = sorted_set::empty {} } }
+            sorted_set::size { s = s }
+        """.trimIndent()))
+    }
+
     /** Warm, so the search is also exercised on the compiled path. */
     @Test
     fun `the search stays correct in a warm loop`() {

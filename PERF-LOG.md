@@ -9851,3 +9851,41 @@ Worth keeping as the shape: **a full sweep over every index of a structure in
 its default state can be no evidence whatsoever about index arithmetic.** The
 state has to be disturbed first, and here that means moving `head` before
 reading.
+
+#### `sorted_set::add` of an element already there — 20.7x, because it IS the search
+
+The guest-side search closed `sorted_set::contains` at 20.6x and left `add` on
+the native path at 307 000 ps. But adding an element that is already present
+returns the set unchanged, so that operation is a SEARCH and nothing else — the
+same search `contains` had just made 20x cheaper, still being done the old way
+one function below it.
+
+`add` now asks `find_index` first and returns the set untouched when the
+element is there, never reaching the native.
+
+```
+  row                                  before     after    verdict
+  ss::add PRESENT, chain              306 932    14 786     20.7x
+  sorted_set::contains     (control)   14 764    15 070     flat
+  sorted_map::insert chain (control)  579 662   571 720     flat
+```
+
+Converged at n=1M and n=2M. **14 786 against `contains`'s 15 070 is the result
+rather than a coincidence**: the two operations now cost the same because they
+do the same work, which is what says the right thing is being skipped.
+
+#### What the absent path pays
+
+When the element is NOT present the native still runs and still searches, so
+that path now searches twice — about 15 ns on top of a ~300 ns insertion that
+has to shift the array anyway. Removing the second search needs an
+insert-at-index native, which is a separate change with its own measurement and
+is not pretended to be done here.
+
+#### Coverage
+
+Three tests added to `SortedSetGuestSearchTest`. The risk a short-circuit
+creates is answering "present" for something absent and silently dropping the
+insertion, so they check SIZE as well as membership on both sides of the
+branch, and one interleaves present and absent adds so a branch inverted the
+wrong way round shows up as a wrong size rather than only a wrong answer.
