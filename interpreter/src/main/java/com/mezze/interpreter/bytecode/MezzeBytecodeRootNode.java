@@ -604,6 +604,20 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    /** The Set peer of {@link InlineSortedKeyAt}, for the same reason. */
+    @Operation
+    public static final class InlineSortedElementAt {
+        @Specialization
+        public static Object doLong(com.mezze.datastructures.sorted.MezzeSortedSet<?> s, long i) {
+            return s.elementAt((int) i);
+        }
+
+        @Specialization
+        public static Object doBoxed(com.mezze.datastructures.sorted.MezzeSortedSet<?> s, Object i) {
+            return s.elementAt((int) (long) (Long) i);
+        }
+    }
+
     /** The value peer of {@link InlineSortedKeyAt}. */
     @Operation
     public static final class InlineSortedValueAt {

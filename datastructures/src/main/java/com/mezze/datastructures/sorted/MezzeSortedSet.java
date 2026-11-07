@@ -172,6 +172,25 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
     /**
      * Returns the number of elements.
      */
+    /**
+     * The element at a position in sort order, for a search driven from
+     * OUTSIDE this class — the Set peer of {@code MezzeSortedMap.keyAt}, and
+     * for the same reason: a lookup running in here put the COMPARISON in host
+     * code, which could only reach the program's `Ord` by calling back out,
+     * and Graal cannot inline a guest function into host code.
+     *
+     * <p>Ownership is revoked as every other read does, so a later insert
+     * copies rather than mutating contents the caller has now observed. The
+     * flag makes it idempotent, so one search's repeated probes pay it once.
+     */
+    public Object elementAt(int i) {
+        revokeOwnership();
+        if (i < 0 || i >= length) {
+            throw new IndexOutOfBoundsException("sorted set index " + i + " of " + length);
+        }
+        return elements[i];
+    }
+
     public int size() {
         return length;
     }

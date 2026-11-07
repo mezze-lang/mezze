@@ -3820,6 +3820,22 @@ public final class BytecodeCompiler {
                             return;
                         }
                     }
+                    // sorted_set element_at { s, i } — the Set search's probe.
+                    if (mr.getFields().size() == 2
+                            && "__native_sorted_set_element_at".equals(recName)) {
+                        NodeIR eS = null, eI = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("s".equals(fld.getName())) eS = fld.getValue();
+                            else if ("i".equals(fld.getName())) eI = fld.getValue();
+                        }
+                        if (eS != null && eI != null) {
+                            b.beginInlineSortedElementAt();
+                            emitNode(eS, b, argCount, localMap);
+                            emitNode(eI, b, argCount, localMap);
+                            b.endInlineSortedElementAt();
+                            return;
+                        }
+                    }
                     // ── Single-field { d } Deque natives ──
                     if (mr.getFields().size() == 1
                             && ("__native_deque_size".equals(recName)
@@ -4035,6 +4051,14 @@ public final class BytecodeCompiler {
                     emitNode(cn.getArgs().get(0), b, argCount, localMap);
                     emitNode(cn.getArgs().get(1), b, argCount, localMap);
                     b.endInlineMapGet();
+                    return;
+                }
+                // sorted_set element_at → the inline probe
+                if ("__native_sorted_set_element_at".equals(name)) {
+                    b.beginInlineSortedElementAt();
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    emitNode(cn.getArgs().get(1), b, argCount, localMap);
+                    b.endInlineSortedElementAt();
                     return;
                 }
                 // sorted_map key_at / value_at → the inline probes

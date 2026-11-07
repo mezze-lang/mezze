@@ -1432,10 +1432,10 @@ public final class NativeDispatch extends MezzeNode {
             SortedSetNatives.singleton(getField(r, "x"), getFunction(r, "cmp")));
         HANDLERS.put("__native_sorted_set_size", (r, c) ->
             SortedSetNatives.size(getSortedSet(r, "s")));
+        HANDLERS.put("__native_sorted_set_element_at", (r, c) ->
+            SortedSetNatives.elementAt(getSortedSet(r, "s"), getField(r, "i")));
         HANDLERS.put("__native_sorted_set_is_empty", (r, c) ->
             SortedSetNatives.isEmpty(getSortedSet(r, "s")));
-        HANDLERS.put("__native_sorted_set_contains", (r, c) ->
-            SortedSetNatives.contains(getSortedSet(r, "s"), getField(r, "x"), getFunction(r, "cmp")));
         HANDLERS.put("__native_sorted_set_add", (r, c) ->
             SortedSetNatives.add(getSortedSet(r, "s"), getField(r, "x"), getFunction(r, "cmp")));
         HANDLERS.put("__native_sorted_set_remove", (r, c) ->

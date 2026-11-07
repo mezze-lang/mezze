@@ -81,11 +81,49 @@ pub let remove: { s: SortedSet 'a, x: 'a } with Ord 'a -> SortedSet 'a = { s, x 
   remove_with_cmp { s = s, x = x, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
 
 ## Returns True if the element is in the set.
-let contains_with_cmp: { s: SortedSet 'a, x: 'a, cmp: { a: 'a, b: 'a } -> Int } -> Bool = { s, x, cmp } ->
-  __native_sorted_set_contains { s = s, x = x, cmp = cmp }
+## ── THE MEMBERSHIP TEST RUNS HERE, NOT IN THE NATIVE ──────────────────────
+##
+## A SortedSet is a sorted array, so `contains` is a binary search. It used to
+## run inside the native, which put the COMPARISON in host code and so called
+## back into guest code once per comparison — measured at ~310 ns against the
+## hash `set::contains`'s 4.8. Host code is past the boundary, so Graal can
+## never inline a guest function into it; running the search HERE makes the
+## comparison an ordinary `<` that inlines and reduces the native's whole job to
+## an array read. The identical change on `sorted_map` was worth 18-20x.
+##
+## The index must stay in [0, size); `find_index` maintains that, which is why
+## `element_at` is private.
+let element_at: { s: SortedSet 'a, i: Int } -> 'a = { s, i } ->
+  __native_sorted_set_element_at { s = s, i = i }
+
+## The position of `x` in sort order, or a negative number if absent.
+##
+## NO `do`-BLOCK BINDING AND NO ANNOTATION, both for the reasons recorded on
+## `sorted_map`'s copy of this search. Binding the probed element first —
+## `let mx = element_at { … }` — generalizes it, so the `Ord` the comparison
+## raises lands on a fresh variable and the annotation is refused; annotating a
+## RECURSIVE helper is refused for the same reason; and dropping the caller's
+## annotation instead leaves a variable unbound at the end of elaboration, which
+## `ElaborationInvariantGateTest` catches. Hence `element_at` called inside the
+## comparison, `(lo + hi) / 2` spelled out, and `found_at` to pin the result to
+## `Int` so `>=` raises nothing the caller cannot name.
+##
+## STORED element on the left, probe on the right — the order the native
+## comparator was handed, so an `Ord` that is not symmetric orders the array the
+## same way whichever side does the search.
+let find_index = { s, x, lo, hi } ->
+  if lo > hi then 0 - 1
+  else if element_at { s = s, i = (lo + hi) / 2 } < x
+    then find_index { s = s, x = x, lo = (lo + hi) / 2 + 1, hi = hi }
+  else if x < element_at { s = s, i = (lo + hi) / 2 }
+    then find_index { s = s, x = x, lo = lo, hi = (lo + hi) / 2 - 1 }
+  else (lo + hi) / 2
+
+let found_at: { idx: Int } -> Bool = { idx } -> idx >= 0
 
 pub let contains: { s: SortedSet 'a, x: 'a } with Ord 'a -> Bool = { s, x } ->
-  contains_with_cmp { s = s, x = x, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
+  found_at { idx = find_index { s = s, x = x, lo = 0,
+                                hi = __native_sorted_set_size { s = s } - 1 } }
 
 ## Returns the number of elements.
 pub let size: { s: SortedSet 'a } -> Int = { s } -> __native_sorted_set_size { s = s }

@@ -9148,3 +9148,85 @@ insert, where the probe already proved the comparator is NOT the cause, so it
 is path copying and a datastructures question. `deque::get by index` at 222 ns
 is likely O(n) by construction rather than dispatch and needs its
 representation checked before anything is claimed.
+
+#### `sorted_set::contains`, 20.6x — the port, and the controls that proved the baseline
+
+The entry above called this "a port, not a design", and it was: the same
+`element_at` probe, the same do-block-free search, the same `Int` pin, the same
+two deletions. It built and typechecked first time, which is the useful
+confirmation that the three typechecker obstacles recorded above are understood
+rather than merely worked around once.
+
+```
+  row                              before     after    verdict
+  sorted_set::contains            309 600    15 060     20.6x
+  sorted_map::get      (control)   17 190    17 187     exactly flat
+  sorted_map::contains (control)   15 058    15 085     flat
+  sorted_set::add      (control)  307 609   305 908     flat — still native
+```
+
+Converged at two sizes of n (15 120/14 995).
+
+**The first measurement of this row was taken against the wrong baseline and
+the controls are what caught it** — again. The saved baseline jar predated the
+`sorted_map` commit by one, so it read 306 245 → 15 054 for the set while the
+two `sorted_map` rows showed the *previous* commit's win rather than nothing.
+Rebuilt from current HEAD, those two rows read 17 190/17 187 and 15 058/15 085
+— identical in both columns, which is what a correct baseline looks like. The
+set figure barely moved (20.3x → 20.6x), so the conclusion survived; the point
+is that it was not known to be safe until the controls said so.
+
+`sorted_set::add` still carries the old comparator-closure path and did not
+move, which bounds the change to exactly the operation claimed.
+
+#### Coverage
+
+`SortedSetGuestSearchTest`, 9 tests: every element of a 64-element set tested
+individually together with the 64 absent values just above the range (64 hits,
+0 false positives, in one number), the empty set, one element, boundaries and
+gaps, `Str` elements, a user-defined descending `Ord` to pin the direction, a
+warm loop, and one test that puts a sorted MAP and a sorted SET in the same
+program — `InlineSortedElementAt` reads the Set's `elements` while
+`InlineSortedKeyAt` reads the Map's `keys`, so a receiver reaching the wrong
+specialization would probe the wrong array, and the contents are chosen to
+disagree so a crossed probe cannot accidentally be right.
+
+Sentinels, as measured rather than as predicted: never finding fails **8 of 9**;
+the direction reversed fails **6**. The three that survive reversal are the
+empty set (no comparison happens), the single-element set (`mid` lands on the
+element, so direction cannot matter) and the map/set test, whose set holds two
+elements that happen to resolve the same way reversed. Union **8 of 9**. The
+test file states these numbers; it originally guessed 7 and 5.
+
+#### The ordered surface, as it now stands
+
+```
+  op                        before      now     total
+  deque::size                8 960      420     21.1x
+  sorted_map::contains_key 308 500   15 030     20.5x
+  sorted_set::contains     309 600   15 060     20.6x
+  sorted_map::size           8 934      416     20.5x
+  sorted_map::get          312 000   17 177     18.2x
+  deque::first              12 276    5 478      2.25x
+  sorted_set::add          307 000  305 908     untouched
+  sorted_map::insert chain 577 000  588 176     untouched
+  deque::get by index      222 000  219 360     untouched
+```
+
+Every ordered LOOKUP is done. Against the hash equivalents the ratios went from
+29-60x to 1.6-3.2x, which is about what an ordered structure should cost.
+
+**What is left here, and it is no longer dispatch.** The three untouched rows
+are all writes or indexing:
+
+- `sorted_set::add` and `sorted_map::insert` still build a comparator closure
+  per call and still call back into guest code per comparison — the same
+  disease the lookups had, and the same cure applies in principle. But an
+  insert also has to SHIFT the array, so the comparison is a smaller share of
+  it: the probe two entries ago skipped every callback and `insert` did not
+  move at all. Writing the search in guest code and then calling a native
+  insert-at-index is the shape, and it needs its own measurement before it is
+  worth claiming.
+- `deque::get by index` at 222 ns is most likely O(n) by construction rather
+  than dispatch; its representation needs reading before anything is said
+  about it.

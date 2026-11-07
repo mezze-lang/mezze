@@ -62,8 +62,13 @@ public final class SortedSetNatives {
     }
 
     @TruffleBoundary
-    public static boolean contains(MezzeSortedSet set, Object element, MezzeFunction cmpFn) {
-        return set.withComparator(ElementComparator.of(cmpFn)).containsObject(element);
+    /**
+     * The element at a position in sort order — the probe the guest-side binary
+     * search in `std::collections::sorted_set` drives. See
+     * {@link MezzeSortedSet#elementAt}.
+     */
+    public static Object elementAt(MezzeSortedSet set, Object index) {
+        return set.elementAt((int) (long) (Long) index);
     }
 
     @TruffleBoundary
