@@ -7841,3 +7841,109 @@ force: `AsyncNatives.scoped` hand-rolls parent/child linkage for transitive
 cancellation (#252), cancel-all on four exception paths, and await-all on exit,
 and this file already has a history of cancellation and per-thread-state bugs.
 Recorded so the comparison does not have to be re-derived.
+
+### LEDGER UPDATE 2026-11-07 — EIGHT handler installs permanently cost the whole process 31x on every effect op
+
+The biggest ratio left on the board was "install a handler per iteration,
+90 µs, 240x". Its attributed cause was *"it invalidates the chain-stable
+assumption on every push and pop, so it is paying deoptimisation"*. **That cause
+was wrong, and what is actually happening is worse and much more general.**
+
+`StabilityAssumption` gives up for good:
+
+```java
+  static final int CHURN_LIMIT = 8;
+  synchronized Assumption get() {
+      if (unstable) return Assumption.NEVER_VALID;   // forever
+      ...
+  }
+  synchronized void invalidate() {
+      ...
+      if (++churns >= CHURN_LIMIT) unstable = true;
+  }
+```
+
+So there is no ongoing churn to pay — after eight cycles the assumption is
+simply dead. And `HANDLER_CHAIN_STABLE` is a `private static final`:
+**process-global.** `resetStabilityForTests` is the only way back and its own
+javadoc says what it is for — *"For tests that exercise the cached path: the
+assumptions are process-global, and earlier tests in the same JVM can have
+pushed an effect past its churn limit."* It has no callers in `src/main`.
+
+#### Measured, and it is 31x
+
+Kernel 9 is new: churn the assumption past its limit (32 install/uninstall
+pairs, four times the limit), then measure exactly what kernel 3 measures — one
+op per iteration, handler installed ONCE outside the loop.
+
+```
+  kernel 3  one op, pristine process         826 ps/iter   (min of 9)
+  kernel 9  the SAME op, after 32 installs 25 118 ps/iter   (min of 6)
+```
+
+**31x, permanently, for the life of the process.** Kernel 9's readings are
+tight — 25 118 to 26 368, an 8% spread with no warmup outliers — so that is a
+stable steady state, not a measurement artefact. Any server installing a handler
+per request trips this on its eighth request, and every effect operation it
+performs afterwards runs 31x slower.
+
+#### The churn limit earns its place, which is why this is a trade and not a bug
+
+A/B with `CHURN_LIMIT` raised to 1e9 on one build, three processes per kernel:
+
+```
+  kernel                        limit=8    limit disabled
+  3  one op, pristine               826         897        unchanged (control)
+  9  the same op after churn     25 384         948        27x FASTER
+  5  install per iteration       85 627     208 362        2.4x SLOWER
+```
+
+So the limit is doing real work: without it, a loop that installs a handler
+every iteration deoptimises compiled code forever and gets 2.4x worse. The
+design is right about the loop and wrong about the aftermath.
+
+#### ATTEMPTED FIX, MEASURED, REVERTED
+
+A 50 ms cool-off: keep the limit, but forgive churn once it stops — stamping
+`lastChangeNanos` on EVERY change (including while backed off) so a churning
+loop keeps refreshing it and never recovers mid-loop, while a quiet process
+does.
+
+```
+  kernel                     limit=8    cool-off     verdict
+  3  one op, pristine            826         837     unchanged
+  9  the same op after churn  25 384      25 355     NO RECOVERY
+  5  install per iteration    85 627     145 460     1.7x WORSE
+```
+
+**Why kernel 9 did not recover, which is the part worth keeping.** `get()` is
+called at SPECIALIZATION time, from `@Cached("getHandlerStableAssumption()")` —
+not per operation. Once `EffectBinding` has specialized to `doGeneric` because
+`get()` returned `NEVER_VALID`, the DSL never calls `get()` again: `doGeneric`
+carries no guard, matches forever, and nothing re-asks. **A cool-off on the
+assumption object cannot help a node that has already stopped consulting it.**
+That is a fact about the Truffle specialization lifecycle, and it rules out the
+entire class of "make the assumption recover" fixes.
+
+Why kernel 5 got 1.7x worse is NOT explained. The only change on that path is
+two `System.nanoTime()` calls per iteration, ~50 ns against an 85 µs iteration,
+which cannot account for 60 µs. Possibly inlining or the `synchronized` block;
+recorded as unexplained rather than guessed at. Reverted, and the revert
+re-measured at 863 / 25 118 / 85 930 — back to baseline.
+
+#### The ranked next step, and it connects to work that landed today
+
+A real fix has to make the uncached specialization notice recovery and
+`transferToInterpreterAndInvalidate()` to re-specialize — more invasive than a
+cool-off, and it reintroduces the deopt the limit exists to prevent.
+
+**The better angle is to stop `EffectBinding` needing the GLOBAL assumption at
+all.** Its comment explains why it uses the global one: *"resume/abort
+singletons depend on the entire chain being empty, not just one effect's
+handler."* But `CallIndirectScalar1.doFallThroughResume`, landed earlier today,
+shows the call site can be guarded on IDENTITY with **no assumption** — once a
+function instance is in hand the choice is already made. If `EffectBinding`
+could resolve `resume`/`abort` the same way, churning one effect's handler would
+cost that effect its per-effect assumption and nothing else, and the
+process-global cliff would disappear. That is the shape to try next, and the
+31x above is what it is worth.

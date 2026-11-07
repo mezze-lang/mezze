@@ -193,6 +193,26 @@ let go_d = { i, acc } ->
 
 let k_depth = { n } -> perform Ones {} in perform P1 {} in perform P2 {} in perform P3 {} in go_d { i = n, acc = 0 }
 
+## 9. IS THE FAST PATH RECOVERABLE? `StabilityAssumption.CHURN_LIMIT` is 8:
+##    after eight hand-out-then-invalidate cycles the assumption returns
+##    NEVER_VALID *for good*, and `HANDLER_CHAIN_STABLE` is a `private static
+##    final` — process-global. `resetStabilityForTests` is the only way back and
+##    has no callers outside tests.
+##
+##    So this kernel churns the assumption past its limit FIRST (32 install /
+##    uninstall pairs, four times the limit), and only then measures what
+##    kernel 3 measures: one op per iteration with the handler installed once
+##    outside the loop. Kernel 3 runs in a pristine process and reads ~830
+##    ps/iter. If kernel 9 reads the same, the churn limit costs nothing beyond
+##    the loop that trips it. If it is much slower, then EIGHT handler installs
+##    permanently deoptimise every effect operation in the process — which any
+##    server installing a handler per request would trip on its eighth request.
+let churn = { i } -> if i <= 0 then 0 else churn { i = i - one_installed {} }
+
+let k_after_churn = { n } -> do
+  let _c = churn { i = 32 }
+  perform Ones {} in go_o { i = n, acc = 0 }
+
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
 
@@ -256,4 +276,11 @@ pub let main = {} -> perform Console in perform SystemArgs in do
     report { name = "8 direct call  ", n = n, r = time_it { f = {} -> k_ident { n = n } } }
     report { name = "8 direct call  ", n = n, r = time_it { f = {} -> k_ident { n = n } } }
     report { name = "8 direct call  ", n = n, r = time_it { f = {} -> k_ident { n = n } } }
+  else if k == 9 then do
+    k_after_churn { n = n }
+    k_after_churn { n = n }
+    k_after_churn { n = n }
+    report { name = "9 op AFTER churn", n = n, r = time_it { f = {} -> k_after_churn { n = n } } }
+    report { name = "9 op AFTER churn", n = n, r = time_it { f = {} -> k_after_churn { n = n } } }
+    report { name = "9 op AFTER churn", n = n, r = time_it { f = {} -> k_after_churn { n = n } } }
   else println { msg = "unknown kernel" }
