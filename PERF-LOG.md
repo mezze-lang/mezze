@@ -7493,3 +7493,112 @@ the warm path.
 install, whose floor is unknown because it invalidates the chain-stable
 assumption on every push and pop; the 334 ns abort; real continuation capture;
 effects once a second thread invalidates `singleThreaded`; and all of Loom.
+
+### LEDGER UPDATE 2026-11-07 — ASYNC HAS ITS FIRST NUMBERS, and the harness's own flag had a blind spot
+
+The last block this ledger described as never measured: *"UNKNOWN — never
+measured, and this is the biggest category: all of Loom and async (spawn, join,
+channels, STM, atoms, parallel map, cancellation, structured scope)."* No bench
+existed, so `bench/cases/asyncsurface` is new — same method as
+`bench/cases/surface`: per-operation cost, a ratio to an in-process control,
+one row per process, min over k passes, and every row returns a checksum so a
+row that skipped the work reads differently.
+
+Each row installs `LoomAsync` inside its own thunk rather than around the
+harness. That keeps the thunks PURE, so `report` needs no effect-row
+annotation, and the install is once per pass over n operations.
+
+```
+  row                        ps/op          n       checksum
+  1  spawn + await        12 535 516 / 12 953 296   1600   ok (two runs)
+  4  scoped, EMPTY         7 309 335               800    ok
+  5  scoped + one task    18 490 170               800    ok
+  3  join of two tasks    NOT CONVERGED — 53 395 630 at n=100, 24 695 723 at n=300
+```
+
+So, as first figures: **a spawn + await round trip costs ~12.7 µs**, an **empty
+structured-concurrency scope costs 7.3 µs**, and a task inside a scope costs
+**18.5 - 7.3 = 11.2 µs** on top of the empty scope — which cross-checks row 1's
+12.7 µs by an independent route, and is the main reason to believe either.
+
+**The ratio to the in-process control is deliberately not quoted.** Against a
+control that does one add these are millions of percent, which is the same
+category error the string rows taught: an O(1) control cannot scale a thread.
+The meaningful baseline is the same round trip with no language on top, so it
+was measured rather than assumed — plain Java, same machine, same n, same
+min-over-k-after-warmup estimator:
+
+```
+  Java  Thread.ofVirtual() start + join, one per iteration   4 684 202 ps/op
+  Java  newVirtualThreadPerTaskExecutor() open + close,
+        nothing submitted                                      264 429 ps/op
+```
+
+Against those:
+
+```
+  spawn + await        Mezze 12.7 µs   Java 4.68 µs    2.7x
+  scoped, EMPTY        Mezze  7.3 µs   Java 0.26 µs     28x
+```
+
+**So spawn + await at 2.7x the raw JVM round trip is respectable** — about 8 µs
+of language on top of a 4.7 µs thread — and it is NOT where the problem is. The
+outlier is the empty scope: **28x, for a construct that runs no user code at
+all**, and 7.3 µs is more than half the cost of an entire spawn-and-await round
+trip.
+
+One caveat on that 28x, stated because it flatters the finding:
+`newVirtualThreadPerTaskExecutor()` opened and closed with nothing submitted is
+not a like-for-like `scoped` — Mezze's version also builds a `Scope` value, wires
+cancellation, and carries a join policy. 0.26 µs is a floor-style reference, not
+an equivalent construct, so the honest claim is "an order of magnitude and more
+above the JVM primitive it is built on", not "28x avoidable".
+
+#### I claimed a cliff. There is no cliff.
+
+While sizing the rows I found n=800 completing in seconds and n=1600 exceeding
+540 s, and wrote that down as a cliff between 800 and 1600 tasks in one handler
+extent — a 3000x blowup. **Then the same n=1600 completed in under 150 s on
+retry, with the correct checksum.** It is wall-clock VARIANCE, not a cliff: the
+same row and the same n range over at least 4x, and a later repeat again
+exceeded 600 s. The variance is real and worth its own row; the cliff was not.
+
+#### The harness's flag had a blind spot, and this is the durable part
+
+`spawn + await` at n=1600 reports 12.5 µs/op and **flags nothing**, out of a
+process that runs for 150 seconds. The measured work is ~200 ms. Everything else
+is the three WARMUP passes — which are executed, and which neither the minimum
+nor the median can see, because both are computed over the MEASURED passes
+only. So the under-warmed check, which has caught real problems all session,
+could not see a row that spent 99% of its wall clock warming up.
+
+`min_of` now also returns the slowest warmup pass, and a row whose warmup cost
+more than 10x its minimum prints `WARMUP-DOMINATED` with the multiple. The
+numbers above are unchanged by this — a minimum over converged passes is still
+the right estimator — but the flag no longer claims a row is healthy when its
+wall clock says otherwise.
+
+The same blind spot exists in `bench/cases/surface` and `ds_matrix`, which share
+this `min_of` shape. It did not mislead there, because those rows are
+nanoseconds and their warmup is milliseconds; it is a latent hole in both and
+worth closing the same way.
+
+#### What this leaves
+
+| row | state |
+|---|---|
+| spawn + await | **MEASURED, ~12.7 µs = 2.7x the JVM round trip (4.68 µs).** Not the problem |
+| structured scope, empty | **ABOVE FLOOR, and the ranked target: 7.3 µs against the JVM primitive's 0.26 µs.** Runs no user code; costs more than half a whole round trip |
+| a task inside a scope | **MEASURED, 11.2 µs** over the empty scope, cross-checking spawn + await |
+| join of two tasks | **NOT CONVERGED.** Falls from 53 µs at n=100 to 25 µs at n=300; n=800 timed out. Needs the warmup fixed first |
+| async wall-clock variance | **NEW ROW, ABOVE FLOOR, cause unknown.** The same row at the same n ranges 4x+ in wall clock |
+| channels · STM · atoms · par_map · cancellation | **still UNKNOWN** |
+
+**NEXT**: the empty `scoped`. The baseline is measured, the ranking is settled,
+and it is the one row doing no user work for its 7.3 µs. After that the
+wall-clock variance, then `join` once the warmup flag has been acted on.
+
+The baseline program is `VThreadBaseline.java` in this session's scratchpad
+rather than the repo — it is a measurement instrument for one row, not
+something to maintain. It is reproduced in the commit message so the figures
+can be re-derived.

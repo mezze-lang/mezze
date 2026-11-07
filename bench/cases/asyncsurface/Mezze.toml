@@ -1,0 +1,12 @@
+[package]
+name = "asyncsurface"
+version = "0.1.0"
+
+[[app]]
+name = "asyncsurface"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]
