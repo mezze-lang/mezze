@@ -7602,3 +7602,61 @@ The baseline program is `VThreadBaseline.java` in this session's scratchpad
 rather than the repo — it is a measurement instrument for one row, not
 something to maintain. It is reproduced in the commit message so the figures
 can be re-derived.
+
+#### The empty scope's 7.3 µs: cause named, and it is an existing ledger row
+
+Read the path rather than guessed at it, and the things that looked expensive
+are not:
+
+  - `HandlerChainRegistry.runDetached(body)` is `return body.get()` — a no-op
+    wrapper.
+  - `MezzeScope.awaitAll()` over zero children is an empty loop.
+  - `NativeDispatch` caches its handler **at construction**, so there is no
+    per-call `HashMap`-by-string lookup. (Worth stating because that is exactly
+    the shape the no-name-dispatch rule exists for, and here it is already
+    right.)
+
+What is left accounts for it structurally:
+
+```java
+  @TruffleBoundary
+  public static Object scoped(MezzeRecord args, IndirectCallNode callNode, MezzeNode node) {
+```
+
+and the only registration is in the record-ABI map:
+
+```java
+  HANDLERS.put("__native_async_scoped", (r, c) -> AsyncNatives.scoped(r, c, null));
+```
+
+So **every `scoped` call crosses a `@TruffleBoundary`, and the guest callback is
+then invoked by `IndirectCallNode` from INSIDE that boundary.** Nothing in the
+scope setup is partial-evaluated, and the callback cannot be inlined into the
+caller's compiled code either — it is reached through an un-inlined indirect
+call behind a boundary. On top of that each call allocates a `MezzeScope`, a
+`{ sc }` record, an argument array and a `Supplier` lambda, does three
+`ThreadLocal` operations, and looks up the context with a NULL node
+(`MezzeContext.get(null)`), which cannot use a node-cached reference.
+
+That is the same cause as the `resume` row fixed earlier today — an un-inlined
+indirect call to a callee the compiler could have folded — and it is already a
+row in this ledger's ABOVE FLOOR list: *"the record-ABI natives still
+unported"*. `__native_async_scoped` has no scalar/BDSL path at all.
+
+**The fix shape** is a port to the scalar/BDSL ABI as an operation, so the
+callback becomes a direct inlinable call the way `MakeRecord2` and the fused
+chain operations are. It is not a mechanical port: `scoped` is a control-flow
+native with a try/finally, parent-scope linkage through a `ThreadLocal`, and
+four distinct exception paths that each cancel children. Sized and ranked, not
+started.
+
+**One number that should go with it when it is done**, from the same session:
+`Async.spawn` + `await` is 12.7 µs against the JVM's 4.68 µs, i.e. ~8 µs of
+language overhead, and an empty `scoped` is 7.3 µs of that same kind of
+overhead with no thread involved at all. If the boundary-plus-indirect-call
+shape is what costs ~7 µs here, it is likely a large part of the ~8 µs there
+too — `Async.spawn` is registered the same way — confirmed by inspection:
+`HANDLERS.put("__native_async_spawn", (r, c) -> AsyncNatives.spawn(r, c, null))`,
+record-ABI only, boundary lambda, null node, no scalar path. That is still a
+prediction about the SPLIT of the 8 µs, recorded so it can be checked rather
+than assumed.
