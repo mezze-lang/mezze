@@ -3786,7 +3786,9 @@ public final class BytecodeCompiler {
                     // map::size { m } → InlineMapSize. Separate from the { s }
                     // block below because that one scans for the string
                     // natives' parameter name; `map::size` declares `m`.
-                    if (mr.getFields().size() == 1 && "__native_map_size".equals(recName)) {
+                    if (mr.getFields().size() == 1
+                            && ("__native_map_size".equals(recName)
+                                || "__native_sorted_map_size".equals(recName))) {
                         NodeIR mNode = null;
                         for (FieldIR fld : mr.getFields()) {
                             if ("m".equals(fld.getName())) mNode = fld.getValue();
@@ -3795,6 +3797,27 @@ public final class BytecodeCompiler {
                             b.beginInlineMapSize();
                             emitNode(mNode, b, argCount, localMap);
                             b.endInlineMapSize();
+                            return;
+                        }
+                    }
+                    // ── Single-field { d } Deque natives ──
+                    if (mr.getFields().size() == 1
+                            && ("__native_deque_size".equals(recName)
+                                || "__native_deque_first".equals(recName))) {
+                        NodeIR dNode = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("d".equals(fld.getName())) dNode = fld.getValue();
+                        }
+                        if (dNode != null) {
+                            if ("__native_deque_size".equals(recName)) {
+                                b.beginInlineMapSize();
+                                emitNode(dNode, b, argCount, localMap);
+                                b.endInlineMapSize();
+                            } else {
+                                b.beginInlineDequeFirst();
+                                emitNode(dNode, b, argCount, localMap);
+                                b.endInlineDequeFirst();
+                            }
                             return;
                         }
                     }
@@ -3814,7 +3837,8 @@ public final class BytecodeCompiler {
                             }
                             // set::size { s } → InlineMapSize. Declares `s`, so
                             // it rides this scan rather than the `m` one above.
-                            if ("__native_set_size".equals(recName)) {
+                            if ("__native_set_size".equals(recName)
+                                    || "__native_sorted_set_size".equals(recName)) {
                                 b.beginInlineMapSize();
                                 emitNode(sNode, b, argCount, localMap);
                                 b.endInlineMapSize();
@@ -3916,10 +3940,20 @@ public final class BytecodeCompiler {
                     return;
                 }
                 // map::size / set::size → InlineMapSize, same reasoning.
-                if ("__native_map_size".equals(name) || "__native_set_size".equals(name)) {
+                if ("__native_map_size".equals(name) || "__native_set_size".equals(name)
+                        || "__native_sorted_map_size".equals(name)
+                        || "__native_sorted_set_size".equals(name)
+                        || "__native_deque_size".equals(name)) {
                     b.beginInlineMapSize();
                     emitNode(arg0, b, argCount, localMap);
                     b.endInlineMapSize();
+                    return;
+                }
+                // deque::first → InlineDequeFirst
+                if ("__native_deque_first".equals(name)) {
+                    b.beginInlineDequeFirst();
+                    emitNode(arg0, b, argCount, localMap);
+                    b.endInlineDequeFirst();
                     return;
                 }
                 // {int,float,nat,bool}::to_str → InlineScalarInspect

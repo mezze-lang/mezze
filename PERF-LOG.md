@@ -8913,3 +8913,83 @@ single-threaded-effects assumption"* — skipping itself, in the same run, for
 exactly the same reason. So the conclusion above is not an inference from one
 afternoon's failure; it is a property of this process that an existing test
 already documents by guarding against it.
+
+#### The ordered containers' BASE cost, 20.5x — and `sorted_map::size` reaches parity with the hash one
+
+The entry above ranked two levers on this surface and this is the second, the
+contained one: `sorted_map::size`, `sorted_set::size`, `deque::size` and
+`deque::first` were string-keyed `HANDLERS` entries with no `BytecodeCompiler`
+special case. `InlineMapSize` gains three specializations and
+`InlineDequeFirst` is new.
+
+```
+  row                            before     after    verdict
+  sorted_map::size                8 540       416     20.5x
+  deque::size                     8 865       420     21.1x
+  deque::first                   12 343     5 478      2.25x
+  sorted_map::get      (control) 308 200   311 896     flat
+  sorted_map::contains (control) 306 855   306 626     flat
+  sorted_map::insert   (control) 563 046   570 635     flat
+  deque::get by index  (control) 218 442   219 823     flat
+```
+
+**`sorted_map::size` at 416 is parity with the hash `map::size` at 429**, which
+is the right endpoint: both return a stored count, and the 20x was never
+anything but the dispatch in front of it.
+
+`deque::first` gains 2.25x rather than 20x, and that is expected: it also
+allocates a `MezzeVariant` for the `Some`, which cannot go away while the
+signature returns `Option a`. The same ceiling `map::get` ran into.
+
+**The four controls stayed on the HANDLERS path deliberately** — they take a
+comparator, so they are three-operand records this change does not touch. An
+earlier note in this session predicted they would gain ~3% from the base cost
+coming off; that was wrong, because the base cost only comes off an operation
+that gets a special case, and these did not get one. Flat is the control
+holding, not a missed win.
+
+#### Coverage
+
+`OrderedSizeInlineTest`, 10 tests. `InlineMapSize` now carries FIVE
+specializations — map, set, sorted map, sorted set, deque — selected on the
+receiver's runtime class, so a receiver reaching the wrong one would report
+another container's size. One test puts three container kinds of different
+sizes in one program with weights 1/10/100 so that any wrong answer changes the
+total; the rest cover distinct-key counting, the growth progression at
+0/1/2/64, both deque ends, shrinking after a pop, `first` against `push_front`
+and `push_back`, `first` on empty, and a warm loop.
+
+TWO sentinels, reported separately rather than combined:
+
+- the three new size specializations returning 0 fails **7 of 10** — exactly
+  the size tests;
+- `deque::first` returning `last` instead fails **3** — the two ordering tests
+  and the warm loop.
+
+Union **9 of 10**. The tenth is `deque first on an empty deque is None`, which
+both sentinels satisfy by accident because an empty container answers None
+under either wrongness. That is a property of the assertion, not a gap.
+
+#### Where this surface stands
+
+```
+  op                        before      now     total
+  sorted_map::size           8 934      416     20.5x
+  deque::size                8 960      420     21.1x
+  deque::first              12 276    5 478      2.25x
+  sorted_map::get          317 000  317 000     UNTOUCHED
+  sorted_map::contains_key 308 500  308 500     UNTOUCHED
+  sorted_set::contains     310 000  310 000     UNTOUCHED
+  sorted_map::insert chain 577 000  577 000     UNTOUCHED
+  deque::get by index      222 000  222 000     UNTOUCHED
+```
+
+So the comparator-free operations are done and everything that takes an `Ord`
+is exactly where it was. **The ranked next item is unchanged and is the big
+one**: the ordered lookups at 29-60x the hash equivalents, of which a
+probe-bounded 10-13x is `ElementComparator.compare` calling back into guest
+code once per comparison. It needs the ordered structures to obtain a native
+comparator for key types whose `Ord` is canonical, decided from the impl's
+identity and never its name — a design change through the monomorphiser, not a
+patch. After that, `sorted_map::insert` at 43x the hash insert is its own
+problem, and the probe proved the comparator is NOT its cause.

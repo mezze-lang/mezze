@@ -556,6 +556,45 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         public static long doSet(com.mezze.datastructures.set.MezzeSet<?> s) {
             return (long) s.size();
         }
+
+        // The ORDERED containers and Deque, for the same reason and off the
+        // same measurement. `bench/cases/dsmore` put `sorted_map::size` at
+        // 8 934 ps and `deque::size` at 8 960 against the hash `map::size`'s
+        // 429 — 20.8x for an operation that returns a field — because these
+        // natives are registered in NativeDispatch's record-ABI HANDLERS map
+        // and reached by a STRING-KEYED HashMap lookup per call. No comparator
+        // is involved anywhere here: `size` and `is_empty` are the only
+        // ordered operations with no `with Ord`, which is what makes them the
+        // control that isolated this cost from the comparator's.
+        @Specialization
+        public static long doSortedMap(com.mezze.datastructures.sorted.MezzeSortedMap<?, ?> m) {
+            return (long) m.size();
+        }
+
+        @Specialization
+        public static long doSortedSet(com.mezze.datastructures.sorted.MezzeSortedSet<?> s) {
+            return (long) s.size();
+        }
+
+        @Specialization
+        public static long doDeque(com.mezze.datastructures.deque.MezzeDeque<?> d) {
+            return (long) d.size();
+        }
+    }
+
+    /**
+     * {@code deque::first} off the string-keyed HANDLERS path.
+     *
+     * <p>Measured at 12 276 ps in `bench/cases/dsmore` — more than `size`
+     * because it also allocates a {@code MezzeVariant} for the {@code Some},
+     * which cannot go away while the signature returns {@code Option a}.
+     */
+    @Operation
+    public static final class InlineDequeFirst {
+        @Specialization
+        public static Object doDeque(com.mezze.datastructures.deque.MezzeDeque<?> d) {
+            return com.mezze.interpreter.nodes.builtin.collections.DequeNatives.first(d);
+        }
     }
 
     /**
