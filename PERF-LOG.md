@@ -9784,3 +9784,70 @@ referenced only by its own test and two benchmarks, with no native, no stdlib
 module and no interpreter construction. Recorded with the deletion option
 named, since an unwired structure carrying a soundness defect is a candidate
 for removal rather than repair, and that is the maintainer's call.
+
+#### `deque::get` was O(n) for an O(1) structure — 24.5x, and the slope is gone
+
+`bench/cases/dsmore` recorded this row as "most likely O(n) by construction
+rather than dispatch; its representation needs reading before anything is said
+about it." The representation was fine. The native was walking an iterator.
+
+```java
+    int i = 0;
+    for (Object elem : deque) {
+        if (i == index) return MezzeVariant.some(elem);
+        i++;
+    }
+```
+
+A Deque is a ring buffer, and `MezzeDeque.get(int)` — in the same class, right
+above the push paths — is one bounds check and
+`buffer[(head + index) & mask]`. The native never needed to iterate.
+
+```
+  row                            before     after    verdict
+  deque::get by index           222 457     9 070     24.5x
+  deque::size        (control)      439       452     flat
+  deque::first       (control)    5 307     5 306     flat
+  sorted_map::size   (control)      445       433     flat
+```
+
+Interleaved against a HEAD baseline, three controls flat — two of them other
+Deque operations, which bounds the change to exactly the one claimed.
+Checksums identical (`sum=100100000`).
+
+And the slope, which is the real result:
+
+```
+  elements          250     1 000     4 000
+  iterating      71 933   221 294   839 410    linear
+  indexed         8 150    10 797    11 076    flat
+  verdict           8.8x     20.5x     75.8x
+```
+
+It was linear and is now constant, so the win grows without bound in the size
+of the deque. The remaining ~10 ns is the `MezzeVariant` allocated for the
+`Some`, the same floor `map::get` and `deque::first` sit on.
+
+Every other iterating native in that file is correct to iterate — `sum`,
+`product`, `unique`, `minBy` and the rest need every element. This one was the
+only operation whose answer depends on one position.
+
+#### The sentinel earned its keep by disagreeing with the obvious test
+
+`DequeIndexedGetTest`, 7 tests. Walking an iterator cannot compute a wrong
+index; `(head + index) & mask` can — but only once the buffer has WRAPPED, when
+`head` sits near the end of the array and the mask has to fold the sum back to
+the front. A deque that has only ever been pushed to the back has `head == 0`,
+where a broken index calculation looks perfectly correct.
+
+A sentinel dropping `head` from the calculation fails **3 of 7** — and they are
+exactly the three that move it: after pops advance `head`, after `push_front`
+moves it backwards, and the base-versus-popped-view pair. The four that pass
+include a sweep over EVERY index of a 64-element deque and a 2 000-iteration
+warm loop, which look like thorough coverage and prove nothing at all about the
+arithmetic.
+
+Worth keeping as the shape: **a full sweep over every index of a structure in
+its default state can be no evidence whatsoever about index arithmetic.** The
+state has to be disturbed first, and here that means moving `head` before
+reading.

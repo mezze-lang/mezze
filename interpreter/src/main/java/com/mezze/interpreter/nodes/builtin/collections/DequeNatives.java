@@ -479,18 +479,25 @@ public final class DequeNatives {
     // ==================== Indexed Access ====================
 
     @TruffleBoundary
+    /**
+     * Indexed access, in O(1).
+     *
+     * <p>This used to WALK THE ITERATOR to the index, which made it O(n) for an
+     * operation the structure supports in constant time: a Deque is a ring
+     * buffer, and {@code MezzeDeque.get(int)} is one bounds check and
+     * {@code buffer[(head + index) & mask]}. The cost showed up as a slope —
+     * `bench/cases/dsmore` measured 71 933 / 221 294 / 839 410 ps at 250 /
+     * 1 000 / 4 000 elements, which is linear in the size of the deque for a
+     * lookup by position.
+     *
+     * <p>Every other iterating native in this file visits each element because
+     * its answer depends on all of them. This one never did.
+     */
     public static MezzeVariant get(MezzeDeque deque, long index) {
         if (index < 0 || index >= deque.size()) {
             return MezzeVariant.none();
         }
-        int i = 0;
-        for (Object elem : deque) {
-            if (i == index) {
-                return MezzeVariant.some(elem);
-            }
-            i++;
-        }
-        return MezzeVariant.none();
+        return MezzeVariant.some(deque.get((int) index));
     }
 
     @TruffleBoundary
