@@ -10840,3 +10840,94 @@ kind.
 
 Gate: `:interpreter:test` 7 681 tests 0 failures 14 skipped; `:typechecker:test`
 4 826 tests 0 failures; `:datastructures:test` 753 tests 0 failures 2 skipped.
+
+#### Every `get` in the language allocates an Option — 1.93x on the first one
+
+`bench/cases/allocsurface` asks only "does it allocate", by counting young
+collections, and running it one kernel per process at n=2e7 sorted fifteen
+kernels into two groups with nothing in between:
+
+```
+  allocates nothing (3 collections)   allocates (17-30)
+    map has            6 111            map get          16 303
+    set has            6 986            seq get          15 482
+    map size           1 172            list get         16 154
+    str size           1 060            bytes get        17 864
+    dict               1 248            record update    23 987
+    tier control       6 180            str interp       21 055
+                                        str concat       13 487
+                                        map insert       17 285
+```
+
+**Every keyed read that returns `Option` allocates; its `has` sibling does
+not.** And the attribution is exact, because `allocsurface` has the controls for
+it: `map size` is a native call with NO lookup (1 172 ps, 3 collections),
+`map has` is the SAME lookup returning a Bool and sits on the tier control
+(6 111 against 6 180, 3 collections), and `map get` is that lookup returning an
+`Option`. So the lookup allocates nothing and costs ~5 ns, and the ~7-10 ns plus
+fourteen extra collections between `has` and `get` are the `Option` alone —
+**twice the cost of the lookup it wraps.**
+
+The `match` is immediately on the result, so the variant never escapes.
+
+```
+  kernel                 HEAD        fused     verdict   young
+  5 map get            11 009        5 701       1.93x   17 -> 3
+  8 map has (control)   5 921        6 144        flat    3 -> 3
+  10 tier (control)     1 055        1 017        flat    3 -> 3
+  7 seq get             14 123       14 584       flat   22 -> 21
+  13 list get           16 483       16 026       flat   21 -> 21
+  15 bytes get          14 767       15 097       flat   21 -> 21
+```
+
+Seven readings a side, spreads 1.39x and 1.38x. **The collection count going to
+3 is the result** — the same floor as `has`, `size` and the tier control — and
+`get` is now 1.5 ns from `has` instead of 6.8.
+
+#### The machinery already existed and was dead
+
+`BytecodeCompiler.tryEmitFusedMutGetMatch` does exactly this for mut sequences,
+is fully written and documented, and never fires: it gates on
+`CallDirectIR.isScalarABI()`, which is set for extracted lambdas only, and by
+the time the bytecode compiler runs the stdlib wrapper has been inlined and no
+such call survives to match. Keying on the NATIVE's name is what survives
+inlining — the same reason the `__native_sorted_map_key_at` fast path fires.
+
+#### Three mistakes of mine, each caught by a sentinel rather than by thinking
+
+**The first draft rejected `isScalarABI()`** — a condition copied from the
+record-ABI fast paths above without checking that it applied. The sentinel then
+failed exactly ONE of six tests, because the fusion fired in straight-line test
+code and not in a loop, which is where the cost is. A probe printing the
+scrutinee settled it in one run: `CallNativeIR name=__native_map_get
+scalar=true`, and `__native_seq_get`, `__native_list_get` and
+`__native_bytes_get` beside it, all scalar. After the fix the sentinel fails
+THREE of six, and the survivors are the right three: two expect the `None`
+branch either way, and the guarded one is refused and falls back.
+
+**"The fusion does not fire in allocsurface" was a conclusion from nothing.**
+`bench/scripts/ab.sh` redirects the build's stderr to `/dev/null`, so the probe
+printed into a void and I read the silence as an answer.
+
+**And a number written before it was measured**, for the third time today: the
+test doc said the sentinel fails "four of the six". It fails three. All three
+invented numbers are out.
+
+#### A control that moved and should not be quoted at all
+
+`map size` read 3.03x, and nothing in this change touches it. At seven readings
+it is 1.09x with a **5.29x spread** — a 1.2 ns row whose noise is five times the
+effect anyone would claim from it. `tier control` is the same: 1.04x, spread
+4.60x. Those two are allocation controls, not timing controls, and the
+collection count is the only column of theirs worth reading.
+
+#### What is left
+
+`seq get`, `list get` and `bytes get` are untouched and still allocate: a byte
+or an index needs a presence signal, and `null` is available for all three —
+Mezze has no null value, so no container can hold one, and `bytes::get` boxes
+its byte into a `Long` before returning it. One operation each, doing its own
+bounds check, extends the same pattern.
+
+Gate: `:interpreter:test` 7 687 tests 0 failures 14 skipped; `:typechecker:test`
+4 826 tests 0 failures; `:datastructures:test` 753 tests 0 failures 2 skipped.

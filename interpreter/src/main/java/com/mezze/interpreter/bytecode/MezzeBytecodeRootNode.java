@@ -6424,6 +6424,49 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    /**
+     * A map lookup returning the VALUE or null, for the fused
+     * `match map::get { m, k } is Some { val } -> … , None -> …` pattern.
+     *
+     * <p>WHY. `__native_map_get` builds a `MezzeVariant` for the `Some`, and
+     * that allocation is the larger half of the operation. Measured on
+     * `bench/cases/allocsurface` at n=2e7, one kernel per process, with young
+     * collections as the evidence:
+     *
+     * <pre>
+     *   kernel            ps/iter   young
+     *   map size            1 172       3     a native call, no lookup
+     *   map has             6 111       3     the same lookup, returns Bool
+     *   map get            16 303      18     the same lookup, returns Option
+     * </pre>
+     *
+     * `has` sits on the tier control (6 180 ps, 3 collections), so the lookup
+     * itself allocates nothing and costs ~5 ns. The ~10 ns and the fifteen
+     * extra collections between `has` and `get` are the `Option` — <b>twice the
+     * cost of the lookup it wraps</b>. The same gap shows on `seq get`,
+     * `list get` and `bytes get`, which all allocate while their `has`/`size`
+     * siblings do not.
+     *
+     * <p>NULL MEANS ABSENT, unambiguously: Mezze has no null value, so a map
+     * can never hold one. `MezzeMap.get` already returns null for a missing
+     * key, which is why this needs no new lookup — only a way to reach the one
+     * that exists without wrapping its answer.
+     *
+     * <p>The emitter stores the result in a local and tests it with
+     * {@link IsNotNull}, so the lookup runs ONCE. Doing it twice would be worse
+     * than the allocation; the MUT version of this pattern could split into a
+     * bounds check and a read because both were free, and a hash lookup is not.
+     */
+    @Operation
+    public static final class InlineMapGetRaw {
+        @Specialization
+        @TruffleBoundary
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        public static Object doOp(com.mezze.datastructures.map.MezzeMap map, Object key) {
+            return map.get(key);
+        }
+    }
+
     /** Null check — used by the fused MutGetRaw + match pattern. */
     @Operation
     public static final class IsNotNull {

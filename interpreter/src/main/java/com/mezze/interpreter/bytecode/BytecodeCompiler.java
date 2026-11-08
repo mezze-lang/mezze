@@ -8859,10 +8859,167 @@ public final class BytecodeCompiler {
         return true;
     }
 
+    /**
+     * Detect and emit the fused
+     * {@code match map::get { m, k } is Some { val } -> expr, None -> default}
+     * pattern, skipping the {@code MezzeVariant} the native would allocate for
+     * the {@code Some}.
+     *
+     * <p>WHY THIS IS WORTH A SPECIAL CASE. Measured on
+     * `bench/cases/allocsurface` at n=2e7, one kernel per process, counting
+     * young collections:
+     *
+     * <pre>
+     *   kernel            ps/iter   young
+     *   map size            1 172       3     a native call, no lookup
+     *   map has             6 111       3     the same lookup, returns Bool
+     *   map get            16 303      18     the same lookup, returns Option
+     * </pre>
+     *
+     * `has` sits on the tier control (6 180 ps, 3 collections), so the lookup
+     * allocates nothing and costs ~5 ns, and the ~10 ns plus fifteen
+     * collections between it and `get` are the `Option` alone — TWICE the cost
+     * of the lookup it wraps.
+     *
+     * <p>WHY IT MATCHES THE NATIVE AND NOT THE WRAPPER. {@link
+     * #tryEmitFusedMutGetMatch} is the same idea for mut sequences and it is
+     * DEAD CODE: it gates on {@code CallDirectIR.isScalarABI()}, which is set
+     * for extracted lambdas only, and by the time this compiler runs the
+     * stdlib wrapper has been inlined and no such call survives to match.
+     * Keying on the NATIVE's name is what survives inlining — the same reason
+     * the `__native_sorted_map_key_at` fast path above fires.
+     *
+     * <p>NULL MEANS ABSENT, unambiguously: Mezze has no null value, so a map
+     * cannot hold one, and {@code MezzeMap.get} already returns null for a
+     * missing key.
+     *
+     * <p>THE LOOKUP RUNS ONCE. Its result goes into a local and the branch
+     * tests that local, rather than looking up twice the way the mut version
+     * could afford to with a bounds check and a read.
+     *
+     * <p>REFUSED for a guard, an if-let binding, or anything but exactly a
+     * one-field {@code Some} and an empty {@code None} (or a wildcard), so a
+     * match this does not fully understand falls back to the generic path.
+     */
+    private boolean tryEmitFusedNativeMapGetMatch(MatchIR m, MezzeBytecodeRootNodeGen.Builder b,
+                                                  int argCount, BytecodeLocal[] localMap) {
+        NodeIR scrutinee = m.getScrutinee();
+        if (!(scrutinee instanceof CallNativeIR cn)) return false;
+        if (!"__native_map_get".equals(cn.getName())) return false;
+
+        // BOTH ABIs, and the scalar one is what actually turns up here. A probe
+        // printing the scrutinee reported
+        // `CallNativeIR name=__native_map_get scalar=true` for the loop in
+        // `bench/cases/allocsurface`, alongside `__native_seq_get`,
+        // `__native_list_get` and `__native_bytes_get` — all scalar. An earlier
+        // draft of this method rejected `isScalarABI()`, a condition copied
+        // from the record-ABI fast paths above without checking that it
+        // applied, and so fired only in straight-line test code and never
+        // where the cost is.
+        NodeIR mapArg, keyArg;
+        if (cn.isScalarABI()) {
+            // Positional, already in signature order, so there is no written
+            // field order to preserve.
+            if (cn.getArgs().size() != 2) return false;
+            mapArg = cn.getArgs().get(0);
+            keyArg = cn.getArgs().get(1);
+        } else {
+            if (!(cn.getArg() instanceof MakeRecordIR mr)) return false;
+            if (mr.getFields().size() != 2) return false;
+            // ORDER IS PRESERVED, NOT ASSUMED. A record evaluates its fields in
+            // the order they are WRITTEN, and this emits the map then the key;
+            // either can be a call. So the record path is taken only when the
+            // written order already matches, exactly as the generic record-ABI
+            // collapse above requires.
+            if (!"m".equals(mr.getFields().get(0).getName())
+                    || !"k".equals(mr.getFields().get(1).getName())) return false;
+            mapArg = mr.getFields().get(0).getValue();
+            keyArg = mr.getFields().get(1).getValue();
+        }
+        if (mapArg == null || keyArg == null) return false;
+
+        var cases = m.getCases();
+        if (cases.size() != 2) return false;
+        CaseIR someCase = null, noneCase = null;
+        for (CaseIR cs : cases) {
+            if (cs.getGuard() != null) return false;
+            if (!cs.getIfLetBindings().isEmpty()) return false;
+            var pat = cs.getPattern();
+            if (pat instanceof PatternIR.Variant vp) {
+                if ("Some".equals(vp.getTagName()) && vp.getFieldNames().size() == 1) someCase = cs;
+                else if ("None".equals(vp.getTagName()) && vp.getFieldNames().isEmpty()) noneCase = cs;
+                else return false;
+            } else if (pat instanceof PatternIR.Wildcard) {
+                noneCase = cs;
+            } else {
+                return false;
+            }
+        }
+        if (someCase == null || noneCase == null) return false;
+
+        PatternIR.Variant somePat = (PatternIR.Variant) someCase.getPattern();
+        int valSlot = somePat.getFieldSlots().get(0);
+
+        // Block {
+        //   rawLocal = InlineMapGetRaw(mapArg, keyArg)
+        //   Conditional(IsNotNull(rawLocal),
+        //     Block { val = rawLocal; someBody },
+        //     noneBody)
+        // }
+        b.beginBlock();
+        BytecodeLocal rawLocal = b.createLocal();
+        b.beginStoreLocal(rawLocal);
+        b.beginInlineMapGetRaw();
+        emitNode(mapArg, b, argCount, localMap);
+        emitNode(keyArg, b, argCount, localMap);
+        b.endInlineMapGetRaw();
+        b.endStoreLocal();
+
+        // Zero-init binding slots, as the generic emitMatch does.
+        java.util.Set<Integer> bindingSlots = new java.util.HashSet<>();
+        collectBindingSlots(cases, bindingSlots);
+        for (Integer slot : bindingSlots) {
+            if (slot != null && slot >= argCount && slot - argCount < localMap.length) {
+                b.beginStoreLocal(localMap[slot - argCount]);
+                b.emitLoadNullConstant();
+                b.endStoreLocal();
+            }
+        }
+
+        b.beginConditional();
+        b.beginIsNotNull();
+        b.emitLoadLocal(rawLocal);
+        b.endIsNotNull();
+
+        b.beginBlock();
+        if (valSlot >= argCount && valSlot - argCount < localMap.length) {
+            b.beginStoreLocal(localMap[valSlot - argCount]);
+            b.emitLoadLocal(rawLocal);
+            b.endStoreLocal();
+        }
+        for (var binding : someCase.getBindings()) {
+            if (binding.getSlot() >= argCount && binding.getSlot() - argCount < localMap.length) {
+                b.beginStoreLocal(localMap[binding.getSlot() - argCount]);
+                b.emitLoadLocal(rawLocal);
+                b.endStoreLocal();
+            }
+        }
+        emitNode(someCase.getBody(), b, argCount, localMap);
+        b.endBlock();
+
+        emitNode(noneCase.getBody(), b, argCount, localMap);
+        b.endConditional();
+        b.endBlock();
+        return true;
+    }
+
     private void emitMatch(MatchIR m, MezzeBytecodeRootNodeGen.Builder b,
                            int argCount, BytecodeLocal[] localMap) {
         // Try fused MutGetRaw + match pattern first
         if (tryEmitFusedMutGetMatch(m, b, argCount, localMap)) return;
+        // Then the live one: a record-ABI `map::get` whose Option is matched
+        // immediately and therefore never escapes.
+        if (tryEmitFusedNativeMapGetMatch(m, b, argCount, localMap)) return;
 
         b.beginBlock();
         BytecodeLocal scrutineeLocal = b.createLocal();
