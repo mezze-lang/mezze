@@ -532,6 +532,64 @@ fun ErrorCode.explain(): String = when (this) {
 
             "it one type throughout."
 
+    ErrorCode.V0713_TYPE_ALIAS_OF_NAMED_TYPE ->
+
+        "ONE SHAPE, ONE NAME — so that inference has exactly one answer.\n\n" +
+
+            "  type Person = { name: Str, age: Int }\n" +
+            "  let x = { name = \"Ada\", age = 32 }      # infers Person\n\n" +
+
+            "That works only because the shape has exactly ONE name. A second " +
+
+            "name for the same thing turns adoption into a choice, and a choice " +
+
+            "is what inference cannot make on your behalf. So a `type` may name a " +
+
+            "shape that has NONE, and may never rename something already named.\n\n" +
+
+            "REFUSED — already named:\n\n" +
+
+            "  type UserId = Int                      a primitive has a name\n" +
+            "  type Ids    = [Int]                     built only from builtins\n" +
+            "  type N      = Nat                       a newtype is already distinct\n" +
+            "  type P2     = P                         a second name for P\n" +
+            "  type Res    = Result Response Error     an applied name keeps its\n" +
+            "                                          identity through an alias\n\n" +
+
+            "ACCEPTED — naming something nameless:\n\n" +
+
+            "  type Person  = { name: Str, age: Int }  a record declaration\n" +
+            "  type Colour  = | R, G, B |              a variant declaration\n" +
+            "  type Handler = { req: Req } -> Resp     a function type has no\n" +
+            "                                          identity of its own\n" +
+            "  type Rows    = [Row]                    a collection of YOUR type\n\n" +
+
+            "`newtype` is the construct for a distinct type, and it costs one " +
+
+            "line. Unlike a `type`, its name SURVIVES: it appears in inference, " +
+
+            "in error messages and in your module's public signature, and it can " +
+
+            "carry impls. A `type` that merely renames is erased before any of " +
+
+            "that happens — `type UserId = Int` never reaches a signature, a " +
+
+            "diagnostic or a hover, so it is a comment the compiler spell-checks.\n\n" +
+
+            "The two accepted odd ones out, for the record. A FUNCTION type is " +
+
+            "genuinely nameless, so an alias gives it a first name — though the " +
+
+            "name still does not survive, which is why V0706 refuses an impl on " +
+
+            "one. A SEQ alias's name is dropped too, so it cannot create a second " +
+
+            "identity for anything; it is allowed when the element is a type you " +
+
+            "declared, because naming a collection of your own things says " +
+
+            "something, and refused when it is builtins all the way down."
+
     ErrorCode.V0712_NOT_A_TYPE_NAME ->
 
         "An ability or an effect was written where a type belongs. Types, " +

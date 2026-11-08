@@ -8,12 +8,38 @@ import java.nio.file.Paths
 import kotlin.test.assertTrue
 
 /**
- * Pins the transparency rule for `type X = ...`.
+ * Pins the transparency rule for `type X = ...`, and what a `type` may name.
  *
- * - `type MyInt = Int` — MyInt and Int are interchangeable at every use site.
- * - Ability impls of the aliased type apply automatically (no need to
- *   `impl Eq for MyInt`).
- * - Contrast: `newtype UserId = Str` stays nominally distinct.
+ * ONE SHAPE, ONE NAME — so inference has exactly one answer:
+ *
+ *     type Person = { name: Str, age: Int }
+ *     let x = { name = "Ada", age = 32 }      # infers Person
+ *
+ * works only because the shape has exactly one name. A second name makes
+ * adoption a choice, and a choice is what inference cannot make for the author.
+ * So a `type` names a shape that has NONE, and never renames something already
+ * named (V0713).
+ *
+ * This file USED to pin `type MyInt = Int` as intended behaviour, in most of the
+ * tests below. That was the evidence I cited when I first proposed refusing
+ * primitive aliases and then backed off — "a test file pins this, so someone
+ * decided it deliberately". The decision has since been made the other way, and
+ * on the stronger argument: a primitive alias is erased before inference even
+ * finishes, so it never reaches a signature, a diagnostic or a hover, and it
+ * cannot carry an impl. It is a comment the compiler spell-checks. `newtype`
+ * does all three and costs one line.
+ *
+ * The transparency property is REAL and still worth pinning — it just needs a
+ * vehicle that survives the rule. Three do, and each carries a different half
+ * of what the primitive alias used to demonstrate:
+ *
+ *   - a RECORD alias (`type Row = { id: Int }`) — interchangeable with its
+ *     shape in both directions, and derives `Eq` like any record
+ *   - a SEQ alias over the author's own type (`type Rows = [Row]`) — inherits
+ *     the underlying type's INHERENT methods, which is the claim V0706's
+ *     message makes
+ *   - a FUNCTION alias (`type Producer 'a = {} -> 'a`) — stays callable, which
+ *     is the abbreviation value that justified keeping it
  */
 class TypeAliasTransparencyTest {
     private lateinit var parser: MezzeParser
@@ -29,7 +55,10 @@ class TypeAliasTransparencyTest {
         tc.typeCheck(p, Paths.get("."), enablePrelude = true)
         null
     } catch (e: ParseException) { "PARSE: ${e.message}" }
-      catch (e: TypeCheckError) { "TC: ${e.message}" }
+      // The CODE is included so a refusal can be asserted on the thing that
+      // does not move. The prose does move — this file's own rewrite is the
+      // proof — and `reject` matches a substring, so both still work.
+      catch (e: TypeCheckError) { "TC ${e.code?.name ?: "(uncoded)"}: ${e.message}" }
       catch (e: Exception) { "${e::class.simpleName}: ${e.message}" }
 
     private fun ok(label: String, src: String) {
@@ -39,88 +68,88 @@ class TypeAliasTransparencyTest {
 
     private fun reject(label: String, src: String, hint: String) {
         val e = err(src)
-        assertTrue(e != null, "[$label] expected rejection")
+        assertTrue(e != null, "[$label] expected rejection\n---\n$src")
         assertTrue(e.contains(hint), "[$label] error mismatch. want: '$hint'\n got: $e")
     }
 
-    // ── PARSING ────────────────────────────────────────────────────────
+    // ── WHAT A `type` MAY NAME ─────────────────────────────────────────
 
-    @Test fun `type Foo = Int parses`() {
-        ok("parse.primitive", "type Foo = Int")
+    @Test fun `a record declaration parses and is accepted`() {
+        ok("parse.record", "type Person = { name: Str, age: Int }")
     }
 
-    @Test fun `type Ids = Seq Int parses`() {
-        ok("parse.generic", "use std::collections::seq\ntype Ids = Seq Int")
+    @Test fun `a variant declaration parses and is accepted`() {
+        ok("parse.variant", "type Colour = | R, G, B |")
     }
 
-    // ── TRANSPARENCY: MyInt is Int at use sites ────────────────────────
+    @Test fun `a function alias parses and is accepted`() {
+        ok("parse.function", "type Handler = { n: Int } -> Int")
+    }
+
+    @Test fun `a seq alias over the author's own type is accepted`() {
+        ok("parse.seq-of-mine", "type Row = { id: Int }\ntype Rows = [Row]")
+    }
+
+    // ── TRANSPARENCY: a record alias IS its shape ──────────────────────
 
     @Test fun `alias transparently accepts the aliased value`() {
         ok("transparent.accept", """
-            type MyInt = Int
-            pub let take = { n: MyInt } -> n
-            pub let call = {} -> take { n = 42 }
+            type Row = { id: Int }
+            pub let take = { r: Row } -> r.id
+            pub let call = {} -> take { r = { id = 42 } }
         """)
     }
 
-    @Test fun `aliased value flows into aliased parameter`() {
+    @Test fun `aliased value flows into a bare-shape parameter`() {
         ok("transparent.both-ways", """
-            type MyInt = Int
-            pub let mk : {} -> MyInt = {} -> 42
-            pub let sink : { n: Int } -> Int = { n } -> n
-            pub let go = {} -> sink { n = mk {} }
+            type Row = { id: Int }
+            pub let mk : {} -> Row = {} -> { id = 42 }
+            pub let sink : { r: { id: Int } } -> Int = { r } -> r.id
+            pub let go = {} -> sink { r = mk {} }
         """)
     }
 
-    @Test fun `alias inherits Eq impl from aliased primitive`() {
+    @Test fun `alias inherits Eq from the shape it names`() {
         ok("transparent.eq-inherited", """
-            type MyInt = Int
-            pub let same = { a: MyInt, b: MyInt } -> a == b
-        """)
-    }
-
-    @Test fun `alias inherits arithmetic from aliased primitive`() {
-        ok("transparent.arith-inherited", """
-            type MyInt = Int
-            pub let inc = { n: MyInt } -> n + 1
+            type Row = { id: Int }
+            pub let same = { a: Row, b: Row } -> a == b
         """)
     }
 
     /**
-     * The INHERENT methods too, not only the abilities above.
-     *
-     * This is the claim V0706's message makes — "a transparent alias already
-     * inherits the impls of the type it aliases" — and it is the reason an impl
-     * on the alias is refused rather than merely discouraged: there is nothing
-     * for it to add, and a receiver would never reach it anyway. Eq and
-     * arithmetic were pinned; the method half was the part of the diagnostic's
-     * claim that nothing tested.
+     * The INHERENT methods, which is the claim V0706's message makes — "a
+     * transparent alias already inherits the impls of the type it aliases". A
+     * seq alias is the vehicle: `first` lives on `Seq`, not on `Rows`, and a
+     * `Rows` receiver reaches it.
      */
-    @Test fun `alias inherits inherent methods from the aliased primitive`() {
-        ok("transparent.method-inherited", """
-            use std::int
-            type MyInt = Int
-            pub let show = { n: MyInt } -> n.to_str {}
-        """)
-    }
-
-    /** And through a container, where the method lives on `Seq`, not the alias. */
     @Test fun `seq alias inherits the seq inherent methods`() {
         ok("transparent.seq-method-inherited", """
             use std::int
             use std::collections::seq
-            type Ids = [Int]
-            pub let top = { xs: Ids } -> xs.first {}
+            type Row = { id: Int }
+            type Rows = [Row]
+            pub let top = { xs: Rows } -> xs.first {}
         """)
     }
 
-    /** Transitively, for the same reason the Eq case is transitive. */
-    @Test fun `alias-of-alias inherits inherent methods`() {
-        ok("transparent.method-inherited-chain", """
+    /** A function alias stays callable — the abbreviation it buys is usable. */
+    @Test fun `function alias stays callable`() {
+        ok("transparent.fn-callable", """
             use std::int
-            type A = Int
-            type B = A
-            pub let show = { b: B } -> b.to_str {}
+            type Handler = { n: Int } -> Int
+            pub let run = { h: Handler } -> h { n = 1 }
+            pub let go = {} -> run { h = { n } -> n + 1 }
+        """)
+    }
+
+    @Test fun `function alias is interchangeable with the raw signature`() {
+        ok("transparent.fn-both-ways", """
+            use std::int
+            type Handler = { n: Int } -> Int
+            pub let takesAlias = { h: Handler } -> h { n = 1 }
+            pub let takesRaw = { f: { n: Int } -> Int } -> f { n = 1 }
+            pub let a = { f: { n: Int } -> Int } -> takesAlias { h = f }
+            pub let b = { h: Handler } -> takesRaw { f = h }
         """)
     }
 
@@ -128,8 +157,8 @@ class TypeAliasTransparencyTest {
 
     /**
      * The other side of the line: a newtype inherits NOTHING, so the method is
-     * absent and `impl M where` is the way to give it one — which is what V0706
-     * points the author at.
+     * absent and `impl M where` is the way to give it one — which is what both
+     * V0706 and V0713 point the author at.
      */
     @Test fun `newtype does NOT inherit inherent methods from the wrapped type`() {
         reject("newtype.method-not-inherited", """
@@ -155,49 +184,30 @@ class TypeAliasTransparencyTest {
         """, "Eq")
     }
 
-    // ── COMPOSITION ────────────────────────────────────────────────────
-
-    @Test fun `alias-of-alias resolves transitively`() {
-        ok("compose.chain", """
-            type MyInt = Int
-            type MyInt2 = MyInt
-            pub let take : { n: Int } -> Int = { n } -> n
-            pub let call = { x: MyInt2 } -> take { n = x }
-        """)
-    }
-
     // ── PARAMETRIC ALIASES ─────────────────────────────────────────────
 
-    @Test fun `parametric alias over Seq unifies with the aliased shape`() {
-        ok("param.seq", """
-            use std::collections::seq
-            type Ids 'a = Seq 'a
-            pub let take : { xs: Seq Int } -> Seq Int = { xs } -> xs
-            pub let call = { xs: Ids Int } -> take { xs = xs }
-        """)
-    }
-
-    @Test fun `parametric alias with two type params`() {
+    @Test fun `parametric record alias with two type params`() {
         ok("param.two", """
             type Pair 'a 'b = { first: 'a, second: 'b }
             pub let mk : {} -> Pair Int Str = {} -> { first = 1, second = "hi" }
         """)
     }
 
-    @Test fun `parametric alias-of-alias resolves transitively`() {
-        ok("param.alias-of-alias", """
-            use std::collections::seq
-            type Ids 'a = Seq 'a
-            type Bag 'a = Ids 'a
-            pub let take : { xs: Seq Int } -> Seq Int = { xs } -> xs
-            pub let call = { xs: Bag Int } -> take { xs = xs }
-        """)
-    }
-
-    @Test fun `parametric alias inlines through a function type`() {
+    @Test fun `parametric function alias inlines through the signature`() {
         ok("param.function-rhs", """
             type Producer 'a = {} -> 'a
             pub let mk : Producer Int = {} -> 42
+        """)
+    }
+
+    @Test fun `parametric record alias of a record alias is accepted`() {
+        // Both are record DECLARATIONS (ParsedRecordDef), not aliases of a
+        // name, so neither renames anything — the nesting is just composition.
+        ok("param.record-in-record", """
+            type Row = { id: Int }
+            type Holder = { r: Row }
+            pub let take : { h: { r: { id: Int } } } -> Int = { h } -> h.r.id
+            pub let go = { h: Holder } -> take { h = h }
         """)
     }
 
@@ -232,53 +242,23 @@ class TypeAliasTransparencyTest {
         """, "")
     }
 
-    // ── ALIAS INTEROP: mixing alias names with the raw type at boundaries ──
+    // ── ALIAS INTEROP: mixing the alias name with the raw shape ────────
     //
-    // The whole point of transparent aliases is that call sites can freely
-    // mix the alias name and the aliased type. These tests pin the common
-    // patterns where a user has a value typed as `MyInt` but the callee is
-    // annotated with `Int` (or vice versa), and the value flows through
-    // records, sequences, higher-order callbacks, and stdlib functions.
-
-    @Test fun `MyInt value flows into function annotated with bare Int`() {
-        ok("interop.value-to-bare", """
-            type MyInt = Int
-            pub let mk : {} -> MyInt = {} -> 42
-            pub let sink : { n: Int } -> Int = { n } -> n
-            pub let go = {} -> sink { n = mk {} }
-        """)
-    }
-
-    @Test fun `bare Int value flows into function annotated with MyInt`() {
-        ok("interop.bare-to-value", """
-            type MyInt = Int
-            pub let take : { n: MyInt } -> MyInt = { n } -> n
-            pub let go = {} -> take { n = 5 }
-        """)
-    }
+    // The whole point of a transparent alias is that call sites may freely mix
+    // the alias name and the thing it names. These pin the common boundaries —
+    // a record field, a seq element, a higher-order callback, a type argument —
+    // with a RECORD alias as the vehicle, since that is the kind whose name
+    // both survives and stays interchangeable.
 
     @Test fun `alias flows through a record field type`() {
-        // Bare inline records: {n: MyInt} must be interchangeable with
-        // {n: Int} at every boundary because MyInt inlines to Int.
         ok("interop.record-field", """
-            type MyInt = Int
-            pub let take : { w: { n: Int } } -> Int = { w } -> w.n
-            pub let go = { w: { n: MyInt } } -> take { w = w }
+            type Row = { id: Int }
+            pub let take : { w: { r: { id: Int } } } -> Int = { w } -> w.r.id
+            pub let go = { w: { r: Row } } -> take { w = w }
         """)
     }
 
-    @Test fun `record alias with aliased field type flows structurally`() {
-        // `type X = <anything>` is fully transparent. Wrap and {n: Int} are
-        // the same type at every use site.
-        ok("interop.record-alias-wrapping-alias", """
-            type MyInt = Int
-            type Wrap = { n: MyInt }
-            pub let take : { r: { n: Int } } -> Int = { r } -> r.n
-            pub let go = { w: Wrap } -> take { r = w }
-        """)
-    }
-
-    @Test fun `bare inline record flows into record-alias parameter`() {
+    @Test fun `bare inline record flows into a record-alias parameter`() {
         ok("interop.bare-into-alias", """
             type Wrap = { n: Int }
             pub let take : { w: Wrap } -> Int = { w } -> w.n
@@ -289,29 +269,106 @@ class TypeAliasTransparencyTest {
     @Test fun `alias flows through a Seq element boundary`() {
         ok("interop.seq-element", """
             use std::collections::seq
-            type MyInt = Int
-            pub let mk : {} -> Seq MyInt = {} -> seq::empty {}
-            pub let take : { xs: Seq Int } -> Seq Int = { xs } -> xs
+            type Row = { id: Int }
+            pub let mk : {} -> Seq Row = {} -> seq::empty {}
+            pub let take : { xs: Seq { id: Int } } -> Seq { id: Int } = { xs } -> xs
             pub let go = {} -> take { xs = mk {} }
         """)
     }
 
-    @Test fun `alias flows into a stdlib map callback typed with bare Int`() {
+    @Test fun `alias flows into a stdlib map callback typed with the raw shape`() {
         ok("interop.hof-callback", """
+            use std::int
             use std::collections::seq
-            type MyInt = Int
-            pub let mk : {} -> Seq MyInt = {} -> seq::empty {}
-            pub let go = {} -> seq::map { xs = mk {}, f = { x: Int } -> x + 1 }
+            type Row = { id: Int }
+            pub let mk : {} -> Seq Row = {} -> seq::empty {}
+            pub let go = {} -> seq::map { xs = mk {}, f = { x: { id: Int } } -> x.id }
         """)
     }
 
-    @Test fun `Option MyInt and Option Int are interchangeable`() {
+    @Test fun `Option Row and Option of the raw shape are interchangeable`() {
         ok("interop.option-arg", """
-            type MyInt = Int
-            pub let take : { o: Option Int } -> Int = { o } -> match o is
-                Some { val = n } -> n
+            type Row = { id: Int }
+            pub let take : { o: Option { id: Int } } -> Int = { o } -> match o is
+                Some { val = r } -> r.id
                 None -> 0
-            pub let go = { m: Option MyInt } -> take { o = m }
+            pub let go = { m: Option Row } -> take { o = m }
         """)
+    }
+
+    // ── REFUSED: a second name for something already named (V0713) ─────
+    //
+    // Each of these was an `ok(...)` in this file before the rule changed, and
+    // the comment on each says which property it used to pin and where that
+    // property went.
+
+    /** Was `parse.primitive`. A primitive has a name; `newtype` for a new one. */
+    @Test fun `a primitive alias is refused`() {
+        reject("refused.primitive", "type Foo = Int", "V0713")
+    }
+
+    /**
+     * Was `transparent.arith-inherited` — an alias of `Int` could be added to.
+     * That property has no vehicle left, and does not need one: the author who
+     * wanted `MyInt` to behave as `Int` can write `Int`, and the author who
+     * wanted it DISTINCT wants a newtype, which refuses arithmetic on purpose.
+     */
+    @Test fun `a primitive alias used arithmetically is refused at the declaration`() {
+        reject("refused.arith", """
+            use std::int
+            type MyInt = Int
+            pub let inc = { n: MyInt } -> n + 1
+        """, "V0713")
+    }
+
+    /** Was `compose.chain`. A second name for a name. */
+    @Test fun `an alias of an alias is refused`() {
+        reject("refused.chain", """
+            type Row = { id: Int }
+            type Row2 = Row
+        """, "V0713")
+    }
+
+    /** Was `parse.generic` and `param.seq`. `Seq Int` is already named. */
+    @Test fun `a seq alias built only from builtins is refused`() {
+        reject("refused.seq-builtin", "use std::collections::seq\ntype Ids = Seq Int", "V0713")
+        reject("refused.seq-bracket", "type Ids = [Int]", "V0713")
+        reject("refused.seq-nested", "type Matrix = [[Float]]", "V0713")
+    }
+
+    /** Was `param.alias-of-alias`. A parametric rename is still a rename. */
+    @Test fun `a parametric seq alias is refused`() {
+        reject("refused.param-seq", "use std::collections::seq\ntype Ids 'a = Seq 'a", "V0713")
+    }
+
+    /**
+     * An APPLIED name is the one refusal that is about ambiguity rather than
+     * pointlessness: `withAliasIdentity` stamps a variant with the alias's
+     * identity, so `Res` would be a SECOND identity over one shape — exactly
+     * what the `Person` rule rules out.
+     */
+    @Test fun `an alias of an applied type is refused`() {
+        reject("refused.applied", """
+            use std::option
+            type Opt = Option Int
+        """, "V0713")
+    }
+
+    /** A newtype is already a distinct type; renaming it gains nothing. */
+    @Test fun `an alias of a newtype is refused`() {
+        reject("refused.newtype", """
+            use std::int
+            newtype M = Int
+            type M2 = M
+        """, "V0713")
+    }
+
+    /**
+     * The exemption, and why it is not a hole: `__Native*` is a reserved prefix
+     * for opaque runtime handles an author cannot spell, so the alias is that
+     * type's FIRST usable name. `std/polyglot/core.mz` relies on it.
+     */
+    @Test fun `an alias of an unspellable native handle is accepted`() {
+        ok("native.first-name", "type Foreign = __NativeForeign")
     }
 }

@@ -3,69 +3,79 @@ package com.mezze.language.typechecker
 import org.junit.jupiter.api.Test
 
 /**
- * `type` specification: a SPELLING, never a new type.
+ * `type` specification: what an alias may NAME, and what an impl on one may do.
  *
- * A `type` is transparent everywhere — `type Id = Int` lets any `Int` pass where
- * an `Id` is asked for, and back again. That is the whole of what it is, and it
- * decides what it may be used for:
+ * The governing rule is ONE SHAPE, ONE NAME, so that inference has exactly one
+ * answer — `let x = { name = "Ada", age = 32 }` can only adopt `Person` while
+ * `Person` is the only name for that shape. TypeAliasTransparencyTest pins the
+ * rule itself and the transparency that follows from it. This file is the IMPL
+ * question that sits on top: given an alias that is allowed, may it carry one?
  *
- *   - For a RECORD or VARIANT it earns its keep. The type keeps an IDENTITY, so
- *     the name survives to dispatch (`impl Norm for Point2` works) and the name
- *     stands for something long.
- *   - For a bare PRIMITIVE the alias itself is fine and SUPPORTED: it reads as
- *     documentation in a signature, and it INHERITS the primitive's impls, which
- *     TypeAliasTransparencyTest pins (`type MyInt = Int` already has `Eq` and
- *     arithmetic, with no impl written). What is refused is declaring an IMPL on
- *     it — `IntType` has nowhere to record "this was called Id", so the alias
- *     name never reaches dispatch and the impl would be silently dead.
+ * After the rule, exactly one alias kind can be declared AND cannot carry an
+ * impl, so V0706 has exactly one subject left: the FUNCTION alias.
  *
- * `newtype` is the construct for a distinct type, and in Mezze it costs one
- * line — which is why `type` can afford to be only a spelling. Rust's users
- * reach for alias tricks because its newtype pattern costs real boilerplate.
+ *   - a record or variant declaration keeps an IDENTITY, so `impl Norm for
+ *     Point2` dispatches and is allowed
+ *   - a primitive, seq-of-builtins, newtype or applied-name alias is refused at
+ *     the DECLARATION by V0713, so no impl on one can exist to ask about
+ *   - a FUNCTION alias is allowed — a function type is genuinely nameless, so
+ *     naming it is what `type` is for — but `FunctionType` has no identity
+ *     field, so the name does not survive to a use site and an impl on it would
+ *     be silently dead. That is V0706.
  *
- * A WRONG TURN worth recording. I first refused the primitive ALIAS itself,
- * having measured that the stdlib and examples contain none. The measurement was
- * right and the conclusion was not: TypeAliasTransparencyTest pins the alias as
- * intended behaviour in 13 cases, and a corpus of USES was never going to show a
- * feature's own test file. Only the impl is refused.
+ * A WRONG TURN worth recording, because the record of it matters more now than
+ * when I wrote it. I first refused the primitive ALIAS itself, having measured
+ * that the stdlib and examples contain none. The measurement was right and the
+ * conclusion was premature: TypeAliasTransparencyTest pinned the alias as
+ * intended behaviour in 13 cases, and a corpus of USES was never going to show
+ * a feature's own test file — so I retracted and refused only the impl.
+ *
+ * The decision later went the other way, on a stronger argument than the one I
+ * had: a primitive alias is ERASED before inference finishes — measured, even on
+ * an annotated return type — so it never reaches a signature, a diagnostic or a
+ * hover, and cannot carry an impl. It is a comment the compiler spell-checks.
+ * What made my first attempt wrong was the evidence I offered, not the
+ * conclusion; a pinning test meant "someone decided this, go ask them", and
+ * asking is what eventually settled it.
  */
 class TypeAliasSpecTest : VariantSpecBase() {
 
-    // ========================================= a primitive alias is refused
+    // ===================== V0706's one remaining subject: a function alias
 
-    /** An IMPL on a transparent alias of a primitive can never be found. */
-    @Test fun `an impl on a primitive alias is refused`() {
+    /**
+     * The name cannot reach the use site, so the impl would never run. Unlike
+     * the primitive case this is NOT redundant — a function alias is a real,
+     * allowed abbreviation; it simply cannot be a dispatch target.
+     */
+    @Test fun `an impl on a function alias is refused`() {
         rejects(
             """
             use std::int
-            type Id = Int
+            type Handler = { n: Int } -> Int
             ability Norm for 'a where { norm: { it: 'a } -> Int }
-            impl Norm for Id where { norm = { it } -> 1 }
+            impl Norm for Handler where { norm = { it } -> 1 }
             $MAIN
             """,
             "V0706",
             "Refused where it is WRITTEN, not at the use site that is surprised by " +
-                "it — the same instinct as an undeclared type name being an error on " +
-                "its own line. Without this the author gets a type that silently is " +
-                "`Int`, and an impl on it that silently never runs.",
+                "it. `FunctionType` has no identity field, so `Handler` is lost " +
+                "between the impl and the receiver.",
         )
     }
 
-    /** Every primitive, since the reason is about the representation. */
-    @Test fun `an impl on any primitive alias is refused`() {
-        for (prim in listOf("Str", "Float", "Bool", "Char")) {
-            rejects(
-                """
-                type Alias$prim = $prim
-                ability Norm$prim for 'a where { norm$prim: { it: 'a } -> Bool }
-                impl Norm$prim for Alias$prim where { norm$prim = { it } -> True }
-                $MAIN
-                """,
-                "V0706",
-                "`$prim` has no identity field either — the rule is about what the type " +
-                    "node can carry, not about `Int` specifically.",
-            )
-        }
+    /** An INHERENT impl on one, by the same reasoning. */
+    @Test fun `an inherent impl on a function alias is refused`() {
+        rejects(
+            """
+            use std::int
+            type Handler = { n: Int } -> Int
+            impl Handler where { twice = { it: Handler } -> 2 }
+            $MAIN
+            """,
+            "V0706",
+            "The inherent path resolves aliases first and reaches the same answer; " +
+                "InherentImplOwnershipSpecTest pins that half of it.",
+        )
     }
 
     /** And the diagnosis names `newtype`, which is what the author meant. */
@@ -73,16 +83,16 @@ class TypeAliasSpecTest : VariantSpecBase() {
         val r = check(
             """
             use std::int
-            type Id = Int
+            type Handler = { n: Int } -> Int
             ability Norm for 'a where { norm: { it: 'a } -> Int }
-            impl Norm for Id where { norm = { it } -> 1 }
+            impl Norm for Handler where { norm = { it } -> 1 }
             $MAIN
             """.trimIndent()
         )
         val msg = (r.exceptionOrNull() as? TypeCheckError)?.let {
             it.message + "\n" + it.hints.joinToString("\n")
         } ?: ""
-        assert(msg.contains("newtype Id = Int")) {
+        assert(msg.contains("newtype Handler = { n: Int } -> Int")) {
             "the fix must be spelled out, not implied; got:\n$msg"
         }
     }
@@ -90,34 +100,26 @@ class TypeAliasSpecTest : VariantSpecBase() {
     /**
      * The hint names the REAL type, not a description of it.
      *
-     * It first said "a seq type", which produced `newtype Ids = a seq type` — a
-     * hint that reads as a fix and cannot be pasted. Worse than no hint. Every
-     * alias kind now renders the annotation the author would have written.
+     * It first said "a function type", which produced `newtype H = a function
+     * type` — a hint that reads as a fix and cannot be pasted. Worse than no
+     * hint. Now the annotation the author would have written is rendered.
      */
     @Test fun `the hint renders the underlying type as code`() {
-        val cases = mapOf(
-            "type Ids = [Int]" to "[Int]",
-            "type Handler = { n: Int } -> Int" to "{ n: Int } -> Int",
-            "type Id = Int" to "Int",
-        )
-        for ((decl, underlying) in cases) {
-            val name = decl.removePrefix("type ").substringBefore(" ")
-            val e = check(
-                """
-                use std::int
-                $decl
-                ability Norm for 'a where { norm: { it: 'a } -> Int }
-                impl Norm for $name where { norm = { it } -> 1 }
-                $MAIN
-                """.trimIndent()
-            ).exceptionOrNull() as? TypeCheckError
-            val hints = e?.hints?.joinToString("\n") ?: ""
-            assert(hints.contains("`impl … for $underlying`")) {
-                "the impl hint must be pasteable for `$decl`; got:\n$hints"
-            }
-            assert(hints.contains("`newtype $name = $underlying`")) {
-                "the newtype hint must be pasteable for `$decl`; got:\n$hints"
-            }
+        val e = check(
+            """
+            use std::int
+            type Handler = { n: Int } -> Int
+            ability Norm for 'a where { norm: { it: 'a } -> Int }
+            impl Norm for Handler where { norm = { it } -> 1 }
+            $MAIN
+            """.trimIndent()
+        ).exceptionOrNull() as? TypeCheckError
+        val hints = e?.hints?.joinToString("\n") ?: ""
+        assert(hints.contains("`impl … for { n: Int } -> Int`")) {
+            "the impl hint must be pasteable; got:\n$hints"
+        }
+        assert(hints.contains("`newtype Handler = { n: Int } -> Int`")) {
+            "the newtype hint must be pasteable; got:\n$hints"
         }
     }
 
@@ -126,9 +128,9 @@ class TypeAliasSpecTest : VariantSpecBase() {
         accepts(
             """
             use std::int
-            type Ids = [Int]
+            type Handler = { n: Int } -> Int
             ability Norm for 'a where { norm: { it: 'a } -> Int }
-            impl Norm for [Int] where { norm = { it } -> 1 }
+            impl Norm for ({ n: Int } -> Int) where { norm = { it } -> 1 }
             $MAIN
             """,
             "Route one: implement for the underlying type. A hint that named an " +
@@ -137,9 +139,9 @@ class TypeAliasSpecTest : VariantSpecBase() {
         accepts(
             """
             use std::int
-            newtype Ids = [Int]
+            newtype Handler = { n: Int } -> Int
             ability Norm for 'a where { norm: { it: 'a } -> Int }
-            impl Norm for Ids where { norm = { it } -> 1 }
+            impl Norm for Handler where { norm = { it } -> 1 }
             $MAIN
             """,
             "Route two: a newtype, which carries its own impls.",
@@ -159,13 +161,12 @@ class TypeAliasSpecTest : VariantSpecBase() {
             pub let u = { i: Id } -> i.norm {}
             $MAIN
             """,
-            "Nominal, so the impl is FOUND — the exact thing the alias could not do. " +
-                "This is the test that makes the refusal above a redirection rather " +
-                "than a removal.",
+            "Nominal, so the impl is FOUND. This is the test that makes V0713 a " +
+                "redirection rather than a removal.",
         )
     }
 
-    /** And two newtypes of one payload stay distinct, unlike two aliases. */
+    /** And two newtypes of one payload stay distinct. */
     @Test fun `two newtypes of the same primitive are distinct`() {
         rejects(
             """
@@ -177,15 +178,37 @@ class TypeAliasSpecTest : VariantSpecBase() {
             $MAIN
             """,
             "T0201",
-            "What an author wanting `type Meters = Int` was reaching for. Two ALIASES " +
-                "of `Int` interchange freely and are legal together precisely because " +
-                "they mean nothing; two newtypes do not.",
+            "What an author writing `type Meters = Int` was reaching for and could " +
+                "never have got: two ALIASES of `Int` interchanged freely, which is " +
+                "why they are now refused outright rather than merely barred from " +
+                "carrying impls.",
         )
     }
 
-    // ========================================= compound aliases stay
+    /**
+     * The argument that used to permit two aliases of one primitive, turned
+     * around. It was "they interchange freely and so cannot compete for
+     * dispatch" — true, and the reason they were legal together. Taken
+     * seriously it says the names mean nothing at all, which is a reason to
+     * refuse each of them rather than to allow both.
+     */
+    @Test fun `two aliases of one primitive are now each refused`() {
+        for (decl in listOf("type Meters = Int", "type Feet = Int")) {
+            rejects(
+                """
+                use std::int
+                $decl
+                $MAIN
+                """,
+                "V0713",
+                "Refused individually, so the pair never arises.",
+            )
+        }
+    }
 
-    /** A record alias is the case `type` is FOR. */
+    // ========================================= what a `type` may still name
+
+    /** A record declaration is the case `type` is FOR. */
     @Test fun `a record alias is still allowed`() {
         accepts(
             """
@@ -196,12 +219,12 @@ class TypeAliasSpecTest : VariantSpecBase() {
             pub let u = { p: Point2 } -> p.norm {}
             $MAIN
             """,
-            "Keeps an identity, so the name reaches dispatch — and it stands for a " +
-                "shape worth naming. Both reasons the primitive case lacks.",
+            "Keeps an identity, so the name reaches dispatch — and it names a shape " +
+                "that had no name. Both reasons the primitive case lacks.",
         )
     }
 
-    /** A variant alias too. */
+    /** A variant declaration too. */
     @Test fun `a variant alias is still allowed`() {
         accepts(
             """
@@ -216,60 +239,62 @@ class TypeAliasSpecTest : VariantSpecBase() {
         )
     }
 
-    /** A seq alias shortens real text, so it stays — impls on it are 11.x's business. */
-    @Test fun `a seq alias is still allowed`() {
-        accepts(
-            """
-            use std::int
-            use std::str
-            type Rows = [{ k: Str, v: Str }]
-            pub let count = { r: Rows } -> 1
-            $MAIN
-            """,
-            "`[{ k: Str, v: Str }]` is worth a name; `Int` is not. The rule is about " +
-                "a BARE primitive, so this is unaffected.",
-        )
-    }
-
-    /** A function alias likewise. */
+    /** A function alias — declarable, just not a dispatch target. */
     @Test fun `a function alias is still allowed`() {
         accepts(
             """
             use std::int
             type Handler = { n: Int } -> Int
             pub let run = { h: Handler } -> h { n = 1 }
+            pub let go = {} -> run { h = { n } -> n + 1 }
             $MAIN
             """,
-            "Shortens a real signature. Nothing about the primitive rule reaches it.",
+            "A function type is nameless, so this is a first name, and the whole " +
+                "value of it is the abbreviation at the signatures that use it.",
         )
     }
 
-    /** A generic record alias — 11.14's case, unaffected. */
     @Test fun `a generic record alias is still allowed`() {
         accepts(
             """
             use std::int
             type Box 'a = { v: 'a }
-            pub let get = { b: Box Int } -> b.v
+            pub let u = { b: Box Int } -> b.v
             $MAIN
             """,
-            "The parameterised form is a record alias and keeps every property of one.",
+            "A record declaration with parameters is still a record declaration.",
         )
     }
 
-    /** Two aliases of one primitive remain legal — nothing adopts an `Int`. */
-    @Test fun `two aliases of one primitive coexist`() {
+    /**
+     * A seq alias needs its element to be a type the author NAMED. `[Row]`
+     * names a collection of their own things; `[{ k: Str, v: Str }]` names a
+     * collection of a shape that itself has no name, which is backwards — the
+     * element is what wanted naming.
+     */
+    @Test fun `a seq alias over a named element is allowed and over an anonymous one is not`() {
         accepts(
             """
             use std::int
-            type Id = Int
-            type Count = Int
-            pub let f = { i: Id, c: Count } -> i + c
+            use std::str
+            type Row = { k: Str, v: Str }
+            type Rows = [Row]
+            pub let count = { r: Rows } -> 1
             $MAIN
             """,
-            "The one-shape-one-name claim (11.5) deliberately does not reach a " +
-                "primitive: a bare `4` adopts nothing, so the ambiguity 11.5 exists to " +
-                "prevent cannot arise. And they add freely, because both ARE `Int`.",
+            "Name the element, then the collection. Two declarations, each naming " +
+                "something that had no name.",
+        )
+        rejects(
+            """
+            use std::str
+            type Rows = [{ k: Str, v: Str }]
+            $MAIN
+            """,
+            "V0713",
+            "The inner shape has no name while the collection does. Refused so the " +
+                "author names the row, which is the thing they will want to talk " +
+                "about anyway.",
         )
     }
 }

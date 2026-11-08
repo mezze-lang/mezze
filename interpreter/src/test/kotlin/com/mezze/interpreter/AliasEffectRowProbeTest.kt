@@ -128,16 +128,18 @@ class AliasEffectRowProbeTest {
     }
 
     /**
-     * An alias of a function type with NO row is still legal, and chains: T0219
-     * refuses a row on such an alias, not the alias itself. `Gen` is `UnitFn`,
-     * which is the pure thunk.
+     * An alias of a function type with NO row is legal and usable: T0219 refuses
+     * a row on such an alias, not the alias itself.
+     *
+     * This used to chain through `type Gen 'a = UnitFn 'a` to show the alias
+     * survived a second layer. V0713 refuses that layer now — an alias of an
+     * alias is a second name — and the layer was never what the test was about.
      */
     @Test
-    fun `a row-less function alias still chains`() {
+    fun `a row-less function alias is legal and callable`() {
         assertEquals(7L, MezzeTestHelper.asLong(eval("""
             type UnitFn 'a = {} -> 'a
-            type Gen 'a = UnitFn 'a
-            let run_it: { g: Gen Int } -> Int = { g } -> g {}
+            let run_it: { g: UnitFn Int } -> Int = { g } -> g {}
             run_it { g = {} -> 7 }
         """.trimIndent())))
     }
@@ -222,12 +224,19 @@ class AliasEffectRowProbeTest {
      * function alias rather than ask you to move it to the use site: there is no
      * use-site position that could own it.
      */
+    // A RECORD alias as the return type, since `type MyInt = Int` is refused at
+    // the declaration now (V0713). The subject is untouched — the row belongs to
+    // the ARROW, not to whatever the arrow returns — and a record alias is an
+    // alias in every sense that matters here: transparent, named, and standing
+    // where the return type goes.
     @Test
     fun `the row is the arrow's even when the return type is an alias`() {
         assertEquals(7L, MezzeTestHelper.asLong(eval("""
-            type MyInt = Int
-            let f: {} -> MyInt <Tick> = {} -> Tick.tick {}
-            perform Ticker in f {}
+            type Box = { v: Int }
+            let f: {} -> Box <Tick> = {} -> { v = Tick.tick {} }
+            perform Ticker in do
+              let b = f {}
+              b.v
         """.trimIndent())))
     }
 
@@ -236,9 +245,11 @@ class AliasEffectRowProbeTest {
     fun `without that row the same body is refused`() {
         val t = assertThrows(Throwable::class.java) {
             eval("""
-                type MyInt = Int
-                let f: {} -> MyInt = {} -> Tick.tick {}
-                perform Ticker in f {}
+                type Box = { v: Int }
+                let f: {} -> Box = {} -> { v = Tick.tick {} }
+                perform Ticker in do
+                  let b = f {}
+                  b.v
             """.trimIndent())
         }
         assertTrue(

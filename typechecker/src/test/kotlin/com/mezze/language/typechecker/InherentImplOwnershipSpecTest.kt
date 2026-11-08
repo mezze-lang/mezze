@@ -130,10 +130,11 @@ class InherentImplOwnershipSpecTest : VariantSpecBase() {
             impl Id where { twice = { it: Id } -> it + it }
             $MAIN
             """,
-            "V0706",
-            "Refused at the DECLARATION, where the fix is (`newtype Id = Int`), " +
-                "rather than at every use site. Rust resolves aliases before " +
-                "coherence too, which is why `type V = Vec<i32>; impl V {}` is " +
+            "V0713",
+            "The ROOT CAUSE wins: `type Id = Int` is refused as a declaration before " +
+                "anything asks about the impl. It used to report V0706 — true but " +
+                "downstream, since the alias is the mistake. Rust resolves aliases " +
+                "before coherence too, which is why `type V = Vec<i32>; impl V {}` is " +
                 "still E0116 and not a new type to hang methods on.",
         )
     }
@@ -148,9 +149,10 @@ class InherentImplOwnershipSpecTest : VariantSpecBase() {
             impl B where { twice = { it: B } -> it + it }
             $MAIN
             """,
-            "V0706",
+            "V0713",
             "The reason is about the underlying representation, which another " +
-                "alias link does not change.",
+                "alias link does not change — and a chain of renames is refused at " +
+                "the declaration for the same reason a single one is.",
         )
     }
 
@@ -163,9 +165,10 @@ class InherentImplOwnershipSpecTest : VariantSpecBase() {
             impl Ids where { firstish = { it: Ids } -> 1 }
             $MAIN
             """,
-            "V0706",
-            "Two modules could each alias `[Int]` and each add methods to it. " +
-                "Named by the spelling, both impls target one type.",
+            "V0713",
+            "`[Int]` is built only from builtins, so the alias is refused outright " +
+                "and the impl question never arises. `newtype Ids = [Int]` is the " +
+                "route to methods on a seq-shaped type you own.",
         )
     }
 

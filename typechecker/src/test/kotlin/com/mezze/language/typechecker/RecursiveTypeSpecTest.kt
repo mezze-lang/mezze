@@ -199,18 +199,26 @@ class RecursiveTypeSpecTest : VariantSpecBase() {
     }
 
     /** A long alias chain that terminates is still fine. */
+    /**
+     * A chain that REACHES something is not a cycle — the walk has to stop
+     * rather than report one. Written with record declarations now that a chain
+     * of renames is itself refused (V0713): `type A = B` where `B` is another
+     * alias is a second name, cycle or not. What this still pins is that the
+     * cycle walk terminates, which is the only thing it was ever about.
+     */
     @Test fun `a terminating alias chain is fine`() {
         accepts(
             """
             use std::int
-            type A = B
-            type B = C
-            type C = Int
-            pub let f = { a: A } -> a + 1
+            type Leaf = { v: Int }
+            type Mid = { l: Leaf }
+            type Top = { m: Mid }
+            pub let f = { t: Top } -> t.m.l.v
             $MAIN
             """,
-            "Only a CYCLE is refused. A chain that reaches a real type is ordinary " +
-                "transparency, and the cycle walk must stop at `C` rather than report one.",
+            "Only a CYCLE is refused. A chain of declarations that bottoms out in a " +
+                "real shape is ordinary composition, and the walk must stop at `Leaf` " +
+                "rather than report one.",
         )
     }
 }

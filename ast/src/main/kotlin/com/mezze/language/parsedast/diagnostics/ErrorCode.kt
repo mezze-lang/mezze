@@ -156,6 +156,7 @@ enum class ErrorCode {
     V0711_UNINHABITED_TYPE, // `type Endless = { next: Endless }` — recursion with no base case; no value of it can be built
     V0710_TOP_LEVEL_EXPRESSION, // a bare expression at the top level of a program (only decls allowed); fine in the REPL
     V0712_NOT_A_TYPE_NAME, // `{ x: Eq }` or `type X = Tick` — an ability or effect name in a type position; they are separate namespaces
+    V0713_TYPE_ALIAS_OF_NAMED_TYPE, // `type UserId = Int` — a second name for something already named; one shape has one name, so inference has one answer. `newtype` for a distinct type
 
     // ─── Typechecker: misc syntax/desugar (T04xx) ────────────────────────
     T0401_UNKNOWN_OPERATOR,

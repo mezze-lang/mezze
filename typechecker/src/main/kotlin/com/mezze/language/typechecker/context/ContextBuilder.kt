@@ -12,6 +12,7 @@ import com.mezze.language.typechecker.util.TypeAnnotationConverter
 import com.mezze.language.typechecker.util.WellKnownTypeApp
 import com.mezze.language.typechecker.validation.AbilityValidator
 import com.mezze.language.typechecker.validation.DuplicateDeclarationValidator
+import com.mezze.language.typechecker.validation.TypeAliasTargetValidator
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typedast.Hash
 
@@ -522,6 +523,11 @@ class ContextBuilder {
 
         val localValidationRegistry = DeclarationRegistry.from(allParsedTypeDecls, abilityDecls, effectDecls)
         AbilityValidator.validateNameCollisions(localValidationRegistry)
+        // Before the impl checks below, so the ROOT CAUSE wins: `type Id = Int;
+        // impl Norm for Id` would otherwise report V0706 ("the impl can never be
+        // found"), which is true but downstream — the alias is the mistake, and
+        // V0706 narrows to function-type aliases once this rule is in force.
+        TypeAliasTargetValidator.validate(module, localValidationRegistry)
         AbilityValidator.validateNoSharedOperationNames(abilityDecls, importedAbilities)
 
         for (abilityDecl in abilityDecls.values) {

@@ -120,11 +120,13 @@ class MalformedAsWrittenSpecTest : VariantSpecBase() {
             """
             use std::int
             use std::option
-            type Id = Int
-            pub let u = { i: Id, o: Option Int } -> i + 1
+            type Row = { id: Int }
+            pub let u = { r: Row, o: Option Int } -> r.id
             $MAIN
             """,
-            "The returning-early path must not return early on a healthy module.",
+            "The returning-early path must not return early on a healthy module. " +
+                "A record declaration rather than `type Id = Int`, which V0713 now " +
+                "refuses — the point is a module with nothing wrong with it.",
         )
     }
 

@@ -166,10 +166,15 @@ class NewtypeRulesTest {
         """, "DoesNotExist")
     }
 
+    // A FUNCTION alias, because `type MyInt = Int` is refused at the
+    // declaration now (V0713). The subject is unchanged — `Alias.(x)` must not
+    // be mistaken for newtype construction — and the function alias is the kind
+    // that still reaches THIS message: a record or variant alias gets its own
+    // more specific one naming the construction syntax to use instead.
     @Test fun `RULE disambiguation - Transparent alias dot-parens is REJECTED with newtype hint`() {
         reject("disambig.alias", """
-            type MyInt = Int
-            pub let f = {} -> MyInt.(42)
+            type Handler = { n: Int } -> Int
+            pub let f = {} -> Handler.({ n } -> n)
         """, "transparent type alias")
     }
 
