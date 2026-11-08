@@ -221,6 +221,31 @@ let l_ss_add_present = { i, acc, s, keys } -> if i <= 0 then acc
     l_ss_add_present { i = i - 1, s = s, keys = keys,
                        acc = acc + sorted_set::size { s = s2 } }
 
+## ── 15/16. BUILDING a sorted map, ascending against descending ─────────────
+## These two are a PAIR and neither means anything alone. Both do `n` inserts
+## into a map built from empty, so `n` is the op count AND the final size, and
+## the row prints cost per insert.
+##
+## Ascending insertion lands every key at `insertPos == length`, which is the
+## one position the array can take without copying: the write is at index
+## `length`, outside the window every map sharing the array reads, so the slot
+## belongs to nobody. Descending insertion lands every key at 0, which can only
+## be done by copying. So the pair separates the fast path from the structure:
+## if ascending is flat in `n` while descending doubles when `n` doubles, the
+## append is firing and the copy is what remains.
+##
+## SIZED BY THEIR OWN COST, not by the file's default `n`. A descending build is
+## O(n^2) in total — every insert copies the whole array — so at the 1 000 000
+## this file uses elsewhere one pass would run for minutes. Run these at
+## `n`=10 000 and 20 000 and read the SLOPE; the absolute numbers are per-insert
+## either way.
+let l_sm_build_asc = { i, limit, m } -> if i > limit then sorted_map::size { m = m }
+  else l_sm_build_asc { i = i + 1, limit = limit,
+                        m = sorted_map::insert { m = m, k = i, v = i } }
+
+let l_sm_build_desc = { i, m } -> if i <= 0 then sorted_map::size { m = m }
+  else l_sm_build_desc { i = i - 1, m = sorted_map::insert { m = m, k = i, v = i } }
+
 let l_dq_get = { i, acc, d, keys } -> if i <= 0 then acc
   else do
     let v = match deque::get { d = d, i = i % keys } is
@@ -279,3 +304,7 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
            label = "ss::add ABSENT, base   ", thunk = {} -> l_ss_add_absent { i = n, acc = 0, s = ss, keys = keys } }
   report { idx = 14, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "ss::add PRESENT, base  ", thunk = {} -> l_ss_add_present { i = n, acc = 0, s = ss, keys = keys } }
+  report { idx = 15, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "sm build ASCENDING     ", thunk = {} -> l_sm_build_asc { i = 1, limit = n, m = sorted_map::empty {} } }
+  report { idx = 16, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "sm build DESCENDING    ", thunk = {} -> l_sm_build_desc { i = n, m = sorted_map::empty {} } }

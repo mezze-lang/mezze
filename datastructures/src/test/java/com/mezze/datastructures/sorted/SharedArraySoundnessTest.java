@@ -2,6 +2,7 @@ package com.mezze.datastructures.sorted;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
@@ -212,5 +213,86 @@ public class SharedArraySoundnessTest {
         assertArrayEquals(EVENS_TO_20, base.toArray(), "the base saw its own add");
         assertEquals(11, base.size());
         assertEquals(12, added.size());
+    }
+    // ──── the append, now that a read no longer takes the token away ────
+
+    /**
+     * A read used to revoke ownership, which meant the guest-side search a
+     * guest insert runs FIRST killed the append fast path on every insert
+     * Mezze ever made. It does not any more, so these cover the path that
+     * became reachable.
+     *
+     * <p>Sharing the array is the PREMISE here, asserted by identity rather
+     * than assumed: if the append did not run in place, the result would carry
+     * fresh arrays and these tests would pass without touching the path they
+     * are about.
+     */
+    @Test
+    public void aReadNoLongerStopsTheAppendRunningInPlace() {
+        MezzeSortedMap<Integer, String> base = ownedMapWithSpare();
+        base.keyAt(5);          // the probe a guest search makes
+        base.get(4);            // and the other read that used to revoke
+
+        MezzeSortedMap<Integer, String> appended = base.put(21, "v21");
+
+        assertSame(base.getKeysInternal(), appended.getKeysInternal(),
+                "the append did not run in place, so a read still revokes");
+        assertEquals(12, appended.size());
+        assertEquals("v21", appended.get(21));
+    }
+
+    @Test
+    public void anAppendIsInvisibleToTheMapItCameFrom() {
+        MezzeSortedMap<Integer, String> base = ownedMapWithSpare();
+        Object[] before = base.keys();
+
+        MezzeSortedMap<Integer, String> appended = base.put(21, "v21");
+        assertSame(base.getKeysInternal(), appended.getKeysInternal(), "premise: in place");
+
+        assertArrayEquals(before, base.keys());
+        assertArrayEquals(EVENS_TO_20, base.keys());
+        assertEquals(11, base.size());
+        assertNull(base.get(21));
+        assertEquals(12, appended.size());
+    }
+
+    /**
+     * SIXTY-FOUR maps, every one of them sharing arrays through a chain of
+     * appends, each read back AFTER all the appends have happened — which is
+     * the ordering that matters, because an earlier map must not see what was
+     * written past its own end.
+     */
+    @Test
+    public void aChainOfAppendsLeavesEveryEarlierMapReadable() {
+        List<MezzeSortedMap<Integer, String>> steps = new ArrayList<>();
+        MezzeSortedMap<Integer, String> m = MezzeSortedMap.empty();
+        for (int i = 0; i < 64; i++) {
+            m = m.put(i, "v" + i);
+            steps.add(m);
+        }
+        for (int i = 0; i < 64; i++) {
+            MezzeSortedMap<Integer, String> s = steps.get(i);
+            assertEquals(i + 1, s.size(), "map " + i + " changed length");
+            for (int j = 0; j <= i; j++) {
+                assertEquals("v" + j, s.get(j), "map " + i + " lost key " + j);
+            }
+            assertNull(s.get(i + 1), "map " + i + " saw a later append");
+        }
+    }
+
+    @Test
+    public void aChainOfSetAppendsLeavesEveryEarlierSetReadable() {
+        List<MezzeSortedSet<Integer>> steps = new ArrayList<>();
+        MezzeSortedSet<Integer> s = MezzeSortedSet.empty();
+        for (int i = 0; i < 64; i++) {
+            s = s.add(i);
+            steps.add(s);
+        }
+        for (int i = 0; i < 64; i++) {
+            MezzeSortedSet<Integer> v = steps.get(i);
+            assertEquals(i + 1, v.size(), "set " + i + " changed length");
+            assertTrue(v.contains(i), "set " + i + " lost its last element");
+            assertFalse(v.contains(i + 1), "set " + i + " saw a later append");
+        }
     }
 }

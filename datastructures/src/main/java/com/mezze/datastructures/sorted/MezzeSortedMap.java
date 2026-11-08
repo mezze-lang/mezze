@@ -73,25 +73,35 @@ public final class MezzeSortedMap<K, V> implements TruffleObject, Iterable<Mezze
         this.ownerToken = ownerToken;
     }
 
-    /** Latched flag: once anything has READ this structure it may never be
-     *  mutated in place again, however the ownership token stands. (The
-     *  rationale used to live on HashMapStorage, which is gone — its whole
-     *  family was replaced by persistent tries after the in-place writes turned
-     *  out to be observable in the structure derived FROM; see known-bugs
-     *  BUG 38.) */
-    @CompilationFinal
-    private boolean ownershipRevoked;
-
+    /**
+     * Whether this map may still write into its own arrays — which is only
+     * ever the append in {@link #appendInPlace}, at index {@code length}.
+     *
+     * <p>READING NO LONGER REVOKES THIS, and that is the whole point. Every
+     * read on this class is bounded by {@code length}: {@code keyAt} and
+     * {@code valueAt} range-check against it, and every search runs inside it.
+     * The append writes at {@code length}, which is outside the window of
+     * every map holding these arrays, because a map sharing them was derived
+     * EARLIER and so has a length no greater than the owner's — ownership only
+     * ever moves forward, to the longer map. So no reader can observe the
+     * append, and there is nothing for a read to protect.
+     *
+     * <p>It used to revoke, back when a sibling path shifted
+     * {@code [insertPos, length)} in place for a middle insert. That write WAS
+     * inside the window, the revocation was the only thing standing between it
+     * and BUG 38, and it did not work — a map still saw its own insert, which
+     * is BUG 40. Deleting that path removed the write; this removes the guard
+     * that was failing to contain it, and with it the reason the append could
+     * never fire from guest code: the guest-side search reads the map before
+     * inserting into it, so the revocation killed the fast path on every
+     * insert Mezze ever made.
+     *
+     * <p>ANYTHING ADDED THAT WRITES INSIDE {@code [0, length)} BREAKS THIS and
+     * cannot be fixed by revoking on reads. It needs a structure that shares
+     * instead, which is what the Map and Set became.
+     */
     private boolean isOwner() {
-        return !ownershipRevoked && ownerToken != null && ownerToken[0] == this;
-    }
-
-    private void revokeOwnership() {
-        if (ownershipRevoked) return;
-        if (ownerToken != null && ownerToken[0] == this) {
-            ownerToken[0] = null;
-        }
-        ownershipRevoked = true;
+        return ownerToken != null && ownerToken[0] == this;
     }
 
     // ===== CONSTRUCTION =====
@@ -177,7 +187,6 @@ public final class MezzeSortedMap<K, V> implements TruffleObject, Iterable<Mezze
      */
     @SuppressWarnings("unchecked")
     public V get(K key) {
-        revokeOwnership();
         int idx = binarySearch(key);
         return idx >= 0 ? (V) values[idx] : null;
     }
@@ -188,7 +197,6 @@ public final class MezzeSortedMap<K, V> implements TruffleObject, Iterable<Mezze
      */
     @SuppressWarnings("unchecked")
     public Object getObject(Object key) {
-        revokeOwnership();
         int idx = binarySearchObject(key);
         return idx >= 0 ? values[idx] : null;
     }
@@ -234,13 +242,14 @@ public final class MezzeSortedMap<K, V> implements TruffleObject, Iterable<Mezze
      * makes the comparison an ordinary guest call that DOES inline, and
      * reduces this class's job to an array read.
      *
-     * <p>Ownership is revoked exactly as {@code getObject} does, and for the
-     * same reason: the caller has now observed these contents, so a later
-     * insert must copy rather than mutate underneath them. The flag makes it
-     * idempotent, so the repeated probes of one search pay it once.
+     * <p>This probe used to revoke ownership, on the grounds that the caller
+     * had now observed the contents. It does not, and must not: the probe is
+     * bounded by {@code length} and the only in-place write lands AT
+     * {@code length}, so there is nothing here to protect — while revoking
+     * meant that the search a guest insert runs first killed the append fast
+     * path on every insert Mezze made. See {@link #isOwner}.
      */
     public Object keyAt(int i) {
-        revokeOwnership();
         if (i < 0 || i >= length) {
             throw new IndexOutOfBoundsException("sorted map key index " + i + " of " + length);
         }
@@ -249,7 +258,6 @@ public final class MezzeSortedMap<K, V> implements TruffleObject, Iterable<Mezze
 
     /** The value at a position in sort order. See {@link #keyAt}. */
     public Object valueAt(int i) {
-        revokeOwnership();
         if (i < 0 || i >= length) {
             throw new IndexOutOfBoundsException("sorted map value index " + i + " of " + length);
         }
@@ -257,7 +265,6 @@ public final class MezzeSortedMap<K, V> implements TruffleObject, Iterable<Mezze
     }
 
     public boolean containsKey(K key) {
-        revokeOwnership();
         return binarySearch(key) >= 0;
     }
 
@@ -266,7 +273,6 @@ public final class MezzeSortedMap<K, V> implements TruffleObject, Iterable<Mezze
      * For interpreter use with dynamic types.
      */
     public boolean containsKeyObject(Object key) {
-        revokeOwnership();
         return binarySearchObject(key) >= 0;
     }
 
@@ -503,7 +509,6 @@ public final class MezzeSortedMap<K, V> implements TruffleObject, Iterable<Mezze
      */
     @SuppressWarnings("unchecked")
     public MezzeSortedMap<K, V> removeObject(Object key) {
-        revokeOwnership();
         int idx = binarySearchObject(key);
         if (idx < 0) return this;
 

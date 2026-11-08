@@ -10084,3 +10084,82 @@ measurement". This is it.
 
 Gate: `:interpreter:test` 7 649 tests 0 failures 14 skipped; `:typechecker:test` 4 826 tests 0 failures;
 `:datastructures:test` 749 tests 0 failures 2 skipped.
+
+#### Reading revoked the right to append, so Mezze never once appended — 215x
+
+The previous entry left `insert` copy-bound and said the rest was structural.
+It was not. There was still a fast path in the class, unreachable for a reason
+that had stopped being true.
+
+`putObject` can append without copying when the key lands at the END of the
+array: the write is at index `length`, and every map holding those arrays reads
+`[0, length)`, so the slot belongs to nobody. That path is guarded by
+`isOwner()`, and `isOwner()` was false as soon as anything had READ the map —
+`keyAt`, `valueAt`, `get`, `containsKey` all called `revokeOwnership()`.
+
+And the guest-side search reads the map before inserting into it. **So the
+append could not fire on a single insert Mezze ever made.** The revocation was
+written for the middle-insert path that shifted `[insertPos, length)` in place;
+that write really was inside the reader's window, the revocation was the only
+thing between it and BUG 38, and it did not even work — a map still saw its own
+insert, which is BUG 40. Deleting that path removed the write. This removes the
+guard that had been failing to contain it.
+
+```
+  n         ASCENDING build            DESCENDING build (control)
+            before      after  ratio   before      after  ratio
+  10 000   3 002 369   96 796   31.0x  3 031 396  2 971 826  1.02x
+  20 000   5 731 662   54 115  105.9x  5 814 722  5 765 581  1.01x
+  40 000  11 228 349   52 280  214.8x 11 314 117 11 215 870  1.01x
+```
+
+Per-insert cost was DOUBLING with n and is now flat: O(n) per insert became
+O(1) amortized, so the win grows without bound. 57 young collections against 6
+at n=20 000 says the same thing in the measure that survives a loaded machine.
+
+**The control is the same operation with one thing changed.** A descending build
+does the identical work in the identical loop and lands every key at position 0,
+which cannot be appended — and it does not move. Nothing else distinguishes the
+two rows, so nothing else can explain the 215x.
+
+#### And every ordered lookup got 1.24x, which was not the point
+
+```
+  row                          before    after   verdict
+  sorted_set::contains         14 486   11 673     1.24x
+  ss::add PRESENT, base        17 018   13 601     1.25x
+  sorted_map::contains_key     15 013   11 793     1.27x
+  sorted_map::get (hit)        16 941   13 897     1.22x
+  sm::insert ABSENT, base     676 996  669 284      flat
+  sm::insert PRESENT, base    183 263  180 518      flat
+  sorted_map::size (control)      482      443      flat
+```
+
+Converged at n=300k and n=600k. `revokeOwnership` was idempotent, but idempotent
+meant a field load and a branch on EVERY PROBE of the search — ten of them a
+lookup. The GC count is unchanged at 5 against 5, which is the useful part: this
+win is not allocation, so the two mechanisms in this change are separable and
+each is attributed by its own evidence.
+
+It also more than repays the regression the previous entry recorded:
+`ss::add PRESENT` was 15 308 before that change and 17 018 after it, and is
+13 601 now.
+
+#### What is actually load-bearing now
+
+One sentence, because it is the whole safety argument and it is no longer
+written as a flag: **the only in-place write in either class is at index
+`length`, and no map sharing the array can address that slot, because a map
+sharing it was derived earlier and so has a length no greater than the owner's —
+ownership only ever moves forward.** Anything added that writes inside
+`[0, length)` breaks this and cannot be repaired by revoking on reads. That was
+tried; it is BUG 40.
+
+Two sentinels, because the argument deserves them. `isOwner()` returning false
+fails exactly the two tests that assert the arrays came back SHARED — proof the
+others would have passed through the copy path without touching the thing they
+name. The append writing at `length - 1` instead of `length` fails 9 of 14,
+including a chain of 64 maps read back after all 64 appends.
+
+Gate: `:interpreter:test` 7 649 tests 0 failures 14 skipped; `:typechecker:test` 4 826 tests 0 failures;
+`:datastructures:test` 753 tests 0 failures 2 skipped.

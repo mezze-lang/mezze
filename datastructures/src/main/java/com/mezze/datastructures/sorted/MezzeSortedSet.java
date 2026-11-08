@@ -61,25 +61,15 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
         this.ownerToken = ownerToken;
     }
 
-    /** Latched flag: once anything has READ this structure it may never be
-     *  mutated in place again, however the ownership token stands. (The
-     *  rationale used to live on HashMapStorage, which is gone — its whole
-     *  family was replaced by persistent tries after the in-place writes turned
-     *  out to be observable in the structure derived FROM; see known-bugs
-     *  BUG 38.) */
-    @CompilationFinal
-    private boolean ownershipRevoked;
-
+    /**
+     * Whether this set may still write into its own array — only ever the
+     * append in {@link #appendInPlace}, at index {@code length}. Reading does
+     * NOT revoke it; see {@code MezzeSortedMap.isOwner} for why that is sound
+     * and for what it was protecting against before the middle-insert path was
+     * deleted as BUG 40.
+     */
     private boolean isOwner() {
-        return !ownershipRevoked && ownerToken != null && ownerToken[0] == this;
-    }
-
-    private void revokeOwnership() {
-        if (ownershipRevoked) return;
-        if (ownerToken != null && ownerToken[0] == this) {
-            ownerToken[0] = null;
-        }
-        ownershipRevoked = true;
+        return ownerToken != null && ownerToken[0] == this;
     }
 
     // ===== CONSTRUCTION =====
@@ -184,12 +174,11 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
      * code, which could only reach the program's `Ord` by calling back out,
      * and Graal cannot inline a guest function into host code.
      *
-     * <p>Ownership is revoked as every other read does, so a later insert
-     * copies rather than mutating contents the caller has now observed. The
-     * flag makes it idempotent, so one search's repeated probes pay it once.
+     * <p>This probe does NOT revoke ownership, though it used to: it is
+     * bounded by {@code length} and the only in-place write lands AT
+     * {@code length}. See {@code MezzeSortedMap.isOwner}.
      */
     public Object elementAt(int i) {
-        revokeOwnership();
         if (i < 0 || i >= length) {
             throw new IndexOutOfBoundsException("sorted set index " + i + " of " + length);
         }
@@ -211,7 +200,6 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
      * Returns true if the element is present.
      */
     public boolean contains(A elem) {
-        revokeOwnership();
         return binarySearch(elem) >= 0;
     }
 
@@ -276,7 +264,6 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
     }
 
     public boolean containsObject(Object elem) {
-        revokeOwnership();
         return binarySearchObject(elem) >= 0;
     }
 
