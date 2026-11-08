@@ -1,0 +1,158 @@
+## WHAT ONE MORE FUSED STAGE COSTS.
+##
+## `fusegaps` ranks pipeline SHAPES and found map+map at 8.2x the map+filter
+## floor. That comparison has a confound: its floor kernel filters on `x * 3 < n`,
+## which rejects TWO THIRDS of the elements, so its fold runs on a third of them
+## while map+map folds all. At most 3x of the 8.2x is that.
+##
+## The clean comparison is map-only (74 ps, folds all) against map+map (702 ps,
+## folds all) — ONE extra `+ 1` stage for 9.5x. And both are EMITTED AS FUSED
+## pipelines: `MEZZE_CHAIN_CANON_EMIT_DEBUG=1` prints
+## `FusedLongRangePipeline (Accumulate, 2 stages)` for the second, so this is a
+## cost INSIDE the fused path, not a fallback to the lazy walk.
+##
+## So this case holds everything fixed but the NUMBER OF STAGES. No filter, so
+## every kernel folds exactly `n` elements and the only variable is stage depth.
+## Each stage is an add, so each is individually the cheapest thing a stage can
+## be and the checksums stay predictable:
+##
+##   k1  range -> fold                          0 stages
+##   k2  range -> +1 -> fold                    1 stage
+##   k3  range -> +1 -> +2 -> fold              2 stages
+##   k4  range -> +1 -> +2 -> +3 -> fold        3 stages
+##   k5  range -> +1 -> +2 -> +3 -> +4 -> fold  4 stages
+##
+## A flat row means stage depth is free and the 9.5x is about map+map
+## specifically. A step between one and two means the pipeline leaves its fast
+## representation at a stage-count THRESHOLD. A linear slope means each stage
+## costs the same and one stage is simply expensive.
+##
+## Kernel 6 is the control: the same arithmetic as k4 written as ONE stage, so
+## the work is identical and only the STAGING differs. If k4 is slow and k6 is
+## fast, the cost is per-stage overhead and not the adds.
+use std::collections::iter
+use std::collections::seq
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::int
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }, result = r }
+
+let report = { name, n, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/elem  sum=$(int::to_str { n = r.result })" }
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+## ── The ladder ──────────────────────────────────────────────────────────────
+
+let k0 = { n } -> iter::range { start = 0, end = n }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+let k1 = { n } -> iter::range { start = 0, end = n }
+  .map { f = { x } -> x + 1 }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+let k2 = { n } -> iter::range { start = 0, end = n }
+  .map { f = { x } -> x + 1 }
+  .map { f = { x } -> x + 2 }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+let k3 = { n } -> iter::range { start = 0, end = n }
+  .map { f = { x } -> x + 1 }
+  .map { f = { x } -> x + 2 }
+  .map { f = { x } -> x + 3 }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+let k4 = { n } -> iter::range { start = 0, end = n }
+  .map { f = { x } -> x + 1 }
+  .map { f = { x } -> x + 2 }
+  .map { f = { x } -> x + 3 }
+  .map { f = { x } -> x + 4 }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+## The control: k3's arithmetic as ONE stage. Same work, one stage instead of
+## three, and the same checksum as k3 — so a difference is staging alone.
+let k3_flat = { n } -> iter::range { start = 0, end = n }
+  .map { f = { x } -> x + 6 }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  let n = arg_at { args = args, i = 1, def = 20000000 }
+  if k == 1 then do
+    k0 { n = n }
+    k0 { n = n }
+    k0 { n = n }
+    k0 { n = n }
+    k0 { n = n }
+    report { name = "1 stages=0       ", n = n, r = time_it { f = {} -> k0 { n = n } } }
+    report { name = "1 stages=0       ", n = n, r = time_it { f = {} -> k0 { n = n } } }
+    report { name = "1 stages=0       ", n = n, r = time_it { f = {} -> k0 { n = n } } }
+    report { name = "1 stages=0       ", n = n, r = time_it { f = {} -> k0 { n = n } } }
+    report { name = "1 stages=0       ", n = n, r = time_it { f = {} -> k0 { n = n } } }
+  else if k == 2 then do
+    k1 { n = n }
+    k1 { n = n }
+    k1 { n = n }
+    k1 { n = n }
+    k1 { n = n }
+    report { name = "2 stages=1       ", n = n, r = time_it { f = {} -> k1 { n = n } } }
+    report { name = "2 stages=1       ", n = n, r = time_it { f = {} -> k1 { n = n } } }
+    report { name = "2 stages=1       ", n = n, r = time_it { f = {} -> k1 { n = n } } }
+    report { name = "2 stages=1       ", n = n, r = time_it { f = {} -> k1 { n = n } } }
+    report { name = "2 stages=1       ", n = n, r = time_it { f = {} -> k1 { n = n } } }
+  else if k == 3 then do
+    k2 { n = n }
+    k2 { n = n }
+    k2 { n = n }
+    k2 { n = n }
+    k2 { n = n }
+    report { name = "3 stages=2       ", n = n, r = time_it { f = {} -> k2 { n = n } } }
+    report { name = "3 stages=2       ", n = n, r = time_it { f = {} -> k2 { n = n } } }
+    report { name = "3 stages=2       ", n = n, r = time_it { f = {} -> k2 { n = n } } }
+    report { name = "3 stages=2       ", n = n, r = time_it { f = {} -> k2 { n = n } } }
+    report { name = "3 stages=2       ", n = n, r = time_it { f = {} -> k2 { n = n } } }
+  else if k == 4 then do
+    k3 { n = n }
+    k3 { n = n }
+    k3 { n = n }
+    k3 { n = n }
+    k3 { n = n }
+    report { name = "4 stages=3       ", n = n, r = time_it { f = {} -> k3 { n = n } } }
+    report { name = "4 stages=3       ", n = n, r = time_it { f = {} -> k3 { n = n } } }
+    report { name = "4 stages=3       ", n = n, r = time_it { f = {} -> k3 { n = n } } }
+    report { name = "4 stages=3       ", n = n, r = time_it { f = {} -> k3 { n = n } } }
+    report { name = "4 stages=3       ", n = n, r = time_it { f = {} -> k3 { n = n } } }
+  else if k == 5 then do
+    k4 { n = n }
+    k4 { n = n }
+    k4 { n = n }
+    k4 { n = n }
+    k4 { n = n }
+    report { name = "5 stages=4       ", n = n, r = time_it { f = {} -> k4 { n = n } } }
+    report { name = "5 stages=4       ", n = n, r = time_it { f = {} -> k4 { n = n } } }
+    report { name = "5 stages=4       ", n = n, r = time_it { f = {} -> k4 { n = n } } }
+    report { name = "5 stages=4       ", n = n, r = time_it { f = {} -> k4 { n = n } } }
+    report { name = "5 stages=4       ", n = n, r = time_it { f = {} -> k4 { n = n } } }
+  else do
+    k3_flat { n = n }
+    k3_flat { n = n }
+    k3_flat { n = n }
+    k3_flat { n = n }
+    k3_flat { n = n }
+    report { name = "6 stages=1 (=k4) ", n = n, r = time_it { f = {} -> k3_flat { n = n } } }
+    report { name = "6 stages=1 (=k4) ", n = n, r = time_it { f = {} -> k3_flat { n = n } } }
+    report { name = "6 stages=1 (=k4) ", n = n, r = time_it { f = {} -> k3_flat { n = n } } }
+    report { name = "6 stages=1 (=k4) ", n = n, r = time_it { f = {} -> k3_flat { n = n } } }
+    report { name = "6 stages=1 (=k4) ", n = n, r = time_it { f = {} -> k3_flat { n = n } } }
