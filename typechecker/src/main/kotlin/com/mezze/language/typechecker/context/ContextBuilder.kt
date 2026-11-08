@@ -552,7 +552,9 @@ class ContextBuilder {
                 localAbilityNames = localAbilityNames,
                 localTypeNames = localTypeNames,
                 importedAbilityNames = importedAbilityNames,
-                importedTypeNames = importedTypeNames
+                importedTypeNames = importedTypeNames,
+                currentModulePath = currentModulePath?.let { ModulePath.parse(it) },
+                registry = implValidationRegistry,
             )
         }
     }

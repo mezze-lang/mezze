@@ -181,19 +181,7 @@ object AbilityValidator {
                     // is what TypeAliasTransparencyTest pins (`type MyInt = Int`
                     // already has `Eq` and arithmetic, with no impl written).
                     aliasOfUnnameableTarget(n, registry)?.let { underlying ->
-                        throw TypeCheckError(
-                            "`$n` is a transparent alias of $underlying, so an impl declared for " +
-                            "it can never be found: the alias name does not survive to the use " +
-                            "site. A transparent alias already inherits the impls of the type it " +
-                            "aliases.",
-                            loc,
-                            code = ErrorCode.V0706_TRANSPARENT_ALIAS_IMPL,
-                            hints = listOf(
-                                "to implement for the underlying type: `impl … for $underlying`",
-                                "for a DISTINCT type that carries its own impls: " +
-                                    "`newtype $n = $underlying`",
-                            ),
-                        )
+                        throw transparentAliasImplError(n, underlying, loc)
                     }
                     if (n.isTypeVarName() ||
                         BuiltinTypes.isBuiltinTypeName(n) ||
@@ -504,12 +492,16 @@ object AbilityValidator {
         localAbilityNames: Set<String>,
         localTypeNames: Set<String>,
         importedAbilityNames: Set<String>,
-        importedTypeNames: Set<String>
+        importedTypeNames: Set<String>,
+        currentModulePath: ModulePath?,
+        registry: DeclarationRegistry,
     ) {
         val sourceLocation = impl.loc
 
         if (impl.isInherent) {
-            validateInherentImplLocality(impl, localTypeNames, sourceLocation)
+            validateInherentImplLocality(
+                impl, localTypeNames, currentModulePath, registry, sourceLocation,
+            )
             return
         }
 
@@ -560,61 +552,6 @@ object AbilityValidator {
             is ParsedFunctionType -> "Function"
             is ParsedSeqType -> "Seq"
         }
-    }
-
-    /**
-     * Collect every nominal type name mentioned anywhere inside a parsed
-     * type annotation — outermost constructor AND every constructor in
-     * the type-argument tree. Used by the inherent-impl locality check
-     * so `impl [Promise 'a]` can live in Promise's module (Promise
-     * appears in the receiver tree even though the outermost constructor
-     * is Seq).
-     *
-     * Type variables (`'a`, `'b`) are excluded — they aren't nominal
-     * declarations. Structural placeholders (`"Record"`, `"Variant"`,
-     * `"Function"`, `"Seq"`) are still included so the check still
-     * applies to bare `impl [Int]`, `impl {x: Int}`, etc.
-     */
-    private fun collectAllTypeNames(annotation: ParsedTypeAnnotation): Set<String> {
-        val out = LinkedHashSet<String>()
-        fun walk(a: ParsedTypeAnnotation) {
-            when (a) {
-                is ParsedNamedType -> {
-                    // Type variables are prefixed with `'`; skip.
-                    if (a.name.startsWith("'")) return
-                    out.add(a.name)
-                }
-                is ParsedTypeApp -> {
-                    out.add(a.constructor)
-                    a.args.forEach { walk(it) }
-                }
-                is ParsedQualifiedType -> {
-                    out.add(a.typeName)
-                    a.args.forEach { walk(it) }
-                }
-                is ParsedSeqType -> {
-                    out.add("Seq")
-                    walk(a.elementType)
-                }
-                is ParsedRecordType -> {
-                    out.add("Record")
-                    a.entries.forEach { walk(it.type) }
-                }
-                is ParsedVariantType -> {
-                    out.add("Variant")
-                    a.constructors.forEach { ctor ->
-                        ctor.dataType?.let { walk(it) }
-                    }
-                }
-                is ParsedFunctionType -> {
-                    out.add("Function")
-                    walk(a.paramType)
-                    walk(a.returnType)
-                }
-            }
-        }
-        walk(annotation)
-        return out
     }
 
     // #212 removed that field — the parser now rejects ability-level
@@ -762,38 +699,98 @@ object AbilityValidator {
         }
     }
 
+    /**
+     * Locality rule for inherent impls — Rust's, at our granularity.
+     *
+     * An inherent method may only be added by the OWNER of the receiver's
+     * outermost constructor. A type argument confers nothing: `[MyT]` is a
+     * `Seq`, and `Seq` belongs to whoever declares it, exactly as
+     * `impl Vec<MyType> { … }` is E0116 in Rust however local `MyType` is.
+     * The rule used to ask whether ANY name mentioned anywhere in the receiver
+     * tree was local, which let a module attach methods to a container it does
+     * not own as long as it owned something inside it.
+     *
+     * Ownership is asked at two granularities, and the applied case is why:
+     *
+     *  - NULLARY target (`impl Int`): the owning MODULE. Our home table is
+     *    finer than Rust's crate rule and there is no reason to give that up —
+     *    `impl Int where` belongs in `std::int` and nowhere else.
+     *  - APPLIED target (`impl [Promise 'a]`, `impl Result Response HttpError`):
+     *    the owning PACKAGE, which is Rust's unit of coherence. `Seq` is at
+     *    home in `std::collections::seq` and `Promise` is declared in
+     *    `std::effects::async`, but both are `std`, and inside one crate Rust
+     *    does not care which module an inherent impl sits in.
+     *
+     * An alias is resolved FIRST, so `type Id = Int; impl Id where` is judged
+     * as `impl Int where` — Rust resolves aliases before coherence too, which
+     * is why `type V = Vec<i32>; impl V { }` is still E0116. Without this the
+     * impl was accepted and then unreachable: the alias name does not survive
+     * to a call site, so every use was told `Int` has no such method while the
+     * declaration looked fine.
+     */
     private fun validateInherentImplLocality(
         impl: ParsedImplAbilityDecl,
         localTypeNames: Set<String>,
+        currentModulePath: ModulePath?,
+        registry: DeclarationRegistry,
         sourceLocation: Loc
     ) {
         for (targetType in impl.targetTypes) {
-            // Locality rule for inherent impls: at least ONE nominal
-            // type mentioned anywhere in the receiver tree must be
-            // locally declared. This lets a module attach methods to
-            // parametric containers (e.g. `impl [Promise 'a]` in the
-            // module that declares Promise) — the outermost constructor
-            // (`Seq`) is not local, but Promise is, and that's the
-            // interesting locality.
-            val mentioned = collectAllTypeNames(targetType)
-            val hasLocal = mentioned.any { name -> localTypeNames.contains(name) }
-            if (!hasLocal) {
-                val outerName = getTypeNameFromParsedAnnotation(targetType)
-                throw TypeCheckError(
-                    "Cannot define inherent impl for type '$outerName' in this module. " +
-                    "Inherent impls can only be defined where at least one of the " +
-                    "types mentioned in the receiver is defined. " +
-                    "Move this impl to the module where one of [${mentioned.joinToString(", ")}] " +
-                    "is declared.",
-                    sourceLocation,
-                    code = ErrorCode.V0406_ORPHAN_INSTANCE,
-                    hints = listOf(
-                        "define the impl in the same module as one of the receiver's nominal types",
-                    ),
-                )
+            if (targetType is ParsedNamedType) {
+                aliasOfUnnameableTarget(targetType.name, registry)?.let { underlying ->
+                    throw transparentAliasImplError(targetType.name, underlying, sourceLocation)
+                }
             }
+
+            val outerName = getTypeNameFromParsedAnnotation(targetType)
+            if (localTypeNames.contains(outerName)) continue
+
+            val isApplied = targetType is ParsedTypeApp ||
+                targetType is ParsedSeqType ||
+                (targetType is ParsedQualifiedType && targetType.args.isNotEmpty())
+            val ownerPackage = BuiltinTypeRegistry.homeModuleFor(outerName)
+                ?.segments?.firstOrNull()
+            val myPackage = currentModulePath?.segments?.firstOrNull()
+            if (isApplied && ownerPackage != null && ownerPackage == myPackage) continue
+
+            val owner = BuiltinTypeRegistry.homeModuleFor(outerName)?.fullPath
+            throw TypeCheckError(
+                "Cannot define an inherent impl for '$outerName' in this module: an inherent " +
+                "method can only be added by the module that owns the receiver's type. " +
+                (owner?.let { "'$outerName' is owned by `$it`. " } ?: "") +
+                // Only worth saying when there ARE arguments — and then it is the
+                // whole point, because owning one is what used to be accepted.
+                if (isApplied) {
+                    "A type argument does not make the receiver local — " +
+                        "`${renderParsedAnnotation(targetType)}` is a '$outerName', whoever its " +
+                        "arguments belong to."
+                } else "",
+                sourceLocation,
+                code = ErrorCode.V0406_ORPHAN_INSTANCE,
+                hints = listOfNotNull(
+                    owner?.let { "move this impl to `$it`" },
+                    "or declare an ability here and implement it for the receiver: " +
+                        "an ability you own may be implemented for any type",
+                ),
+            )
         }
     }
+
+    /** Shared by the ability path and the inherent path: both resolve aliases. */
+    private fun transparentAliasImplError(name: String, underlying: String, loc: Loc) =
+        TypeCheckError(
+            "`$name` is a transparent alias of $underlying, so an impl declared for " +
+            "it can never be found: the alias name does not survive to the use " +
+            "site. A transparent alias already inherits the impls of the type it " +
+            "aliases.",
+            loc,
+            code = ErrorCode.V0706_TRANSPARENT_ALIAS_IMPL,
+            hints = listOf(
+                "to implement for the underlying type: `impl … for $underlying`",
+                "for a DISTINCT type that carries its own impls: " +
+                    "`newtype $name = $underlying`",
+            ),
+        )
 
     /**
      * #279/F4: reject an ability impl whose method name is silently shadowed by a

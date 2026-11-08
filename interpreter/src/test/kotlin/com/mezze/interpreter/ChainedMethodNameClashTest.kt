@@ -98,14 +98,26 @@ class ChainedMethodNameClashTest {
         }
     }
 
+    /**
+     * The competing `finish` arrives by IMPORT — that module boundary is the
+     * third ingredient, per the class doc.
+     *
+     * `Outcome` is declared here rather than being the stdlib's `Result`: an
+     * inherent impl may only be written by the owner of the receiver's outermost
+     * constructor, so `impl Result Resp Err` in a user module is refused by
+     * V0406 (Rust's answer to `impl Vec<MyType> { }`). What this test needs is a
+     * same-named method on a two-argument applied type in ANOTHER module, and a
+     * locally declared constructor gives exactly that.
+     */
     private fun writeVocab() = write(
         "vocab",
         """
         pub type Resp = { body: Str }
         pub type Err  = { msg: Str }
+        pub type Outcome 'a 'e = { v: 'a, e: 'e }
 
-        impl Result Resp Err where {
-          finish = { it } -> "from-result",
+        impl Outcome Resp Err where {
+          finish = { it } -> "from-outcome",
         }
         """,
     )

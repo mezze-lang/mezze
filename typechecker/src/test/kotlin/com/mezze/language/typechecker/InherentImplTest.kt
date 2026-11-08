@@ -511,7 +511,9 @@ class InherentImplTest {
             typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("Int"))
-        assertTrue(error.message!!.contains("Inherent impls can only be defined where"))
+        assertTrue(error.message!!.contains("can only be added by the module that owns"))
+        // The owner is NAMED, so the message says where the impl may go.
+        assertTrue(error.message!!.contains("std::int"))
     }
 
     @Test
@@ -567,7 +569,9 @@ class InherentImplTest {
             typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("Str"))
-        assertTrue(error.message!!.contains("Inherent impls can only be defined where"))
+        assertTrue(error.message!!.contains("can only be added by the module that owns"))
+        // The owner is NAMED, so the message says where the impl may go.
+        assertTrue(error.message!!.contains("std::str"))
     }
 
     @Test
@@ -616,7 +620,9 @@ class InherentImplTest {
             typeChecker.typeCheck(parsedModule, Paths.get("."))
         }
         assertTrue(error.message!!.contains("Option"))
-        assertTrue(error.message!!.contains("Inherent impls can only be defined where"))
+        assertTrue(error.message!!.contains("can only be added by the module that owns"))
+        // The owner is NAMED, so the message says where the impl may go.
+        assertTrue(error.message!!.contains("std::option"))
     }
 
     @Test

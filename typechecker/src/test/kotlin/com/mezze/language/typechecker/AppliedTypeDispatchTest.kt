@@ -43,21 +43,32 @@ class AppliedTypeDispatchTest {
         typeChecker = TypeChecker()
     }
 
+    /**
+     * The two-argument constructor is declared HERE rather than being the
+     * stdlib's `Result`, because an inherent impl may only be written by the
+     * owner of the receiver's outermost constructor — `impl Result PyF IErr` in
+     * user code is refused by V0406, the same answer Rust gives to
+     * `impl Vec<MyType> { }`. The subject is unchanged: `Carrier` is one
+     * constructor applied to two different argument pairs, which is the shape
+     * that collided, and InherentImplOwnershipSpecTest pins the ownership rule
+     * itself.
+     */
     private val twoProviders = """
+        type Carrier 'a 'e = { v: 'a, e: 'e }
         type PyF = { py_handle: Int }
         type JsF = { js_handle: Str }
         type IErr = { msg: Str }
 
-        impl Result PyF IErr where {
+        impl Carrier PyF IErr where {
           tag = { it } -> "py"
         }
 
-        impl Result JsF IErr where {
+        impl Carrier JsF IErr where {
           tag = { it } -> "js"
         }
 
-        let py: Result PyF IErr = Ok { val = { py_handle = 1 } }
-        let js: Result JsF IErr = Ok { val = { js_handle = "j" } }
+        let py: Carrier PyF IErr = { v = { py_handle = 1 }, e = { msg = "" } }
+        let js: Carrier JsF IErr = { v = { js_handle = "j" }, e = { msg = "" } }
     """.trimIndent()
 
     private fun run(code: String): String {
@@ -81,25 +92,26 @@ class AppliedTypeDispatchTest {
 
     @Test
     fun `a partially-generic same-constructor impl is still reachable`() {
-        // `impl Result 'a IErr` has a type VARIABLE in the first argument, so it
+        // `impl Carrier 'a IErr` has a type VARIABLE in the first argument, so it
         // mints no applied hash and files under the bare constructor hash — as it
-        // must, since it has to serve every `Result <anything> IErr` receiver.
-        // A `Result PyF IErr` receiver has to find BOTH impls: `tag` by its applied
-        // hash, `describe` by falling back to the constructor hash. The applied
-        // hash is a more-specific key layered on top, never a replacement.
+        // must, since it has to serve every `Carrier <anything> IErr` receiver.
+        // A `Carrier PyF IErr` receiver has to find BOTH impls: `tag` by its
+        // applied hash, `describe` by falling back to the constructor hash. The
+        // applied hash is a more-specific key layered on top, never a replacement.
         val code = """
+            type Carrier 'a 'e = { v: 'a, e: 'e }
             type PyF = { py_handle: Int }
             type IErr = { msg: Str }
 
-            impl Result PyF IErr where {
+            impl Carrier PyF IErr where {
               tag = { it } -> "py"
             }
 
-            impl Result 'a IErr where {
+            impl Carrier 'a IErr where {
               describe = { it } -> "generic"
             }
 
-            let py: Result PyF IErr = Ok { val = { py_handle = 1 } }
+            let py: Carrier PyF IErr = { v = { py_handle = 1 }, e = { msg = "" } }
 
             let a: Str = py.tag {}
             let b: Str = py.describe {}

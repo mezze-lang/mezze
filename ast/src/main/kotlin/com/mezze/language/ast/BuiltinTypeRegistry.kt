@@ -46,6 +46,16 @@ object BuiltinTypeRegistry {
     }
 
     /**
+     * The module that owns [typeName], or null when it is not a built-in.
+     *
+     * The home module is a finer answer than Rust's "the crate that defines
+     * the type" — `Int` is owned by `std::int`, not by the whole stdlib. The
+     * orphan rule uses both granularities: the module for a nullary target,
+     * the package for an applied one (see `validateInherentImplLocality`).
+     */
+    fun homeModuleFor(typeName: String): ModulePath? = typeHomeModule[typeName]
+
+    /**
      * Get all built-in type names whose home module matches the given path.
      * These types should be treated as "local" for orphan rule purposes.
      */
