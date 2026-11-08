@@ -5672,6 +5672,19 @@ public final class BytecodeCompiler {
                 // it there is nowhere to put the element transform, and dropping it
                 // silently computes the wrong fold, so refuse and let the fallback run.
                 if (mapOp >= 0) return null;
+                // AND IT MUST RUN AFTER EVERY FILTER. This transform belongs to the
+                // SINK -- in `acc + x * x` the square is part of the fold, not a
+                // stage -- so the filter sees the RAW element. Riding in the map slot
+                // it would run first, because `filterFirst` is only set in the
+                // MapInline branch above and no explicit map stage was present to set
+                // it. `filter(x > 5).fold(0, {acc, x} -> acc + x * x)` over 0..10 then
+                // filtered on `x * x > 5` and returned 280 where the same pipeline
+                // with the square written as an explicit map returns 230.
+                //
+                // `filterFirst` means exactly "the filter goes before the map", which
+                // is the order this needs. It is false here whenever a filter exists,
+                // precisely because the branch that would have set it never ran.
+                if (filterCmpOp >= 0) filterFirst = true;
                 mapOp = a.elemOp().ordinal();
                 selfMap = a.elemSelfOp();
                 if (!selfMap) {

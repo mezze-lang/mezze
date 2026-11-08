@@ -163,6 +163,93 @@ class CompoundFoldFusionTest {
         assertTrue("FusedLoop" in emitted, "emitted: $emitted")
     }
 
+    /**
+     * A TWO-NODE compound body over a FILTERED chain. `acc + x * x` is the
+     * shape FusedLongPipeline takes in its own slot rather than as an inline
+     * tree, and it is the one the test above cannot reach: `acc + x * 2 - 1` is
+     * three nodes, so it goes to the generic loop's tree path and never touches
+     * the slot. The slot is where the stage ORDER lives.
+     *
+     * THE BUG THIS PINS. The element transform belongs to the SINK — in
+     * `acc + x * x` the square is part of the fold, not a pipeline stage — so
+     * the filter must see the RAW element. Riding in the map slot it ran FIRST,
+     * because `filterFirst` is only set in the MapInline branch and no explicit
+     * map stage was present to set it. The filter then tested `x * x > 5`:
+     * x >= 3 rather than x >= 6, and the fold returned 280 where the same
+     * pipeline with the square written as an explicit map returns 230.
+     *
+     * Hand-worked: keep x > 5 over 0..10 -> 6,7,8,9; squares 36+49+64+81 = 230.
+     * The wrong order gives 3..9 squared = 280, so the two answers cannot be
+     * confused with each other.
+     */
+    @Test
+    fun `a two-node compound fold body runs after the filter, not before it`() {
+        val out = run(
+            """
+            let main = {} -> iter::range { start = 0, end = 10 }
+              .filter { p = { x } -> x > 5 }
+              .fold { init = 0, f = { acc, x } -> acc + x * x }
+            main {}
+            """,
+        )
+        assertEquals(230L, out)
+    }
+
+    /**
+     * THE SAME ORDER, SIZED PAST THE VECTOR PIPELINE. `FlpSimd` is a THIRD site
+     * that decides stage order, and it only engages at `SIMD_THRESHOLD = VL * 4`
+     * — 16 or 32 elements depending on the vector width. The test above runs
+     * ten, so it cannot reach it, and a stage-order bug that lives only in the
+     * vector loops is CORRECT small and wrong large. That exact split has
+     * happened here before: `map(*3).filter(<n)` was right below ~16-32
+     * elements and wrong above, because both vector pipelines took a
+     * `filterFirst` flag and never read it.
+     *
+     * The oracle is computed HERE, in Kotlin, rather than by a second Mezze
+     * pipeline — an equality between two Mezze routes passes if both are wrong
+     * the same way.
+     *
+     * `filter(x > 100)` makes the two orders far apart rather than adjacent:
+     * filtering the raw element keeps 101.., filtering the SQUARE keeps 11..,
+     * since `x * x > 100` from x = 11.
+     */
+    @Test
+    fun `the stage order holds past the SIMD threshold`() {
+        val expected = (101..4095).sumOf { it.toLong() * it.toLong() }
+        val wrongOrder = (11..4095).sumOf { it.toLong() * it.toLong() }
+        assertTrue(expected != wrongOrder, "the two orders must be distinguishable")
+        val out = run(
+            """
+            let main = {} -> iter::range { start = 0, end = 4096 }
+              .filter { p = { x } -> x > 100 }
+              .fold { init = 0, f = { acc, x } -> acc + x * x }
+            main {}
+            """,
+        )
+        assertEquals(expected, out)
+    }
+
+    /**
+     * The same pipeline with the square as an EXPLICIT map, which takes a
+     * different route — an explicit map in the slot makes the compound folder
+     * refuse, so this one does not fuse through the slot at all. It is here to
+     * state the expected answer independently of the path that computes it: if
+     * these two ever disagree, one of them is wrong regardless of which.
+     */
+    @Test
+    fun `the explicit-map spelling of the same pipeline agrees`() {
+        val out = run(
+            """
+            let main = {} -> iter::range { start = 0, end = 10 }
+              .filter { p = { x } -> x > 5 }
+              .map { f = { x } -> x * x }
+              .fold { init = 0, f = { acc, x } -> acc + x }
+            main {}
+            """,
+        )
+        assertEquals(230L, out)
+    }
+
     @Test
     fun `an impure fold body is declined, not mis-emitted`() {
         // A body that calls something is outside the grammar: it must fall back

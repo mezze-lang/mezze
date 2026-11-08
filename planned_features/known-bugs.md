@@ -4419,3 +4419,73 @@ its order disagrees with the natural one everywhere, so an answer computed the
 wrong way cannot coincide with the right one. The first test establishes the
 layout through `min_key`/`max_key`, which read index 0 and `size - 1` and use no
 comparator, so a failure in the other six cannot be blamed on the insert path.
+
+## BUG 42 — FIXED 2026-11-08: a compound fold body ran BEFORE the filter, so the filter tested the transformed element
+
+```mezze
+iter::range { start = 0, end = 10 }
+  .filter { p = { x } -> x > 5 }
+  .fold { init = 0, f = { acc, x } -> acc + x * x }
+```
+
+Returned **280**. The answer is **230** — `6² + 7² + 8² + 9²` — and writing the
+square as an explicit `.map` returns 230, so the same pipeline gave two answers
+depending on which spelling was used.
+
+A silent wrong number out of a fused numeric pipeline, on the most ordinary
+compound fold anyone writes.
+
+### Cause
+
+`FusedLongPipeline` has ONE map slot, and `classifyFolderBody` decomposes
+`acc + x * x` into a fold op plus an ELEMENT TRANSFORM, which
+`tryBuildFusedLongPipeline` injects into that slot when no explicit map stage
+holds it. But the transform belongs to the SINK — in `acc + x * x` the square is
+part of the fold, not a pipeline stage — so the filter must see the RAW element.
+
+Stage order in the loop is decided by one flag:
+
+```java
+if (filterFirst && filterCmpOp >= 0) { ... }   // filter, then map
+if (mapOp >= 0) v = flpOp(mapOp, v, ...);
+if (!filterFirst && filterCmpOp >= 0) { ... }  // map, then filter
+```
+
+and `filterFirst` is only ever set inside the `MapInline` branch, by
+`if (seenFilter) filterFirst = true`. With the transform injected there is no
+explicit map stage, that branch never runs, `filterFirst` stays false — and the
+filter lands AFTER the injected transform. It tested `x * x > 5`, true from
+x = 3 rather than x = 6.
+
+### Fix
+
+One line, at the injection site: `if (filterCmpOp >= 0) filterFirst = true;`.
+`filterFirst` means exactly "the filter goes before the map", which is the order
+a sink-side transform needs, and it is false here precisely because the branch
+that would have set it never ran.
+
+### Why the existing tests missed it
+
+`CompoundFoldFusionTest` already had "a compound fold over a filtered chain
+keeps both stages", which is this shape — but its body is `acc + x * 2 - 1`,
+THREE nodes, so it is emitted as an inline arithmetic TREE by the generic fused
+loop and never reaches the slot. Only a TWO-node body takes the slot, and the
+slot is where the order lives. The test asserted `"FusedLoop" in emitted`, which
+is the generic loop, so it was passing while naming the right shape.
+
+### Regression tests
+
+`CompoundFoldFusionTest`, three added. A two-node body over a filtered chain
+(230, against 280 for the wrong order — far apart, not adjacent); the
+explicit-map spelling of the same pipeline, which takes a different route and so
+states the answer independently of the path that computes it; and the same order
+**sized past `SIMD_THRESHOLD`**.
+
+That third one is required by what BUG-era work on this file already
+established: `FlpSimd` is a THIRD site deciding stage order and only engages at
+`VL * 4`, so an order bug living in the vector loops is CORRECT small and wrong
+large — which is exactly how the earlier `filterFirst` defect behaved when both
+vector pipelines took the flag and never read it. Its oracle is computed in
+Kotlin, not by a second Mezze pipeline, because an equality between two Mezze
+routes passes when both are wrong the same way. Removing the one-line fix fails
+the small case AND the past-threshold case.
