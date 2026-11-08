@@ -221,6 +221,108 @@ class MultiMapStageFusionTest {
         assertEquals(40L, out)
     }
 
+    // ────────────── past the vector threshold ──────────────
+
+    /**
+     * EVERY TEST ABOVE RUNS FIVE ELEMENTS, so none of them reaches `FlpSimd`.
+     * The vector pipelines engage only at `SIMD_THRESHOLD = VL * 4` — 16 or 32
+     * elements — and they are a SEPARATE implementation of the same stages:
+     * they apply the extras lanewise, with their own copy of the order logic.
+     * A defect there is CORRECT small and wrong at scale, which is exactly how
+     * the earlier `filterFirst` defect in this file behaved.
+     *
+     * The oracle is computed in Kotlin. `range(0, n).map(+1).map(+2)` sums
+     * `x + 3` over `[0, n)`.
+     */
+    @Test
+    fun `two maps hold past the SIMD threshold`() {
+        val n = 4096
+        val expected = (0 until n).sumOf { it.toLong() + 3L }
+        val out = run(
+            """
+            let main = {} -> iter::range { start = 0, end = $n }
+              .map { f = { x } -> x + 1 }
+              .map { f = { x } -> x + 2 }
+              .fold { init = 0, f = { acc, x } -> acc + x }
+            main {}
+            """,
+        )
+        assertEquals(expected, out)
+        assertFusedWithExtras()
+    }
+
+    /**
+     * THE SCALAR TAIL. The vector loop covers `loopBound(n)` elements and a
+     * scalar tail covers the remaining `n % VL`. VL is 4 or 8, so a size that
+     * is a multiple of it never exercises the tail at all — and a tail that
+     * forgot the extra stages is right at those sizes and wrong at every other
+     * one. These sizes are chosen to leave a non-zero remainder for either
+     * vector width, and the test above is a multiple of both, so the pair
+     * covers the loop and the tail separately.
+     */
+    @Test
+    fun `two maps hold when the vector loop leaves a tail`() {
+        for (n in listOf(4097, 4099, 4101, 4103)) {
+            val expected = (0 until n).sumOf { it.toLong() + 3L }
+            val out = run(
+                """
+                let main = {} -> iter::range { start = 0, end = $n }
+                  .map { f = { x } -> x + 1 }
+                  .map { f = { x } -> x + 2 }
+                  .fold { init = 0, f = { acc, x } -> acc + x }
+                main {}
+                """,
+            )
+            assertEquals(expected, out, "n=$n left a wrong tail")
+        }
+    }
+
+    /**
+     * Three stages past the threshold, with a SELF op among them so the
+     * lanewise self/literal select is exercised too: `((x+1) squared) + 2`.
+     */
+    @Test
+    fun `three maps including a self op hold past the SIMD threshold`() {
+        val n = 4099
+        val expected = (0 until n).sumOf { val y = it.toLong() + 1L; y * y + 2L }
+        val out = run(
+            """
+            let main = {} -> iter::range { start = 0, end = $n }
+              .map { f = { x } -> x + 1 }
+              .map { f = { x } -> x * x }
+              .map { f = { x } -> x + 2 }
+              .fold { init = 0, f = { acc, x } -> acc + x }
+            main {}
+            """,
+        )
+        assertEquals(expected, out)
+        assertFusedWithExtras()
+    }
+
+    /**
+     * A filter before two maps, past the threshold. The vector loop builds its
+     * MASK from the raw element before applying any map, and the extras run
+     * after the primary one, so the whole group sits on one side of the filter
+     * in the vector path exactly as it does in the scalar path.
+     */
+    @Test
+    fun `a filter before two maps holds past the SIMD threshold`() {
+        val n = 4099
+        val expected = (0 until n).filter { it > 100 }.sumOf { it.toLong() + 3L }
+        val out = run(
+            """
+            let main = {} -> iter::range { start = 0, end = $n }
+              .filter { p = { x } -> x > 100 }
+              .map { f = { x } -> x + 1 }
+              .map { f = { x } -> x + 2 }
+              .fold { init = 0, f = { acc, x } -> acc + x }
+            main {}
+            """,
+        )
+        assertEquals(expected, out)
+        assertFusedWithExtras()
+    }
+
     /**
      * The single-map case must be untouched: it keeps the config slot and its
      * bytecode child, which is what lets it vectorise. `bench/cases/iterstage`

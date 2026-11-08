@@ -3574,14 +3574,13 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             // ── SIMD fast path for SUM/COUNT/REDUCE on materialized long[] ──
             // Gated off on SVM and when jdk.incubator.vector is absent.
             if (fromArray
-                    && extraOps == 0           // the vector loops carry ONE map
                     && FlpSimd.AVAILABLE
                     && n >= FlpSimd.SIMD_THRESHOLD
                     && (sinkKind == FLP_SINK_SUM || sinkKind == FLP_SINK_COUNT
                         || sinkKind == FLP_SINK_REDUCE)
                     && sinkPredCmpOp < 0) {
                 return FlpSimd.flpArraySimd(data, n, sinkKind,
-                        mapOp, mapOperand, selfMap,
+                        mapOp, mapOperand, selfMap, extraOps, extraLits,
                         filterPreOp, filterPreRhs, filterCmpOp, filterCmpRhs,
                         foldOp, foldInit, filterFirst);
             }
@@ -3931,14 +3930,13 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             // elements per cycle. The threshold matches VectorOps; below
             // it, the PE-optimized scalar loop wins on overhead.
             // Gated off on SVM and when jdk.incubator.vector is absent.
-            if (extraOps == 0              // the vector loops carry ONE map
-                    && FlpSimd.AVAILABLE
+            if (FlpSimd.AVAILABLE
                     && n >= FlpSimd.SIMD_THRESHOLD
                     && (sinkKind == FLP_SINK_SUM || sinkKind == FLP_SINK_COUNT
                         || sinkKind == FLP_SINK_REDUCE)
                     && sinkPredCmpOp < 0) {
                 return FlpSimd.flpRangeSimd(start, n, sinkKind,
-                        mapOp, mapOperand, selfMap,
+                        mapOp, mapOperand, selfMap, extraOps, extraLits,
                         filterPreOp, filterPreRhs, filterCmpOp, filterCmpRhs,
                         foldOp, foldInit, filterFirst);
             }

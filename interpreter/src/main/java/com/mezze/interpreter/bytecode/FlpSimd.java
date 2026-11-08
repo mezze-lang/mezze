@@ -77,6 +77,7 @@ final class FlpSimd {
     @TruffleBoundary
     static Object flpRangeSimd(long start, int n, int sinkKind,
                                int mapOp, long mapOperand, boolean selfMap,
+                               int extraOps, long[] extraLits,
                                int filterPreOp, long filterPreRhs,
                                int filterCmpOp, long filterCmpRhs,
                                int foldOp, long foldInit, boolean filterFirst) {
@@ -84,6 +85,7 @@ final class FlpSimd {
         LongVector filterPreRhsVec = LongVector.broadcast(Vectors.SPECIES, filterPreRhs);
         LongVector filterCmpRhsVec = LongVector.broadcast(Vectors.SPECIES, filterCmpRhs);
         LongVector mapOperandVec   = LongVector.broadcast(Vectors.SPECIES, mapOperand);
+        LongVector[] extraVecs     = broadcastExtras(extraLits);
 
         // Iota vector: [0, 1, 2, ..., VL-1]
         long[] iotaArr = new long[Vectors.VL];
@@ -124,6 +126,7 @@ final class FlpSimd {
             if (mapOp >= 0) {
                 v = simdOp(mapOp, v, selfMap ? v : mapOperandVec);
             }
+            if (extraOps != 0) v = simdApplyExtraMaps(extraOps, extraVecs, v);
 
             // ── Filter, when the predicate sees the MAPPED element ──
             if (filterCmpOp >= 0 && !filterFirst) {
@@ -184,6 +187,8 @@ final class FlpSimd {
                 if (!flpCmp(filterCmpOp, fv, filterCmpRhs)) continue;
             }
             if (mapOp >= 0) v = flpOp(mapOp, v, selfMap ? v : mapOperand);
+            if (extraOps != 0) v = MezzeBytecodeRootNode.flpApplyExtraMaps(
+                    extraOps, extraLits, v);
             if (filterCmpOp >= 0 && !filterFirst) {
                 long fv = filterPreOp >= 0
                         ? flpOp(filterPreOp, v, filterPreRhs) : v;
@@ -225,12 +230,14 @@ final class FlpSimd {
     @TruffleBoundary
     static Object flpArraySimd(long[] data, int n, int sinkKind,
                                int mapOp, long mapOperand, boolean selfMap,
+                               int extraOps, long[] extraLits,
                                int filterPreOp, long filterPreRhs,
                                int filterCmpOp, long filterCmpRhs,
                                int foldOp, long foldInit, boolean filterFirst) {
         LongVector filterPreRhsVec = LongVector.broadcast(Vectors.SPECIES, filterPreRhs);
         LongVector filterCmpRhsVec = LongVector.broadcast(Vectors.SPECIES, filterCmpRhs);
         LongVector mapOperandVec   = LongVector.broadcast(Vectors.SPECIES, mapOperand);
+        LongVector[] extraVecs     = broadcastExtras(extraLits);
 
         LongVector accVec = LongVector.zero(Vectors.SPECIES);
         long countAcc = 0;
@@ -257,6 +264,7 @@ final class FlpSimd {
             if (mapOp >= 0) {
                 v = simdOp(mapOp, v, selfMap ? v : mapOperandVec);
             }
+            if (extraOps != 0) v = simdApplyExtraMaps(extraOps, extraVecs, v);
 
             if (filterCmpOp >= 0 && !filterFirst) {
                 LongVector fv = filterPreOp >= 0
@@ -307,6 +315,8 @@ final class FlpSimd {
                 if (!flpCmp(filterCmpOp, fv, filterCmpRhs)) continue;
             }
             if (mapOp >= 0) v = flpOp(mapOp, v, selfMap ? v : mapOperand);
+            if (extraOps != 0) v = MezzeBytecodeRootNode.flpApplyExtraMaps(
+                    extraOps, extraLits, v);
             if (filterCmpOp >= 0 && !filterFirst) {
                 long fv = filterPreOp >= 0 ? flpOp(filterPreOp, v, filterPreRhs) : v;
                 if (!flpCmp(filterCmpOp, fv, filterCmpRhs)) continue;
@@ -336,6 +346,44 @@ final class FlpSimd {
     }
 
     // ── SIMD operation helpers ──
+
+    /**
+     * Map stages TWO AND LATER, lanewise.
+     *
+     * <p>WHY THE VECTOR LOOPS NEEDED THIS AT ALL. When maps two and later were
+     * first fused they went into the SCALAR pipeline only, and these two vector
+     * loops declined whenever a second map was present because they carry ONE
+     * map positionally. That left the measured gap exactly where it started:
+     * `bench/cases/iterstage` put a one-stage pipeline at 75 ps/elem and a
+     * two-stage one at ~423, and disabling the vector path moved the ONE-STAGE
+     * row from 75 to 292 -- so the floor was never the scalar loop, it was
+     * this file, and the ~3.9x it carries was the whole cliff.
+     *
+     * <p>A RUNTIME SWITCH IS AFFORDABLE HERE, unlike in the partial-evaluated
+     * scalar loop where reading an op out of an array cost ~760 ps a stage.
+     * These methods are `@TruffleBoundary`: nothing is PE-folded, `mapOp` is
+     * ALREADY a runtime int, and {@link #simdOp}'s switch already runs per
+     * vector iteration -- so its cost is divided by the vector length rather
+     * than paid per element.
+     */
+    private static LongVector simdApplyExtraMaps(
+            int extraOps, LongVector[] litVecs, LongVector v) {
+        for (int s = 0; s < MezzeBytecodeRootNode.FLP_MAX_EXTRA_MAPS; s++) {
+            int field = (extraOps >>> (s * 5)) & 0x1F;
+            if (field == 0) break;
+            v = simdOp((field & 0xF) - 1, v, (field & 0x10) != 0 ? v : litVecs[s]);
+        }
+        return v;
+    }
+
+    /** Broadcast each extra stage's literal ONCE, outside the loop. */
+    private static LongVector[] broadcastExtras(long[] extraLits) {
+        LongVector[] out = new LongVector[extraLits.length];
+        for (int s = 0; s < extraLits.length; s++) {
+            out[s] = LongVector.broadcast(Vectors.SPECIES, extraLits[s]);
+        }
+        return out;
+    }
 
     private static LongVector simdOp(int op, LongVector a, LongVector b) {
         return switch (op) {
