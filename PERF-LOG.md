@@ -10677,3 +10677,90 @@ could vectorise.
 
 Gate: `:interpreter:test` 7 675 tests 0 failures 14 skipped; `:typechecker:test`
 4 826 tests 0 failures; `:datastructures:test` 753 tests 0 failures 2 skipped.
+
+#### `bytes::map` ran its callback through the record path — 4.83x, and it was a stale cache
+
+`bytesurface` had `bytes::map` at 25 497 ps a byte against `bytes::fold`'s 149 —
+171x for what looks like the same per-element guest callback. Two causes, and
+only one of them is a defect.
+
+**The fused half is correct and stays.** `NativeHofNames` deliberately keeps
+bytes out of the element-stage vocabulary: `bytes::map`'s callback result
+truncates to 8 bits, so peeling it as an ordinary stage would make a fused chain
+compute a different answer — `x * 2` over a byte of 200 is 144, not 400. Bytes
+participates only as a SOURCE under a fold sink, which is why `fold` is fused
+and `map` is not. Nothing to fix there.
+
+**The other half was a cache populated too early.** A probe in
+`ScalarCall.prepare1`'s fallback reported
+
+```
+  PROBE prepare1 NO BYPASS: partial=false root=LazyStubRootNode   <- 650 of 650 calls
+```
+
+`ScalarBypass.tryResolve` requires the callback's root to be a
+`TrampolineRootNode`, and a function that has not been compiled yet presents a
+`LazyStubRootNode` instead. So every `bytes::map` call took the record path and
+allocated a `MezzeRecord` plus an `Object[]` per element.
+
+**This exact bug was found and fixed once already**, in
+`CallIndirectScalar1/2`, where it cost every indirect call site in the language
+its allocation-free path — 8.6x on a closure callback, 2.7x on `seq::fold`. The
+HOF-callback gate is separate code and never got the fix. Applying the same
+`peekForwardTargetNoClosures`:
+
+```
+  row                            HEAD         peek    verdict
+  bytes::map, len 512       11 543 131    2 313 142     4.99x
+  bytes::map, len 1024      23 052 255    4 774 974     4.83x
+  bytes::fold    (control)     155 191      158 797      flat
+  bytes::size    (control)       6 814        6 479      flat
+  list::count    (control)       1 592        1 615      flat
+  list::fold_left(control)       1 460        1 433      flat
+
+  young collections                118           25
+```
+
+Converged across both lengths, per-byte cost stable (22 512 and 22 545 before,
+4 663 and 4 518 after), checksums identical. The peek refuses a function
+carrying closures — the stub prepends them per call and a bypassing caller would
+not — so the change is strictly additive.
+
+#### A control that read 0.79x, and was not one
+
+`seq::count` read 130 → 164 in the five-rep pass, a 21% regression on a core
+operation. At nine reps it is **1.00x** — 138 against 138, with per-side spreads
+of 1.43x and 1.96x. Noise, and it would have shipped as a false regression claim
+had the pass stopped at five. Same shape as the `deque::push_back` episode, with
+the opposite conclusion, which is the point of re-reading rather than guessing
+which way it will go.
+
+#### I removed test coverage and the sentinel caught it
+
+Making the bypass work meant `bytes::map` went POSITIONAL, and a positional path
+cannot see a field NAME. So putting the known-bad `byte` back in place of `x` in
+`BytesNatives.map` made **every test in `BytesHofScalarBypassTest` pass** —
+including the one written to catch exactly that mistake after it had once
+shipped. The fix had silently disarmed its own regression test.
+
+Probed for a callback that still reaches the record path:
+
+```
+  inline lambda  { x } -> x + 1   ->  BYPASSES   (what the bench measures)
+  top-level fn   plus_one         ->  RECORD PATH (trampoline, 0 closures,
+                                      refused by an inner-target check)
+```
+
+So a top-level function passed as a value carries the field-name coverage now,
+and a case for it is the only test that fails when the name is wrong. Worth
+keeping as the shape: **a performance fix can disarm the test that guards its
+own correctness, and nothing about the fix looks like it touches testing.** The
+only way that surfaced was re-running the sentinel the old doc described.
+
+Two stale claims in that file corrected while there: "bytes is still 21x the
+FUSED seq fold — `bytes` is not in the fuser's vocabulary" is no longer true of
+`fold` (155 ps a byte against `seq::fold`'s 280, so FASTER), and "`map` is not
+bypass-eligible here at all" is no longer true of an inline lambda.
+
+Gate: `:interpreter:test` 7 676 tests 0 failures 14 skipped; `:typechecker:test`
+4 826 tests 0 failures; `:datastructures:test` 753 tests 0 failures 2 skipped.
