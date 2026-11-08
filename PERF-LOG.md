@@ -10222,3 +10222,84 @@ another constant, which is a larger piece of work than anything above.
 
 Gate: `:interpreter:test` 7 656 tests 0 failures 14 skipped; `:typechecker:test`
 4 826 tests 0 failures; `:datastructures:test` 753 tests 0 failures 2 skipped.
+
+#### The slices were still searching in a native — 70x — and one of them was a regression of mine
+
+Nine ordered operations were left: `floor_key`, `ceiling_key`, `range`,
+`head_map`, `tail_map`, `sub_map` on the Map, and `range`, `head_set`,
+`tail_set` on the Set. They take NO comparator argument and searched with the
+one STORED on the map, so they were both the slowest things left in the module
+and — as it turned out — broken.
+
+```
+  row                              HEAD   guest-search   verdict
+  sorted_map::floor_key         952 277         13 597    70.0x
+  sorted_map::ceiling_key       871 239         13 229    65.9x
+  sorted_map::head_map        8 198 126        192 207    42.7x
+  sorted_map::take half       7 688 192        179 618    42.8x
+  sorted_map::get  (control)     13 934         14 068     flat
+  sorted_map::contains_key       12 833         13 265     flat
+  sm::insert PRESENT   (ctl)    176 189        185 019     flat
+  sm::remove ABSENT    (ctl)     15 520         16 478     flat
+```
+
+Converged at n=100k and n=200k. `floor_key` and `ceiling_key` are pure
+searches, so they land where every other pure search landed: 13 597 against
+`contains_key`'s 13 265.
+
+#### The regression, and what hid it
+
+`floor_key` on a map with a user `Ord` threw `ClassCastException`. The
+comparator those nine searched with was never set deliberately — the old
+`insert` went through a native that called
+`withComparator(ElementComparator.of(cmpFn))` first, and the map it returned
+carried the result. Moving `insert`'s search into guest code stopped that
+happening, the arrays stayed correctly ordered because the guest search is what
+orders them, and the field was simply never written again.
+
+Nothing in 7 649 tests touched it, for a reason worth keeping: the slice tests
+used `Int` keys, where the host's ordering and the program's AGREE, and the
+custom-`Ord` tests used `get`/`insert`/`contains_key`, which had already stopped
+needing the stored comparator. **The case that distinguishes them is the product
+of two test dimensions that each existed separately.** Filed as BUG 41, and
+verified as a regression rather than argued to be one: the new test file passes
+against the runtime three commits back and fails six ways against the one that
+introduced it.
+
+The fix is not to reinstate the install. A slice is INDEX ARITHMETIC over a
+search the guest already does, so nothing needs storing at all — which is why
+this entry is a perf win and a correctness fix at once.
+
+#### `take` was in the same defect, and was not the shape I first said
+
+`take` and `drop` rebuilt their result one `putObject` at a time, paying a
+comparator search per entry — so a map keyed by a record threw from `take`
+however it was reached, and the Set's version rebuilt through
+`MezzeSortedSet.empty()` with NO comparator, losing the ordering it had been
+sliced from.
+
+I called that O(n²). It is not, and the slope says so:
+
+```
+  keys           HEAD          new   ratio
+  250       1 596 407       66 880   23.9x
+  1000      7 663 727      195 190   39.3x
+  4000     31 706 782    1 061 386   29.9x
+
+  growth 250->4000 (16x the keys):  HEAD 19.9x   new 15.9x
+```
+
+The rebuild inserts in ASCENDING order, so every one of its inserts takes the
+append fast path — which the previous entry had just made reachable. That makes
+it O(n log n) rather than O(n²), and 19.9x against a linear 16x is exactly the
+mild super-linearity that predicts. Both are now one slicing native: two array
+copies of an already-ordered run, and not one comparison. The new row is
+allocation bound rather than copy bound — 1.06 µs for 4 000 slots is 264 ps a
+slot, far above memcpy — so what remains is the result it has to allocate.
+
+Worth keeping: **a slope is also how you find out your own account of a
+mechanism was wrong.** The ratio was there to be read either way; the shape is
+what said the rebuild had already been half-fixed by something else.
+
+Gate: `:interpreter:test` 7 663 tests 0 failures 14 skipped; `:typechecker:test` 4 826 tests 0 failures;
+`:datastructures:test` 753 tests 0 failures 2 skipped.

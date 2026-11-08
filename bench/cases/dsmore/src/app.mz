@@ -275,6 +275,40 @@ let l_ss_remove_absent = { i, acc, s, keys } -> if i <= 0 then acc
     l_ss_remove_absent { i = i - 1, s = s, keys = keys,
                          acc = acc + sorted_set::size { s = s2 } }
 
+## ── 21-24. THE SLICES AND NEIGHBOURS ───────────────────────────────────────
+## `floor_key` and `ceiling_key` are pure searches, so they are the same shape
+## as `remove` of an absent key and should move the same way.
+##
+## `take` is a different question. It was not a search at all — it rebuilt the
+## result one insert at a time, which is O(n^2) with a comparator search per
+## entry, so this row is sized smaller than the rest of the file and compared
+## against itself rather than against the searches.
+let l_sm_floor = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let v = match sorted_map::floor_key { m = m, k = (i % keys) + 1 } is
+      Some { val } -> val
+      None -> 0
+    l_sm_floor { i = i - 1, acc = acc + v, m = m, keys = keys }
+
+let l_sm_ceiling = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let v = match sorted_map::ceiling_key { m = m, k = (i % keys) + 1 } is
+      Some { val } -> val
+      None -> 0
+    l_sm_ceiling { i = i - 1, acc = acc + v, m = m, keys = keys }
+
+let l_sm_head = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let h = sorted_map::head_map { m = m, to = (i % keys) + 1 }
+    l_sm_head { i = i - 1, m = m, keys = keys,
+                acc = acc + sorted_map::size { m = h } }
+
+let l_sm_take = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let t = sorted_map::take { m = m, n = keys / 2 }
+    l_sm_take { i = i - 1, m = m, keys = keys,
+                acc = acc + sorted_map::size { m = t } }
+
 let l_dq_get = { i, acc, d, keys } -> if i <= 0 then acc
   else do
     let v = match deque::get { d = d, i = i % keys } is
@@ -345,3 +379,11 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
            label = "ss::remove PRESENT, base", thunk = {} -> l_ss_remove_present { i = n, acc = 0, s = ss, keys = keys } }
   report { idx = 20, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "ss::remove ABSENT, base", thunk = {} -> l_ss_remove_absent { i = n, acc = 0, s = ss, keys = keys } }
+  report { idx = 21, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "sorted_map::floor_key  ", thunk = {} -> l_sm_floor { i = n, acc = 0, m = sm, keys = keys } }
+  report { idx = 22, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "sorted_map::ceiling_key", thunk = {} -> l_sm_ceiling { i = n, acc = 0, m = sm, keys = keys } }
+  report { idx = 23, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "sorted_map::head_map   ", thunk = {} -> l_sm_head { i = n, acc = 0, m = sm, keys = keys } }
+  report { idx = 24, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "sorted_map::take half  ", thunk = {} -> l_sm_take { i = n, acc = 0, m = sm, keys = keys } }

@@ -258,39 +258,84 @@ pub let partition
   -> { pass: SortedMap 'k 'v, fail: SortedMap 'k 'v } <...>
   = { m, p } -> __native_sorted_map_partition { m = m, p = p }
 
+## ── THE SLICES AND NEIGHBOURS RUN HERE TOO, AND HAVE TO ───────────────────
+##
+## These six take NO comparator argument. They searched with the one STORED on
+## the map, which the old `insert` installed as a SIDE EFFECT of going through a
+## native that called `withComparator`. The moment `insert` started taking its
+## position from the guest search, nothing installed it, and the only comparator
+## a map could have was the natural-order lambda `empty {}` is built with — so a
+## key whose `Ord` is not the host's reached `(Comparable) a` and threw
+## `ClassCastException`. That was a REGRESSION, caught by nothing in the suite
+## because no test combined a user `Ord` with these six, and
+## `SortedOrderOpsOrdTest` exists for it now.
+##
+## The fix is not to put the comparator back. A slice is INDEX ARITHMETIC over
+## the search the guest already does, so nothing needs storing: `find_index`
+## answers both halves at once, since the number of keys strictly BELOW a probe
+## and the number up to and INCLUDING it are each one expression over its
+## encoded result, and every one of these six is a pair of those numbers handed
+## to `take`/`drop`. It also takes the ~300 ns native comparator search off
+## them, which is the same ~20x the other ordered operations got.
+let count_below: { idx: Int } -> Int = { idx } -> if idx < 0 then 0 - idx - 1 else idx
+
+let count_upto: { idx: Int } -> Int = { idx } -> if idx < 0 then 0 - idx - 1 else idx + 1
+
+## `[from, to)` of the sort order, empty rather than negative when the ends
+## cross — which `range { lo = x, hi = y }` produces for any `y` before `x`.
+## Every slice goes through ONE native, which copies a contiguous run of the
+## already-ordered arrays and makes no comparison. It clamps its own ends, so
+## crossing ends give an empty map rather than a negative length.
+let slice: { m: SortedMap 'k 'v, from: Int, to: Int } -> SortedMap 'k 'v = { m, from, to } ->
+  __native_sorted_map_slice { m = m, from = from, to = to }
+
+let key_at_or_none: { m: SortedMap 'k 'v, n: Int } -> Option 'k = { m, n } ->
+  if n < 0 then None
+  else if n >= __native_sorted_map_size { m = m } then None
+  else Some { val = key_at { m = m, i = n } }
+
 ## Returns entries with keys in range [lo, hi] inclusive.
 pub let range: { m: SortedMap 'k 'v, lo: 'k, hi: 'k } with Ord 'k -> SortedMap 'k 'v = { m, lo, hi } ->
-  __native_sorted_map_range { m = m, lo = lo, hi = hi }
+  slice { m = m,
+          from = count_below { idx = find_index { m = m, k = lo, lo = 0, hi = __native_sorted_map_size { m = m } - 1 } },
+          to = count_upto { idx = find_index { m = m, k = hi, lo = 0, hi = __native_sorted_map_size { m = m } - 1 } } }
 
 ## Returns the greatest key <= the given key, or None.
 pub let floor_key: { m: SortedMap 'k 'v, k: 'k } with Ord 'k -> Option 'k = { m, k } ->
-  __native_sorted_map_floor_key { m = m, k = k }
+  key_at_or_none { m = m,
+                   n = count_upto { idx = find_index { m = m, k = k, lo = 0, hi = __native_sorted_map_size { m = m } - 1 } } - 1 }
 
 ## Returns the least key >= the given key, or None.
 pub let ceiling_key: { m: SortedMap 'k 'v, k: 'k } with Ord 'k -> Option 'k = { m, k } ->
-  __native_sorted_map_ceiling_key { m = m, k = k }
+  key_at_or_none { m = m,
+                   n = count_below { idx = find_index { m = m, k = k, lo = 0, hi = __native_sorted_map_size { m = m } - 1 } } }
 
 ## Returns entries with keys strictly less than the given key.
 pub let head_map: { m: SortedMap 'k 'v, to: 'k } with Ord 'k -> SortedMap 'k 'v = { m, to } ->
-  __native_sorted_map_head_map { m = m, to = to }
+  slice { m = m, from = 0,
+    to = count_below { idx = find_index { m = m, k = to, lo = 0, hi = __native_sorted_map_size { m = m } - 1 } } }
 
 ## Returns entries with keys >= the given key.
 pub let tail_map: { m: SortedMap 'k 'v, from: 'k } with Ord 'k -> SortedMap 'k 'v = { m, from } ->
-  __native_sorted_map_tail_map { m = m, from = from }
+  slice { m = m, to = __native_sorted_map_size { m = m },
+    from = count_below { idx = find_index { m = m, k = from, lo = 0, hi = __native_sorted_map_size { m = m } - 1 } } }
 
 ## Returns entries with keys in range [lo, hi).
 pub let sub_map
   : { m: SortedMap 'k 'v, lo: 'k, hi: 'k } with Ord 'k
   -> SortedMap 'k 'v
-  = { m, lo, hi } -> __native_sorted_map_sub_map { m = m, lo = lo, hi = hi }
+  = { m, lo, hi } ->
+  slice { m = m,
+          from = count_below { idx = find_index { m = m, k = lo, lo = 0, hi = __native_sorted_map_size { m = m } - 1 } },
+          to = count_below { idx = find_index { m = m, k = hi, lo = 0, hi = __native_sorted_map_size { m = m } - 1 } } }
 
 ## Takes the first n entries in key-sorted order.
 pub let take: { m: SortedMap 'k 'v, n: Int } -> SortedMap 'k 'v = { m, n } ->
-  __native_sorted_map_take { m = m, n = n }
+  slice { m = m, from = 0, to = n }
 
 ## Drops the first n entries in key-sorted order.
 pub let drop: { m: SortedMap 'k 'v, n: Int } -> SortedMap 'k 'v = { m, n } ->
-  __native_sorted_map_drop { m = m, n = n }
+  slice { m = m, from = n, to = __native_sorted_map_size { m = m } }
 
 ## Keeps only entries for which the predicate returns True.
 pub let filter

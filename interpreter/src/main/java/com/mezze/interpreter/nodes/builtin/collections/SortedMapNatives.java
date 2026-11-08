@@ -600,31 +600,22 @@ public final class SortedMapNatives {
         return result;
     }
 
+    /**
+     * A contiguous run of the sort order, which is every slice
+     * {@code std::collections::sorted_map} offers: {@code take}, {@code drop},
+     * {@code head_map}, {@code tail_map}, {@code range} and {@code sub_map} are
+     * each a pair of indices the GUEST computes from its own search, handed
+     * here.
+     *
+     * <p>{@code take} and {@code drop} used to rebuild their result one
+     * {@code putObject} at a time — O(n^2), with a comparator search per entry.
+     * That made them the last place a slice could reach {@code (Comparable) a}
+     * for a key the host cannot order, so a sorted map keyed by a record threw
+     * from `take` however it was reached.
+     */
     @TruffleBoundary
-    public static MezzeSortedMap take(MezzeSortedMap map, long n) {
-        var order = map.comparator();
-        MezzeSortedMap result = MezzeSortedMap.empty(order);
-        int count = 0;
-        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
-            if (count >= n) break;
-            result = result.putObject(entry.key(), entry.value());
-            count++;
-        }
-        return result;
-    }
-
-    @TruffleBoundary
-    public static MezzeSortedMap drop(MezzeSortedMap map, long n) {
-        var order = map.comparator();
-        MezzeSortedMap result = MezzeSortedMap.empty(order);
-        int count = 0;
-        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
-            if (count >= n) {
-                result = result.putObject(entry.key(), entry.value());
-            }
-            count++;
-        }
-        return result;
+    public static MezzeSortedMap slice(MezzeSortedMap map, Object from, Object to) {
+        return map.slice((int) (long) (Long) from, (int) (long) (Long) to);
     }
 
     // ==================== Additional Higher-Order Functions ====================

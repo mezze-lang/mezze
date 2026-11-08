@@ -4345,3 +4345,77 @@ ownership. A test that touches the base before the write it is trying to catch
 proves nothing while reading exactly like one that does — which is how the first
 BUG 38 test passed vacuously at one entry. Nothing in the file calls `get` on a
 base; `size`, `keys` and `getKeysInternal` are used because they do not revoke.
+
+## BUG 41 — FIXED 2026-11-08, same day it was introduced: the ordered slices lost the program's `Ord`
+
+A regression of my own, committed in `2a9c54f6a` and found three commits later.
+Recorded because it shipped, and because the SHAPE of it is the useful part: it
+was a dependency on a side effect, and nothing in 7 649 tests touched it.
+
+```mezze
+newtype Down = { v: Int }        # Ord is the REVERSE of the payload
+impl Ord for Down where { lt = { it, r } -> dv { d = it } > dv { d = r }, … }
+
+let m = sorted_map::insert { m = sorted_map::empty {}, k = Down.({ v = 1 }), v = 10 }
+sorted_map::floor_key { m = m, k = Down.({ v = 4 }) }
+# ClassCastException: MezzeRecord cannot be cast to java.lang.Comparable
+```
+
+Six operations threw: `floor_key`, `ceiling_key`, `range`, `head_map`,
+`tail_map`, `sub_map`, plus `range`, `head_set` and `tail_set` on the Set. For a
+key type that IS host-comparable they did not throw — they silently answered by
+the host's ordering instead of the program's, which is the worse half.
+
+### Cause: the comparator was installed by a side effect
+
+Those natives take NO comparator argument. They search with the one STORED on
+the map, and nothing ever set it deliberately — the old `insert` called
+`__native_sorted_map_insert`, which did
+`map.withComparator(ElementComparator.of(cmpFn))` before inserting, and the map
+it returned carried the result. Every insert reinstalled it; the slices simply
+found it there.
+
+`2a9c54f6a` moved the search for `insert` into guest code, so `insert` stopped
+going through that native. The arrays stayed correctly ordered — the guest
+search is what orders them — but the comparator field was never written again,
+and the only one a map could have was the natural-order lambda `empty {}` is
+built with.
+
+### Why no test caught it
+
+Both halves of the suite were satisfied: the ORDER tests used `Int` keys, where
+the host's ordering and the program's agree, and the custom-`Ord` tests used
+`get`/`insert`/`contains_key`, which had already stopped needing the stored
+comparator. No test combined a user `Ord` with a slice, so the one case that
+distinguishes them did not exist.
+
+Verified rather than argued: the same test file passes against the runtime at
+`523138128` and fails six ways against `2a9c54f6a`, which is what makes it a
+regression rather than a pre-existing hole.
+
+### Fix: nothing stores a comparator any more
+
+Putting the install back was the wrong repair — it was a hidden side effect, and
+removing it was the point. A slice is INDEX ARITHMETIC over a search the guest
+already does: `find_index` returns the index when the key is present and
+`-(insertPos + 1)` when it is not, so the number of keys strictly BELOW a probe
+and the number up to and INCLUDING it are each one expression over that, and all
+nine operations are a pair of those numbers handed to one slicing native.
+
+`take` and `drop` were part of the same defect and had to be rewritten too. They
+rebuilt their result one `putObject` at a time, which paid a comparator search
+per entry — so a sorted map keyed by a record threw from `take` however it was
+reached, and the Set's version was worse still, rebuilding through
+`MezzeSortedSet.empty()` with no comparator at all and so losing the ordering it
+had been sliced from. Both are now the same single slice: two array copies of an
+already-ordered run, and not one comparison.
+
+### Regression tests
+
+`interpreter/src/test/kotlin/.../stdlib/SortedOrderOpsOrdTest.kt`, 7 tests. A
+`newtype` with a DESCENDING `Ord` probes both halves at once: it is not
+host-comparable, so a wrong-comparator search throws rather than answering, and
+its order disagrees with the natural one everywhere, so an answer computed the
+wrong way cannot coincide with the right one. The first test establishes the
+layout through `min_key`/`max_key`, which read index 0 and `size - 1` and use no
+comparator, so a failure in the other six cannot be blamed on the insert path.

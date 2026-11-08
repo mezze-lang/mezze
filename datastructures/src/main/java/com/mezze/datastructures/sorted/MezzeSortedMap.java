@@ -554,6 +554,29 @@ public final class MezzeSortedMap<K, V> implements TruffleObject, Iterable<Mezze
         return new MezzeSortedMap<>(newKeys, newValues, comparator);
     }
 
+    /**
+     * The entries at {@code [from, to)} of the sort order, as a new map. The
+     * source is already ordered, so this is two array copies and NOT ONE
+     * COMPARISON — which is what every slice in
+     * {@code std::collections::sorted_map} is now built from.
+     *
+     * <p>{@code take} and {@code drop} used to rebuild their result one
+     * {@code putObject} at a time: O(n^2), with a comparator search per entry,
+     * and therefore also the last place a slice could reach
+     * {@code (Comparable) a} for a key the host cannot order.
+     *
+     * <p>The ends are CLAMPED rather than rejected, because that is the
+     * contract the callers want: {@code take { n }} past the end is the whole
+     * map, and a range whose ends cross is empty.
+     */
+    public MezzeSortedMap<K, V> slice(int from, int to) {
+        int lo = Math.max(0, Math.min(from, length));
+        int hi = Math.max(lo, Math.min(to, length));
+        if (lo == hi) return empty(comparator);
+        return new MezzeSortedMap<>(Arrays.copyOfRange(keys, lo, hi),
+                                    Arrays.copyOfRange(values, lo, hi), comparator);
+    }
+
     // ===== RANGE OPERATIONS =====
 
     /**

@@ -334,6 +334,17 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
     }
 
     /**
+     * The elements at {@code [from, to)} of the sort order, as a new set. One
+     * array copy and no comparison; see {@code MezzeSortedMap.slice}.
+     */
+    public MezzeSortedSet<A> slice(int from, int to) {
+        int lo = Math.max(0, Math.min(from, length));
+        int hi = Math.max(lo, Math.min(to, length));
+        if (lo == hi) return empty(comparator);
+        return new MezzeSortedSet<>(Arrays.copyOfRange(elements, lo, hi), comparator);
+    }
+
+    /**
      * Creates a sorted set from raw Object iterable (for interpreter use).
      */
     @SuppressWarnings("unchecked")

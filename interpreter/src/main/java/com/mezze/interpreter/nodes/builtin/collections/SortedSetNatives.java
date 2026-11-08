@@ -430,29 +430,16 @@ public final class SortedSetNatives {
         return MezzeVariant.some(maxElem);
     }
 
+    /**
+     * A contiguous run of the sort order. See
+     * {@code SortedMapNatives.slice}; the set's {@code take} and {@code drop}
+     * were worse than the map's — they rebuilt through
+     * {@code MezzeSortedSet.empty()} with NO comparator, so the result lost the
+     * ordering it was sliced from as well as paying a search per element.
+     */
     @TruffleBoundary
-    public static MezzeSortedSet take(MezzeSortedSet set, long n) {
-        MezzeSortedSet result = MezzeSortedSet.empty();
-        int count = 0;
-        for (Object elem : set) {
-            if (count >= n) break;
-            result = result.addObject(elem);
-            count++;
-        }
-        return result;
-    }
-
-    @TruffleBoundary
-    public static MezzeSortedSet drop(MezzeSortedSet set, long n) {
-        MezzeSortedSet result = MezzeSortedSet.empty();
-        int count = 0;
-        for (Object elem : set) {
-            if (count >= n) {
-                result = result.addObject(elem);
-            }
-            count++;
-        }
-        return result;
+    public static MezzeSortedSet slice(MezzeSortedSet set, Object from, Object to) {
+        return set.slice((int) (long) (Long) from, (int) (long) (Long) to);
     }
 
     @TruffleBoundary

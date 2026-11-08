@@ -225,15 +225,30 @@ pub let max_by: { s: SortedSet 'a, f: { val: 'a } -> 'b <...> } with Ord 'b -> O
 
 ## Takes the first n elements in sorted order.
 pub let take: { s: SortedSet 'a, n: Int } -> SortedSet 'a = { s, n } ->
-  __native_sorted_set_take { s = s, n = n }
+  __native_sorted_set_slice { s = s, from = 0, to = n }
 
 ## Drops the first n elements in sorted order.
 pub let drop: { s: SortedSet 'a, n: Int } -> SortedSet 'a = { s, n } ->
-  __native_sorted_set_drop { s = s, n = n }
+  __native_sorted_set_slice { s = s, from = n, to = __native_sorted_set_size { s = s } }
+
+## ── THE SLICES RUN HERE TOO ───────────────────────────────────────────────
+## These three take NO comparator and searched with the one stored on the set,
+## which nothing installs since `add` started taking its position from the guest
+## search. See the long note on the same six in `std::collections::sorted_map`:
+## a slice is index arithmetic over a search the guest already does.
+let count_below: { idx: Int } -> Int = { idx } -> if idx < 0 then 0 - idx - 1 else idx
+
+let count_upto: { idx: Int } -> Int = { idx } -> if idx < 0 then 0 - idx - 1 else idx + 1
+
+## One native for every slice; see the note in `std::collections::sorted_map`.
+let slice: { s: SortedSet 'a, from: Int, to: Int } -> SortedSet 'a = { s, from, to } ->
+  __native_sorted_set_slice { s = s, from = from, to = to }
 
 ## Returns elements in range [lo, hi] inclusive.
 pub let range: { s: SortedSet 'a, lo: 'a, hi: 'a } with Ord 'a -> SortedSet 'a = { s, lo, hi } ->
-  __native_sorted_set_range { s = s, lo = lo, hi = hi }
+  slice { s = s,
+          from = count_below { idx = find_index { s = s, x = lo, lo = 0, hi = __native_sorted_set_size { s = s } - 1 } },
+          to = count_upto { idx = find_index { s = s, x = hi, lo = 0, hi = __native_sorted_set_size { s = s } - 1 } } }
 
 ## Returns elements in either set but not both.
 pub let symmetric_difference
@@ -243,11 +258,13 @@ pub let symmetric_difference
 
 ## Returns elements strictly less than the given element.
 pub let head_set: { s: SortedSet 'a, to: 'a } with Ord 'a -> SortedSet 'a = { s, to } ->
-  __native_sorted_set_head_set { s = s, to = to }
+  slice { s = s, from = 0,
+    to = count_below { idx = find_index { s = s, x = to, lo = 0, hi = __native_sorted_set_size { s = s } - 1 } } }
 
 ## Returns elements >= the given element.
 pub let tail_set: { s: SortedSet 'a, from: 'a } with Ord 'a -> SortedSet 'a = { s, from } ->
-  __native_sorted_set_tail_set { s = s, from = from }
+  slice { s = s, to = __native_sorted_set_size { s = s },
+    from = count_below { idx = find_index { s = s, x = from, lo = 0, hi = __native_sorted_set_size { s = s } - 1 } } }
 
 ## Maps elements with f, collecting only Some results into a SortedSet.
 pub let filter_map

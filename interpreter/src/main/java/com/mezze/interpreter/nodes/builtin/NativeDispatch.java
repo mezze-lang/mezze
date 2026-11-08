@@ -1440,6 +1440,8 @@ public final class NativeDispatch extends MezzeNode {
             SortedSetNatives.addAt(getSortedSet(r, "s"), getField(r, "i"), getField(r, "x")));
         HANDLERS.put("__native_sorted_set_remove_at", (r, c) ->
             SortedSetNatives.removeAt(getSortedSet(r, "s"), getField(r, "i")));
+        HANDLERS.put("__native_sorted_set_slice", (r, c) ->
+            SortedSetNatives.slice(getSortedSet(r, "s"), getField(r, "from"), getField(r, "to")));
         HANDLERS.put("__native_sorted_set_min", (r, c) ->
             SortedSetNatives.min(getSortedSet(r, "s")));
         HANDLERS.put("__native_sorted_set_max", (r, c) ->
@@ -1511,10 +1513,6 @@ public final class NativeDispatch extends MezzeNode {
             SortedSetNatives.minBy(getSortedSet(r, "s"), getFunction(r, "f"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_sorted_set_max_by", (r, c) ->
             SortedSetNatives.maxBy(getSortedSet(r, "s"), getFunction(r, "f"), getFunction(r, "cmp"), c));
-        HANDLERS.put("__native_sorted_set_take", (r, c) ->
-            SortedSetNatives.take(getSortedSet(r, "s"), getLong(r, "n")));
-        HANDLERS.put("__native_sorted_set_drop", (r, c) ->
-            SortedSetNatives.drop(getSortedSet(r, "s"), getLong(r, "n")));
         HANDLERS.put("__native_sorted_set_range", (r, c) ->
             SortedSetNatives.range(getSortedSet(r, "s"), getField(r, "lo"), getField(r, "hi")));
 
@@ -1698,6 +1696,8 @@ public final class NativeDispatch extends MezzeNode {
                 getField(r, "k"), getField(r, "v")));
         HANDLERS.put("__native_sorted_map_remove_at", (r, c) ->
             SortedMapNatives.removeAt(getSortedMap(r, "m"), getField(r, "i")));
+        HANDLERS.put("__native_sorted_map_slice", (r, c) ->
+            SortedMapNatives.slice(getSortedMap(r, "m"), getField(r, "from"), getField(r, "to")));
         HANDLERS.put("__native_sorted_map_is_empty", (r, c) ->
             SortedMapNatives.isEmpty(getSortedMap(r, "m")));
         HANDLERS.put("__native_sorted_map_keys", (r, c) ->
@@ -1778,10 +1778,6 @@ public final class NativeDispatch extends MezzeNode {
             SortedMapNatives.tailMap(getSortedMap(r, "m"), getField(r, "from")));
         HANDLERS.put("__native_sorted_map_sub_map", (r, c) ->
             SortedMapNatives.subMap(getSortedMap(r, "m"), getField(r, "lo"), getField(r, "hi")));
-        HANDLERS.put("__native_sorted_map_take", (r, c) ->
-            SortedMapNatives.take(getSortedMap(r, "m"), getLong(r, "n")));
-        HANDLERS.put("__native_sorted_map_drop", (r, c) ->
-            SortedMapNatives.drop(getSortedMap(r, "m"), getLong(r, "n")));
 
         // Additional higher-order functions
         HANDLERS.put("__native_sorted_map_map_keys", (r, c) ->
