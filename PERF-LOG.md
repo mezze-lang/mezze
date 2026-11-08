@@ -10521,3 +10521,53 @@ real blocker, and says to re-run that check before touching it.
 **So the 2x on every string concatenation and interpolation is real and is not
 available.** Recorded rather than left for someone to re-derive: the measurement
 took one probe build, and the reason it cannot be taken took two more.
+
+#### An ASCII fast path for case conversion: tried, measured, REVERTED
+
+`str::to_upper` runs 782 ps a character against `str::concat`'s 33.7 ps for
+allocating and copying the same bytes — 23x, when both allocate and only one
+transforms. In ASCII exactly 'a'-'z' have an uppercase mapping and none of them
+expand, so `c - 32` over that range looked like it had to beat a table lookup.
+
+It did beat it, and lost anyway.
+
+```
+  row                      HEAD   ascii path    ratio
+  to_upper  15 chars     16 417       19 196    0.86x
+  to_upper 131 chars    108 122       79 558    1.36x
+  str::to_upper          54 674       42 456    1.29x
+  concat   (control)     10 223       10 337     flat
+  str::size (control)       937          868     flat
+  str::contains (ctl)     5 504        5 355     flat
+
+  per character             790.6        520.4   1.52x
+```
+
+1.52x on the per-character term and **0.86x on short strings**, which are the
+common case. Decomposing the two rows says exactly where it went: the FIXED cost
+went from 4 567 to 11 396 ps. `toCharArray` inflates a Latin1 string to UTF-16
+and `new String(char[])` compresses it back, so the fast path bought two compares
+per character and paid two extra passes and an allocation for them.
+
+#### The useful part is why 23x was never going to come from this
+
+**Both versions are SCALAR.** 790 ps a character is about 2.4 cycles — a
+per-character loop, which is what a table lookup costs. 520 ps is a cheaper
+per-character loop. Neither is vectorised, and neither can be while the loop
+carries a data-dependent bail for the first non-ASCII character.
+
+`concat`'s 26-34 ps a character is not a cheaper per-character operation — it is
+**no per-character operation at all**: a bulk copy the JIT vectorises. So the
+23x is the distance between a vectorised copy and a scalar transform, and
+closing it needs the transform vectorised — an intrinsic, or the Vector API that
+this build already loads for `SeqSumLongSIMDNode` — not a cheaper comparison.
+That is a different and much larger change, and it now has a number attached to
+what it would be worth.
+
+Reverted, with one thing kept: `AsciiCaseConversionTest`, 6 tests over 18
+inputs, differential against the JDK's own `Locale.ROOT` answer. It guards BUG
+37's invariant — that `str::to_upper` is a language primitive and must not read
+the host locale — and it is the harness a future attempt has to survive. A
+sentinel removing the non-ASCII deferral failed 4 of the 6, `ß`→`SS` among them,
+which is the case that makes an arithmetic fast path return a string of the
+wrong length.
