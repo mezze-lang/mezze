@@ -86,7 +86,58 @@ class TypeAliasTransparencyTest {
         """)
     }
 
+    /**
+     * The INHERENT methods too, not only the abilities above.
+     *
+     * This is the claim V0706's message makes — "a transparent alias already
+     * inherits the impls of the type it aliases" — and it is the reason an impl
+     * on the alias is refused rather than merely discouraged: there is nothing
+     * for it to add, and a receiver would never reach it anyway. Eq and
+     * arithmetic were pinned; the method half was the part of the diagnostic's
+     * claim that nothing tested.
+     */
+    @Test fun `alias inherits inherent methods from the aliased primitive`() {
+        ok("transparent.method-inherited", """
+            use std::int
+            type MyInt = Int
+            pub let show = { n: MyInt } -> n.to_str {}
+        """)
+    }
+
+    /** And through a container, where the method lives on `Seq`, not the alias. */
+    @Test fun `seq alias inherits the seq inherent methods`() {
+        ok("transparent.seq-method-inherited", """
+            use std::int
+            use std::collections::seq
+            type Ids = [Int]
+            pub let top = { xs: Ids } -> xs.first {}
+        """)
+    }
+
+    /** Transitively, for the same reason the Eq case is transitive. */
+    @Test fun `alias-of-alias inherits inherent methods`() {
+        ok("transparent.method-inherited-chain", """
+            use std::int
+            type A = Int
+            type B = A
+            pub let show = { b: B } -> b.to_str {}
+        """)
+    }
+
     // ── CONTRAST: newtype stays nominal ────────────────────────────────
+
+    /**
+     * The other side of the line: a newtype inherits NOTHING, so the method is
+     * absent and `impl M where` is the way to give it one — which is what V0706
+     * points the author at.
+     */
+    @Test fun `newtype does NOT inherit inherent methods from the wrapped type`() {
+        reject("newtype.method-not-inherited", """
+            use std::int
+            newtype M = Int
+            pub let show = { m: M } -> m.to_str {}
+        """, "to_str")
+    }
 
     @Test fun `newtype does NOT unify with wrapped type`() {
         reject("newtype.nominal-distinct", """
