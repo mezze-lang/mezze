@@ -292,18 +292,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
 
         int insertPos = -(idx + 1);
 
-        // The only in-place write in this class. Sound by ADDRESSABILITY: it
-        // writes at index `length`, outside the `[0, length)` every set
-        // holding this array reads. See MezzeSortedMap.putObject for the
-        // middle-insert path that was deleted from beside it.
-        if (isOwner() && length < elements.length && insertPos == length) {
-            elements[length] = elem;
-            Object[] token = ownerToken;
-            @SuppressWarnings("unchecked")
-            MezzeSortedSet<A> result = new MezzeSortedSet<>(elements, length + 1, comparator, token);
-            token[0] = result;
-            return result;
-        }
+        if (insertPos == length && canAppendInPlace()) return appendInPlace(elem);
 
         // Allocate with spare capacity
         int newCapacity = Math.max(length + 1, length + (length >> 1) + 4);
@@ -389,6 +378,60 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
      */
     public MezzeSortedSet<A> add(A elem) {
         return addObject(elem);
+    }
+
+    /** Whether {@link #appendInPlace} may run. */
+    private boolean canAppendInPlace() {
+        return isOwner() && length < elements.length;
+    }
+
+    /**
+     * Append at index {@code length} without copying, handing the token to the
+     * result. The only in-place write in this class, and sound by
+     * ADDRESSABILITY: every set holding this array reads {@code [0, length)},
+     * so none of them can address the slot. See
+     * {@code MezzeSortedMap.appendInPlace} for the middle-insert sibling that
+     * was deleted as BUG 40.
+     */
+    @SuppressWarnings("unchecked")
+    private MezzeSortedSet<A> appendInPlace(Object elem) {
+        elements[length] = elem;
+        Object[] token = ownerToken;
+        MezzeSortedSet<A> result = new MezzeSortedSet<>(elements, length + 1, comparator, token);
+        token[0] = result;
+        return result;
+    }
+
+    /**
+     * Add an element at a position in sort order, for a caller that has ALREADY
+     * established it is absent and where it goes — the guest-side binary search
+     * in {@code std::collections::sorted_set}. Makes no comparison and so needs
+     * no comparator; the native search cost ~30 ns a comparison.
+     *
+     * <p>THE CALLER OWNS THE ORDERING: {@code insertPos} must be the index that
+     * keeps the array sorted, which the guest search returns encoded as
+     * {@code -(insertPos + 1)} when the element is absent. A wrong position
+     * silently produces an unsorted array that every later search misreads.
+     */
+    public MezzeSortedSet<A> addAt(int insertPos, Object elem) {
+        if (insertPos < 0 || insertPos > length) {
+            throw new IndexOutOfBoundsException(
+                    "sorted set insert position " + insertPos + " of " + length);
+        }
+        if (insertPos == length && canAppendInPlace()) return appendInPlace(elem);
+
+        int newCapacity = Math.max(length + 1, length + (length >> 1) + 4);
+        Object[] newElements = new Object[newCapacity];
+        System.arraycopy(elements, 0, newElements, 0, insertPos);
+        newElements[insertPos] = elem;
+        System.arraycopy(elements, insertPos, newElements, insertPos + 1, length - insertPos);
+
+        Object[] token = new Object[1];
+        @SuppressWarnings("unchecked")
+        MezzeSortedSet<A> result =
+                new MezzeSortedSet<>(newElements, length + 1, comparator, token);
+        token[0] = result;
+        return result;
     }
 
     /**

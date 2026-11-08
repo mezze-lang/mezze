@@ -55,6 +55,33 @@ public final class SortedMapNatives {
         return map.valueAt((int) (long) (Long) index);
     }
 
+    /**
+     * Replace the value at a position the GUEST search already found, and
+     * insert at a position it already computed. Neither takes a comparator,
+     * because neither compares: the index is the whole input.
+     *
+     * <p>`insert` used to search here, which meant the comparison ran in host
+     * code and called back into guest code once per comparison — ~30 ns each,
+     * ~300 ns a lookup, against ~15 ns for the entire guest-side search. That
+     * is the same cost `get` and `contains_key` stopped paying when their
+     * search moved out; these two are what let `insert` stop paying it too.
+     *
+     * <p>The guest encodes the search result the way a Java binary search
+     * does: a non-negative index means found, and {@code -(insertPos + 1)}
+     * means absent with the position that keeps the array sorted. The guest
+     * decides which of these two to call.
+     */
+    @TruffleBoundary
+    public static MezzeSortedMap setAt(MezzeSortedMap map, Object index, Object value) {
+        return map.setAt((int) (long) (Long) index, value);
+    }
+
+    /** See {@link #setAt}. */
+    @TruffleBoundary
+    public static MezzeSortedMap insertAt(MezzeSortedMap map, Object index, Object key, Object value) {
+        return map.insertAt((int) (long) (Long) index, key, value);
+    }
+
     public static MezzeVariant get(MezzeSortedMap map, Object key, MezzeFunction cmpFn) {
         map = map.withComparator(ElementComparator.of(cmpFn));
         Object value = map.getObject(key);

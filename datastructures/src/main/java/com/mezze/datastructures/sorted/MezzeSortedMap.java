@@ -346,6 +346,97 @@ public final class MezzeSortedMap<K, V> implements TruffleObject, Iterable<Mezze
         return putObject(key, value);
     }
 
+    /** Whether {@link #appendInPlace} may run. Both arrays are written, so
+     *  both capacities are checked. */
+    private boolean canAppendInPlace() {
+        return isOwner() && length < keys.length && length < values.length;
+    }
+
+    /**
+     * Append at index {@code length} without copying, and hand the token to
+     * the result.
+     *
+     * <p>The ONLY in-place write in this class, and sound by ADDRESSABILITY
+     * rather than by care: every map holding these arrays reads
+     * {@code [0, length)}, so none of them can address the slot. The map
+     * derived here carries {@code length + 1} and is the only one that can
+     * see it.
+     *
+     * <p>There used to be a sibling taking the same token for a MIDDLE insert,
+     * shifting {@code [insertPos, length)} up by one. That range IS
+     * addressable, by the base itself, so inserting into a map changed the
+     * map — `base.put(5, _)` on 0,2,4,6,… left `base` reading 5 at index 3 and
+     * 20 gone. It is deleted rather than guarded (BUG 40): a fast path that
+     * mutates inside its own read window is not a fast path. Anything added
+     * beside this one has to make the addressability argument first.
+     */
+    @SuppressWarnings("unchecked")
+    private MezzeSortedMap<K, V> appendInPlace(Object key, Object value) {
+        keys[length] = key;
+        values[length] = value;
+        Object[] token = ownerToken;
+        MezzeSortedMap<K, V> result =
+                new MezzeSortedMap<>(keys, values, length + 1, comparator, token);
+        token[0] = result;
+        return result;
+    }
+
+    /**
+     * Replace the value at a position in sort order, for a caller that has
+     * ALREADY located the key — the guest-side binary search in
+     * {@code std::collections::sorted_map}. Makes no comparison and so needs
+     * no comparator: the native search cost ~30 ns per comparison and ~300 ns
+     * a lookup, against ~15 ns for the whole guest search.
+     *
+     * <p>Shares the keys array, exactly as {@link #putObject}'s replace does.
+     */
+    public MezzeSortedMap<K, V> setAt(int i, Object value) {
+        if (i < 0 || i >= length) {
+            throw new IndexOutOfBoundsException("sorted map value index " + i + " of " + length);
+        }
+        Object[] newValues = Arrays.copyOf(values, length);
+        newValues[i] = value;
+        return new MezzeSortedMap<>(keys, newValues, length, comparator, null);
+    }
+
+    /**
+     * Insert a key and value at a position in sort order. See {@link #setAt}
+     * for why this takes a position rather than searching for one.
+     *
+     * <p>THE CALLER OWNS THE ORDERING. {@code insertPos} must be the index
+     * that keeps the array sorted — what the guest search returns encoded as
+     * {@code -(insertPos + 1)} when the key is absent. A wrong position
+     * silently produces an unsorted array, which every later binary search
+     * then reads as a missing key, so this is deliberately not public API: the
+     * only caller is the native beside the search that computes it.
+     */
+    public MezzeSortedMap<K, V> insertAt(int insertPos, Object key, Object value) {
+        if (insertPos < 0 || insertPos > length) {
+            throw new IndexOutOfBoundsException(
+                    "sorted map insert position " + insertPos + " of " + length);
+        }
+        if (insertPos == length && canAppendInPlace()) return appendInPlace(key, value);
+
+        int newCapacity = Math.max(length + 1, length + (length >> 1) + 4);
+        Object[] newKeys = new Object[newCapacity];
+        Object[] newValues = new Object[newCapacity];
+
+        System.arraycopy(keys, 0, newKeys, 0, insertPos);
+        newKeys[insertPos] = key;
+        System.arraycopy(keys, insertPos, newKeys, insertPos + 1, length - insertPos);
+
+        System.arraycopy(values, 0, newValues, 0, insertPos);
+        newValues[insertPos] = value;
+        System.arraycopy(values, insertPos, newValues, insertPos + 1, length - insertPos);
+
+        Object[] token = new Object[1];
+        @SuppressWarnings("unchecked")
+        MezzeSortedMap<K, V> result =
+                new MezzeSortedMap<>(newKeys, newValues, length + 1, comparator, token);
+        token[0] = result;
+        return result;
+    }
+
     /**
      * Returns a new sorted map with the entry added/updated (raw type).
      * For interpreter use with dynamic types.
@@ -363,12 +454,12 @@ public final class MezzeSortedMap<K, V> implements TruffleObject, Iterable<Mezze
             //
             // The share needs nothing revoked: the only in-place write left
             // in this class lands at index `length`, which no map reading
-            // `[0, length)` can address. See the append path below.
+            // `[0, length)` can address. See appendInPlace.
             //
             // This map's values array is exactly `length` while the keys array
             // it shares may be longer. Nothing reads `values.length`, so that
-            // is safe, and the append guard below checks BOTH capacities
-            // because it writes both arrays.
+            // is safe, and canAppendInPlace checks BOTH capacities because the
+            // write it guards touches both arrays.
             Object[] newValues = Arrays.copyOf(values, length);
             newValues[idx] = value;
             return new MezzeSortedMap<>(keys, newValues, length, comparator, null);
@@ -377,30 +468,7 @@ public final class MezzeSortedMap<K, V> implements TruffleObject, Iterable<Mezze
         // Insert new
         int insertPos = -(idx + 1);
 
-        // The ONLY in-place write in this class, and it is sound by
-        // ADDRESSABILITY rather than by care: it writes at index `length`,
-        // and every map holding these arrays reads `[0, length)` — none of
-        // them can address the slot. A map derived by appending carries
-        // `length + 1` and so is the only one that can see it.
-        //
-        // There used to be a second one beside it, taking the same token for a
-        // middle insert and shifting `[insertPos, length)` up by one. That slot
-        // range IS addressable, by the base itself, so inserting into a map
-        // changed the map: `base.put(5, _)` on 0,2,4,6,… left `base` reading
-        // 5 at index 3 and 20 gone. It was never reachable from Mezze —
-        // SortedMapNatives installs a comparator first, and `withComparator`
-        // yields a map with no token — but it is deleted rather than guarded,
-        // because a fast path that mutates inside its own read window is not a
-        // fast path. A middle insert now copies, which is what it has to do.
-        if (isOwner() && length < keys.length && length < values.length && insertPos == length) {
-            keys[length] = key;
-            values[length] = value;
-            Object[] token = ownerToken;
-            @SuppressWarnings("unchecked")
-            MezzeSortedMap<K, V> result = new MezzeSortedMap<>(keys, values, length + 1, comparator, token);
-            token[0] = result;
-            return result;
-        }
+        if (insertPos == length && canAppendInPlace()) return appendInPlace(key, value);
 
         // Allocate with spare capacity
         int newCapacity = Math.max(length + 1, length + (length >> 1) + 4);

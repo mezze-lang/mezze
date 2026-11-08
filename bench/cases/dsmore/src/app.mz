@@ -175,6 +175,52 @@ let l_dq_first = { i, acc, d } -> if i <= 0 then acc
     l_dq_first { i = i - 1, acc = acc + v, d = d }
 
 ## ── 10. deque::get by index ─────────────────────────────────────────────────
+## ── 11/12. insert FROM A SHARED BASE, absent key vs present key ────────────
+## Row 3 chains, and every key it uses is already there, so it times a REPLACE.
+## Nothing measured what it costs to insert a key that is NOT there, and the two
+## are different operations: a replace copies the values array, an insertion
+## copies both and shifts. Chaining cannot answer it — a chain of absent inserts
+## GROWS the map, so the cost moves during the loop and the row means nothing,
+## which is the trap this file's header is about.
+##
+## So both rows insert into the SAME base map every iteration and drop the
+## result. The map's size never changes, the two rows differ in ONE thing, and
+## `size` of the result is the checksum so the insert cannot be dead code.
+##
+## The absent keys are ABOVE the base's range (it holds 1..keys with no gaps, so
+## there is no absent key in the middle to use). Position costs nothing here
+## anyway: the copy path copies all `length` elements wherever the key lands,
+## and the base has no owner token — it was built through the natives — so the
+## append fast path never fires.
+let l_sm_insert_absent = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let m2 = sorted_map::insert { m = m, k = keys + 1 + (i % keys), v = i }
+    l_sm_insert_absent { i = i - 1, m = m, keys = keys,
+                         acc = acc + sorted_map::size { m = m2 } }
+
+let l_sm_insert_present = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let m2 = sorted_map::insert { m = m, k = (i % keys) + 1, v = i }
+    l_sm_insert_present { i = i - 1, m = m, keys = keys,
+                          acc = acc + sorted_map::size { m = m2 } }
+
+## ── 13/14. the SET's two insert shapes, from a shared base ─────────────────
+## `add` of a present element and `add` of an absent one take different paths
+## through the same search, and the search is shared, so one row cannot stand
+## for both. Row 6 chains present adds; these two are the base form, matching
+## rows 11 and 12 so map and set are read the same way.
+let l_ss_add_absent = { i, acc, s, keys } -> if i <= 0 then acc
+  else do
+    let s2 = sorted_set::add { s = s, x = keys + 1 + (i % keys) }
+    l_ss_add_absent { i = i - 1, s = s, keys = keys,
+                      acc = acc + sorted_set::size { s = s2 } }
+
+let l_ss_add_present = { i, acc, s, keys } -> if i <= 0 then acc
+  else do
+    let s2 = sorted_set::add { s = s, x = (i % keys) + 1 }
+    l_ss_add_present { i = i - 1, s = s, keys = keys,
+                       acc = acc + sorted_set::size { s = s2 } }
+
 let l_dq_get = { i, acc, d, keys } -> if i <= 0 then acc
   else do
     let v = match deque::get { d = d, i = i % keys } is
@@ -225,3 +271,11 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
            label = "deque::first           ", thunk = {} -> l_dq_first { i = n, acc = 0, d = dq } }
   report { idx = 10, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "deque::get by index    ", thunk = {} -> l_dq_get { i = n, acc = 0, d = dq, keys = keys } }
+  report { idx = 11, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "sm::insert ABSENT, base", thunk = {} -> l_sm_insert_absent { i = n, acc = 0, m = sm, keys = keys } }
+  report { idx = 12, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "sm::insert PRESENT, base", thunk = {} -> l_sm_insert_present { i = n, acc = 0, m = sm, keys = keys } }
+  report { idx = 13, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "ss::add ABSENT, base   ", thunk = {} -> l_ss_add_absent { i = n, acc = 0, s = ss, keys = keys } }
+  report { idx = 14, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "ss::add PRESENT, base  ", thunk = {} -> l_ss_add_present { i = n, acc = 0, s = ss, keys = keys } }

@@ -71,9 +71,14 @@ public final class SortedSetNatives {
         return set.elementAt((int) (long) (Long) index);
     }
 
+    /**
+     * Add at a position the GUEST search already computed. Takes no comparator
+     * because it makes no comparison — see
+     * {@code SortedMapNatives.setAt} for why the search belongs in guest code.
+     */
     @TruffleBoundary
-    public static MezzeSortedSet add(MezzeSortedSet set, Object element, MezzeFunction cmpFn) {
-        return set.withComparator(ElementComparator.of(cmpFn)).addObject(element);
+    public static MezzeSortedSet addAt(MezzeSortedSet set, Object index, Object element) {
+        return set.addAt((int) (long) (Long) index, element);
     }
 
     @TruffleBoundary

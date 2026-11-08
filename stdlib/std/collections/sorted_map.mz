@@ -64,12 +64,30 @@ pub let singleton: { k: 'k, v: 'v } with Ord 'k -> SortedMap 'k 'v = { k, v } ->
   singleton_with_cmp { k = k, v = v, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
 
 ## Inserts a key-value pair, returning a new map.
-let insert_with_cmp
-  : { m: SortedMap 'k 'v, k: 'k, v: 'v, cmp: { a: 'k, b: 'k } -> Int } -> SortedMap 'k 'v = { m, k, v, cmp } ->
-  __native_sorted_map_insert { m = m, k = k, v = v, cmp = cmp }
+##
+## The search runs HERE, like `get`'s and `contains_key`'s — see the note above
+## `find_index`. `insert` used to hand the native a comparator closure and let
+## it search, which cost ~30 ns a comparison and ~300 ns a lookup against ~15 ns
+## for the whole guest search; at 1 000 keys that search was most of the
+## operation, with the array copy the smaller half.
+##
+## `find_index` returns everything needed to finish without searching again:
+## the index when the key is there, and `-(insertPos + 1)` when it is not.
+##
+## Separate helper for the same reason `get` has `value_or_none`: `insert`
+## cannot bind the search result to a `do`-block `let` without detaching its
+## `Ord` (the note above `find_index` explains why), and calling the search
+## twice would double the work. This helper compares nothing, so it raises no
+## constraint its annotation cannot name.
+let insert_at_slot: { m: SortedMap 'k 'v, k: 'k, v: 'v, idx: Int } -> SortedMap 'k 'v = { m, k, v, idx } ->
+  if idx < 0
+    then __native_sorted_map_insert_at { m = m, i = 0 - idx - 1, k = k, v = v }
+    else __native_sorted_map_set_at { m = m, i = idx, v = v }
 
 pub let insert: { m: SortedMap 'k 'v, k: 'k, v: 'v } with Ord 'k -> SortedMap 'k 'v = { m, k, v } ->
-  insert_with_cmp { m = m, k = k, v = v, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
+  insert_at_slot { m = m, k = k, v = v,
+                   idx = find_index { m = m, k = k, lo = 0,
+                                      hi = __native_sorted_map_size { m = m } - 1 } }
 
 ## ── THE ORDERED LOOKUPS RUN HERE, NOT IN THE NATIVE ───────────────────────
 ##
@@ -98,7 +116,11 @@ let key_at: { m: SortedMap 'k 'v, i: Int } -> 'k = { m, i } ->
 let value_at: { m: SortedMap 'k 'v, i: Int } -> 'v = { m, i } ->
   __native_sorted_map_value_at { m = m, i = i }
 
-## The position of `k` in sort order, or a negative number if absent.
+## The position of `k` in sort order, or `-(insertPos + 1)` if absent, where
+## `insertPos` is the index that would keep the array sorted — the encoding a
+## Java binary search uses, and for the same reason: one search answers both
+## "is it there" and "where does it go", which is what lets `insert` finish
+## without searching twice. `get` and `contains_key` only test the sign.
 ##
 ## NO `do`-BLOCK BINDING IN HERE, and that is not a style choice. The obvious
 ## spelling binds the probed key first:
@@ -133,7 +155,7 @@ let value_at: { m: SortedMap 'k 'v, i: Int } -> 'v = { m, i } ->
 ## comparator was handed, so an `Ord` that is not symmetric orders the array the
 ## same way whichever side does the search.
 let find_index = { m, k, lo, hi } ->
-  if lo > hi then 0 - 1
+  if lo > hi then 0 - lo - 1
   else if key_at { m = m, i = (lo + hi) / 2 } < k
     then find_index { m = m, k = k, lo = (lo + hi) / 2 + 1, hi = hi }
   else if k < key_at { m = m, i = (lo + hi) / 2 }

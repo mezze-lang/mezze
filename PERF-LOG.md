@@ -9996,3 +9996,91 @@ window.
 
 Gate: `:interpreter:test` 7 635 tests 0 failures 14 skipped; `:typechecker:test`
 4 826 tests 0 failures; `:datastructures:test` 749 tests 0 failures 2 skipped.
+
+#### `insert` was still paying for the search its own lookups stopped paying — 2.30x
+
+`get` and `contains_key` moved their binary search into guest code and got 10-20x
+for it, because the native search ran the COMPARISON in host code and so called
+back into guest code once per comparison. `insert` kept calling that native, and
+the stdlib note above `find_index` had the number sitting in it the whole time:
+**~30 ns a comparison, ~300 ns a lookup**, against ~15 ns for the entire guest
+search. At 1 000 keys a 412 000 ps insert was mostly that search, with the array
+copy the smaller half.
+
+So `find_index` now returns what a Java binary search returns — the index when
+the key is present, `-(insertPos + 1)` when it is not — and two natives take the
+position instead of computing it. Neither takes a comparator, because neither
+compares.
+
+```
+  row                              HEAD   guest-search   verdict
+  sm::insert PRESENT, base      411 568        178 767     2.30x
+  ss::add ABSENT, base          473 370        238 005     1.99x
+  sm::insert PRESENT, chain     405 848        269 475     1.51x
+  sm::insert ABSENT, base       919 696        665 820     1.38x
+  ss::add PRESENT, base          15 308         17 009     0.90x
+  ss::add PRESENT, chain         14 682         15 226     0.96x
+  sorted_map::get    (control)   16 988         17 062      flat
+  sorted_map::contains_key (ctl) 14 869         14 622      flat
+  sorted_set::contains (control) 14 848         15 072      flat
+  sorted_map::size   (control)      670            701      flat
+```
+
+Converged at n=300k and n=600k with 11 readings, checksums scaling with n. And
+the allocation evidence, which is the part that survives a loaded machine —
+the removed search allocated a record and an args array PER COMPARISON, so
+roughly twenty objects an insert went with it:
+
+```
+  row                        HEAD young   new young
+  sm::insert PRESENT, base          60          39
+  sm::insert ABSENT, base          124          97
+  ss::add ABSENT, base              70          52
+  ss::add PRESENT, base              5           7
+```
+
+#### The absent paths win less, and that says what is left
+
+PRESENT 2.30x against ABSENT 1.38x, because they were never the same operation:
+a replace copies one array, an insertion copies two at 1.5x capacity. Taking
+~300 ns of search off both leaves the replace nearly free of everything but its
+copy and the insertion still dominated by its two. **The insert row is now
+copy-bound, which it was not before** — which is the state in which the
+remaining question is structural rather than a constant.
+
+The chain form wins less than the base form for the same reason in a different
+place: 1.51x against 2.30x, because a chained replace feeds each result to the
+next, so every iteration copies into a FRESH values array instead of re-copying
+one the cache already holds.
+
+#### The regression is real, is 1.7 ns, and was bought for 235 ns
+
+`ss::add` of an element already present got **10% slower**, consistently across
+two sizes of n and 11 readings. It is not noise and it is not mysterious: the
+present branch used to be `if found_at { idx = … } then s`, a one-field call
+record, and is now `add_at_slot { s, x, idx }`, a three-field one. Record fields
+are boxed, so `x` costs an extra boxed `Int` on a path that does not use it —
+and the GC count says exactly that, 5 young collections against 7, rather than
+leaving it inferred.
+
+Keeping the present path at its old cost needs the index in two places, which
+needs a `do`-block binding, which detaches the `Ord` (the note above
+`find_index` explains why). The alternative is searching twice on the absent
+path, which is the 15 ns this change removed. So: +1.7 ns on a present add
+against -235 ns on an absent one, taken deliberately.
+
+#### `ss::add ABSENT` existed as a gap, not as a row
+
+Rows 11-14 of `bench/cases/dsmore` are new, and they had to be, because row 3
+chains PRESENT keys only — it times a replace, and nothing measured an
+insertion. Chaining cannot measure one: a chain of absent inserts GROWS the
+container, so the cost moves during the loop. All four insert into the same base
+and drop the result, so the size never changes and the two rows differ in one
+thing.
+
+The old `add` note had already promised this measurement — "removing the second
+search needs an insert-at-index native, which is a separate change with its own
+measurement". This is it.
+
+Gate: `:interpreter:test` 7 649 tests 0 failures 14 skipped; `:typechecker:test` 4 826 tests 0 failures;
+`:datastructures:test` 749 tests 0 failures 2 skipped.
