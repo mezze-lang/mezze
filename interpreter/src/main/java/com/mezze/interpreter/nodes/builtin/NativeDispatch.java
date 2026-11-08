@@ -2496,7 +2496,11 @@ public final class NativeDispatch extends MezzeNode {
     }
 
     private static MezzeList getList(MezzeRecord r, String name) {
-        Object val = getField(r, name);
+        return coerceList(getField(r, name), name);
+    }
+
+    /** See {@link #coerceSeq}; a list has THREE representations, not two. */
+    public static MezzeList coerceList(Object val, String name) {
         if (val instanceof MezzeList list) return list;
         // Handle array literals (Object[]) - convert to MezzeList
         if (val instanceof Object[] arr) {
@@ -2601,9 +2605,19 @@ public final class NativeDispatch extends MezzeNode {
     }
 
     private static MezzeSeq getSeq(MezzeRecord r, String name) {
-        Object val = getField(r, name);
+        return coerceSeq(getField(r, name), name);
+    }
+
+    /**
+     * A SEQ HAS MORE THAN ONE RUNTIME REPRESENTATION: the canonical
+     * {@link MezzeSeq}, and a bare {@code Object[]} for a literal that was
+     * never wrapped. This is the one place that decides what counts as a seq,
+     * so that every route which reads one agrees -- including
+     * {@code MezzeBytecodeRootNode.InlineSeqGetRaw}, which fuses the read and
+     * has to accept exactly what this accepts.
+     */
+    public static MezzeSeq coerceSeq(Object val, String name) {
         if (val instanceof MezzeSeq seq) return seq;
-        // Also handle Object[] - convert to MezzeSeq
         if (val instanceof Object[] arr) return MezzeSeq.fromArray(arr);
         throw new NativeTypeMismatchException("Expected MezzeSeq for field '" + name + "', got: " +
             (val == null ? "null" : val.getClass().getSimpleName()));
@@ -2622,7 +2636,11 @@ public final class NativeDispatch extends MezzeNode {
     }
 
     private static BytesNatives.MezzeBytes getBytes(MezzeRecord r, String name) {
-        Object val = getField(r, name);
+        return coerceBytes(getField(r, name), name);
+    }
+
+    /** See {@link #coerceSeq}; bytes has ONE representation. */
+    public static BytesNatives.MezzeBytes coerceBytes(Object val, String name) {
         if (val instanceof BytesNatives.MezzeBytes bytes) return bytes;
         throw new NativeTypeMismatchException("Expected MezzeBytes for field '" + name + "'");
     }

@@ -8905,7 +8905,12 @@ public final class BytecodeCompiler {
                                                   int argCount, BytecodeLocal[] localMap) {
         NodeIR scrutinee = m.getScrutinee();
         if (!(scrutinee instanceof CallNativeIR cn)) return false;
-        if (!"__native_map_get".equals(cn.getName())) return false;
+        String getName = cn.getName();
+        boolean isMapGet = "__native_map_get".equals(getName);
+        boolean isSeqGet = "__native_seq_get".equals(getName);
+        boolean isListGet = "__native_list_get".equals(getName);
+        boolean isBytesGet = "__native_bytes_get".equals(getName);
+        if (!isMapGet && !isSeqGet && !isListGet && !isBytesGet) return false;
 
         // BOTH ABIs, and the scalar one is what actually turns up here. A probe
         // printing the scrutinee reported
@@ -8931,8 +8936,10 @@ public final class BytecodeCompiler {
             // either can be a call. So the record path is taken only when the
             // written order already matches, exactly as the generic record-ABI
             // collapse above requires.
-            if (!"m".equals(mr.getFields().get(0).getName())
-                    || !"k".equals(mr.getFields().get(1).getName())) return false;
+            String f0 = isMapGet ? "m" : isSeqGet ? "xs" : isListGet ? "xs" : "b";
+            String f1 = isMapGet ? "k" : isListGet ? "index" : "i";
+            if (!f0.equals(mr.getFields().get(0).getName())
+                    || !f1.equals(mr.getFields().get(1).getName())) return false;
             mapArg = mr.getFields().get(0).getValue();
             keyArg = mr.getFields().get(1).getValue();
         }
@@ -8969,10 +8976,16 @@ public final class BytecodeCompiler {
         b.beginBlock();
         BytecodeLocal rawLocal = b.createLocal();
         b.beginStoreLocal(rawLocal);
-        b.beginInlineMapGetRaw();
+        if (isMapGet) b.beginInlineMapGetRaw();
+        else if (isSeqGet) b.beginInlineSeqGetRaw();
+        else if (isListGet) b.beginInlineListGetRaw();
+        else b.beginInlineBytesGetRaw();
         emitNode(mapArg, b, argCount, localMap);
         emitNode(keyArg, b, argCount, localMap);
-        b.endInlineMapGetRaw();
+        if (isMapGet) b.endInlineMapGetRaw();
+        else if (isSeqGet) b.endInlineSeqGetRaw();
+        else if (isListGet) b.endInlineListGetRaw();
+        else b.endInlineBytesGetRaw();
         b.endStoreLocal();
 
         // Zero-init binding slots, as the generic emitMatch does.

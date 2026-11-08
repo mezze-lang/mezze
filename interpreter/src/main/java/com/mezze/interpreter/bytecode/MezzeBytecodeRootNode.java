@@ -6467,6 +6467,102 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    /**
+     * An indexed read returning the ELEMENT or null, for the same fused
+     * `match get { … } is Some/None` pattern as {@link InlineMapGetRaw}.
+     *
+     * <p>NULL MEANS OUT OF RANGE, and that is sound for all three of these:
+     * Mezze has no null value, so no container can hold one. `bytes::get`
+     * boxes its byte into a `Long` before returning it, so even there a
+     * present element is non-null.
+     *
+     * <p>The bounds check lives HERE rather than in the emitted code, which is
+     * what lets one operation stand in for the native's whole
+     * check-then-wrap body. The mut version of this pattern split into a
+     * separate bounds test and read; that is only worth it when the read can
+     * come back UNBOXED, which is a further step these do not take.
+     *
+     * <p>THE CONTAINER IS TAKEN AS `Object` AND DISPATCHED HERE, deliberately.
+     * A seq is EITHER a {@link com.mezze.datastructures.seq.MezzeSeq} OR a bare
+     * `Object[]` that was never wrapped, and a list has a third form again — so
+     * the native does not RECEIVE a container, it receives something it
+     * COERCES, in `NativeDispatch.getSeq`/`getList`. A fused read accepting
+     * only the canonical class is therefore narrower than the native it stands
+     * in for, which is not an optimisation but a change of semantics: it cost
+     * 39 interpreter tests, every one an `Object[]` seq arriving at a node with
+     * no specialization for it. Anything unrecognised here goes to the SAME
+     * coercion the native uses, so there is one answer to "what counts as a
+     * seq" and this cannot drift from it.
+     *
+     * <p>A DSL type guard would buy nothing anyway: the body is behind a
+     * boundary, so the guard is an `instanceof` either way, and doing it here
+     * makes the unsupported-specialization failure mode IMPOSSIBLE rather than
+     * merely unlikely.
+     *
+     * <p>`list::get` stays O(n) but walks the cons cells ONCE; the native walks
+     * TWICE, because `ListNatives.get` bounds-checks with `size()` — itself a
+     * walk — before calling `get(i)`, which walks again. An `Object[]` seq or
+     * list is read IN PLACE, where the native allocates a wrapper around it
+     * first just to read one element.
+     */
+    @Operation
+    public static final class InlineSeqGetRaw {
+        @Specialization
+        @TruffleBoundary
+        @SuppressWarnings("rawtypes")
+        public static Object doOp(Object container, long index) {
+            int i = (int) index;
+            if (i < 0) return null;
+            if (container instanceof Object[] arr) {
+                return i >= arr.length ? null : arr[i];
+            }
+            com.mezze.datastructures.seq.MezzeSeq seq =
+                container instanceof com.mezze.datastructures.seq.MezzeSeq s ? s
+                    : com.mezze.interpreter.nodes.builtin.NativeDispatch.coerceSeq(container, "xs");
+            return i >= seq.size() ? null : seq.get(i);
+        }
+    }
+
+    /** See {@link InlineSeqGetRaw}. */
+    @Operation
+    public static final class InlineListGetRaw {
+        @Specialization
+        @TruffleBoundary
+        @SuppressWarnings("rawtypes")
+        public static Object doOp(Object container, long index) {
+            int i = (int) index;
+            if (i < 0) return null;
+            if (container instanceof Object[] arr) {
+                return i >= arr.length ? null : arr[i];
+            }
+            com.mezze.datastructures.list.MezzeList cur =
+                container instanceof com.mezze.datastructures.list.MezzeList l ? l
+                    : com.mezze.interpreter.nodes.builtin.NativeDispatch.coerceList(container, "xs");
+            for (int k = 0; k < i; k++) {
+                if (cur.isEmpty()) return null;
+                cur = cur.tail();
+            }
+            return cur.isEmpty() ? null : cur.head();
+        }
+    }
+
+    /** See {@link InlineSeqGetRaw}. */
+    @Operation
+    public static final class InlineBytesGetRaw {
+        @Specialization
+        @TruffleBoundary
+        public static Object doOp(Object container, long index) {
+            int i = (int) index;
+            if (i < 0) return null;
+            com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes bytes =
+                container instanceof com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes b
+                    ? b
+                    : com.mezze.interpreter.nodes.builtin.NativeDispatch.coerceBytes(container, "b");
+            if (i >= bytes.length()) return null;
+            return (long) (bytes.get(i) & 0xFF);
+        }
+    }
+
     /** Null check — used by the fused MutGetRaw + match pattern. */
     @Operation
     public static final class IsNotNull {
