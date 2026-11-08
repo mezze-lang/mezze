@@ -1,5 +1,7 @@
 package com.mezze.interpreter.nodes.builtin.io;
 
+import com.mezze.datastructures.seq.LongSeqStorage;
+import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.values.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
@@ -402,13 +404,30 @@ public final class BytesNatives {
         return Base64.getEncoder().encodeToString(bytes.getData());
     }
 
+    /**
+     * The bytes as a `[Int]`, built straight into a primitive `long[]`.
+     *
+     * <p>It used to BOX every byte: an `Object[]` filled with
+     * `(long) (bytes.get(i) & 0xFF)`, which allocates a `Long` per element and
+     * then makes `SeqStorageFactory.fromArray` guess the storage back — three
+     * `instanceof` a element to decide it is all `Long`, a second array, and an
+     * unboxing pass. 2 496 ps a byte on `bench/cases/bytesurface`, for a
+     * conversion that is a widening copy.
+     *
+     * <p>`MezzeSeq.fromLongs` would CLONE the array, so the storage is built
+     * directly instead. Sound because `out` is allocated here and never
+     * escapes: the clone exists to stop a caller mutating the sequence it
+     * handed over, and there is no such caller.
+     */
     @TruffleBoundary
-    public static Object[] toArray(MezzeBytes bytes) {
-        Object[] result = new Object[bytes.length()];
-        for (int i = 0; i < bytes.length(); i++) {
-            result[i] = (long) (bytes.get(i) & 0xFF);
+    public static MezzeSeq<Long> toSeq(MezzeBytes bytes) {
+        byte[] data = bytes.getData();
+        if (data.length == 0) return MezzeSeq.empty();
+        long[] out = new long[data.length];
+        for (int i = 0; i < data.length; i++) {
+            out[i] = data[i] & 0xFF;
         }
-        return result;
+        return MezzeSeq.fromStorage(new LongSeqStorage(out));
     }
 
 }

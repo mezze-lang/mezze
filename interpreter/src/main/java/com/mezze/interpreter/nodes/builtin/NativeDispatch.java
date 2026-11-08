@@ -2191,7 +2191,7 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_bytes_to_base64", (r, c) ->
             BytesNatives.toBase64(getBytes(r, "b")));
         HANDLERS.put("__native_bytes_to_seq", (r, c) ->
-            BytesNatives.toArray(getBytes(r, "b")));
+            BytesNatives.toSeq(getBytes(r, "b")));
 
         // HOF operations
         HANDLERS.put("__native_bytes_map", (r, c) ->

@@ -10764,3 +10764,79 @@ bypass-eligible here at all" is no longer true of an inline lambda.
 
 Gate: `:interpreter:test` 7 676 tests 0 failures 14 skipped; `:typechecker:test`
 4 826 tests 0 failures; `:datastructures:test` 753 tests 0 failures 2 skipped.
+
+#### `bytes::to_seq` boxed a Long per byte — 6.63x
+
+The last of the three bytes defects, and the plainest: converting a `Bytes` to a
+`[Int]` filled an `Object[]` with `(long) (bytes.get(i) & 0xFF)`, boxing a
+`Long` per element, and then handed it to `SeqStorageFactory.fromArray`, which
+has to GUESS the storage back — three `instanceof` an element to decide it is
+all `Long`, a second array, and an unboxing pass. For what is a widening copy.
+
+```
+  row                      len         HEAD       long[]     verdict
+  bytes::to_seq           1024      2 526 132      380 769     6.63x
+  bytes::to_seq            512        985 782      202 737     4.86x
+  bytes::to_hex (control) 1024        899 964      911 774      flat
+  bytes::fold   (control) 1024        155 185      156 589      flat
+  bytes::size   (control) 1024          6 810        6 669      flat
+  bytes::get    (control) 1024          7 946        7 697      flat
+
+  young collections                        52           24
+```
+
+**The two ratios differ because HEAD is not linear.** Its per-byte cost rises
+from 1 925 to 2 467 ps as the buffer doubles — more boxed `Long`s, more
+collection — while the new path is flat at 372 to 396. So the win grows with the
+buffer rather than being a constant 6.63x, and quoting one number without the
+other would have hidden that.
+
+`MezzeSeq.fromLongs` would have CLONED the array, so the storage is built
+directly. Sound because the array is allocated in the native and never escapes:
+the clone exists to stop a caller mutating the sequence it handed over, and
+there is no such caller.
+
+#### A round trip is blind to any error its inverse undoes
+
+The sentinel corrected the test's own note. Dropping the `& 0xFF` — the whole
+correctness of the conversion, since a Java `byte` is signed and `0xFF` reads as
+-1 — fails TWO of the five tests, not the four first written there.
+
+The survivor is the interesting one. The ROUND TRIP through `from_seq` passes,
+because `from_seq` truncates with `byteValue()`: -1 goes back to `0xFF` and the
+trip is the identity whether or not the element was sign-extended on the way
+out.
+
+**That is the same blind spot the hex codec's whole-range sum has under a nibble
+swap** — swapping nibbles is a bijection on 0..255, so the sum over every byte
+value cannot see it. Twice in one day, in two different files, the test that
+looked strongest was the one blind to the bug it was aimed at. What sees these
+is reading the VALUES: `0x00 0x7f 0x80 0xff` sums to 510 unsigned and -2
+sign-extended; `0x01 0xf0 0xa5` distinguishes a nibble swap because no byte in
+it has equal nibbles.
+
+Worth stating as a rule: **a round-trip or whole-range property is invariant
+under any error the inverse undoes symmetrically, and under any permutation of
+the input set.** Those are exactly the errors an encoder/decoder pair is likely
+to have.
+
+#### Bytes, after three fixes
+
+```
+  op                    before        after    note
+  to_hex            49 944/byte      882/byte  String.format per byte
+  to_seq             2 467/byte      372/byte  a boxed Long per byte
+  map               25 497/byte    ~4 600/byte callback never bypassed
+  fold                  —            149/byte  fused; faster than seq::fold's 280
+```
+
+Still open and measured: `to_hex` is 5.7x `to_base64` per byte (base64 reaches
+an intrinsified JDK encoder), `index_of` scans a byte at a time at 214 ps a
+byte where it could vectorise, and `map` remains ~30x `fold` — which is CORRECT,
+not a defect: `NativeHofNames` keeps bytes out of the element-stage vocabulary
+because `map`'s result truncates to 8 bits, so fusing it would make `x * 2` over
+a byte of 200 give 400 instead of 144. Closing that needs a truncating stage
+kind.
+
+Gate: `:interpreter:test` 7 681 tests 0 failures 14 skipped; `:typechecker:test`
+4 826 tests 0 failures; `:datastructures:test` 753 tests 0 failures 2 skipped.
