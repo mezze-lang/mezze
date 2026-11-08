@@ -1,5 +1,42 @@
 package com.mezze.language.ast
 
+/**
+ * One rendered TYPE ARGUMENT, parenthesized when it would otherwise reparse
+ * wrongly.
+ *
+ * Every site that prints an application joins its arguments with a space, and
+ * none of them used to bracket a nested one — so `Option (Option Int)` printed
+ * as `Option Option Int`, `Maybe (Maybe Int)` as `Maybe Maybe Int`, and a
+ * function-typed argument lost its boundary entirely. The printed form is what a
+ * reader copies back into their source, and that form said something else: read
+ * as source, `Option Option Int` applies `Option` to TWO arguments, which V0705
+ * now refuses outright. So the printer was emitting types the compiler rejects.
+ *
+ * The test is a space at bracket depth zero, decided on the rendered string so
+ * one rule covers every shape rather than each arm guessing about its argument:
+ *
+ *   Int            no space            Int
+ *   [Int]          space-free          [Int]
+ *   { x: Int }     spaces inside {}    { x: Int }
+ *   Option Int     space at depth 0    (Option Int)
+ *   { a } -> b     space at depth 0    ({ a } -> b)
+ *
+ * The last two are the point: both are single arguments whose rendering contains
+ * a separator that the join would otherwise hand back to the enclosing
+ * application.
+ */
+internal fun parenthesizeTypeArg(rendered: String): String {
+    var depth = 0
+    for (c in rendered) {
+        when (c) {
+            '{', '[', '(' -> depth++
+            '}', ']', ')' -> depth--
+            ' ' -> if (depth == 0) return "($rendered)"
+        }
+    }
+    return rendered
+}
+
 private fun printVariantType(
     type: MezzeType.VariantType,
     typeAliases: Map<String, TypeAliasInfo>,
@@ -10,8 +47,13 @@ private fun printVariantType(
 
     if (BuiltinTypes.isOptionVariant(type)) {
         val valueType = BuiltinTypes.getOptionValueType(type)
+        // Rendered through the same bracketing rule as any other argument: this
+        // arm does not join a list, so it was missed, and `Option (Option Int)`
+        // printed as `Option Option Int`.
         val valueTypeStr = if (valueType != null) {
-            prettyPrintWithAliasCheck(valueType, typeAliases, showExpansion, typeVarMapping)
+            parenthesizeTypeArg(
+                prettyPrintWithAliasCheck(valueType, typeAliases, showExpansion, typeVarMapping),
+            )
         } else {
             "'a"
         }
@@ -28,7 +70,7 @@ private fun printVariantType(
                 val typeArgs = inferTypeArguments(type, aliasDef, aliasInfo.typeParams)
                 if (typeArgs != null) {
                     val argsStr = if (typeArgs.isEmpty()) "" else " " + typeArgs.joinToString(" ") {
-                        prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping)
+                        parenthesizeTypeArg(prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping))
                     }
                     return aliasName + argsStr
                 }
@@ -55,7 +97,7 @@ private fun printVariantType(
             val aliasDef = aliasInfo.definition as MezzeType.VariantType
             val typeArgs = inferTypeArguments(type, aliasDef, aliasInfo.typeParams)
             val argsStr = if (typeArgs.isNullOrEmpty()) "" else " " + typeArgs.joinToString(" ") {
-                prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping)
+                parenthesizeTypeArg(prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping))
             }
             return aliasName + argsStr
         }
@@ -67,7 +109,7 @@ private fun printVariantType(
             aliasMatch.aliasName
         } else {
             val argsStr = aliasMatch.typeArgs.joinToString(" ") {
-                prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping)
+                parenthesizeTypeArg(prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping))
             }
             "${aliasMatch.aliasName} $argsStr"
         }
@@ -93,7 +135,7 @@ private fun printVariantType(
     // printers agree. Anonymous inline variants (no name) still expand below.
     type.identity.displayNameOrNull()?.let { declaredName ->
         val argsStr = if (type.typeArgs.isEmpty()) "" else " " + type.typeArgs.joinToString(" ") {
-            prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping)
+            parenthesizeTypeArg(prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping))
         }
         return "$declaredName$argsStr"
     }
@@ -177,7 +219,7 @@ private fun printRecordType(
         // reader wrote, and for a generic one that includes its arguments.
         if (type.typeArgs.isEmpty()) return displayName
         val args = type.typeArgs.joinToString(" ") {
-            prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping)
+            parenthesizeTypeArg(prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping))
         }
         return "$displayName $args"
     }
@@ -268,7 +310,7 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: MutableM
         if (type.constructor == BuiltinTypes.SEQ && type.args.size == 1) {
             "[${prettyPrintTypeWithMapping(type.args[0], typeVarMapping)}]"
         } else {
-            val argsStr = type.args.joinToString(" ") { prettyPrintTypeWithMapping(it, typeVarMapping) }
+            val argsStr = type.args.joinToString(" ") { parenthesizeTypeArg(prettyPrintTypeWithMapping(it, typeVarMapping)) }
             if (argsStr.isEmpty()) type.constructor else "${type.constructor} $argsStr"
         }
     }
@@ -286,7 +328,7 @@ private fun prettyPrintTypeWithMapping(type: MezzeType, typeVarMapping: MutableM
 
         val abilityConstraints = if (filteredConstraints.isNotEmpty()) {
             " with " + filteredConstraints.joinToString(", ") { constraint ->
-                val typeArgs = constraint.typeArgs.joinToString(" ") { prettyPrintTypeWithMapping(it, typeVarMapping) }
+                val typeArgs = constraint.typeArgs.joinToString(" ") { parenthesizeTypeArg(prettyPrintTypeWithMapping(it, typeVarMapping)) }
                 val head = if (typeArgs.isNotEmpty()) "${constraint.abilityName} $typeArgs" else constraint.abilityName
                 if (constraint.associatedTypeBindings.isEmpty()) {
                     head
@@ -354,7 +396,7 @@ fun prettyPrintTypeWithAliases(
                 vars.toList()
             }
             val argsStr = if (args.isEmpty()) "" else " " + args.joinToString(" ") {
-                prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping)
+                parenthesizeTypeArg(prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping))
             }
             val aliasName = type.identity.displayNameOrNull() + argsStr
             return if (showExpansion) {
@@ -371,7 +413,7 @@ fun prettyPrintTypeWithAliases(
         val aliasName = if (aliasMatch.typeArgs.isEmpty()) {
             aliasMatch.aliasName
         } else {
-            val typeArgsStr = aliasMatch.typeArgs.joinToString(" ") { prettyPrintTypeWithAliases(it, typeAliases, showExpansion) }
+            val typeArgsStr = aliasMatch.typeArgs.joinToString(" ") { parenthesizeTypeArg(prettyPrintTypeWithAliases(it, typeAliases, showExpansion)) }
             "${aliasMatch.aliasName} $typeArgsStr"
         }
 
@@ -406,7 +448,7 @@ private fun prettyPrintWithAliasCheck(
                     vars.toList()
                 }
                 val argsStr = if (args.isEmpty()) "" else " " + args.joinToString(" ") {
-                    prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping)
+                    parenthesizeTypeArg(prettyPrintWithAliasCheck(it, typeAliases, showExpansion, typeVarMapping))
                 }
                 return type.identity.displayNameOrNull() + argsStr
             }

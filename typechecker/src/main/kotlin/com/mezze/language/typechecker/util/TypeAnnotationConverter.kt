@@ -706,8 +706,18 @@ object TypeAnnotationConverter {
                 typeArgs = typeArgs,
                 ascriptionWall = false,
             )
+            // `typeArgs` is print-only on a record (deliberately outside
+            // equals/hashCode — the fields already carry the instantiation), and
+            // its doc says it is set by `adoptRecordAlias` and empty everywhere
+            // else. This was one of the "everywhere else", so a generic record
+            // alias kept its NAME and lost its ARGUMENTS: `type Pair 'a = { l:
+            // 'a, r: 'a }` written as `Pair Int` printed as a bare `Pair`. That
+            // is now not even legal source — V0705 refuses an under-applied
+            // constructor — so the message named a type the author could not
+            // have written.
             is MezzeType.RecordType -> resolved.copy(
                 identity = aliasIdentity,
+                typeArgs = typeArgs,
             )
             else -> resolved
         }
