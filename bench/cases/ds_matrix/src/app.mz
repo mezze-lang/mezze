@@ -161,6 +161,11 @@ let main = {} -> perform Console in perform SystemArgs in perform SystemTime in 
     report {idx = 9, sel = sel, label = "list::filter+size(alloc)", floor_ns = floor.min, n = n, warm = warm, k = k, thunk = {} -> list::size {xs = list::filter {xs = list_ns, p = {x} -> x % 2 == 0}}}
     report {idx = 10, sel = sel, label = "list::any (miss)", floor_ns = floor.min, n = n, warm = warm, k = k, thunk = {} -> if list::any {xs = list_ns, p = {x} -> x == (0 - 1)} then 1 else 0}
     report {idx = 11, sel = sel, label = "list::count", floor_ns = floor.min, n = n, warm = warm, k = k, thunk = {} -> list::count {xs = list_ns, p = {x} -> x % 2 == 0}}
+    # THE MISSING CONTROL. `seq` has a native-sum row and `list` did not, so
+    # nothing separated the two things a List row pays: walking the cons cells,
+    # and calling back into guest code per element. `list::sum` walks and takes
+    # no callback, so `fold_left - sum` is the callback and `sum` is the walk.
+    report {idx = 13, sel = sel, label = "list::sum        (native)", floor_ns = floor.min, n = n, warm = warm, k = k, thunk = {} -> list::sum {xs = list_ns}}
 
     # RANGE fusion
     println { msg = "" }

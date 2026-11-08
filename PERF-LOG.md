@@ -10381,3 +10381,68 @@ covered it. It is not measuring an allocation and should not be read as one.
 - **`coresurface` has nothing comparable** — one effect operation is 393 ps net
   of the tier control, and option and variant matching are at parity with a
   counted loop (226 and 231 against 222).
+
+#### What the List gap actually is: the WALK, and the callback is free
+
+The missing control. `seq` had a native-sum row and `list` did not, so nothing
+separated the two things a List row pays — walking the cons cells, and calling
+back into guest code per element. `list::sum` walks and takes no callback, so it
+is the walk alone. n=2e6, one row per process, min of five, spreads 1.04-1.37x:
+
+```
+  row                         ps/elem  callback   all five
+  list::sum     (native)        1 731        no   1858 1896 1889 1731 1801
+  list::fold_left (sum)         1 661       yes   1696 1661 1676 1725 1707
+  list::count                   1 736       yes   1783 1736 1737 1899 2161
+  seq::sum      (native)          281        no    289  386  281  329  302
+  seq::fold     (sum)             274       yes    280  278  274  313  281
+```
+
+**The callback is free on both structures.** `seq::fold` 274 against
+`seq::sum` 281, and `list::fold_left` 1 661 against `list::sum` 1 731 — the
+version WITH a guest call per element is marginally cheaper than the one
+without, on both. So none of the 6x is the boundary, the closure, or the
+dictionary, and the whole of it is the traversal: 1 731 against 281 is **6.2x
+for walking 2 000 000 cons cells instead of 2 000 000 array slots**.
+
+That corrects the standing note, which had this as `list::fold_left` being 3.9x
+`seq::fold` and guessed at chunked backing without separating the two costs. The
+ratio was right; the attribution was unmeasured.
+
+#### And 6.2x is about what a cons cell has to cost
+
+A `MezzeLongCons` is a header, an unboxed long and a tail reference — call it 32
+bytes against the 8 an element of a `LongSeqStorage` occupies. So the walk moves
+4x the memory, and every step's address DEPENDS on the previous load, which an
+array index does not: the hardware can prefetch an array and can only speculate
+a pointer chain. 4x the traffic and no vectorisation lands near 6x without
+anything being wrong.
+
+So this is not a defect to fix but a REPRESENTATION to decide — and the
+representation is PURELY INTERNAL, which is the opposite of what I first wrote
+here. `[x, ...rest]` is a SEQ pattern and does not apply to a List:
+
+```
+  match someList is
+    [] -> …
+    [x, ...rest] -> …
+  # error[T0201]: Field `xs` expects ['a] but got List Int
+```
+
+A List is taken apart by `list::uncons`, which returns
+`Option { head: 'a, tail: List 'a }` — a FUNCTION, not a pattern. So cons/nil is
+not language-visible at all, and nothing about changing the backing touches
+syntax or pattern exhaustiveness. The only contract is the complexity of the
+function surface: `uncons` has to hand back a head and a tail `List` (a
+chunk-and-offset view, O(1)), and `cons` has to stay cheap, which is the one
+thing a cons list is actually good at and the thing a chunked structure needs a
+front-buffer strategy for.
+
+**That makes this more tractable than the entry first claimed, not less.** The
+wrong half was mine: the same `expects ['a] but got List Int` error had appeared
+earlier the same day in a test of mine, where I charged it to the test and did
+not read what it said about patterns. Heads are already unboxed per kind
+(`MezzeLongCons`, `MezzeDoubleCons`, `MezzeCons`), so that half is done.
+
+Recorded rather than attempted, with the control row left in `ds_matrix` so the
+next reading of it does not have to re-derive the attribution.
