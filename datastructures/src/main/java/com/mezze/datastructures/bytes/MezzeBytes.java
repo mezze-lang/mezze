@@ -364,13 +364,27 @@ public final class MezzeBytes implements TruffleObject {
     /**
      * Returns hex string representation.
      */
+    /**
+     * Hex-encode, two characters a byte.
+     *
+     * <p>Had the same `String.format` per byte as
+     * `BytesNatives.toHex` did — see the note there for the measurement. This
+     * is a DIFFERENT class that happens to share the name (three do; the
+     * guest's `bytes::*` natives use the one nested in `BytesNatives`), so the
+     * bug had to be fixed in both places rather than one.
+     */
     public String toHexString() {
-        StringBuilder sb = new StringBuilder(data.length * 2);
-        for (byte b : data) {
-            sb.append(String.format("%02x", b & 0xFF));
+        char[] out = new char[data.length * 2];
+        for (int i = 0, j = 0; i < data.length; i++) {
+            int v = data[i] & 0xFF;
+            out[j++] = HEX_DIGITS[v >>> 4];
+            out[j++] = HEX_DIGITS[v & 0x0F];
         }
-        return sb.toString();
+        return new String(out);
     }
+
+    /** Lowercase hex digits, indexed by nibble. */
+    private static final char[] HEX_DIGITS = "0123456789abcdef".toCharArray();
 
     // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
 

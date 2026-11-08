@@ -1,0 +1,201 @@
+## WHAT BYTES COST — the first measurement of the whole type.
+##
+## `Bytes` had ZERO benchmark coverage while sitting on the codec, IO and HTTP
+## paths, which is the worst place for an unmeasured type: a per-element loop is
+## the normal shape there, so a per-op floor multiplies.
+##
+## THE HOST SIDE IS NOT THE QUESTION. `MezzeBytes` wraps a `byte[]`; `get` is
+## `data[index]`, `slice` is `Arrays.copyOfRange`, `index_of` is a plain loop.
+## Nothing is accidentally O(n) the way `deque::get` was. So what these rows
+## measure is the GUEST path — dispatch, argument packing and the boundary — not
+## the data structure.
+##
+## WHAT IS SUSPECTED, written before the numbers so the rows can refute it.
+## `BytesOps.kt` ported these ops to the scalar native ABI, and its own comment
+## records the record ABI costing 2-3.3x. But the scalar ABI is still
+## `CallNativeScalar`, which is `@TruffleBoundary` over a `@Variadic Object[]`:
+## the boundary stops the handler inlining and the array cannot be scalar
+## replaced, so every call allocates. `TypedNativeHandlers` holds NARROW shapes
+## that avoid it — `OL`, `OB`, `OLO`, `OOB` — and contains no bytes op at all.
+## If that is the cost, the O(1) rows (`size`, `is_empty`, `get`) land near each
+## other and far above the control, regardless of how little work they do.
+##
+## METHOD, the same as dsmore/mapsurface/surface:
+##   - ONE ROW PER PROCESS (`bytesurface <n> <row> <len>`). Fifteen rows in one
+##     JVM is a compiler lottery; `ds_matrix` had `list::map+size` read 1 776
+##     one way and 3 790 the other.
+##   - a ratio to a CONTROL timed in the SAME process — a counted loop over the
+##     same arithmetic with no Bytes in it.
+##   - min over k measured passes after `warm` warmup passes.
+##   - EVERY ROW CHECKSUMS. `ds_matrix` printed no checksum and had rows being
+##     deleted outright; a row that got fast by not doing the work has to read
+##     as a different number, not a better one.
+##   - size each row by ITS OWN cost: the codec rows do work proportional to the
+##     buffer, the O(1) rows do not, so they are not comparable at one n.
+use std::effects::log::{ println, Console }
+use std::effects::args::{ SystemArgs, argv }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::collections::seq
+use std::collections::bytes
+use std::str
+use std::int
+use std::option
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_one = { thunk } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = thunk {}
+  let t1 = monotonic {}
+  { ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }, sum = r }
+
+let time_k_go = { thunk, k, acc, last } -> if k == 0
+  then { times = acc, sum = last }
+  else do
+    let r = time_one { thunk = thunk }
+    time_k_go { thunk = thunk, k = k - 1, acc = seq::push { xs = acc, x = r.ns }, last = r.sum }
+
+let nth_or_zero = { xs, i } -> match seq::get { xs = xs, i = i } is
+  Some { val } -> val
+  None -> 0
+
+let min_of = { thunk, warm, k } -> do
+  let w = time_k_go { thunk = thunk, k = warm, acc = [], last = 0 }
+  let ws = seq::sort { xs = w.times }
+  let warm_max = nth_or_zero { xs = ws, i = seq::size { xs = ws } - 1 }
+  let run = time_k_go { thunk = thunk, k = k, acc = [], last = 0 }
+  let sorted = seq::sort { xs = run.times }
+  let half = seq::size { xs = sorted } / 2
+  { min = nth_or_zero { xs = sorted, i = 0 },
+    med = nth_or_zero { xs = sorted, i = half },
+    warm_max = warm_max,
+    sum = run.sum }
+
+## THE FLOOR: one loop iteration and one add, no Bytes at all.
+let control_loop = { i, acc } -> if i <= 0 then acc else control_loop { i = i - 1, acc = acc + i }
+
+let report = { idx, sel, label, thunk, floor_ps, n, warm, k } -> perform Console in perform SystemTime in
+  if sel != 0 && sel != idx then {} else do
+    let t = min_of { thunk = thunk, warm = warm, k = k }
+    let ps_per_op = (t.min * 1000) / n
+    let ratio = if floor_ps == 0 then 0 else (ps_per_op * 100) / floor_ps
+    let warm_ratio = if t.min == 0 then 0 else t.warm_max / t.min
+    let warn = if t.med > (t.min * 2) then "   UNDER-WARMED (raise n or passes)"
+      else if warm_ratio > 10 then "   WARMUP-DOMINATED"
+      else ""
+    println { msg = "  $(label): $(int::to_str { n = ps_per_op }) ps/op  x$(int::to_str { n = ratio })/100 floor  sum=$(int::to_str { n = t.sum })$(warn)" }
+
+## ── build the buffers once, outside every timed loop ────────────────────────
+let build_bytes = { i, acc } -> if i <= 0 then bytes::from_seq { arr = acc }
+  else build_bytes { i = i - 1, acc = seq::push { xs = acc, x = (i * 7) % 251 } }
+
+## ── 1. size — O(1), and the reference for the per-op floor ──────────────────
+let l_size = { i, acc, b } -> if i <= 0 then acc
+  else l_size { i = i - 1, acc = acc + bytes::size { b = b }, b = b }
+
+## ── 2. is_empty — O(1), one field compare, returns Bool ────────────────────
+let l_is_empty = { i, acc, b } -> if i <= 0 then acc
+  else l_is_empty { i = i - 1, b = b,
+                    acc = acc + (if bytes::is_empty { b = b } then 1 else 0) }
+
+## ── 3. get by index — `data[index]`, so O(1) in the host ───────────────────
+let l_get = { i, acc, b, len } -> if i <= 0 then acc
+  else l_get { i = i - 1, b = b, len = len,
+               acc = acc + option::get_or { opt = bytes::get { b = b, i = i % len }, def = 0 } }
+
+## ── 4. starts_with a 4-byte prefix — a SHORT scan with two receivers ───────
+let l_starts = { i, acc, b, p } -> if i <= 0 then acc
+  else l_starts { i = i - 1, b = b, p = p,
+                  acc = acc + (if bytes::starts_with { b = b, prefix = p } then 1 else 0) }
+
+## ── 5. index_of, pattern ABSENT — the full scan, no early exit ─────────────
+let l_index_of = { i, acc, b, p } -> if i <= 0 then acc
+  else l_index_of { i = i - 1, b = b, p = p,
+                    acc = acc + option::get_or { opt = bytes::index_of { b = b, pattern = p }, def = 0 } }
+
+## ── 6. slice of half the buffer — Arrays.copyOfRange ───────────────────────
+let l_slice = { i, acc, b, len } -> if i <= 0 then acc
+  else l_slice { i = i - 1, b = b, len = len,
+                 acc = acc + bytes::size { b = bytes::slice { b = b, start = 0, end = len / 2 } } }
+
+## ── 7. concat of the buffer with itself ────────────────────────────────────
+let l_concat = { i, acc, b } -> if i <= 0 then acc
+  else l_concat { i = i - 1, b = b,
+                  acc = acc + bytes::size { b = bytes::concat { b1 = b, b2 = b } } }
+
+## ── 8. fold — a guest callback PER BYTE ────────────────────────────────────
+let l_fold = { i, total, b } -> if i <= 0 then total
+  else l_fold { i = i - 1, b = b,
+                total = total + bytes::fold { b = b, init = 0, f = { acc, byte } -> acc + byte } }
+
+## ── 9. map — a guest callback per byte AND a new buffer ────────────────────
+let l_map = { i, acc, b } -> if i <= 0 then acc
+  else l_map { i = i - 1, b = b,
+               acc = acc + bytes::size { b = bytes::map { b = b, f = { x } -> x } } }
+
+## ── 10. to_hex — the codec path, two characters a byte ─────────────────────
+let l_to_hex = { i, acc, b } -> if i <= 0 then acc
+  else l_to_hex { i = i - 1, b = b,
+                  acc = acc + str::size { s = bytes::to_hex { b = b } } }
+
+## ── 11. to_base64 — the other codec path ──────────────────────────────────
+let l_to_b64 = { i, acc, b } -> if i <= 0 then acc
+  else l_to_b64 { i = i - 1, b = b,
+                  acc = acc + str::size { s = bytes::to_base64 { b = b } } }
+
+## ── 12. to_seq — every byte becomes an Int element ────────────────────────
+let l_to_seq = { i, acc, b } -> if i <= 0 then acc
+  else l_to_seq { i = i - 1, b = b,
+                  acc = acc + seq::size { xs = bytes::to_seq { b = b } } }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let n = arg_at { args = args, i = 0, def = 1000000 }
+  let sel = arg_at { args = args, i = 1, def = 0 }
+  let len = arg_at { args = args, i = 2, def = 1024 }
+  let floor_n = arg_at { args = args, i = 3, def = 40000000 }
+  let warm = 4
+  let k = 9
+  let b = build_bytes { i = len, acc = [] }
+  ## A 4-byte prefix that IS there, and a 4-byte pattern that is NOT, so row 5
+  ## scans the whole buffer rather than exiting early.
+  let pre = bytes::slice { b = b, start = 0, end = 4 }
+  let absent = bytes::from_seq { arr = [252, 253, 254, 255] }
+  let floor = min_of { thunk = {} -> control_loop { i = floor_n, acc = 0 }, warm = warm, k = k }
+  let floor_ps = (floor.min * 1000) / floor_n
+  println { msg = "bytesurface (n=$(int::to_str { n = n }) ops, len=$(int::to_str { n = len }) bytes): $(int::to_str { n = warm }) warmup + $(int::to_str { n = k }) measured, MIN per row" }
+  println { msg = "control: a counted loop + add = $(int::to_str { n = floor_ps }) ps/op. Rows below are xNNN/100 of it." }
+  if floor.med > (floor.min * 2) then
+    println { msg = "!! the CONTROL is under-warmed, so every ratio below is suspect — raise n" }
+  else
+    println { msg = "" }
+
+  report { idx = 1, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "bytes::size         ", thunk = {} -> l_size { i = n, acc = 0, b = b } }
+  report { idx = 2, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "bytes::is_empty     ", thunk = {} -> l_is_empty { i = n, acc = 0, b = b } }
+  report { idx = 3, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "bytes::get by index ", thunk = {} -> l_get { i = n, acc = 0, b = b, len = len } }
+  report { idx = 4, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "bytes::starts_with  ", thunk = {} -> l_starts { i = n, acc = 0, b = b, p = pre } }
+  report { idx = 5, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "bytes::index_of MISS", thunk = {} -> l_index_of { i = n, acc = 0, b = b, p = absent } }
+  report { idx = 6, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "bytes::slice half   ", thunk = {} -> l_slice { i = n, acc = 0, b = b, len = len } }
+  report { idx = 7, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "bytes::concat self  ", thunk = {} -> l_concat { i = n, acc = 0, b = b } }
+  report { idx = 8, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "bytes::fold         ", thunk = {} -> l_fold { i = n, total = 0, b = b } }
+  report { idx = 9, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "bytes::map          ", thunk = {} -> l_map { i = n, acc = 0, b = b } }
+  report { idx = 10, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "bytes::to_hex       ", thunk = {} -> l_to_hex { i = n, acc = 0, b = b } }
+  report { idx = 11, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "bytes::to_base64    ", thunk = {} -> l_to_b64 { i = n, acc = 0, b = b } }
+  report { idx = 12, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "bytes::to_seq       ", thunk = {} -> l_to_seq { i = n, acc = 0, b = b } }

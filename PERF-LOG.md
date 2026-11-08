@@ -10571,3 +10571,109 @@ the host locale — and it is the harness a future attempt has to survive. A
 sentinel removing the non-ASCII deferral failed 4 of the 6, `ß`→`SS` among them,
 which is the case that makes an arithmetic fast path return a string of the
 wrong length.
+
+#### `bytes::to_hex` formatted one byte at a time — 56.7x
+
+`Bytes` had ZERO benchmark coverage, which is the worst place for it: the type
+sits on the codec, IO and HTTP paths, where a per-element loop is the normal
+shape, so a per-byte cost multiplies. `bench/cases/bytesurface` is the first
+measurement of it — twelve rows, one row per process, every row checksummed.
+
+The first run answered the question on its own:
+
+```
+  row                        ps/op   per byte (1 024-byte buffer)
+  bytes::to_base64         225 082            220
+  bytes::to_hex         51 142 999         49 944      <-- 227x base64
+  bytes::fold              152 866            149
+  bytes::map            26 109 334         25 497      <-- 171x fold
+  bytes::to_seq          2 556 210          2 496
+  bytes::index_of MISS     219 030            214
+  bytes::concat self        87 482             43
+  bytes::slice half         37 791             74
+  bytes::get by index         7 695             —
+  bytes::size                 6 658             —
+```
+
+**Hex being 227x base64 is the whole diagnosis**, and the two methods are
+adjacent in the same file. base64 hands the buffer to the JDK's bulk encoder.
+Hex did this:
+
+```java
+for (int i = 0; i < bytes.length(); i++) {
+    sb.append(String.format("%02x", bytes.get(i) & 0xFF));
+}
+```
+
+`String.format` PER BYTE — parse the format string, allocate a `Formatter`, box
+the int, 1 024 times a call. A nibble table replaces it.
+
+```
+  row                        HEAD      table     verdict
+  bytes::to_hex          51 198 035    903 080     56.7x
+  bytes::to_base64 (ctl)    175 049    158 646      flat
+  bytes::size      (ctl)      6 585      6 681      flat
+  bytes::get       (ctl)      8 073      7 873      flat
+  bytes::fold      (ctl)    152 670    158 349      flat
+  bytes::to_seq    (ctl)  2 602 322  2 530 706      flat
+```
+
+49 998 → 882 ps a byte, checksums identical. `from_hex` had the same shape —
+`hex.substring(i*2, i*2+2)` and `Integer.parseInt` per byte — and got the same
+treatment; it also stops accepting the SIGN `parseInt` allowed, so `"-1"` and
+`"+f"` are `None` now rather than decoding to `0xFF` and `0x0F`.
+
+Both fixed in TWO places: three unrelated classes are named `MezzeBytes` and the
+guest's `bytes::*` natives build the one nested in `BytesNatives`, so the
+identical bug lived in `datastructures`'s copy as well.
+
+#### A hypothesis of mine, wrong, and a number I should not have written
+
+The comment first said the fix was "worth 1.9x on top of the table itself: 882
+ps a byte to 458". **That number was invented before measuring.** Removed, then
+measured.
+
+The idea was that `new String(char[])` must scan and compress UTF-16 down to
+Latin1, so building a `byte[]` and handing it over as ISO-8859-1 should skip a
+pass. INTERLEAVED, seven readings a side with no overlap:
+
+```
+  to_hex    char[] 927 240     byte[] 1 001 812     0.93x
+  char[]:  931516 951048 927240 935841 949804 958984 931928
+  byte[]:  1060579 1020801 1034206 1051738 1072274 1023954 1001812
+```
+
+**8% WORSE.** The all-ASCII `char[]` constructor takes a better path than the
+explicit-charset one. Worth recording for the same reason the `to_upper`
+attempt was: an extra pass that looks obviously wasteful can be cheaper than the
+thing that avoids it.
+
+It was also measured across two SEPARATE runs first, where it looked worse by a
+different amount and `to_base64` had drifted 25% between them — more than the
+difference being asked about, so that reading meant nothing. Same rule as the
+self-A/B: the question is never "is the reading stable" but "stable against
+what".
+
+#### The sentinel corrected one of the tests
+
+Swapping the two nibbles in the encoder fails 2 of the 6 tests — but NOT the
+round trip over every byte value, and the reason is worth keeping: **swapping
+nibbles is a BIJECTION on 0..255, so the sum over the whole range is invariant
+under it.** A property that ranges over every input can still be blind to a
+permutation of those inputs. The asymmetric spot check (`0x01 0xf0 0xa5 0x05
+0x80 0xff`, chosen so no byte has equal nibbles) is what catches it, and the
+test now says so.
+
+#### Still open on this bench
+
+`bytes::map` is 25 497 ps a byte against `bytes::fold`'s 149 — 171x for the same
+per-byte guest callback. `BytesNatives.map`'s own comment already records that it
+"turns out not to take that path", meaning the scalar bypass `fold` uses; the
+callback goes through the record path instead. Next.
+
+Also unexplained and smaller: `to_seq` at 2 496 ps a byte (boxing each byte into
+a Seq element) and `index_of` at 214 ps a byte for a byte-at-a-time scan that
+could vectorise.
+
+Gate: `:interpreter:test` 7 675 tests 0 failures 14 skipped; `:typechecker:test`
+4 826 tests 0 failures; `:datastructures:test` 753 tests 0 failures 2 skipped.

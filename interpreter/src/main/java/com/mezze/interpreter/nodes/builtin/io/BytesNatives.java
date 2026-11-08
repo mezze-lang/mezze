@@ -64,19 +64,36 @@ public final class BytesNatives {
     }
 
     @TruffleBoundary
+    /**
+     * Hex-decode. The companion to {@link #toHex} and the same shape of fix:
+     * it used to call {@code hex.substring(i*2, i*2+2)} and
+     * {@code Integer.parseInt} per byte — a two-character String allocated and
+     * parsed for every byte of output.
+     *
+     * <p>ONE BEHAVIOUR CHANGE, and it is a narrowing. {@code parseInt} accepts
+     * a SIGN, so `"-1"` decoded to {@code 0xFF} and `"+f"` to {@code 0x0F};
+     * neither is hex. The nibble table rejects both as {@code None}, which is
+     * what every other malformed input already did.
+     */
     public static MezzeVariant fromHex(String hex) {
-        if (hex.length() % 2 != 0) {
-            return MezzeVariant.none();
+        int len = hex.length();
+        if ((len & 1) != 0) return MezzeVariant.none();
+        byte[] out = new byte[len / 2];
+        for (int i = 0, j = 0; j < out.length; j++) {
+            int hi = nibble(hex.charAt(i++));
+            int lo = nibble(hex.charAt(i++));
+            if ((hi | lo) < 0) return MezzeVariant.none();
+            out[j] = (byte) ((hi << 4) | lo);
         }
-        try {
-            byte[] bytes = new byte[hex.length() / 2];
-            for (int i = 0; i < bytes.length; i++) {
-                bytes[i] = (byte) Integer.parseInt(hex.substring(i * 2, i * 2 + 2), 16);
-            }
-            return MezzeVariant.some(new MezzeBytes(bytes));
-        } catch (NumberFormatException e) {
-            return MezzeVariant.none();
-        }
+        return MezzeVariant.some(new MezzeBytes(out));
+    }
+
+    /** A hex digit's value, or -1. Both cases, as {@code parseInt} accepted. */
+    private static int nibble(char c) {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
     }
 
     @TruffleBoundary
@@ -342,13 +359,42 @@ public final class BytesNatives {
         }
     }
 
+    /** Lowercase hex digits, indexed by nibble. */
+    private static final char[] HEX_DIGITS = "0123456789abcdef".toCharArray();
+
+    /**
+     * Hex-encode, two characters a byte.
+     *
+     * <p>It used to call {@code String.format("%02x", …)} PER BYTE, which
+     * parses the format string, allocates a {@code Formatter} and boxes the
+     * int every time. Measured on `bench/cases/bytesurface` over a 1 024-byte
+     * buffer: <b>49 944 ps a byte</b>, against {@link #toBase64} — the method
+     * immediately below, a strictly more complex encoding — at 220. The
+     * contrast was the whole diagnosis: base64 hands the buffer to a bulk JDK
+     * encoder and hex formatted one byte at a time.
+     *
+     * <p>Two array writes a byte now, off {@code getData()} rather than
+     * {@code get(i)} so the loop reads the array directly.
+     *
+     * <p>A {@code byte[]} handed over as ISO-8859-1 was tried instead, on the
+     * reasoning that {@code new String(char[])} must scan and compress UTF-16
+     * down to Latin1. INTERLEAVED, it measured 0.93x — 8% WORSE, seven
+     * readings a side with no overlap (char 927-959k, byte 1002-1072k). The
+     * all-ASCII {@code char[]} constructor evidently takes a better path than
+     * the explicit charset one, so this stays as it is. Measured across two
+     * separate runs first, where it looked worse by a different amount and the
+     * control had drifted 25% — more than the difference being asked about.
+     */
     @TruffleBoundary
     public static String toHex(MezzeBytes bytes) {
-        StringBuilder sb = new StringBuilder(bytes.length() * 2);
-        for (int i = 0; i < bytes.length(); i++) {
-            sb.append(String.format("%02x", bytes.get(i) & 0xFF));
+        byte[] data = bytes.getData();
+        char[] out = new char[data.length * 2];
+        for (int i = 0, j = 0; i < data.length; i++) {
+            int v = data[i] & 0xFF;
+            out[j++] = HEX_DIGITS[v >>> 4];
+            out[j++] = HEX_DIGITS[v & 0x0F];
         }
-        return sb.toString();
+        return new String(out);
     }
 
     @TruffleBoundary
