@@ -505,7 +505,7 @@ fun ErrorCode.explain(): String = when (this) {
     ErrorCode.V0705_TYPE_ARITY_MISMATCH ->
         "A type constructor was applied with the wrong number of type arguments."
 
-    ErrorCode.V0706_PRIMITIVE_TYPE_ALIAS ->
+    ErrorCode.V0706_TRANSPARENT_ALIAS_IMPL ->
 
         "A `type` is a SPELLING, not a new type. It is transparent everywhere, " +
 
@@ -517,7 +517,8 @@ fun ErrorCode.explain(): String = when (this) {
 
             "IDENTITY that a receiver can be matched against. A record or variant " +
 
-            "type keeps one; a primitive has nowhere to record it, so the alias " +
+            "type keeps one; a primitive, a sequence and a function type have " +
+            "nowhere to record it, so the alias " +
 
             "name never reaches dispatch and the impl would be silently dead.\n\n" +
 

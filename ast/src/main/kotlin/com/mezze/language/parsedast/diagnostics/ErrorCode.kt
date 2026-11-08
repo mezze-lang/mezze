@@ -149,7 +149,7 @@ enum class ErrorCode {
     V0703_UNKNOWN_FIELD,
     V0704_UNKNOWN_CONSTRUCTOR,
     V0705_TYPE_ARITY_MISMATCH,
-    V0706_PRIMITIVE_TYPE_ALIAS, // `type Id = Int` — a transparent alias of a primitive enforces nothing and cannot carry an impl; `newtype Id = Int` is the distinct type
+    V0706_TRANSPARENT_ALIAS_IMPL, // `impl Norm for Id` where `type Id = Int` (or `[Int]`, or a function type) — the alias name cannot reach dispatch, so the impl would be dead; implement for the underlying type, or use a `newtype`
     V0707_CONSTRUCTOR_MUST_BE_UPPERCASE,
     V0708_SPREAD_ONLY_RECORD_FORBIDDEN,
     V0709_CIRCULAR_TYPE_DEPENDENCY,

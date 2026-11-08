@@ -1500,31 +1500,10 @@ class AbilityChecker internal constructor(
         return "\n  Available impls: $implList$suffix"
     }
 
-    private fun renderAnnotation(a: ParsedTypeAnnotation): String = when (a) {
-        is ParsedNamedType -> a.name
-        is ParsedQualifiedType -> {
-            val prefix = a.modulePath.joinToString("::")
-            val head = if (prefix.isEmpty()) a.typeName else "$prefix::${a.typeName}"
-            if (a.args.isEmpty()) head else "$head ${a.args.joinToString(" ") { renderAnnotation(it) }}"
-        }
-        is ParsedTypeApp ->
-            if (a.args.isEmpty()) a.constructor else "${a.constructor} ${a.args.joinToString(" ") { renderAnnotation(it) }}"
-        is ParsedRecordType -> {
-            val fields = a.entries.joinToString(", ") { "${it.name}: ${renderAnnotation(it.type)}" }
-            if (a.isOpen) "{ $fields, ... }" else "{ $fields }"
-        }
-        is ParsedVariantType -> {
-            val ctors = a.constructors.joinToString(", ") { c ->
-                val dt = c.dataType
-                if (dt == null) c.name else "${c.name} ${renderAnnotation(dt)}"
-            }
-            "| $ctors |"
-        }
-        is ParsedFunctionType ->
-            "${renderAnnotation(a.paramType)} -> ${renderAnnotation(a.returnType)}"
-        is ParsedSeqType -> "[${renderAnnotation(a.elementType)}]"
-        else -> a::class.simpleName?.removePrefix("Parsed")?.removeSuffix("Type") ?: "?"
-    }
+    /** @see renderParsedAnnotation — kept as a member so the nine call sites
+     *  in this class read unchanged. */
+    private fun renderAnnotation(a: ParsedTypeAnnotation): String =
+        renderParsedAnnotation(a)
 
     internal fun isConcrete(type: MezzeType): Boolean {
         return when (type) {
@@ -1735,4 +1714,38 @@ class AbilityChecker internal constructor(
         }
         return false
     }
+}
+
+/**
+ * A parsed type annotation, rendered as the SOURCE a reader would write.
+ *
+ * Lifted out of [AbilityChecker] so a diagnostic anywhere can name a type the
+ * way the author spelled it. The alternative was a second renderer, and the one
+ * that existed was already correct about the awkward cases — a record's
+ * openness, a variant's arms, a function's arrow.
+ */
+internal fun renderParsedAnnotation(a: ParsedTypeAnnotation): String = when (a) {
+    is ParsedNamedType -> a.name
+    is ParsedQualifiedType -> {
+        val prefix = a.modulePath.joinToString("::")
+        val head = if (prefix.isEmpty()) a.typeName else "$prefix::${a.typeName}"
+        if (a.args.isEmpty()) head else "$head ${a.args.joinToString(" ") { renderParsedAnnotation(it) }}"
+    }
+    is ParsedTypeApp ->
+        if (a.args.isEmpty()) a.constructor else "${a.constructor} ${a.args.joinToString(" ") { renderParsedAnnotation(it) }}"
+    is ParsedRecordType -> {
+        val fields = a.entries.joinToString(", ") { "${it.name}: ${renderParsedAnnotation(it.type)}" }
+        if (a.isOpen) "{ $fields, ... }" else "{ $fields }"
+    }
+    is ParsedVariantType -> {
+        val ctors = a.constructors.joinToString(", ") { c ->
+            val dt = c.dataType
+            if (dt == null) c.name else "${c.name} ${renderParsedAnnotation(dt)}"
+        }
+        "| $ctors |"
+    }
+    is ParsedFunctionType ->
+        "${renderParsedAnnotation(a.paramType)} -> ${renderParsedAnnotation(a.returnType)}"
+    is ParsedSeqType -> "[${renderParsedAnnotation(a.elementType)}]"
+    else -> a::class.simpleName?.removePrefix("Parsed")?.removeSuffix("Type") ?: "?"
 }

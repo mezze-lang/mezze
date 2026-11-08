@@ -8,6 +8,7 @@ import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.typechecker.abilities.BuiltInAbilities
 import com.mezze.language.typechecker.context.DeclarationRegistry
 import com.mezze.language.typechecker.context.TypingContext
+import com.mezze.language.typechecker.solving.renderParsedAnnotation
 import com.mezze.language.typechecker.solving.UnificationResult
 import com.mezze.language.typechecker.solving.unify
 import com.mezze.language.typechecker.util.TypeAnnotationConverter
@@ -131,8 +132,12 @@ object AbilityValidator {
             is ParsedNamedType ->
                 if (PrimitiveTypes.fromName(aliased.name) != null) aliased.name
                 else aliasOfUnnameableTarget(aliased.name, registry, seen)
-            is ParsedSeqType -> "a seq type"
-            is ParsedFunctionType -> "a function type"
+            // RENDERED, not described. Saying "a seq type" produced hints that
+            // were not code — `newtype Ids = a seq type` — which is worse than
+            // no hint: it reads as a fix and cannot be pasted. The author needs
+            // `[Int]`, which is what they would have written themselves.
+            is ParsedSeqType -> renderParsedAnnotation(aliased)
+            is ParsedFunctionType -> renderParsedAnnotation(aliased)
             else -> null
         }
     }
@@ -182,7 +187,7 @@ object AbilityValidator {
                             "site. A transparent alias already inherits the impls of the type it " +
                             "aliases.",
                             loc,
-                            code = ErrorCode.V0706_PRIMITIVE_TYPE_ALIAS,
+                            code = ErrorCode.V0706_TRANSPARENT_ALIAS_IMPL,
                             hints = listOf(
                                 "to implement for the underlying type: `impl … for $underlying`",
                                 "for a DISTINCT type that carries its own impls: " +

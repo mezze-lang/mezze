@@ -87,6 +87,65 @@ class TypeAliasSpecTest : VariantSpecBase() {
         }
     }
 
+    /**
+     * The hint names the REAL type, not a description of it.
+     *
+     * It first said "a seq type", which produced `newtype Ids = a seq type` — a
+     * hint that reads as a fix and cannot be pasted. Worse than no hint. Every
+     * alias kind now renders the annotation the author would have written.
+     */
+    @Test fun `the hint renders the underlying type as code`() {
+        val cases = mapOf(
+            "type Ids = [Int]" to "[Int]",
+            "type Handler = { n: Int } -> Int" to "{ n: Int } -> Int",
+            "type Id = Int" to "Int",
+        )
+        for ((decl, underlying) in cases) {
+            val name = decl.removePrefix("type ").substringBefore(" ")
+            val e = check(
+                """
+                use std::int
+                $decl
+                ability Norm for 'a where { norm: { it: 'a } -> Int }
+                impl Norm for $name where { norm = { it } -> 1 }
+                $MAIN
+                """.trimIndent()
+            ).exceptionOrNull() as? TypeCheckError
+            val hints = e?.hints?.joinToString("\n") ?: ""
+            assert(hints.contains("`impl … for $underlying`")) {
+                "the impl hint must be pasteable for `$decl`; got:\n$hints"
+            }
+            assert(hints.contains("`newtype $name = $underlying`")) {
+                "the newtype hint must be pasteable for `$decl`; got:\n$hints"
+            }
+        }
+    }
+
+    /** And both routes the hint offers actually work. */
+    @Test fun `both routes the hint offers are real`() {
+        accepts(
+            """
+            use std::int
+            type Ids = [Int]
+            ability Norm for 'a where { norm: { it: 'a } -> Int }
+            impl Norm for [Int] where { norm = { it } -> 1 }
+            $MAIN
+            """,
+            "Route one: implement for the underlying type. A hint that named an " +
+                "impossible impl would be worse than silence.",
+        )
+        accepts(
+            """
+            use std::int
+            newtype Ids = [Int]
+            ability Norm for 'a where { norm: { it: 'a } -> Int }
+            impl Norm for Ids where { norm = { it } -> 1 }
+            $MAIN
+            """,
+            "Route two: a newtype, which carries its own impls.",
+        )
+    }
+
     // ========================================= newtype is the way to do it
 
     /** `newtype` does what the alias looked like it was doing. */
