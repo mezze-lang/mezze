@@ -39,6 +39,35 @@ class TypeValidator(
     private val codecGenerator = CodecGenerator()
 
     private val typeNameCache = mutableMapOf<MezzeType, String>()
+
+    /**
+     * What is wrong with the module AS WRITTEN — asked before anything is solved.
+     *
+     * These three read the parsed module and the declaration registry and nothing
+     * else: no substitution, no constraint results, no typed tree. They answer
+     * whether a name resolves, whether a type constructor got the right number of
+     * arguments, whether a type can be built at all, and whether an alias's
+     * effect row is well formed. None of that depends on inference.
+     *
+     * They used to run at the END, beside the validators that DO need the solve,
+     * and ordering decided which diagnostic a user saw: only the FIRST collected
+     * error is reported, so a program whose annotation named an unimported type
+     * was told `Cannot use '+' with Int, PubId. To enable this, implement: impl
+     * NumAdd PubId` — a suggestion to write an impl for a type that does not
+     * exist. The solver had faithfully reasoned about a nonexistent type and
+     * reported what it found, and the real error was sitting further down the
+     * list.
+     *
+     * Rust reports E0412 "cannot find type" and does not then complain about the
+     * operator. Running these first means the same: a module that is not
+     * well-formed as written never reaches the solver, so it cannot produce
+     * advice about types it does not have.
+     */
+    fun validateAsWritten(module: ParsedModule): List<ValidationError> =
+        unknownTypeValidator.validate(module) +
+            recursiveTypeValidator.validate(module) +
+            aliasEffectRowValidator.validate(module)
+
     fun validate(
         module: ParsedModule,
         constraintResults: Map<String, ConstraintResult>,
@@ -57,9 +86,6 @@ class TypeValidator(
         val decidedScrutineeTypes: Map<Loc, MezzeType> =
             typedModule?.let { buildDecidedScrutineeTypes(it) } ?: emptyMap()
 
-        errors.addAll(unknownTypeValidator.validate(module))
-        errors.addAll(recursiveTypeValidator.validate(module))
-        errors.addAll(aliasEffectRowValidator.validate(module))
 
         // Where each binding was written, so an error about one can be squiggled
         // rather than reported against the file at large.

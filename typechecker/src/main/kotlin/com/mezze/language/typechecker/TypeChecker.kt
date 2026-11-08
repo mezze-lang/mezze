@@ -514,6 +514,33 @@ class TypeChecker(
                 ?: registry.typeHashFor(name)
         }) {
 
+        // Is the module well formed AS WRITTEN? Asked here, BEFORE the solver
+        // runs, because the answer needs only the parsed module and the registry
+        // — and because a module that fails it cannot produce a sensible second
+        // opinion. These checks used to run at the end beside the ones that need
+        // a substitution, and since only the FIRST collected error is reported,
+        // an annotation naming an unimported type was answered with `Cannot use
+        // '+' with Int, PubId. To enable this, implement: impl NumAdd PubId` —
+        // advice to write an impl for a type that does not exist. The solver had
+        // reasoned faithfully about a nonexistent type; the real diagnostic was
+        // further down the list. Returning here keeps the solver from being
+        // asked about types the module never declared.
+        run {
+            val asWritten = TypeValidator(context, registry, buildResult.implDeclarations, strictTopLevel)
+                .validateAsWritten(parsedModule)
+            if (asWritten.isNotEmpty()) {
+                return TypeCheckResult.Failure(
+                    errors = asWritten.map { error ->
+                        TypeCheckError(
+                            phase = "Validation", message = error.message(), loc = error.location(),
+                            code = error.code, hints = error.hints, fixHints = error.fixHints,
+                        )
+                    },
+                    importContext = importContext,
+                )
+            }
+        }
+
         // Shared codec-impl registry threaded through both the per-binding solvers
         // (spawned inside ConstraintGenerator) and the module-level solver below.
         // Codec impls the constraint solver auto-derives (e.g. `Encode JsonC Bool`

@@ -540,9 +540,21 @@ internal fun MezzeParser.parseNewtypeDeclaration(stream: TokenStream, visibility
                                         // name is the newtype's own name repeated,
                                         // which is a legacy syntax we no longer accept.
                                         // Modern form is `newtype UserId = Int`.
+                                        //
+                                        // Only the APPLIED spelling is that form. A bare
+                                        // `newtype T = T` repeats the name with nothing
+                                        // after it, which is not old syntax — there is no
+                                        // payload for the dropped constructor to have
+                                        // wrapped — it is a type that wraps itself. Saying
+                                        // "drop the leading `T`" there leaves `newtype T =`
+                                        // and advises nothing; the honest answer is that no
+                                        // value of it can ever be built, which the
+                                        // uninhabited check already gives (V0711), the same
+                                        // answer `type T = T` gets and the same one Rust
+                                        // gives as E0072. So let it through to the
+                                        // validator rather than misdiagnosing it here.
                                         val declName = typeName.value.text
                                         val innerName: String? = when (val w = wrappedType.value) {
-                                            is ParsedNamedType -> if (w.name == declName) declName else null
                                             is ParsedTypeApp -> if (w.constructor == declName) declName else null
                                             else -> null
                                         }

@@ -185,7 +185,7 @@ class ImprovedErrorMessageTest {
     @Test
     fun `test pattern match type error shows pattern context`() {
         val source = """
-            let check = {x: Result} -> do
+            let check = {x: Result Int Str} -> do
                 match x is
                     Ok { val } -> val
                     Err { error } -> 0
