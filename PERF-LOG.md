@@ -10446,3 +10446,78 @@ not read what it said about patterns. Heads are already unboxed per kind
 
 Recorded rather than attempted, with the control row left in `ds_matrix` so the
 next reading of it does not have to re-derive the attribution.
+
+#### The string-concat boundary costs 2x, is not free, and cannot be removed
+
+The first measurement of the string surface. `bench/cases/surface`, one row per
+process, min of 3-5, spreads 1.02-1.09x:
+
+```
+  row                        min ps   x/100 control
+  str::split    (alloc)     166 746          65 390
+  str::to_upper (alloc)      54 473          21 702
+  int::to_str+concat         15 611           6 614
+  str::concat   (alloc)      10 152           3 788
+  str equality                5 815           2 271
+  str::contains (scan)        4 963           2 042
+  str::size                     885             375
+```
+
+**The useful number is not in that table.** `concat`'s own slope rows separate
+the fixed cost from the per-byte cost, and the fit is exact: 8 442 ps at 15
+chars and 12 354 at 131 gives `7 937 + 33.7/char`, which predicts 12 352 against
+a measured 12 354. Two picoseconds. So **creating a string costs ~7.9 ns before
+the first byte is copied**, while copying runs at 33.7 ps a character — and
+`str::size`, through the same native path, is 0.885 ns, so it is not call
+overhead. `str::split` is 13 of those fixed costs in a trench coat: 167 ns for a
+64-character, 13-piece split is 12.8 ns a piece.
+
+#### Where the 7.9 ns goes
+
+`DirectAddNode.addStrings` carries a `@TruffleBoundary` and the comment above it
+said "string concat is inherently allocating so the boundary is free". It is
+not. With that annotation as the ONLY difference between two builds:
+
+```
+  row                     boundary   no boundary    ratio
+  concat    15 chars          8 662         4 323    2.00x
+  concat   131 chars         12 159         6 536    1.86x
+  str::concat   (alloc)      10 268         5 329    1.93x
+  str::size     (control)       895           890    1.01x
+
+  fixed per concat            8 210         4 037
+  per character                30.1          19.1
+```
+
+~4.2 ns of the fixed cost is the boundary, which is the same per-op floor
+measured elsewhere, and it also costs 11 ps a character because the copy cannot
+be optimised in context.
+
+#### And it has to stay — for a reason the old comment did not give
+
+The comment blamed `StringConcatHelper.simpleConcat`, which is true of
+`left + right` and is not the whole story. `String.concat` is no escape: it has
+delegated to the same helper since JDK 21. Copying through a `char[]` avoids
+both and STILL fails the image build, and the trace says why:
+
+```
+  Blocklisted method java.util.concurrent.ConcurrentHashMap.get(Object)
+  trace:  … jdk.internal.util.Preconditions.outOfBoundsMessage
+          … Preconditions$4.apply … List.of … Collection.toArray
+```
+
+`getChars` bounds-checks, and the FAILURE path builds its message through
+machinery that is blocklisted. Without a boundary that error path becomes
+runtime-compilable. **Every bounds-checked String accessor has that shape**, so
+the PE-safe formulations all allocate more than the 4.2 ns they save — which is
+the same rule already recorded for error paths inside PE'd native ops, arriving
+from a third direction.
+
+Verified in BOTH directions rather than assumed: with the boundary
+`mez build --native` succeeds in 1m28s and produces a 120 MB binary; without it
+the analysis phase fails in 57s. The comment now carries the numbers and the
+real blocker, and says to re-run that check before touching it.
+
+**So the 2x on every string concatenation and interpolation is real and is not
+available.** Recorded rather than left for someone to re-derive: the measurement
+took one probe build, and the reason it cannot be taken took two more.
