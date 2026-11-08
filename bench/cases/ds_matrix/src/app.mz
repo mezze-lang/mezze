@@ -40,15 +40,28 @@ let build_list = {n, acc} -> if n == 0
 
 # --- timing wrapper ---
 
+# THE RESULT IS CARRIED OUT, and that is not bookkeeping. `let r = thunk {}`
+# with `r` unused leaves the whole row DELETABLE, and it was being deleted:
+# `seq::map+size` read ratios of 1, 10, 1, 74, 1 over five runs at n=2e6 — a
+# ratio of 1/100 is the row costing a hundredth of the control, which no
+# allocating map does. `size(map(xs, f))` is provably `size(xs)` for a loop
+# -invariant `xs`, so with nothing consuming it there is nothing to compute.
+#
+# Every sibling case states this as a rule — "EVERY ROW CHECKSUMS: a kernel that
+# got fast by not doing the work shows up as a different number instead of a
+# better one" — and this one, the Phase G regression gate, was the one that did
+# not. Threading the value to a `println` makes it escape.
 let time_one = {thunk} -> perform SystemTime in do
     let t0 = monotonic {}
     let r = thunk {}
     let t1 = monotonic {}
-    duration_to_nanos { d = sub_duration { a = t1, b = t0 } }
+    { ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }, sum = r }
 
-let time_k_go = {thunk, k, acc} -> if k == 0
-    then acc
-    else time_k_go {thunk = thunk, k = k - 1, acc = seq::push {xs = acc, x = time_one {thunk = thunk}}}
+let time_k_go = {thunk, k, acc, last} -> if k == 0
+    then { times = acc, sum = last }
+    else do
+        let o = time_one {thunk = thunk}
+        time_k_go {thunk = thunk, k = k - 1, acc = seq::push {xs = acc, x = o.ns}, last = o.sum}
 
 # The FLOOR: visit n values and add them, with no collection in the way. Timed
 # by the same path as every op below, so the ratio is apples to apples.
@@ -61,12 +74,23 @@ let nth_or_zero = {xs, i} -> match seq::get {xs = xs, i = i} is
     None -> 0
 
 let min_of = {thunk, warm, k} -> do
-    let _w = time_k_go {thunk = thunk, k = warm, acc = []}
-    let sorted = seq::sort {xs = time_k_go {thunk = thunk, k = k, acc = []}}
+    let _w = time_k_go {thunk = thunk, k = warm, acc = [], last = 0}
+    let run = time_k_go {thunk = thunk, k = k, acc = [], last = 0}
+    let sorted = seq::sort {xs = run.times}
     let half = seq::size {xs = sorted} / 2
-    { min = nth_or_zero {xs = sorted, i = 0}, med = nth_or_zero {xs = sorted, i = half} }
+    { min = nth_or_zero {xs = sorted, i = 0}, med = nth_or_zero {xs = sorted, i = half},
+      sum = run.sum }
 
 # ONE OP PER PROCESS when `sel` says so, and that is not a convenience.
+#
+# `sel = 0` RUNS THEM ALL IN ONE PROCESS AND ITS NUMBERS DO NOT COMPARE. Read
+# across the rows of one such run and you get published-looking nonsense:
+# `list::map+size` reads 1 776 ps/elem there and 3 790 on its own, which turns
+# a parity against `seq::map+size` into a 3x, and `seq::count` reads 153 —
+# below the control, for a scan with a guest predicate per element — against
+# 3 646 alone. Both were believed for a while. The banner below says so on the
+# way past; the per-row ratio is the only figure that survives, and only from a
+# process that ran one row.
 # Building a 1M cons list and a 1M seq in the same process GCs while the timer
 # runs: the control stayed flagged UNDER-WARMED at every N, and `seq::count`
 # swung 149 -> 4465 ps/elem between two runs of the same binary. A seq-only
@@ -81,7 +105,7 @@ let report = {idx, sel, label, thunk, floor_ns, n, warm, k} -> perform Console i
     # A median past twice the minimum is not a slow op, it is an unfinished
     # measurement. Say so on the row rather than leaving a reader to divide.
     let warn = if t.med > (t.min * 2) then "   UNDER-WARMED (raise N or passes)" else ""
-    println { msg = "  $(label): $(ps_per_elem.to_str{}) ps/elem  x$(ratio_x100.to_str{})/100 floor$(warn)" }
+    println { msg = "  $(label): $(ps_per_elem.to_str{}) ps/elem  x$(ratio_x100.to_str{})/100 floor  sum=$(t.sum.to_str{})$(warn)" }
 
 # --- main ---
 

@@ -10303,3 +10303,81 @@ what said the rebuild had already been half-fixed by something else.
 
 Gate: `:interpreter:test` 7 663 tests 0 failures 14 skipped; `:typechecker:test` 4 826 tests 0 failures;
 `:datastructures:test` 753 tests 0 failures 2 skipped.
+
+#### The Phase G gate had no checksum, and two of my own readings of it were wrong
+
+No perf win in this entry. `bench/cases/ds_matrix` is the regression gate for the
+Phase G storage and Iter work, and it was not measuring what its rows said. I
+went to it looking for the next gap, drew two conclusions from it, and both were
+artifacts of the instrument.
+
+**It never printed a checksum.** `time_one` did `let r = thunk {}` and returned
+only the duration, so `r` was dead and the row was DELETABLE — and was being
+deleted:
+
+```
+  seq::map+size, five runs at n=2e6, ratio to the control, x/100:
+     1    10     1    74     1
+```
+
+A ratio of 1/100 is the row costing a hundredth of a counted loop, which no
+allocating map does. `size(map(xs, f))` is provably `size(xs)` for a
+loop-invariant `xs`, so with nothing consuming it there is nothing to compute.
+Every sibling case states the rule in its header — "EVERY ROW CHECKSUMS: a
+kernel that got fast by not doing the work shows up as a different number
+instead of a better one" — and the one that is a gate was the one without it.
+Fixed: the value is threaded out and printed, and the sums are now right
+(`sum=2000000` for a 2e6 map+size, `1000000` for an even filter,
+`1999999000000` for a sum).
+
+**Both wrong readings came from running all rows in one process.** `sel = 0`
+does that, and the file already warned that absolute numbers do not compare
+across builds — but not that they do not compare across ROWS of one run, which
+is what I did:
+
+```
+                       all rows, one process    one row per process
+  list::map+size                     1 776                   3 790
+  seq::count                           153                   3 646
+```
+
+So I read a 3.0x gap between `seq::map+size` and `list::map+size` that is
+actually parity, and read `seq::count` as FASTER than the control — for a scan
+with a guest predicate per element — when it is 23x it. The banner now says so
+on the way past.
+
+#### What the instrument says once it is honest
+
+n=2e6, one row per process, checksums verified:
+
+```
+  op              seq   x/100    list   x/100    list/seq
+  fold            347     130   1 704     611       4.9x
+  sum (native)    335     137       —       —          —
+  filter+size     161      62   1 802     597      11.2x
+  any (miss)      401     154   1 724     639       4.3x
+  count           160      56   1 778     646      11.1x
+  range.fold       96      38       —       —          —
+```
+
+**Every List row is 1 700-1 800 ps/elem whatever the operation**, and that
+uniformity is the finding: the cost is the cons-cell TRAVERSAL, not the op. It
+also confirms the older note that had `list::fold_left` at 3.9x `seq::fold` —
+it reads 4.9x here — and says the fix is List's representation rather than any
+individual function.
+
+`seq::map+size` reads 20 ps/elem and is flagged UNDER-WARMED, which is correct
+and worth keeping: the chain FUSES `size(map(xs, f))` into a counting loop with
+no allocation, so the row's `(alloc)` label is a leftover from before fusion
+covered it. It is not measuring an allocation and should not be read as one.
+
+#### Three items are left, and all three are structures rather than constants
+
+- **List is cons cells** — 4.9-11.2x Seq, uniform across operations, so it wants
+  a chunked backing like Seq's.
+- **Ordered insert at an arbitrary position** — 14.8x the hash map's at 1 000
+  keys and diverging (9.3x / 9.0x / 20.8x / 40.9x at 250 / 1k / 4k / 16k), now
+  purely the array copy. Wants an ordered tree with guest-driven descent.
+- **`coresurface` has nothing comparable** — one effect operation is 393 ps net
+  of the tier control, and option and variant matching are at parity with a
+  counted loop (226 and 231 against 222).
