@@ -9889,3 +9889,110 @@ creates is answering "present" for something absent and silently dropping the
 insertion, so they check SIZE as well as membership on both sides of the
 branch, and one interleaves present and absent adds so a branch inverted the
 wrong way round shows up as a wrong size rather than only a wrong answer.
+
+#### `sorted_map::insert` of a key already there — 1.40x, and the keys never needed copying
+
+The largest measured gap left on the board, and the first question was not how
+to make it faster but what it was bound BY. 16 KB of array per operation at
+1 000 keys says allocation, and the way to settle that is to count collections
+rather than nanoseconds:
+
+```
+  row                                 ps/op   young collections
+  sm::insert PRESENT, chain         660 680                 264
+  sorted_map::size      (control)       442                   3
+```
+
+Same process shape, same n, same control loop. 88x the collections — the row is
+allocation bound, so the fix has to remove allocation and nothing else matters.
+
+It was allocating twice as much as the operation needs. A replace changes no
+KEY, and the code said so and then did the opposite:
+
+```java
+if (idx >= 0) {
+    // Update existing — only clone values array
+    Object[] newValues = Arrays.copyOf(values, length);
+    newValues[idx] = value;
+    return new MezzeSortedMap<>(Arrays.copyOf(keys, length), newValues, comparator);
+}
+```
+
+The keys array is now shared instead.
+
+```
+  row                                base       fix    verdict
+  sm::insert PRESENT, chain        576 183   410 571     1.40x
+  sorted_map::get (hit)  (control)  16 895    17 113      flat
+  sorted_map::contains_key (ctrl)   15 053    14 756      flat
+  sorted_map::size       (control)      459       448      flat
+  sorted_set::contains   (control)  14 870    15 224      flat
+  ss::add PRESENT, chain (control)  14 828    14 790      flat
+```
+
+1.38x at n=1M over 9 readings, 1.41x at n=2M, checksums scaling with n. And the
+allocation evidence, which is the claim that survives a busy machine: **271
+young collections against 157**.
+
+#### The win grows with the map, because it is half of an O(n)
+
+```
+  keys        base        fix   ratio
+  250      339 027    291 291   1.16x
+  1000     569 707    406 434   1.40x
+  4000   2 141 225  1 249 656   1.71x
+```
+
+That shape is the result. Removing one of two O(n) copies can do no better than
+2x and approaches it only once the copies dominate the fixed cost of the search
+and the three small objects per call. **Still linear** — a persistent replace
+must copy the values array, so this changes the constant and not the shape, and
+closing the shape needs an ordered structure with O(log n) update rather than a
+sorted array. Not pretended to be done here.
+
+#### A control that moved, and was not a regression
+
+`deque::push_back chain` read 0.80x, and held 0.82x at nine readings — which is
+where the rule about re-reading stops helping, because the number was
+reproducible. The question is not "is the reading stable" but "stable against
+WHAT", so: two builds from byte-identical source.
+
+```
+  row                                fix      fix2   ratio
+  deque::push_back chain           9 639    11 058   0.87x
+  sm::insert PRESENT, chain      407 380   406 262   1.00x
+```
+
+13% apart with nothing changed. **`deque::push_back` is not a usable control at
+this precision**: it grows a ring buffer to 1 000 000 elements per pass, so it
+is dominated by heap layout, which moves between builds. `sm::insert` is 1.00x
+across the same pair, which is what lets the 1.40x stand.
+
+Worth keeping as the method: when a control moves, the next measurement is a
+SELF-A/B, not more readings of the same pair. More readings tell you the gap is
+real; only identical source tells you whether the gap is about the code.
+
+#### And the replace path was not safe to share from, which is BUG 40
+
+`putObject` had a second in-place path beside the append, taking the same owner
+token for a middle insert and shifting `[insertPos, length)` up by one. The
+append is sound by ADDRESSABILITY — index `length`, outside the `[0, length)`
+every holder of the array reads — and the shift is inside it, so the base saw
+its own insert:
+
+```java
+base.put(5, "v5");   // result DISCARDED
+base.keys();         // [0,2,4,5,6,8,…,18] — 5 appeared, 20 fell off the window
+```
+
+Pre-existing, nothing to do with sharing, and guest-unreachable because
+`SortedMapNatives` installs a comparator first and `withComparator` yields a map
+with no token. Deleted rather than guarded, with the addressability argument
+written above the path that stays; after which the keys share needs no freeze,
+because the only remaining in-place write cannot be addressed by anyone sharing
+the array. Filed as BUG 40 FIXED. The dead MUT layer on both ordered classes
+went with it — eight methods, no callers, all in-place writers inside the read
+window.
+
+Gate: `:interpreter:test` 7 635 tests 0 failures 14 skipped; `:typechecker:test`
+4 826 tests 0 failures; `:datastructures:test` 749 tests 0 failures 2 skipped.

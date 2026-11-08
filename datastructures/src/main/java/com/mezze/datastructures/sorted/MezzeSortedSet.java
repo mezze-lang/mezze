@@ -268,6 +268,10 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
      */
     public MezzeSortedSet<A> withComparator(Comparator<? super A> cmp) {
         if (cmp == null || cmp == this.comparator) return this;
+        // Hands the array over, and the result can escape sharing it:
+        // `addObject` of a present element and `removeObject` of an absent one
+        // both return `this`. Sound because the only in-place write lands
+        // outside the window either set reads.
         return new MezzeSortedSet<>(elements, length, cmp, null);
     }
 
@@ -288,20 +292,12 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
 
         int insertPos = -(idx + 1);
 
+        // The only in-place write in this class. Sound by ADDRESSABILITY: it
+        // writes at index `length`, outside the `[0, length)` every set
+        // holding this array reads. See MezzeSortedMap.putObject for the
+        // middle-insert path that was deleted from beside it.
         if (isOwner() && length < elements.length && insertPos == length) {
-            // O(1) fast path: appending at end with spare capacity
             elements[length] = elem;
-            Object[] token = ownerToken;
-            @SuppressWarnings("unchecked")
-            MezzeSortedSet<A> result = new MezzeSortedSet<>(elements, length + 1, comparator, token);
-            token[0] = result;
-            return result;
-        }
-
-        if (isOwner() && length < elements.length) {
-            // Spare capacity, inserting in middle — shift in-place
-            System.arraycopy(elements, insertPos, elements, insertPos + 1, length - insertPos);
-            elements[insertPos] = elem;
             Object[] token = ownerToken;
             @SuppressWarnings("unchecked")
             MezzeSortedSet<A> result = new MezzeSortedSet<>(elements, length + 1, comparator, token);
@@ -682,49 +678,6 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
     @SuppressWarnings("unchecked")
     public A[] toArray() {
         return (A[]) Arrays.copyOf(elements, length);
-    }
-
-    // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
-
-    /**
-     * Creates a mutable copy of this sorted set.
-     * Used by to_mut to get a fresh copy that can be mutated.
-     */
-    public MezzeSortedSet<A> copyToMutable() {
-        return new MezzeSortedSet<>(elements.clone(), comparator);
-    }
-
-    /**
-     * Returns the internal elements array (for building mutable sorted sets).
-     * Only for internal use within LocalMut context.
-     */
-    public Object[] getElementsInternal() {
-        return elements;
-    }
-
-    /**
-     * In-place set at index - replaces element at given position.
-     * Note: Does NOT maintain sort order - caller is responsible for that.
-     * Only safe within LocalMut context.
-     */
-    public void mutSet(int index, A value) {
-        if (index < 0 || index >= length) {
-            throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + length);
-        }
-        elements[index] = value;
-    }
-
-    /**
-     * In-place swap elements at indices i and j.
-     * Only safe within LocalMut context.
-     */
-    public void mutSwap(int i, int j) {
-        if (i < 0 || i >= length || j < 0 || j >= length) {
-            throw new IndexOutOfBoundsException("Indices: " + i + ", " + j + ", Size: " + length);
-        }
-        Object tmp = elements[i];
-        elements[i] = elements[j];
-        elements[j] = tmp;
     }
 
     // ===== OBJECT METHODS =====

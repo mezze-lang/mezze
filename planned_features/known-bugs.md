@@ -4243,3 +4243,105 @@ tests: five for the Deque, which all pass and pin the property that makes it
 sound, and three for the BitSet. Two of those are `@Disabled` against this
 entry; the third — a base keeping a bit REMOVED from a derived set — passes,
 because `remove` clones.
+
+## BUG 40 — FIXED 2026-11-08: `MezzeSortedMap` and `MezzeSortedSet` were changed by inserting into them
+
+The shape of BUG 38 and BUG 39 once more — a derivation observable in the value
+it came FROM — in the two structures `OwnerTokenSoundnessTest` had not probed,
+because that file went after the Deque and the BitSet and stopped there.
+
+Nothing is shared in this reproduction. One map, one insert whose result is
+thrown away, and the map is wrong afterwards:
+
+```java
+MezzeSortedMap<Integer, String> base = MezzeSortedMap.empty();
+for (int i = 0; i <= 20; i += 2) base = base.put(i, "v" + i);  // 0,2,4,…,20
+
+base.put(5, "v5");       // the RESULT IS DISCARDED
+base.keys();             // [0, 2, 4, 5, 6, 8, 10, 12, 14, 16, 18]
+                         // 5 is in a map it was never added to, and 20 is gone
+```
+
+`base.size()` still says 11, so the key that fell off the end of the window is
+simply unreachable. `MezzeSortedSet.add` is the same, one array instead of two.
+
+### Cause: a fast path that wrote inside its own read window
+
+`putObject` carried two in-place paths, both guarded by
+`isOwner() && length < keys.length`, and the guard is not what distinguishes
+them:
+
+```java
+// (a) append — writes at index `length`
+keys[length] = key;
+
+// (b) middle insert — writes inside [insertPos, length)
+System.arraycopy(keys, insertPos, keys, insertPos + 1, length - insertPos);
+keys[insertPos] = key;
+```
+
+(a) is sound, and not by luck: every structure holding that array reads
+`[0, length)` and so cannot ADDRESS index `length`. Only the map derived by the
+append carries `length + 1`, and only it can see the slot. That is the same
+argument that makes `MezzeDeque` sound under BUG 38 — a window, and writes
+outside it.
+
+(b) has no such defence. `[insertPos, length)` is exactly what the base reads,
+so the base sees the shift. `isOwner()` was being read as "nobody else can
+observe these contents", but `this` is somebody: the owner is a live value the
+program can still hold, which in Mezze it always can, because
+`let m2 = insert(m1, k, v)` leaves `m1` bound.
+
+### SEVERITY: not reachable from Mezze
+
+Every ordered operation enters through `SortedMapNatives`, which installs a
+comparator before touching the map:
+
+```java
+map = map.withComparator(ElementComparator.of(cmpFn));
+return map.putObject(key, value);
+```
+
+`ElementComparator.of` returns a NEW instance per call, so `withComparator`
+never takes its `cmp == this.comparator` short circuit, and the map it returns
+has no owner token. `isOwner()` is therefore false on every map `putObject`
+ever sees from guest code, and neither in-place path can fire. Only a
+host-level `put` chain — tests, and `fromMap` — reaches them.
+
+So this was a defect in the Java API that no Mezze program could observe,
+found while making the replace path share its keys array rather than copy it.
+
+### Fix: the path is deleted, not guarded
+
+(b) is gone. A middle insert allocates and copies, which is what a persistent
+middle insert has to do. (a) stays, with the addressability argument written
+above it so that re-adding a sibling that writes inside the window has to
+argue with a comment first.
+
+Two further things fell out of it:
+
+- The guard on (a) now checks `length < values.length` as well as
+  `length < keys.length`. It writes both arrays and only checked the capacity
+  of one, which the replace path's keys-sharing makes reachable: that path
+  leaves a map whose values array is exactly `length` while the keys array it
+  shares is longer.
+- The MUT layer on both classes is deleted — `copyToMutable`, `mutUpdate`,
+  `mutUpdateObject`, `mutClearValues` on the map, `copyToMutable`,
+  `getElementsInternal`, `mutSet`, `mutSwap` on the set. Nothing outside the
+  two classes called any of them, and they are in-place writers inside the read
+  window, which is the one thing array sharing cannot tolerate. Same finding as
+  the 73 dead `MUT_*` ops, in a different place.
+
+### Regression tests
+
+`datastructures/src/test/java/.../sorted/SharedArraySoundnessTest.java`, ten
+tests. The two that name this entry are `aMapIsNotChangedByInsertingIntoIt` and
+`aSetIsNotChangedByAddingToIt`; both failed before the deletion at index 3 of
+the key array, `expected: <6> but was: <5>`.
+
+The premise is the hard part and the file says so: the in-place paths need a
+structure that OWNS its arrays AND has spare capacity, and ANY read revokes
+ownership. A test that touches the base before the write it is trying to catch
+proves nothing while reading exactly like one that does — which is how the first
+BUG 38 test passed vacuously at one entry. Nothing in the file calls `get` on a
+base; `size`, `keys` and `getKeysInternal` are used because they do not revoke.

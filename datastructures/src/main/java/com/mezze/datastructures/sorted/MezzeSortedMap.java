@@ -213,6 +213,10 @@ public final class MezzeSortedMap<K, V> implements TruffleObject, Iterable<Mezze
      *  MezzeSortedSet.withComparator). */
     public MezzeSortedMap<K, V> withComparator(Comparator<? super K> cmp) {
         if (cmp == null || cmp == this.comparator) return this;
+        // Hands BOTH arrays over, and the result can escape sharing them:
+        // `removeObject` of an absent key returns `this`. Sound for the same
+        // reason the replace above is — the only in-place write lands outside
+        // the window either map reads.
         return new MezzeSortedMap<>(keys, values, length, cmp, null);
     }
 
@@ -351,32 +355,46 @@ public final class MezzeSortedMap<K, V> implements TruffleObject, Iterable<Mezze
         int idx = binarySearchObject(key);
 
         if (idx >= 0) {
-            // Update existing — only clone values array
+            // A replace changes no KEY, so the keys array is shared rather than
+            // copied. That halves the allocation, and this operation is
+            // allocation bound rather than compute bound: a chain of replaces
+            // ran 264 young collections where the `size` row over the same
+            // process shape ran 3.
+            //
+            // The share needs nothing revoked: the only in-place write left
+            // in this class lands at index `length`, which no map reading
+            // `[0, length)` can address. See the append path below.
+            //
+            // This map's values array is exactly `length` while the keys array
+            // it shares may be longer. Nothing reads `values.length`, so that
+            // is safe, and the append guard below checks BOTH capacities
+            // because it writes both arrays.
             Object[] newValues = Arrays.copyOf(values, length);
             newValues[idx] = value;
-            return new MezzeSortedMap<>(Arrays.copyOf(keys, length), newValues, comparator);
+            return new MezzeSortedMap<>(keys, newValues, length, comparator, null);
         }
 
         // Insert new
         int insertPos = -(idx + 1);
 
-        if (isOwner() && length < keys.length && insertPos == length) {
-            // O(1) fast path: appending at end with spare capacity (sorted ascending insert)
+        // The ONLY in-place write in this class, and it is sound by
+        // ADDRESSABILITY rather than by care: it writes at index `length`,
+        // and every map holding these arrays reads `[0, length)` — none of
+        // them can address the slot. A map derived by appending carries
+        // `length + 1` and so is the only one that can see it.
+        //
+        // There used to be a second one beside it, taking the same token for a
+        // middle insert and shifting `[insertPos, length)` up by one. That slot
+        // range IS addressable, by the base itself, so inserting into a map
+        // changed the map: `base.put(5, _)` on 0,2,4,6,… left `base` reading
+        // 5 at index 3 and 20 gone. It was never reachable from Mezze —
+        // SortedMapNatives installs a comparator first, and `withComparator`
+        // yields a map with no token — but it is deleted rather than guarded,
+        // because a fast path that mutates inside its own read window is not a
+        // fast path. A middle insert now copies, which is what it has to do.
+        if (isOwner() && length < keys.length && length < values.length && insertPos == length) {
             keys[length] = key;
             values[length] = value;
-            Object[] token = ownerToken;
-            @SuppressWarnings("unchecked")
-            MezzeSortedMap<K, V> result = new MezzeSortedMap<>(keys, values, length + 1, comparator, token);
-            token[0] = result;
-            return result;
-        }
-
-        if (isOwner() && length < keys.length) {
-            // Spare capacity but inserting in middle — shift in-place
-            System.arraycopy(keys, insertPos, keys, insertPos + 1, length - insertPos);
-            System.arraycopy(values, insertPos, values, insertPos + 1, length - insertPos);
-            keys[insertPos] = key;
-            values[insertPos] = value;
             Object[] token = ownerToken;
             @SuppressWarnings("unchecked")
             MezzeSortedMap<K, V> result = new MezzeSortedMap<>(keys, values, length + 1, comparator, token);
@@ -587,65 +605,23 @@ public final class MezzeSortedMap<K, V> implements TruffleObject, Iterable<Mezze
         };
     }
 
-    // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
+    // ===== BACKING ARRAYS =====
 
     /**
-     * Creates a mutable copy of this sorted map.
-     * Used by to_mut to get a fresh copy that can be mutated.
-     */
-    public MezzeSortedMap<K, V> copyToMutable() {
-        return new MezzeSortedMap<>(keys.clone(), values.clone(), comparator);
-    }
-
-    /**
-     * In-place put - mutates the underlying arrays.
-     * Only works for updating existing keys (not insertion).
-     * For insertion, use the mutable builder approach.
-     * Only safe within LocalMut context.
-     * Returns true if key was found and updated.
-     */
-    public boolean mutUpdate(K key, V value) {
-        int idx = binarySearch(key);
-        if (idx >= 0) {
-            values[idx] = value;
-            return true;
-        }
-        return false;
-    }
-
-    /**
-     * In-place update by key (raw type).
-     * Only safe within LocalMut context.
-     */
-    public boolean mutUpdateObject(Object key, Object value) {
-        int idx = binarySearchObject(key);
-        if (idx >= 0) {
-            values[idx] = value;
-            return true;
-        }
-        return false;
-    }
-
-    /**
-     * In-place clear - sets all values to null.
-     * Only safe within LocalMut context.
-     */
-    public void mutClearValues() {
-        Arrays.fill(values, null);
-    }
-
-    /**
-     * Returns the internal keys array (for building mutable sorted maps).
-     * Only for internal use within LocalMut context.
+     * The backing keys array, for a caller that walks entries in sort order
+     * without allocating a copy of each one — {@code SortedMapNatives}
+     * compares two maps with it.
+     *
+     * <p>READ ONLY, and bounded by {@link #size()} rather than by the array's
+     * own length: the array carries spare capacity, and a replace SHARES it
+     * with the map it derived from, so the slots past {@code size()} belong to
+     * nobody and writing any slot at all would be visible in another map.
      */
     public Object[] getKeysInternal() {
         return keys;
     }
 
-    /**
-     * Returns the internal values array (for building mutable sorted maps).
-     * Only for internal use within LocalMut context.
-     */
+    /** The backing values array. See {@link #getKeysInternal}. */
     public Object[] getValuesInternal() {
         return values;
     }
