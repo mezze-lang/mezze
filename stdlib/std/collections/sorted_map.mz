@@ -176,12 +176,22 @@ pub let get: { m: SortedMap 'k 'v, k: 'k } with Ord 'k -> Option 'v = { m, k } -
                                      hi = __native_sorted_map_size { m = m } - 1 } }
 
 ## Removes a key, returning a new map.
-let remove_with_cmp
-  : { m: SortedMap 'k 'v, k: 'k, cmp: { a: 'k, b: 'k } -> Int } -> SortedMap 'k 'v = { m, k, cmp } ->
-  __native_sorted_map_remove { m = m, k = k, cmp = cmp }
+##
+## The search runs HERE, like `get`'s and `insert`'s. Removing a key that is NOT
+## there is a pure SEARCH — the map comes back unchanged — so that case now
+## never reaches a native at all, and the case that is there hands the native a
+## position instead of a comparator.
+##
+## Separate helper for the branch, for the reason given above `insert_at_slot`.
+let remove_at_slot: { m: SortedMap 'k 'v, idx: Int } -> SortedMap 'k 'v = { m, idx } ->
+  if idx < 0
+    then m
+    else __native_sorted_map_remove_at { m = m, i = idx }
 
 pub let remove: { m: SortedMap 'k 'v, k: 'k } with Ord 'k -> SortedMap 'k 'v = { m, k } ->
-  remove_with_cmp { m = m, k = k, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
+  remove_at_slot { m = m,
+                   idx = find_index { m = m, k = k, lo = 0,
+                                      hi = __native_sorted_map_size { m = m } - 1 } }
 
 ## Pins the search result to Int, which is what `value_or_none` does for
 ## `get` by accident of taking an Int field. Without it, unannotated

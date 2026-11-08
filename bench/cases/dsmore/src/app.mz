@@ -246,6 +246,35 @@ let l_sm_build_asc = { i, limit, m } -> if i > limit then sorted_map::size { m =
 let l_sm_build_desc = { i, m } -> if i <= 0 then sorted_map::size { m = m }
   else l_sm_build_desc { i = i - 1, m = sorted_map::insert { m = m, k = i, v = i } }
 
+## ── 17-20. REMOVE, the last ordered operation still searching in a native ──
+## `remove` of a key that is NOT there is a pure search — the container comes
+## back unchanged — which is the shape `add` of a present element had, and that
+## one was 20.7x. Same four shapes as the inserts: present and absent, map and
+## set, from a shared base, result dropped.
+let l_sm_remove_present = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let m2 = sorted_map::remove { m = m, k = (i % keys) + 1 }
+    l_sm_remove_present { i = i - 1, m = m, keys = keys,
+                          acc = acc + sorted_map::size { m = m2 } }
+
+let l_sm_remove_absent = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let m2 = sorted_map::remove { m = m, k = keys + 1 + (i % keys) }
+    l_sm_remove_absent { i = i - 1, m = m, keys = keys,
+                         acc = acc + sorted_map::size { m = m2 } }
+
+let l_ss_remove_present = { i, acc, s, keys } -> if i <= 0 then acc
+  else do
+    let s2 = sorted_set::remove { s = s, x = (i % keys) + 1 }
+    l_ss_remove_present { i = i - 1, s = s, keys = keys,
+                          acc = acc + sorted_set::size { s = s2 } }
+
+let l_ss_remove_absent = { i, acc, s, keys } -> if i <= 0 then acc
+  else do
+    let s2 = sorted_set::remove { s = s, x = keys + 1 + (i % keys) }
+    l_ss_remove_absent { i = i - 1, s = s, keys = keys,
+                         acc = acc + sorted_set::size { s = s2 } }
+
 let l_dq_get = { i, acc, d, keys } -> if i <= 0 then acc
   else do
     let v = match deque::get { d = d, i = i % keys } is
@@ -308,3 +337,11 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
            label = "sm build ASCENDING     ", thunk = {} -> l_sm_build_asc { i = 1, limit = n, m = sorted_map::empty {} } }
   report { idx = 16, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "sm build DESCENDING    ", thunk = {} -> l_sm_build_desc { i = n, m = sorted_map::empty {} } }
+  report { idx = 17, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "sm::remove PRESENT, base", thunk = {} -> l_sm_remove_present { i = n, acc = 0, m = sm, keys = keys } }
+  report { idx = 18, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "sm::remove ABSENT, base", thunk = {} -> l_sm_remove_absent { i = n, acc = 0, m = sm, keys = keys } }
+  report { idx = 19, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "ss::remove PRESENT, base", thunk = {} -> l_ss_remove_present { i = n, acc = 0, s = ss, keys = keys } }
+  report { idx = 20, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "ss::remove ABSENT, base", thunk = {} -> l_ss_remove_absent { i = n, acc = 0, s = ss, keys = keys } }

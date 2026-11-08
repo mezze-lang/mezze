@@ -318,4 +318,123 @@ class SortedInsertAtIndexTest {
             ),
         ))
     }
+    // ───────────── remove, which takes the same index ─────────────
+
+    /**
+     * EVERY KEY REMOVED IN TURN, each from its own fresh copy of the same map.
+     * A wrong index does not throw and does not change the size — it drops the
+     * WRONG entry, so the only thing that catches it is checking what survived.
+     * Looking up all 20 keys afterwards gives `2100 - 10*k`, which is a
+     * different number for every `k`, so removing a neighbour cannot produce
+     * the expected total.
+     */
+    @Test
+    fun `removing each key in turn drops exactly that key`() {
+        for (k in 1..20) {
+            val expected = 2100L - 10L * k
+            assertEquals(expected, run(
+                prelude, sumLookups, mapBuiltIn(scrambled),
+                listOf(
+                    "let r = sorted_map::remove { m = m, k = $k }",
+                    "sum_lookups { i = 20, m = r, acc = 0 }",
+                ),
+            ), "removing key $k dropped something else")
+        }
+    }
+
+    @Test
+    fun `removing each key in turn leaves nineteen and the right ends`() {
+        for (k in listOf(1, 2, 10, 19, 20)) {
+            val lo = if (k == 1) 2 else 1
+            val hi = if (k == 20) 19 else 20
+            assertEquals(1L, run(
+                prelude, mapBuiltIn(scrambled),
+                listOf(
+                    "let r = sorted_map::remove { m = m, k = $k }",
+                    "let n = sorted_map::size { m = r }",
+                    "let gone = sorted_map::contains_key { m = r, k = $k }",
+                    "let lo = option::get_or { opt = sorted_map::min_key { m = r }, def = 0 }",
+                    "let hi = option::get_or { opt = sorted_map::max_key { m = r }, def = 0 }",
+                    "if n == 19 && gone.not {} && lo == $lo && hi == $hi then 1 else 0",
+                ),
+            ), "removing key $k left the wrong shape")
+        }
+    }
+
+    @Test
+    fun `removing a key that is not there changes nothing`() {
+        assertEquals(1L, run(
+            prelude, sumLookups, mapBuiltIn(scrambled),
+            listOf(
+                "let a = sorted_map::remove { m = m, k = 0 }",
+                "let b = sorted_map::remove { m = a, k = 21 }",
+                "let c = sorted_map::remove { m = b, k = 999 }",
+                "let total = sum_lookups { i = 20, m = c, acc = 0 }",
+                "let n = sorted_map::size { m = c }",
+                "if total == 2100 && n == 20 then 1 else 0",
+            ),
+        ))
+    }
+
+    @Test
+    fun `a remove leaves the map it came from alone`() {
+        assertEquals(1L, run(
+            prelude, sumLookups, mapBuiltIn(scrambled),
+            listOf(
+                "let r = sorted_map::remove { m = m, k = 7 }",
+                "let base = sum_lookups { i = 20, m = m, acc = 0 }",
+                "let derived = sum_lookups { i = 20, m = r, acc = 0 }",
+                "let bn = sorted_map::size { m = m }",
+                "let rn = sorted_map::size { m = r }",
+                "if base == 2100 && derived == 2030 && bn == 20 && rn == 19 then 1 else 0",
+            ),
+        ))
+    }
+
+    @Test
+    fun `removing every key one after another empties the map`() {
+        assertEquals(1L, run(
+            prelude, mapBuiltIn(scrambled),
+            listOf(
+                "let drain = { i, m } -> if i <= 0 then m",
+                "  else drain { i = i - 1, m = sorted_map::remove { m = m, k = i } }",
+                "let e = drain { i = 20, m = m }",
+                "if sorted_map::size { m = e } == 0 && sorted_map::is_empty { m = e } then 1 else 0",
+            ),
+        ))
+    }
+
+    @Test
+    fun `a set removes exactly the element named`() {
+        for (k in listOf(1, 7, 20)) {
+            assertEquals(1L, run(
+                prelude, setBuiltIn(scrambled),
+                listOf(
+                    "let r = sorted_set::remove { s = s, x = $k }",
+                    "let all_but = { i, s } -> if i <= 0 then True",
+                    "  else if i == $k then all_but { i = i - 1, s = s }",
+                    "  else if sorted_set::contains { s = s, x = i } then all_but { i = i - 1, s = s }",
+                    "  else False",
+                    "let kept = all_but { i = 20, s = r }",
+                    "let gone = sorted_set::contains { s = r, x = $k }",
+                    "let n = sorted_set::size { s = r }",
+                    "if kept && gone.not {} && n == 19 then 1 else 0",
+                ),
+            ), "removing $k from the set left the wrong shape")
+        }
+    }
+
+    @Test
+    fun `a set remove of an absent element changes nothing`() {
+        assertEquals(1L, run(
+            prelude, setBuiltIn(scrambled),
+            listOf(
+                "let r = sorted_set::remove { s = s, x = 21 }",
+                "let all_in = { i, s } -> if i <= 0 then True",
+                "  else if sorted_set::contains { s = s, x = i } then all_in { i = i - 1, s = s }",
+                "  else False",
+                "if all_in { i = 20, s = r } && sorted_set::size { s = r } == 20 then 1 else 0",
+            ),
+        ))
+    }
 }

@@ -10163,3 +10163,62 @@ including a chain of 64 maps read back after all 64 appends.
 
 Gate: `:interpreter:test` 7 649 tests 0 failures 14 skipped; `:typechecker:test` 4 826 tests 0 failures;
 `:datastructures:test` 753 tests 0 failures 2 skipped.
+
+#### `remove` was the last one still searching in a native — 19.9x, twice
+
+Six ordered operations search. Five of them had been moved into guest code;
+`remove` had not, and it is the one where the win was most predictable, because
+removing a key that is NOT there is a pure SEARCH — the container comes back
+unchanged, so that case is the search and nothing else. That is the exact shape
+`sorted_set::add` of a present element had, and that one was 20.7x.
+
+```
+  row                            HEAD   guest-search   verdict
+  sm::remove ABSENT, base     291 052         14 667    19.84x
+  ss::remove ABSENT, base     291 045         14 693    19.81x
+  ss::remove PRESENT, base    410 904        164 415     2.50x
+  sm::remove PRESENT, base    687 838        420 106     1.64x
+  sorted_map::get  (control)   13 877         14 004      flat
+  sorted_map::contains_key     12 120         12 145      flat
+  sorted_set::contains (ctl)   11 713         11 964      flat
+  sm::insert PRESENT   (ctl)  182 722        184 628      flat
+  ss::add PRESENT      (ctl)   14 289         14 095      flat
+```
+
+Converged at n=300k and n=600k, five controls flat, checksums scaling with n.
+
+**Two independent operations landing on 19.8x is the result**, not the
+individual numbers: the map's remove and the set's remove share nothing but the
+mechanism being removed, so agreeing to two significant figures says the ~300 ns
+really was the native comparator callback and not something either structure was
+doing. And they land at 14 667 and 14 693 against `contains`'s 11 964 — an
+absent remove now costs what a search costs, because that is all it is.
+
+```
+  row                        HEAD young   new young
+  sm::remove ABSENT, base           31           7
+  ss::remove ABSENT, base           30           7
+  ss::remove PRESENT, base          56          39
+  sm::remove PRESENT, base          89          71
+```
+
+#### The ordered API is now consistent, and the remaining gap is one thing
+
+`get`, `contains_key`, `contains`, `insert`, `add` and `remove` all search in
+guest code. `insert_with_cmp`, `add_with_cmp` and `remove_with_cmp` are deleted,
+along with four native registrations and two native methods.
+
+Against the hash map in the same regime, at 1 000 keys: get 13 899 against
+12 839 (1.08x), contains 11 964 against 6 570 (1.82x), and **insert of an absent
+key ~669 000 against 45 266 (14.8x)**. Lookups are at or near parity; the one
+gap left is insertion and removal at an arbitrary position, and it is now purely
+the array copy — every comparison-shaped cost has been taken out of it.
+
+`coresurface` says there is nothing comparable elsewhere in the language: one
+effect operation is 393 ps net of the tier control, and option and variant
+matching are at parity with the counted loop (226 and 231 against 222). So the
+next move on this is an ordered structure with O(log n) update rather than
+another constant, which is a larger piece of work than anything above.
+
+Gate: `:interpreter:test` 7 656 tests 0 failures 14 skipped; `:typechecker:test`
+4 826 tests 0 failures; `:datastructures:test` 753 tests 0 failures 2 skipped.

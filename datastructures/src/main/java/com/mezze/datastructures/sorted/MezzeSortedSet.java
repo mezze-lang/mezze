@@ -317,6 +317,23 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
     }
 
     /**
+     * Remove the element at a position in sort order, for a caller that has
+     * ALREADY located it. Makes no comparison; see
+     * {@code MezzeSortedMap.removeAt}.
+     */
+    public MezzeSortedSet<A> removeAt(int i) {
+        if (i < 0 || i >= length) {
+            throw new IndexOutOfBoundsException("sorted set remove index " + i + " of " + length);
+        }
+        if (length == 1) return empty();
+
+        Object[] newElements = new Object[length - 1];
+        System.arraycopy(elements, 0, newElements, 0, i);
+        System.arraycopy(elements, i + 1, newElements, i, length - i - 1);
+        return new MezzeSortedSet<>(newElements, comparator);
+    }
+
+    /**
      * Creates a sorted set from raw Object iterable (for interpreter use).
      */
     @SuppressWarnings("unchecked")

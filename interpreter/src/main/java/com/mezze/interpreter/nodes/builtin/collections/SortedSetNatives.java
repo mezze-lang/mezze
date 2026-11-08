@@ -81,9 +81,10 @@ public final class SortedSetNatives {
         return set.addAt((int) (long) (Long) index, element);
     }
 
+    /** See {@link #addAt}. Reached only when the element IS present. */
     @TruffleBoundary
-    public static MezzeSortedSet remove(MezzeSortedSet set, Object element, MezzeFunction cmpFn) {
-        return set.withComparator(ElementComparator.of(cmpFn)).removeObject(element);
+    public static MezzeSortedSet removeAt(MezzeSortedSet set, Object index) {
+        return set.removeAt((int) (long) (Long) index);
     }
 
     // ==================== Min/Max Operations ====================

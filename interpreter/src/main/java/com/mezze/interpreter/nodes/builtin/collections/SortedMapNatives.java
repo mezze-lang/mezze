@@ -82,6 +82,13 @@ public final class SortedMapNatives {
         return map.insertAt((int) (long) (Long) index, key, value);
     }
 
+    /** See {@link #setAt}. The guest calls this only when the key is present,
+     *  so an absent key never reaches a native at all. */
+    @TruffleBoundary
+    public static MezzeSortedMap removeAt(MezzeSortedMap map, Object index) {
+        return map.removeAt((int) (long) (Long) index);
+    }
+
     public static MezzeVariant get(MezzeSortedMap map, Object key, MezzeFunction cmpFn) {
         map = map.withComparator(ElementComparator.of(cmpFn));
         Object value = map.getObject(key);
@@ -89,12 +96,6 @@ public final class SortedMapNatives {
             return MezzeVariant.none();
         }
         return MezzeVariant.some(value);
-    }
-
-    @TruffleBoundary
-    public static MezzeSortedMap remove(MezzeSortedMap map, Object key, MezzeFunction cmpFn) {
-        map = map.withComparator(ElementComparator.of(cmpFn));
-        return map.removeObject(key);
     }
 
     public static long size(MezzeSortedMap map) {

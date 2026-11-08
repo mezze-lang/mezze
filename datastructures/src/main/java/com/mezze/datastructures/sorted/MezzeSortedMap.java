@@ -526,6 +526,34 @@ public final class MezzeSortedMap<K, V> implements TruffleObject, Iterable<Mezze
         return new MezzeSortedMap<>(newKeys, newValues, comparator);
     }
 
+    /**
+     * Remove the entry at a position in sort order, for a caller that has
+     * ALREADY located it — the guest-side binary search in
+     * {@code std::collections::sorted_map}. Makes no comparison and so needs no
+     * comparator; see {@link #setAt} for the cost that buys.
+     *
+     * <p>Both arrays are copied, because a removal shifts everything after
+     * {@code i} down by one and that range is inside the window every map
+     * holding them reads. The arrays are a slot SHORTER, so there is no spare
+     * capacity and the result cannot append in place until it next grows — the
+     * same trade {@code removeObject} already made.
+     */
+    @SuppressWarnings("unchecked")
+    public MezzeSortedMap<K, V> removeAt(int i) {
+        if (i < 0 || i >= length) {
+            throw new IndexOutOfBoundsException("sorted map remove index " + i + " of " + length);
+        }
+        if (length == 1) return empty();
+
+        Object[] newKeys = new Object[length - 1];
+        Object[] newValues = new Object[length - 1];
+        System.arraycopy(keys, 0, newKeys, 0, i);
+        System.arraycopy(keys, i + 1, newKeys, i, length - i - 1);
+        System.arraycopy(values, 0, newValues, 0, i);
+        System.arraycopy(values, i + 1, newValues, i, length - i - 1);
+        return new MezzeSortedMap<>(newKeys, newValues, comparator);
+    }
+
     // ===== RANGE OPERATIONS =====
 
     /**
