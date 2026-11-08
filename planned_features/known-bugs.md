@@ -4489,3 +4489,51 @@ vector pipelines took the flag and never read it. Its oracle is computed in
 Kotlin, not by a second Mezze pipeline, because an equality between two Mezze
 routes passes when both are wrong the same way. Removing the one-line fix fails
 the small case AND the past-threshold case.
+
+## BUG 43 — OPEN 2026-11-08: a built jar run without `jdk.incubator.vector` dies on a fused numeric pipeline
+
+```
+$ java -Xmx4g -XX:+UseSerialGC --add-modules=jdk.internal.vm.ci -jar app.jar
+Error: java.lang.NoClassDefFoundError: jdk/incubator/vector/Vector
+```
+
+on a program as small as
+
+```mezze
+iter::range { start = 0, end = n }
+  .map { f = { x } -> x + 1 }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+```
+
+`FlpSimd.AVAILABLE` exists to make the vector pipelines optional, and
+`SIMD_THRESHOLD` is `AVAILABLE ? Vectors.VL * 4 : Integer.MAX_VALUE` precisely so
+that a runtime without the module takes the scalar loop. The guard does not hold:
+something on the path still resolves `jdk.incubator.vector.Vector` eagerly, and
+the program dies instead of running slower.
+
+### Why it matters rather than being a curiosity
+
+The launcher `mez build` writes always passes
+`--add-modules=jdk.incubator.vector`, so the supported path is fine. But that
+launcher is a shell script and the jar beside it is an ordinary jar — `java -jar`
+on it is the obvious thing to do, and it is what any host that embeds the jar
+will do. `project_boxing_elimination_blocked` already records `java -jar` being a
+DIFFERENT configuration from the launcher for this exact reason; this says the
+difference is not slower, it is fatal.
+
+### Not a regression
+
+Verified against two builds, one of them `9f6f56cf9` as committed: both fail
+identically. Found while trying to use the module's absence as a way to attribute
+a measurement to the vector path — which is also the workaround for anyone
+needing it: there is none short of passing the module.
+
+### Where to look
+
+`FlpSimd`'s static initialisers and the `Vectors` holder class. A holder is the
+standard idiom for making a capability lazy, so the eager resolution is likely
+either a field type, a method signature on a non-lazy class, or a
+`@TruffleBoundary` method whose descriptor mentions a vector type — note the
+existing comment in `MezzeBytecodeRootNode` that BDSL `Uncached` node paths do
+not respect `@TruffleBoundary`, which is how a similar reference reached the SVM
+blocklist before.

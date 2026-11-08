@@ -5433,7 +5433,7 @@ public final class BytecodeCompiler {
             if (flp != null) {
                 if (rangeStart != null && rangeStep == null) {
                     // Range source (step=1) → FusedLongRangePipeline (no seq allocation at all)
-                    b.beginFusedLongRangePipeline(flp.config);
+                    b.beginFusedLongRangePipeline(flp.config, flp.extraOps, flp.extraLits);
                       emitNode(rangeStart, b, argCount, localMap);             // child 0: start
                       emitNode(rangeEnd,   b, argCount, localMap);             // child 1: end
                       emitFLPOperand(flp.mapLit, flp.mapNode, b, argCount, localMap);
@@ -5444,6 +5444,12 @@ public final class BytecodeCompiler {
                       emitFLPOperand(flp.foldInitLit, flp.foldInitNode, b, argCount, localMap);
                       emitFLPOperand(flp.takeLimitLit, flp.takeLimitNode, b, argCount, localMap);
                     b.endFusedLongRangePipeline();
+                    // The range pipeline had no test seam, so a value test could
+                    // not tell a correct FUSION from a correct FALLBACK — which is
+                    // the only thing worth asserting about a stage rewrite.
+                    recordFusedEmit(flp.extraOps != 0
+                            ? "FusedLongRangePipeline+extraMaps"
+                            : "FusedLongRangePipeline");
                     if (dbg) System.err.println("[chain-canon-emit] emitted FusedLongRangePipeline ("
                             + sinkMode.getClass().getSimpleName() + ", " + classifiedStages.size() + " stages)");
                     return true;
@@ -5540,6 +5546,9 @@ public final class BytecodeCompiler {
      */
     private static final class FLPSpec {
         final int config;
+        /** Map stages TWO AND LATER: ops packed 5 bits each, literals beside. */
+        final int extraOps;
+        final long[] extraLits;
         final long mapLit;           final NodeIR mapNode;
         final long filterPreLit;     final NodeIR filterPreNode;
         final long filterCmpLit;     final NodeIR filterCmpNode;
@@ -5547,7 +5556,7 @@ public final class BytecodeCompiler {
         final long sinkPredCmpLit;   final NodeIR sinkPredCmpNode;
         final long foldInitLit;      final NodeIR foldInitNode;
         final long takeLimitLit;     final NodeIR takeLimitNode;
-        FLPSpec(int config,
+        FLPSpec(int config, int extraOps, long[] extraLits,
                 long mapLit, NodeIR mapNode,
                 long filterPreLit, NodeIR filterPreNode,
                 long filterCmpLit, NodeIR filterCmpNode,
@@ -5556,6 +5565,8 @@ public final class BytecodeCompiler {
                 long foldInitLit, NodeIR foldInitNode,
                 long takeLimitLit, NodeIR takeLimitNode) {
             this.config = config;
+            this.extraOps = extraOps;
+            this.extraLits = extraLits;
             this.mapLit = mapLit;               this.mapNode = mapNode;
             this.filterPreLit = filterPreLit;   this.filterPreNode = filterPreNode;
             this.filterCmpLit = filterCmpLit;   this.filterCmpNode = filterCmpNode;
@@ -5601,22 +5612,54 @@ public final class BytecodeCompiler {
         boolean hasTake = false; long takeLimitLit = 0; NodeIR takeLimitNode = null;
         // Track whether we've seen a filter before a map (for stage ordering).
         boolean seenFilter = false;
+        // A filter that came AFTER a map: it would sit between that map and any
+        // later one, which the single extras block cannot express.
+        boolean filterAfterMap = false;
+        // Map stages two and later: ops packed into an int (so they stay PE
+        // constants and the arithmetic folds), literals in a parallel list.
+        int extraOps = 0;
+        java.util.List<Long> extraLits = new java.util.ArrayList<>();
 
         for (ClassifiedStage stage : stages) {
             if (stage instanceof ClassifiedStage.MapInline mi) {
-                if (mapOp >= 0) return null;
-                mapOp = mi.op().ordinal();
-                // If we saw a filter before this map, the filter goes first.
-                if (seenFilter) filterFirst = true;
-                selfMap = mi.selfOp();
-                if (!selfMap && mi.rhsNode() != null && !(mi.rhsNode() instanceof LongLitIR)) {
-                    mapNode = mi.rhsNode();
-                } else if (!selfMap) {
-                    mapLit = mi.rhsLit();
+                if (mapOp < 0) {
+                    // The FIRST map keeps the config slot and its bytecode child,
+                    // so the single-map case — runtime operand and vectorised path
+                    // included — is exactly what it was.
+                    mapOp = mi.op().ordinal();
+                    // If we saw a filter before this map, the filter goes first.
+                    if (seenFilter) filterFirst = true;
+                    selfMap = mi.selfOp();
+                    if (!selfMap && mi.rhsNode() != null && !(mi.rhsNode() instanceof LongLitIR)) {
+                        mapNode = mi.rhsNode();
+                    } else if (!selfMap) {
+                        mapLit = mi.rhsLit();
+                    }
+                } else {
+                    // A FURTHER map goes in the extras table. This used to be
+                    // `return null`, which dropped the pipeline to the generic
+                    // bytecode loop at 7.7x — see flpApplyExtraMaps.
+                    //
+                    // The extras all run TOGETHER, immediately after the primary
+                    // map, so every map must be on the same side of the filter.
+                    // A filter BETWEEN two maps cannot be expressed and is
+                    // refused; a filter before ALL of them is `filterFirst`, and
+                    // after all of them is the default.
+                    if (filterAfterMap) return null;
+                    // A dynamic operand needs a bytecode child and the emitter's
+                    // child list is fixed, so only a literal (or a self op, which
+                    // needs no operand at all) can ride in the table.
+                    if (!mi.selfOp() && mi.rhsNode() != null
+                            && !(mi.rhsNode() instanceof LongLitIR)) return null;
+                    if (extraLits.size() >= MezzeBytecodeRootNode.FLP_MAX_EXTRA_MAPS) return null;
+                    extraOps = MezzeBytecodeRootNode.flpPackExtraMap(
+                            extraOps, extraLits.size(), mi.op().ordinal(), mi.selfOp());
+                    extraLits.add(mi.selfOp() ? 0L : mi.rhsLit());
                 }
             } else if (stage instanceof ClassifiedStage.FilterStep fs) {
                 if (filterCmpOp >= 0) return null;
                 seenFilter = true;
+                if (mapOp >= 0) filterAfterMap = true;
                 FilterPeel fp = fs.peel();
                 if (fp.callHash() != null) return null;
                 if (fp.preOp() != null) {
@@ -5672,6 +5715,10 @@ public final class BytecodeCompiler {
                 // it there is nowhere to put the element transform, and dropping it
                 // silently computes the wrong fold, so refuse and let the fallback run.
                 if (mapOp >= 0) return null;
+                // Nor with extra map stages: this transform is applied at the
+                // SINK, so it has to come after them, and the extras block runs
+                // after the primary slot it would occupy.
+                if (extraOps != 0) return null;
                 // AND IT MUST RUN AFTER EVERY FILTER. This transform belongs to the
                 // SINK -- in `acc + x * x` the square is part of the fold, not a
                 // stage -- so the filter sees the RAW element. Riding in the map slot
@@ -5734,7 +5781,11 @@ public final class BytecodeCompiler {
         int config = MezzeBytecodeRootNode.flpPackConfig(
                 sinkKind, mapOp, filterPreOp, filterCmpOp,
                 sinkPredPreOp, sinkPredCmpOp, foldOp, selfMap, filterFirst, hasTake);
-        return new FLPSpec(config,
+        long[] extras = extraLits.isEmpty()
+                ? MezzeBytecodeRootNode.FLP_NO_EXTRA_MAPS
+                : new long[extraLits.size()];
+        for (int i = 0; i < extraLits.size(); i++) extras[i] = extraLits.get(i);
+        return new FLPSpec(config, extraOps, extras,
                 mapLit, mapNode, filterPreLit, filterPreNode,
                 filterCmpLit, filterCmpNode,
                 sinkPredPreLit, sinkPredPreNode,
@@ -6539,7 +6590,7 @@ public final class BytecodeCompiler {
     private void emitFLP(FLPSpec flp, NodeIR src,
                          MezzeBytecodeRootNodeGen.Builder b, int argCount,
                          com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
-        b.beginFusedLongPipeline(flp.config);
+        b.beginFusedLongPipeline(flp.config, flp.extraOps, flp.extraLits);
           emitNode(src, b, argCount, localMap);                        // child 0: source
           emitFLPOperand(flp.mapLit, flp.mapNode, b, argCount, localMap);
           emitFLPOperand(flp.filterPreLit, flp.filterPreNode, b, argCount, localMap);

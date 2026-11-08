@@ -3375,6 +3375,81 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         FLP_SINK_TO_SEQ = 5, FLP_SINK_TO_LIST = 6, FLP_SINK_REDUCE = 7,
         FLP_SINK_NONE = 8;
 
+    /** A pipeline with no map stages beyond the first. Shared so that the
+     *  overwhelmingly common case adds nothing to the constant pool. */
+    public static final long[] FLP_NO_EXTRA_MAPS = new long[0];
+
+    /**
+     * Extra map stages carried in {@code extraOps}, 5 bits each.
+     *
+     * <p>CAPPED BY MEASUREMENT, not by the 6 that the bits allow. On
+     * {@code bench/cases/iterstage} at n=2e7 against the generic loop this
+     * replaces: two stages 564 -> 423 ps/elem (1.33x), three 629 -> 550
+     * (1.14x), FOUR 749 -> 1324 (0.57x -- WORSE). The unrolled body stops
+     * paying somewhere past three stages, so a pipeline needing more than two
+     * extras is refused and keeps the generic loop it had.
+     */
+    public static final int FLP_MAX_EXTRA_MAPS = 2;
+
+    /** Pack one extra map stage into {@code extraOps}: op+1 in 4 bits, self in the 5th. */
+    public static int flpPackExtraMap(int extraOps, int index, int op, boolean selfOp) {
+        return extraOps | ((((op + 1) & 0xF) | (selfOp ? 0x10 : 0)) << (index * 5));
+    }
+
+    /**
+     * Apply map stages TWO AND LATER, in pipeline order.
+     *
+     * <p>WHY A SECOND PLACE FOR MAPS AT ALL. The packed config carries ONE map
+     * slot, and `tryBuildFusedLongPipeline` used to refuse the whole fast path
+     * on meeting a second map — `if (mapOp >= 0) return null`. The pipeline then
+     * fell to the generic bytecode loop, which `bench/cases/iterstage` measures
+     * at 539 ps/elem against FLP's 70 for the identical work: a pure stage-count
+     * ladder reads 55 / 70 / 539 / 629 / 719 ps for 0 to 4 stages, so the second
+     * stage alone cost 469 ps where each later one costs ~90. A control doing
+     * the three-stage kernel's arithmetic in ONE stage, with the same checksum,
+     * read 72 against 629.
+     *
+     * <p>WHERE THE OPS LIVE, AND WHY IT IS NOT THE ARRAY. The first version of
+     * this put op ordinal, self flag and literal in a {@code long[]}
+     * {@code @ConstantOperand}, three longs per stage, and MEASURED SLOWER THAN
+     * THE GENERIC LOOP IT REPLACED: 2 stages 536 -> 891 ps/elem, 3 stages
+     * 652 -> 1511, 4 stages 790 -> 2424, each extra stage costing ~760 ps where
+     * the generic loop charges ~120. Controls flat, checksums identical.
+     *
+     * <p>A {@code @ConstantOperand} array is a constant REFERENCE, not constant
+     * CONTENTS. {@code extraMaps.length} folds — the
+     * {@code partialEvaluationConstant} assertion on it passes and
+     * {@link com.oracle.truffle.api.nodes.ExplodeLoop} did unroll — but an
+     * element READ does not, so {@code flpOp}'s switch stayed a runtime switch
+     * and every element paid one dispatch per stage. That is the whole
+     * difference between this and the single-map slot, whose op comes out of the
+     * PE-constant config and folds to one arithmetic instruction.
+     *
+     * <p>So the OPS ride in an int — 5 bits a stage, op+1 in four and the self
+     * flag in the fifth, {@link #FLP_MAX_EXTRA_MAPS} of them — and only the
+     * LITERALS stay in the array. A literal need not fold: it is a value, like
+     * the primary {@code mapOperand}, and after unrolling the index is constant
+     * and the load is loop-invariant, so it hoists out of the loop.
+     *
+     * <p>An extra stage whose operand is a RUNTIME expression is refused rather
+     * than handled: a dynamic operand needs a bytecode child, and the emitter
+     * has a fixed child list. The first map keeps its slot and its child, so the
+     * single-map case — runtime operand and vectorised path included — is
+     * untouched.
+     */
+    @com.oracle.truffle.api.nodes.ExplodeLoop
+    public static long flpApplyExtraMaps(int extraOps, long[] extraLits, long v) {
+        CompilerAsserts.partialEvaluationConstant(extraOps);
+        for (int s = 0; s < FLP_MAX_EXTRA_MAPS; s++) {
+            int field = (extraOps >>> (s * 5)) & 0x1F;
+            if (field == 0) break;                  // no further stage
+            int op = (field & 0xF) - 1;
+            boolean self = (field & 0x10) != 0;
+            v = FusedLongPipeline.flpOp(op, v, self ? v : extraLits[s]);
+        }
+        return v;
+    }
+
     /**
      * Pack op ordinals and flags into a single int for FusedLongPipeline.
      *
@@ -3414,11 +3489,13 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      */
     @Operation
     @ConstantOperand(type = int.class)   // config: packed ops (PE constant)
+    @ConstantOperand(type = int.class)   // extraOps: map stages 2..k (PE constant)
+    @ConstantOperand(type = long[].class) // their literal operands
     public static final class FusedLongPipeline {
 
         @Specialization(guards = "isLongStorage(seq)")
         public static Object doLong(
-                int config,
+                int config, int extraOps, long[] extraLits,
                 MezzeSeq<?> seq,
                 long mapOperand, long filterPreRhs,
                 long filterCmpRhs, long sinkPredPreRhs,
@@ -3428,7 +3505,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Cached InlinedLoopConditionProfile loopProfile) {
             com.mezze.datastructures.seq.LongSeqStorage ls =
                     (com.mezze.datastructures.seq.LongSeqStorage) seq.getStorage();
-            return run(config, ls.getArray(), ls.size(), null,
+            return run(config, extraOps, extraLits, ls.getArray(), ls.size(), null,
                     mapOperand, filterPreRhs, filterCmpRhs, sinkPredPreRhs,
                     sinkPredCmpRhs, foldInit, takeLimit, node, loopProfile);
         }
@@ -3443,7 +3520,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
          */
         @Specialization
         public static Object doList(
-                int config,
+                int config, int extraOps, long[] extraLits,
                 com.mezze.datastructures.list.MezzeList<?> list,
                 long mapOperand, long filterPreRhs,
                 long filterCmpRhs, long sinkPredPreRhs,
@@ -3457,7 +3534,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             // A list's length is a walk; only a materializing sink needs it up front.
             int n = materializes ? list.size() : Integer.MAX_VALUE;
             if (hasTake) n = (int) Math.min(n, takeLimit);
-            return run(config, null, n, list,
+            return run(config, extraOps, extraLits, null, n, list,
                     mapOperand, filterPreRhs, filterCmpRhs, sinkPredPreRhs,
                     sinkPredCmpRhs, foldInit, takeLimit, node, loopProfile);
         }
@@ -3470,7 +3547,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
          * stages and sinks below are written once for both.
          */
         private static Object run(
-                int config, long[] data, int n,
+                int config, int extraOps, long[] extraLits, long[] data, int n,
                 com.mezze.datastructures.list.MezzeList<?> cells,
                 long mapOperand, long filterPreRhs,
                 long filterCmpRhs, long sinkPredPreRhs,
@@ -3497,6 +3574,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             // ── SIMD fast path for SUM/COUNT/REDUCE on materialized long[] ──
             // Gated off on SVM and when jdk.incubator.vector is absent.
             if (fromArray
+                    && extraOps == 0           // the vector loops carry ONE map
                     && FlpSimd.AVAILABLE
                     && n >= FlpSimd.SIMD_THRESHOLD
                     && (sinkKind == FLP_SINK_SUM || sinkKind == FLP_SINK_COUNT
@@ -3553,6 +3631,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
                 // ── Map stage ──
                 if (mapOp >= 0) v = flpOp(mapOp, v, selfMap ? v : mapOperand);
+                if (extraOps != 0) v = flpApplyExtraMaps(extraOps, extraLits, v);
 
                 // ── Filter-second path ──
                 if (!filterFirst && filterCmpOp >= 0) {
@@ -3635,7 +3714,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @Specialization(guards = "!isLongStorage(seq)")
         @TruffleBoundary
         public static Object doFallback(
-                int config,
+                int config, int extraOps, long[] extraLits,
                 MezzeSeq<?> seq,
                 long mapOperand, long filterPreRhs,
                 long filterCmpRhs, long sinkPredPreRhs,
@@ -3668,6 +3747,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                     if (!flpCmp(filterCmpOp, fv, filterCmpRhs)) continue;
                 }
                 if (mapOp >= 0) v = flpOp(mapOp, v, selfMap ? v : mapOperand);
+                if (extraOps != 0) v = flpApplyExtraMaps(extraOps, extraLits, v);
                 if (!filterFirst && filterCmpOp >= 0) {
                     long fv = filterPreOp >= 0
                             ? flpOp(filterPreOp, v, filterPreRhs) : v;
@@ -3813,11 +3893,13 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      */
     @Operation
     @ConstantOperand(type = int.class)   // config: packed ops (PE constant)
+    @ConstantOperand(type = int.class)   // extraOps: map stages 2..k (PE constant)
+    @ConstantOperand(type = long[].class) // their literal operands
     public static final class FusedLongRangePipeline {
 
         @Specialization
         public static Object doRange(
-                int config,
+                int config, int extraOps, long[] extraLits,
                 long start, long end,
                 long mapOperand, long filterPreRhs,
                 long filterCmpRhs, long sinkPredPreRhs,
@@ -3849,7 +3931,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             // elements per cycle. The threshold matches VectorOps; below
             // it, the PE-optimized scalar loop wins on overhead.
             // Gated off on SVM and when jdk.incubator.vector is absent.
-            if (FlpSimd.AVAILABLE
+            if (extraOps == 0              // the vector loops carry ONE map
+                    && FlpSimd.AVAILABLE
                     && n >= FlpSimd.SIMD_THRESHOLD
                     && (sinkKind == FLP_SINK_SUM || sinkKind == FLP_SINK_COUNT
                         || sinkKind == FLP_SINK_REDUCE)
@@ -3890,6 +3973,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
                 // ── Map stage ──
                 if (mapOp >= 0) v = FusedLongPipeline.flpOp(mapOp, v, selfMap ? v : mapOperand);
+                if (extraOps != 0) v = flpApplyExtraMaps(extraOps, extraLits, v);
 
                 // ── Filter-second path ──
                 if (!filterFirst && filterCmpOp >= 0) {
