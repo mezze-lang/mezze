@@ -357,6 +357,65 @@ sealed interface ValidationError {
         override fun location(): Loc? = loc
     }
 
+    data class NotATypeName(
+        val name: String,
+        /** "ability" or "effect" — what the name actually declares. */
+        val kind: String,
+        val loc: Loc? = null
+    ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0712_NOT_A_TYPE_NAME
+
+        override fun message(): String =
+            "'$name' is an $kind, not a type, so it cannot be written where a type is " +
+                "expected. " +
+                when (kind) {
+                    "ability" ->
+                        "An ability names what a type can DO, and is written as a " +
+                            "constraint — `{ it: 'a } -> Int with $name 'a` — leaving the type " +
+                            "itself a variable."
+                    else ->
+                        "An effect names what a function PERFORMS, and is written in the " +
+                            "effect row — `{ } -> Int <$name>` — not as the type of a value."
+                }
+
+        override fun location(): Loc? = loc
+    }
+
+    data class TypeArityMismatch(
+        val typeName: String,
+        val declared: Int,
+        val applied: Int,
+        val loc: Loc? = null
+    ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0705_TYPE_ARITY_MISMATCH
+
+        override fun message(): String = buildString {
+            if (declared == 0) {
+                // Worth a different sentence: there is no count to get right,
+                // the whole application is the mistake. Rust splits this off as
+                // E0109 for the same reason.
+                append("'$typeName' takes no type arguments, but $applied ")
+                append(if (applied == 1) "was given" else "were given")
+                append(". Write `$typeName` on its own.")
+            } else {
+                append("'$typeName' takes $declared type ")
+                append(if (declared == 1) "argument" else "arguments")
+                append(", but $applied ")
+                append(if (applied == 1) "was given" else "were given")
+                append(".")
+                if (applied < declared) {
+                    append(" Every parameter must be supplied — an omitted one is not inferred, ")
+                    append("it is left free to be a different type at every use site.")
+                } else {
+                    append(" A surplus argument is not ignored: it stays in the type, so ")
+                    append("`$typeName` with $applied arguments unifies with nothing else.")
+                }
+            }
+        }
+
+        override fun location(): Loc? = loc
+    }
+
     data class UnknownType(
         val typeName: String,
         val availableTypes: List<String> = emptyList(),

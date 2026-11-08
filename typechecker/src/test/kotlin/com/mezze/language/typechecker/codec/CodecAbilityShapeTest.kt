@@ -491,13 +491,22 @@ class CodecAbilityShapeTest {
     // Tier-4 — sugar ability shapes exist (declarations + blanket impls)
     // =========================================================================
 
+    // These three prove the Tier-4 ability DECLARATIONS exist and import. They
+    // used to do it with `{ x: ToJson } -> x` — naming the ability in a type
+    // position, which V0712 now refuses, since an ability is not a type and
+    // there is no `dyn` form for it to mean. Writing the ability where it
+    // belongs, as a constraint, and CALLING one of its ops is the stronger
+    // proof anyway: it reaches the declaration's operations, not just its name.
+
     @Test
     fun `Tier 4 ToJson ability is importable`() {
         checkPasses(
             """
-            use std::codec::json::{ ToJson }
+            use std::codec::json::{ ToJson, Json }
 
-            pub let noop = { x: ToJson } -> x
+            pub let as_json
+              : { x: 'a } with ToJson 'a -> Json
+              = { x } -> x.to_json {}
             """.trimIndent(),
             "ToJson ability importable",
         )
@@ -507,9 +516,12 @@ class CodecAbilityShapeTest {
     fun `Tier 4 FromJson ability is importable`() {
         checkPasses(
             """
+            use std::codec::core::{ DecodeError }
             use std::codec::json::{ FromJson }
 
-            pub let noop = { x: FromJson } -> x
+            pub let parse_int
+              : { s: Str } with FromJson Int Str -> Result Int DecodeError
+              = { s } -> s.from_json {}
             """.trimIndent(),
             "FromJson ability importable",
         )
@@ -521,7 +533,9 @@ class CodecAbilityShapeTest {
             """
             use std::codec::url::{ ToUrl }
 
-            pub let noop = { x: ToUrl } -> x
+            pub let as_url
+              : { x: 'a } with ToUrl 'a -> Str
+              = { x } -> x.url {}
             """.trimIndent(),
             "ToUrl ability importable",
         )

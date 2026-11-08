@@ -24,6 +24,42 @@ object BuiltinTypes {
     val coreTypeNames = setOf(OPTION, RESULT, LIST, MAP, SET, SEQ, SORTED_MAP, SORTED_SET, DEQUE, NON_EMPTY_LIST, ITER)
 
     /**
+     * How many type arguments each core type takes.
+     *
+     * A declared type carries its own count in `ParsedTypeDecl.typeParams`; a
+     * builtin is defined internally and has nowhere to record one, so this is
+     * the only place that knows `Result` takes two and `Option` takes one.
+     * Primitives are absent and take none — [arityOf] answers 0 for them.
+     */
+    private val coreTypeArity: Map<String, Int> = mapOf(
+        OPTION to 1,
+        RESULT to 2,
+        LIST to 1,
+        MAP to 2,
+        SET to 1,
+        SEQ to 1,
+        SORTED_MAP to 2,
+        SORTED_SET to 1,
+        DEQUE to 1,
+        NON_EMPTY_LIST to 1,
+        ITER to 1,
+    )
+
+    /**
+     * The declared arity of a BUILTIN type name, or null when the name is not a
+     * builtin and the caller should ask the declaration instead.
+     *
+     * A primitive answers 0 rather than null: `Int Str` is as wrong as
+     * `Option Int Str`, and Rust says so with its own code (E0109, "type
+     * arguments are not allowed on this type") for exactly this case.
+     */
+    fun arityOf(typeName: String): Int? = when {
+        coreTypeArity.containsKey(typeName) -> coreTypeArity[typeName]
+        PrimitiveTypes.isPrimitiveName(typeName) -> 0
+        else -> null
+    }
+
+    /**
      * The constructors a SEQUENCE pattern (`[head, ...tail]`) can match against
      * in the name-carried representation. Counterpart to the `SeqType`/`ListType`
      * arms in [builtinConstructorName], for readers that meet a container as

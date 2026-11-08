@@ -503,7 +503,64 @@ fun ErrorCode.explain(): String = when (this) {
         "Check the name and that the type is imported."
 
     ErrorCode.V0705_TYPE_ARITY_MISMATCH ->
-        "A type constructor was applied with the wrong number of type arguments."
+
+        "A type constructor was applied with the wrong number of type arguments.\n\n" +
+
+            "`Option` takes one, `Result` takes two, `Int` takes none, and a type " +
+
+            "you declare takes as many as it writes parameters. The count has to " +
+
+            "match exactly — a missing argument is NOT inferred.\n\n" +
+
+            "Both directions matter, and neither is harmless:\n\n" +
+
+            "  Option Int Str   the surplus argument is kept, not dropped, so this\n" +
+            "                   is a type that unifies with neither `Option Int`\n" +
+            "                   nor `Option Int Bool` — a typo silently becomes a\n" +
+            "                   new, incompatible type instead of an error\n\n" +
+
+            "  Option           the parameter is left FREE, so each use site can\n" +
+            "                   settle it differently and nothing ties them\n" +
+            "                   together\n\n" +
+
+            "  Int Str          `Int` takes nothing; the application itself is the\n" +
+            "                   mistake, so write `Int`\n\n" +
+
+            "To leave an argument genuinely open, name a type VARIABLE for it — " +
+
+            "`Option 'a` — which says the parameter is yours to choose and keeps " +
+
+            "it one type throughout."
+
+    ErrorCode.V0712_NOT_A_TYPE_NAME ->
+
+        "An ability or an effect was written where a type belongs. Types, " +
+
+            "abilities and effects are SEPARATE NAMESPACES, so a name declared in " +
+
+            "one does not stand in for another.\n\n" +
+
+            "An ability names what a type can DO, so it goes in a constraint and " +
+
+            "leaves the type a variable:\n\n" +
+
+            "  { it: Eq } -> Int            no — `Eq` is not a type\n" +
+            "  { it: 'a } -> Int with Eq 'a yes — any 'a that has `Eq`\n\n" +
+
+            "An effect names what a function PERFORMS, so it goes in the effect " +
+
+            "row:\n\n" +
+
+            "  { v: Log } -> Int            no — `Log` is not a type\n" +
+            "  { } -> Int <Log>             yes — performs `Log`\n\n" +
+
+            "There is no way to write \"some value whose type has this ability\" as " +
+
+            "a type on its own. That would need a boxed existential — Rust's " +
+
+            "`dyn Trait` — and the language has no such form, which is why naming " +
+
+            "the ability is refused rather than reinterpreted."
 
     ErrorCode.V0706_TRANSPARENT_ALIAS_IMPL ->
 

@@ -114,9 +114,13 @@ internal class UnknownTypeValidator(
 
     private fun walk(annotation: ParsedTypeAnnotation, errors: MutableList<ValidationError>) {
         when (annotation) {
-            is ParsedNamedType -> checkName(annotation.name, annotation.loc, errors)
+            is ParsedNamedType -> {
+                checkName(annotation.name, annotation.loc, errors)
+                checkArity(annotation.name, 0, annotation.loc, errors)
+            }
             is ParsedTypeApp -> {
                 checkName(annotation.constructor, annotation.loc, errors)
+                checkArity(annotation.constructor, annotation.args.size, annotation.loc, errors)
                 for (arg in annotation.args) walk(arg, errors)
             }
             is ParsedQualifiedType -> {
@@ -339,20 +343,69 @@ internal class UnknownTypeValidator(
         }
     }
 
+    /**
+     * A type constructor must be applied to as many arguments as it declares.
+     *
+     * Nothing asked before, and the arguments were not discarded either: they
+     * stayed in the type and took part in unification, so `Option Int Str` was
+     * a type — distinct from `Option Int` AND from `Option Int Bool`, neither
+     * of which it unified with. A surplus argument therefore did not error, it
+     * minted a silently incompatible type, and a missing one left the parameter
+     * free to be whatever each use site needed. `Int Str` was a type too.
+     *
+     * Rust answers all of these: E0107 for the wrong number of generic
+     * arguments, including too FEW, and E0109 for arguments on something that
+     * takes none. One code here, because the fix is the same sentence either
+     * way — count the arguments.
+     *
+     * Asked only of names this validator could resolve. An unresolved name has
+     * already produced [ValidationError.UnknownType] and has no declared arity
+     * to compare against, so asking would add a second error about a type that
+     * does not exist. Type VARIABLES are skipped: `'a` applied to arguments is
+     * higher-kinded, which the language does not have, and the parser does not
+     * produce it.
+     */
+    private fun checkArity(
+        name: String,
+        applied: Int,
+        loc: Loc,
+        errors: MutableList<ValidationError>,
+    ) {
+        if (name.isTypeVarName()) return
+        val declared = BuiltinTypes.arityOf(name)
+            ?: registry.lookupType(name)?.typeParams?.size
+            ?: return
+        if (declared == applied) return
+        errors.add(ValidationError.TypeArityMismatch(name, declared, applied, loc))
+    }
+
     private fun checkName(name: String, loc: Loc, errors: MutableList<ValidationError>) {
         if (name.isTypeVarName()) return
         if (BuiltinTypes.isBuiltinTypeName(name)) return
         if (registry.lookupType(name) != null) return
         if (registry.typeHashFor(name) != null) return          // import-scoped / transitive
         if (WellKnownHashConstants.resolveTypeHash(name) != null) return  // stdlib well-known
-        // An ABILITY or EFFECT name is a declared thing in another namespace.
-        // Whether one may stand in a type position is its own question and not
-        // one this validator decides: widening the walk to lambda signatures
-        // brought `{ x: ToUrl }` into view, where naming the ability is how a
-        // test proves the import resolved. Reporting it as an UNKNOWN type would
-        // be wrong twice over — it is known, and it is not a type.
-        if (registry.abilityDeclarations.containsKey(name)) return
-        if (registry.effectDeclarations.containsKey(name)) return
+        // An ABILITY or EFFECT name is a declared thing in ANOTHER NAMESPACE, so
+        // neither may stand in a type position — and saying so needs its own
+        // error, because UnknownType would be wrong twice over: the name is
+        // known, and it is not a type.
+        //
+        // This question was parked here once, when widening the walk to lambda
+        // signatures brought `{ x: ToUrl }` into view and the only thing relying
+        // on it was a test proving an import resolved. Answered now, Rust's way:
+        // a bare trait name in a type position is E0782 there, legal only as
+        // `dyn Foo`, and we have no trait objects for it to mean.
+        //
+        // An ability belongs in a `with`/`having` constraint and an effect in an
+        // effect row; both are walked elsewhere in this file and unaffected.
+        if (registry.abilityDeclarations.containsKey(name)) {
+            errors.add(ValidationError.NotATypeName(name, "ability", loc))
+            return
+        }
+        if (registry.effectDeclarations.containsKey(name)) {
+            errors.add(ValidationError.NotATypeName(name, "effect", loc))
+            return
+        }
         errors.add(ValidationError.UnknownType(
             typeName = name,
             availableTypes = registry.typeNames.sorted(),
