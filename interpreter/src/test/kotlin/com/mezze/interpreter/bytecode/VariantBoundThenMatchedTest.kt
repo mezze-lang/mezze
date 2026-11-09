@@ -191,6 +191,137 @@ class VariantBoundThenMatchedTest {
         ))
     }
 
+    // ───────────── a CONDITIONAL scrutinee ─────────────
+
+    /**
+     * `match (if c then A else B) is …` pushes the match into the branches and
+     * folds each, so the match disappears instead of being duplicated. Only
+     * when BOTH branches construct a variant — that is what makes it free,
+     * since each distributed match then collapses to the one case its tag
+     * selects.
+     *
+     * `bench/cases/recfields` at n=2e7: 2 975 ps/iter with 25 young collections
+     * before, 1 068 and 1 after, against a 785 ps ceiling carrying no variant
+     * at all. A function RETURNING the variant measured the SAME 2 985 before
+     * and 1 116 after — so the call was never the obstacle, the `if` between
+     * the construction and the match was.
+     *
+     * BOTH ARMS ARE EXERCISED, because folding to the wrong branch's case is
+     * the way this breaks and either answer alone would hide it.
+     */
+    @Test
+    fun `a conditional scrutinee folds in both directions`() {
+        val prog = """
+            $shape
+            let pick = { c } -> match (if c then Circle { r = 7 } else Tri { b = 2, h = 3 }) is
+              Circle { r } -> r
+              Tri { b, h } -> b * 10 + h
+              Dot -> 0 - 1
+            pick { c = %s }
+        """.trimIndent()
+        assertEquals(7L, run(prog.format("True")))
+        assertEquals(23L, run(prog.format("False")))
+    }
+
+    /** Three constructors reached through NESTED ifs, each by recursion. */
+    @Test
+    fun `nested conditional scrutinees fold`() {
+        val prog = """
+            $shape
+            let pick = { i } -> match (if i == 0 then Dot
+                                       else if i == 1 then Circle { r = 5 }
+                                       else Tri { b = 1, h = 2 }) is
+              Dot -> 100
+              Circle { r } -> r
+              Tri { b, h } -> b + h
+            pick { i = %d }
+        """.trimIndent()
+        assertEquals(100L, run(prog.format(0)))
+        assertEquals(5L, run(prog.format(1)))
+        assertEquals(3L, run(prog.format(2)))
+    }
+
+    /**
+     * BOTH BRANCHES THE SAME TAG. They select the same case, so its body is
+     * duplicated — the one place this rewrite grows the program, bounded by the
+     * branch count. The two payloads must still reach their own branch.
+     */
+    @Test
+    fun `both branches carrying one tag keep their own payloads`() {
+        val prog = """
+            $shape
+            let pick = { c } -> match (if c then Circle { r = 11 } else Circle { r = 22 }) is
+              Circle { r } -> r
+              Tri { b = _, h = _ } -> 0 - 1
+              Dot -> 0 - 2
+            pick { c = %s }
+        """.trimIndent()
+        assertEquals(11L, run(prog.format("True")))
+        assertEquals(22L, run(prog.format("False")))
+    }
+
+    /**
+     * ONE BRANCH IS NOT A CONSTRUCTION, so the rewrite must decline outright
+     * rather than distribute and leave a duplicated match behind. The answer
+     * has to survive the refusal.
+     */
+    @Test
+    fun `a branch that is not a construction declines and stays correct`() {
+        val prog = """
+            $shape
+            let other = { x } -> Tri { b = x, h = x }
+            let pick = { c } -> match (if c then Circle { r = 9 } else other { x = 4 }) is
+              Circle { r } -> r
+              Tri { b, h } -> b + h
+              Dot -> 0 - 1
+            pick { c = %s }
+        """.trimIndent()
+        assertEquals(9L, run(prog.format("True")))
+        assertEquals(8L, run(prog.format("False")))
+    }
+
+    /** A function returning the variant, matched at the call site, in a loop. */
+    @Test
+    fun `a function returning a variant folds at the call site`() {
+        assertEquals(30L, run(
+            """
+            $shape
+            let mk = { i } -> if i % 2 == 0 then Circle { r = i } else Dot
+            let go = { i, acc } -> if i <= 0 then acc else do
+              let v = match mk { i = i } is
+                Circle { r } -> r
+                Tri { b = _, h = _ } -> 0
+                Dot -> 0
+              go { i = i - 1, acc = acc + v }
+            go { i = 10, acc = 0 }
+            """
+        ))
+    }
+
+    /**
+     * The condition must be evaluated ONCE and its own branch taken. `i % 3`
+     * gives a different constructor per residue, so a mis-taken branch shows
+     * up as a different total: over 1..9, residue 0 contributes i, residue 1
+     * contributes 100, residue 2 contributes 0 — 3+6+9 + 100*3 = 318.
+     */
+    @Test
+    fun `the condition picks the branch for every residue`() {
+        assertEquals(318L, run(
+            """
+            $shape
+            let go = { i, acc } -> if i <= 0 then acc else do
+              let v = match (if i % 3 == 0 then Circle { r = i }
+                             else if i % 3 == 1 then Dot
+                             else Tri { b = 0, h = 0 }) is
+                Circle { r } -> r
+                Dot -> 100
+                Tri { b, h } -> b + h
+              go { i = i - 1, acc = acc + v }
+            go { i = 9, acc = 0 }
+            """
+        ))
+    }
+
     /**
      * The payload field expressions must run exactly once and in order even
      * when the construction moves. `i * 2` and `i * 2 + 1` are distinguishable

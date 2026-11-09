@@ -74,6 +74,26 @@ object VariantMatchFolder {
     }
 
     private fun foldMatch(match: MatchIR): NodeIR? {
+        // A CONDITIONAL SCRUTINEE: push the match into the branches.
+        //
+        //     match (if c then Some { val = i } else None) is …
+        //  -> if c then (match Some { val = i } is …) else (match None is …)
+        //
+        // and each branch then folds by the rule below. ONLY when EVERY branch
+        // is itself a construction, which is what makes this free: each
+        // distributed match collapses to the ONE case body its tag selects, so
+        // the result is `if c then <that body> else <the other>` and the match
+        // disappears rather than being duplicated. Without that condition this
+        // would copy every case into every branch.
+        //
+        // WHY IT MATTERS AS MUCH AS THE DIRECT SHAPE. `bench/cases/recfields`
+        // at n=2e7: the conditional scrutinee measures 2 975 ps/iter with 25
+        // young collections against 788 and 1 for the same answer carrying no
+        // variant. A function RETURNING the variant measures 2 985 — the SAME —
+        // so the call was never the obstacle; the `if` between the construction
+        // and the match was.
+        distributeIntoBranches(match)?.let { return it }
+
         val made = match.scrutinee as? MakeVariantIR ?: return null
         val payload = made.payload
         if (payload != null && payload !is MakeRecordIR) return null
@@ -105,6 +125,26 @@ object VariantMatchFolder {
             )
         }
         return if (stmts.isEmpty()) case.body else BlockIR(stmts, case.body, match.src)
+    }
+
+    /**
+     * When the scrutinee is an `if` whose BOTH branches construct a variant,
+     * return the `if` with the match pushed into each branch and each branch
+     * folded. Null when the shape does not apply or either fold declines — in
+     * which case nothing is rewritten, so a declined fold cannot leave a
+     * duplicated match behind.
+     *
+     * Nested `if`s are handled by recursion: the inner one is itself a
+     * conditional scrutinee once the match reaches it.
+     */
+    private fun distributeIntoBranches(match: MatchIR): NodeIR? {
+        val iff = match.scrutinee as? IfIR ?: return null
+        val thenM = MatchIR(iff.thenBr, match.cases, match.src)
+        val elseM = MatchIR(iff.elseBr, match.cases, match.src)
+        // Both sides must fold, or this is not free and is not done at all.
+        val foldedThen = foldMatch(thenM) ?: return null
+        val foldedElse = foldMatch(elseM) ?: return null
+        return IfIR(iff.cond, foldedThen, foldedElse, iff.src)
     }
 
     /**
