@@ -141,6 +141,15 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
 
     /**
      * Unboxed contains for long sets.
+     *
+     * <p>DEAD, AND THE TRIE IS DELIBERATELY ABSENT FROM IT. Nothing calls this
+     * method: a long-keyed set reaches its unboxed probe through
+     * {@code LongTrieSetStorage.containsLong} from {@code storage.contains},
+     * never through here, so the missing branch cost nothing. It was found
+     * while testing whether an interpreter fast path could use this method, and
+     * that fast path measured NULL — see {@code InlineMapContainsKey} — so
+     * closing the hole would have meant fixing code with no callers. Named
+     * here as what it is instead.
      */
     public boolean containsLong(long elem) {
         if (storage instanceof LongSetStorage longStorage) {

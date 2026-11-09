@@ -439,57 +439,6 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
-     * {@code map::size} and {@code set::size} without the generic native path.
-     *
-     * <p>WHY. `str::size` costs 416 ps and `map::size` 4 519 — eleven times as
-     * much for the same shape of work, reading a stored count out of a
-     * container. Both are registered as identical scalar `NativeOp`s (one
-     * OBJECT param, LONG return, pure) and NEITHER crosses a
-     * `@TruffleBoundary`, so the ABI is not the difference. What `str::size`
-     * has and `map::size` lacks is a dedicated PE-transparent operation that
-     * `BytecodeCompiler` emits by name — {@link InlineStringSize}, directly
-     * above. This is its peer.
-     *
-     * <p>WHAT IT IS NOT, established by measurement rather than argument. The
-     * first hypothesis was that `MezzeMap.size()` delegating through the
-     * ten-implementation `MapStorage` interface could not devirtualise.
-     * Caching the size in a final field on `MezzeMap` was built and measured
-     * INTERLEAVED against the unmodified build — two standalone jars,
-     * alternated, because the machine was under load from another worktree:
-     * 3 992 ps against 4 024, with the in-process controls matching at 213 and
-     * 210. 0.8%, so the interface call is not the cost; that change was
-     * reverted. See PERF-LOG.
-     */
-    /**
-     * {@code map::contains_key} and {@code set::contains} without the generic
-     * native path — the two-operand peer of {@link InlineMapSize}.
-     *
-     * <p>ORDER MATTERS HERE, and getting it wrong once is why this comment
-     * exists. The first attempt on these rows was to drop the
-     * `@TruffleBoundary` from `MapNatives.containsKey`, on the evidence that
-     * `size`/`isEmpty` carry none and are far cheaper. Interleaved, that
-     * measured 7 605 ps against the baseline's 7 444 — no gain. The boundary
-     * was not the cost because the GENERIC DISPATCH in front of it was, and
-     * the same thing had just happened with `size`: the cached-count change
-     * read as a null result until `InlineMapSize` removed the dispatch, after
-     * which it was worth 3.9x. So the dispatch comes out first, and the
-     * boundary is re-tested on top of this rather than before it.
-     *
-     * <p>The natives are still called, so their `@TruffleBoundary` and every
-     * check inside them is untouched — this removes the dispatch, nothing else.
-     */
-    /**
-     * {@code map::get} without the generic native path — the same removal as
-     * {@link InlineMapContainsKey}, on the largest row of the map surface
-     * (12.4 ns against `contains_key`'s 7.8).
-     *
-     * <p>`get` does strictly more than `contains_key` and the extra is not
-     * dispatch: on a MISS it probes twice (`map.get` then `map.containsKey`,
-     * to tell a stored null from an absent key) and on a HIT it allocates a
-     * `MezzeVariant` for the `Some`. The allocation cannot go away — the
-     * signature returns `Option v` — so this takes out the one layer that can.
-     */
-    /**
      * {@code map::insert} and {@code set::insert} without the generic native
      * path — the three- and two-operand members of the family that starts at
      * {@link InlineMapSize}.
@@ -526,6 +475,17 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    /**
+     * {@code map::get} without the generic native path — the same removal as
+     * {@link InlineMapContainsKey}, on the largest row of the map surface
+     * (12.4 ns against `contains_key`'s 7.8).
+     *
+     * <p>`get` does strictly more than `contains_key` and the extra is not
+     * dispatch: on a MISS it probes twice (`map.get` then `map.containsKey`,
+     * to tell a stored null from an absent key) and on a HIT it allocates a
+     * `MezzeVariant` for the `Some`. The allocation cannot go away — the
+     * signature returns `Option v` — so this takes out the one layer that can.
+     */
     @Operation
     public static final class InlineMapGet {
         @Specialization
@@ -534,6 +494,48 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    /**
+     * {@code map::contains_key} and {@code set::contains} without the generic
+     * native path — the two-operand peer of {@link InlineMapSize}.
+     *
+     * <p>ORDER MATTERS HERE, and getting it wrong once is why this comment
+     * exists. The first attempt on these rows was to drop the
+     * `@TruffleBoundary` from `MapNatives.containsKey`, on the evidence that
+     * `size`/`isEmpty` carry none and are far cheaper. Interleaved, that
+     * measured 7 605 ps against the baseline's 7 444 — no gain. The boundary
+     * was not the cost because the GENERIC DISPATCH in front of it was, and
+     * the same thing had just happened with `size`: the cached-count change
+     * read as a null result until `InlineMapSize` removed the dispatch, after
+     * which it was worth 3.9x. So the dispatch comes out first, and the
+     * boundary is re-tested on top of this rather than before it.
+     *
+     * <p>THE BOUNDARY WAS RE-TESTED ON TOP, as the note above said to, AND IT
+     * IS STILL NULL. Running the long-keyed trie walk directly inside compiled
+     * code — guarded on the storage, so the walk is allocation-free,
+     * virtual-call-free arithmetic reached on a concrete receiver — measured:
+     *
+     * <pre>
+     *   allocsurface, 1-entry map       base    with the fast path
+     *     map has                   12 077 ps       12 334     0.98x
+     *     set has                   13 116          12 408     1.06x
+     *     map get                   16 895          17 148     0.99x
+     *   mapsurface, 1 000-key trie
+     *     map::contains_key         56 356          55 869     1.01x
+     *     set::contains             54 318          54 719     0.99x
+     * </pre>
+     *
+     * two builds from identical source but for the fast path, interleaved, min
+     * of three, checksums equal, young-collection counts equal to within one.
+     * The change was reverted. AND READ IT AS "BELOW THIS INSTRUMENT'S NOISE"
+     * RATHER THAN AS A ZERO: in the same run `str size`, a row nothing touched,
+     * read 532 ps in one arm and 2 994 in the other.
+     *
+     * <p>WHY IT CANNOT HAVE BEEN MUCH ANYWAY. The probe barely depends on the
+     * structure — `map::contains_key` is 51 ns at ONE key and 67 ns at 16 000,
+     * both converged across two n — so the HAMT walk is a few ns of a row whose
+     * other ~50 ns is the loop around it. A boundary wrapped around a few ns
+     * cannot be worth more than a few ns.
+     */
     @Operation
     public static final class InlineMapContainsKey {
         @Specialization
@@ -547,6 +549,28 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    /**
+     * {@code map::size} and {@code set::size} without the generic native path.
+     *
+     * <p>WHY. `str::size` costs 416 ps and `map::size` 4 519 — eleven times as
+     * much for the same shape of work, reading a stored count out of a
+     * container. Both are registered as identical scalar `NativeOp`s (one
+     * OBJECT param, LONG return, pure) and NEITHER crosses a
+     * `@TruffleBoundary`, so the ABI is not the difference. What `str::size`
+     * has and `map::size` lacks is a dedicated PE-transparent operation that
+     * `BytecodeCompiler` emits by name — {@link InlineStringSize}, directly
+     * above. This is its peer.
+     *
+     * <p>WHAT IT IS NOT, established by measurement rather than argument. The
+     * first hypothesis was that `MezzeMap.size()` delegating through the
+     * ten-implementation `MapStorage` interface could not devirtualise.
+     * Caching the size in a final field on `MezzeMap` was built and measured
+     * INTERLEAVED against the unmodified build — two standalone jars,
+     * alternated, because the machine was under load from another worktree:
+     * 3 992 ps against 4 024, with the in-process controls matching at 213 and
+     * 210. 0.8%, so the interface call is not the cost; that change was
+     * reverted. See PERF-LOG.
+     */
     @Operation
     public static final class InlineMapSize {
         @Specialization
@@ -6566,6 +6590,9 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * {@link IsNotNull}, so the lookup runs ONCE. Doing it twice would be worse
      * than the allocation; the MUT version of this pattern could split into a
      * bounds check and a read because both were free, and a hash lookup is not.
+     *
+     * <p>THE BOUNDARY STAYS, and {@link InlineMapContainsKey} carries the
+     * measurement that decided it.
      */
     @Operation
     public static final class InlineMapGetRaw {
@@ -6608,6 +6635,26 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * boundary, so the guard is an `instanceof` either way, and doing it here
      * makes the unsupported-specialization failure mode IMPOSSIBLE rather than
      * merely unlikely.
+     *
+     * <p>AND THE BOUNDARY STAYS, which was not the obvious answer. A
+     * recognised container's read is a bounds test and ONE array load — the
+     * `long[]`, `Object[]` and `byte[]` are right there — so running it inside
+     * compiled code and leaving only the unrecognised representation behind a
+     * boundary looks free. MEASURED, two builds from identical source but for
+     * that split, interleaved, min of three, checksums equal:
+     *
+     * <pre>
+     *   allocsurface          base    boundary removed
+     *     seq get         16 992 ps       17 152     0.99x
+     *     list get        16 435          16 830     0.98x
+     *     bytes get       17 480          17 681     0.99x
+     * </pre>
+     *
+     * and it was reverted. The reason it could not have been much: these rows
+     * are ~17 ns around a read of a few hundred PICOseconds, and that ~17 ns is
+     * the loop, not the read — the same instrument puts a bare counted loop at
+     * 0.22 ns/iter and the same loop with one more operation in its body at
+     * 41 ns. Until that is fixed, nothing measurable here is about the read.
      *
      * <p>`list::get` stays O(n) but walks the cons cells ONCE; the native walks
      * TWICE, because `ListNatives.get` bounds-checks with `size()` — itself a
