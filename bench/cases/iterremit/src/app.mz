@@ -1,0 +1,123 @@
+## DOES `iter` EARN ITS KEEP ON THE WORK IT EXISTS FOR?
+##
+## Everything measured on this branch so far was a RANGE-sourced pipeline over
+## Ints, which is the one shape `FusedLongPipeline` accepts -- and also the
+## shape `iter.mz`'s own doc says to NOT use `iter` for, because Seq and List
+## have their own fused HOFs. Its stated remit is cross-collection pipelines,
+## UNFUSED collections, and user types via `unfold`. None of that was measured.
+##
+## `FusedLongPipeline` reads every element as `((Number) raw).longValue()`, so
+## it cannot accept a record or a string at all. The question is what the
+## alternative costs.
+##
+## Kernels, every one folding the same n elements:
+##   1  range -> map -> fold            Int, FLP. The reference.
+##   2  unfold -> map -> fold           the same arithmetic from a USER source.
+##                                      iter.mz claims these "fuse at JIT time
+##                                      through Truffle PE" -- unverified.
+##   3  seq of records -> to_iter -> map(.n) -> fold    a RECORD element.
+##   4  seq of records -> seq::fold directly            the control for 3: the
+##                                      same work without `iter` in it.
+##
+## 3 against 4 is the number that matters: it is what reaching for `iter`
+## costs on an element FLP cannot take. 1 against 2 is what a user-defined
+## source costs.
+use std::collections::iter
+use std::collections::seq
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::int
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }, result = r }
+
+let report = { name, n, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/elem  sum=$(int::to_str { n = r.result })" }
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+## ── Int, range source: the reference ────────────────────────────────────────
+let k_range = { n } -> iter::range { start = 0, end = n }
+  .map { f = { x } -> x + 1 }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+## ── Int, UNFOLD source: the same arithmetic from a user-defined producer ────
+let k_unfold = { n } -> iter::unfold {
+    state = 0,
+    step = { s } -> if s >= n then Done else Yield { val = s, next = s + 1 },
+  }
+  .map { f = { x } -> x + 1 }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+## ── A RECORD element, which FLP cannot read at all ──────────────────────────
+let k_rec_iter = { rs, n } -> iter::from_seq { xs = rs }
+  .map { f = { x } -> x.n }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+## Control: the same work with no `iter` in it.
+let k_rec_seq = { rs, n } -> seq::fold {
+  xs = rs,
+  init = 0,
+  f = { acc, x } -> acc + x.n,
+}
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  let n = arg_at { args = args, i = 1, def = 2000000 }
+  if k == 1 then do
+    k_range { n = n }
+    k_range { n = n }
+    k_range { n = n }
+    k_range { n = n }
+    k_range { n = n }
+    report { name = "1 range  Int (ref) ", n = n, r = time_it { f = {} -> k_range { n = n } } }
+    report { name = "1 range  Int (ref) ", n = n, r = time_it { f = {} -> k_range { n = n } } }
+    report { name = "1 range  Int (ref) ", n = n, r = time_it { f = {} -> k_range { n = n } } }
+    report { name = "1 range  Int (ref) ", n = n, r = time_it { f = {} -> k_range { n = n } } }
+    report { name = "1 range  Int (ref) ", n = n, r = time_it { f = {} -> k_range { n = n } } }
+  else if k == 2 then do
+    k_unfold { n = n }
+    k_unfold { n = n }
+    k_unfold { n = n }
+    k_unfold { n = n }
+    k_unfold { n = n }
+    report { name = "2 unfold Int       ", n = n, r = time_it { f = {} -> k_unfold { n = n } } }
+    report { name = "2 unfold Int       ", n = n, r = time_it { f = {} -> k_unfold { n = n } } }
+    report { name = "2 unfold Int       ", n = n, r = time_it { f = {} -> k_unfold { n = n } } }
+    report { name = "2 unfold Int       ", n = n, r = time_it { f = {} -> k_unfold { n = n } } }
+    report { name = "2 unfold Int       ", n = n, r = time_it { f = {} -> k_unfold { n = n } } }
+  else if k == 3 then do
+    ## The records are built ONCE, outside every timed call.
+    let rs = seq::map { xs = seq::range { start = 0, end = n }, f = { x } -> { n = x } }
+    k_rec_iter { rs = rs, n = n }
+    k_rec_iter { rs = rs, n = n }
+    k_rec_iter { rs = rs, n = n }
+    k_rec_iter { rs = rs, n = n }
+    k_rec_iter { rs = rs, n = n }
+    report { name = "3 iter   record    ", n = n, r = time_it { f = {} -> k_rec_iter { rs = rs, n = n } } }
+    report { name = "3 iter   record    ", n = n, r = time_it { f = {} -> k_rec_iter { rs = rs, n = n } } }
+    report { name = "3 iter   record    ", n = n, r = time_it { f = {} -> k_rec_iter { rs = rs, n = n } } }
+    report { name = "3 iter   record    ", n = n, r = time_it { f = {} -> k_rec_iter { rs = rs, n = n } } }
+    report { name = "3 iter   record    ", n = n, r = time_it { f = {} -> k_rec_iter { rs = rs, n = n } } }
+  else do
+    let rs = seq::map { xs = seq::range { start = 0, end = n }, f = { x } -> { n = x } }
+    k_rec_seq { rs = rs, n = n }
+    k_rec_seq { rs = rs, n = n }
+    k_rec_seq { rs = rs, n = n }
+    k_rec_seq { rs = rs, n = n }
+    k_rec_seq { rs = rs, n = n }
+    report { name = "4 seq    record ctl", n = n, r = time_it { f = {} -> k_rec_seq { rs = rs, n = n } } }
+    report { name = "4 seq    record ctl", n = n, r = time_it { f = {} -> k_rec_seq { rs = rs, n = n } } }
+    report { name = "4 seq    record ctl", n = n, r = time_it { f = {} -> k_rec_seq { rs = rs, n = n } } }
+    report { name = "4 seq    record ctl", n = n, r = time_it { f = {} -> k_rec_seq { rs = rs, n = n } } }
+    report { name = "4 seq    record ctl", n = n, r = time_it { f = {} -> k_rec_seq { rs = rs, n = n } } }
