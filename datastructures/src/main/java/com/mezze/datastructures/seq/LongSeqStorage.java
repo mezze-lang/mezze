@@ -46,6 +46,38 @@ public final class LongSeqStorage implements SeqStorage {
         this.isLazy = false;
     }
 
+    /**
+     * Take ownership of {@code data}, using only {@code [0, length)} of it.
+     *
+     * <p>FOR A CALLER THAT FILLED A PREFIX AND KNOWS NOTHING ELSE REFERENCES
+     * THE ARRAY. A materialising pipeline sink (`iter::to_seq` over a filtered
+     * chain) sizes its buffer to the SOURCE and fills only what survives, so it
+     * then had to `Arrays.copyOf` down to the real count: at n=2e7 with a
+     * predicate keeping half that is 160MB allocated, 80MB copied and 80MB
+     * thrown away, for an 80MB result. `length` is already allowed to be below
+     * `data.length` -- that is what the spare-capacity append path is for -- so
+     * the copy was only ever buying a tight array.
+     *
+     * <p>A FRESH OWNER TOKEN IS SOUND HERE and is not a courtesy: the array was
+     * allocated by the caller and handed to exactly this storage, so no other
+     * storage can address it, and the first append writes at index
+     * {@code length}, which is outside this one's {@code [0, length)} window.
+     * It also means the spare capacity the sink over-allocated becomes O(1)
+     * append room instead of waste.
+     *
+     * <p>The caller must not touch {@code data} afterwards.
+     */
+    public static LongSeqStorage ofPrefix(long[] data, int length) {
+        if (length < 0 || length > data.length) {
+            throw new IllegalArgumentException(
+                    "length " + length + " outside [0, " + data.length + "]");
+        }
+        Object[] token = new Object[1];
+        var result = new LongSeqStorage(data, length, token);
+        token[0] = result;
+        return result;
+    }
+
     private LongSeqStorage(long[] data, int length, Object[] ownerToken) {
         this.data = data;
         this.length = length;

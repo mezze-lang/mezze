@@ -4044,8 +4044,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @TruffleBoundary
         private static Object flpResultToSeq(long[] data, int count) {
             if (count == 0) return MezzeSeq.empty();
-            long[] trimmed = count == data.length ? data : java.util.Arrays.copyOf(data, count);
-            return MezzeSeq.fromLongs(trimmed);
+            // No trim. The buffer was sized to the SOURCE and filled to `count`,
+            // and nothing else references it, so the storage takes it as a
+            // prefix -- see LongSeqStorage.ofPrefix for why that is sound and
+            // what the copy used to cost.
+            return MezzeSeq.fromStorage(
+                    com.mezze.datastructures.seq.LongSeqStorage.ofPrefix(data, count));
         }
 
         /** Materialize a long[] into a MezzeList. */
