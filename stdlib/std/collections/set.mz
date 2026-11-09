@@ -77,6 +77,22 @@ pub let to_seq: { s: Set 'a } -> ['a] = { s } -> __native_set_to_seq { s = s }
 ## Creates a set from a Seq.
 pub let from_seq: { xs: ['a] } with Eq 'a, Hash 'a -> Set 'a = { xs } -> __native_set_from_seq { xs = xs }
 
+## Collects an `Iter` into a Set.
+##
+## `Iter` has seven ways IN -- `range`, `from_seq`, `from_list`, `unfold`,
+## `once`, `empty`, and `.to_iter{}` on any of the seven types implementing
+## `Iterable` -- and had only `to_seq`/`to_list` out, so reaching any other
+## collection meant spelling the intermediate yourself.
+##
+## This is ERGONOMICS, not speed: it is what you would have written. `to_seq`
+## hands its buffer to the sequence without copying it, so the intermediate is
+## a wrapper around the buffer the sink had to fill anyway.
+##
+## Lives here rather than in `iter` because `set` imports `iter` for its
+## `Iterable` impl, so the dependency only runs this way.
+pub let from_iter: { it: Iter 'a } with Eq 'a, Hash 'a -> Set 'a = { it } ->
+  from_seq { xs = iter::to_seq { it = it } }
+
 ## ── Operations that carry the element's own `Eq`/`Hash` ──────────────────
 ##
 ## A hash container buckets by the element's runtime representation, which is

@@ -377,6 +377,22 @@ impl Sized for Map 'k 'v where {
   is_empty = { it } -> is_empty { m = it },
 }
 
+## Collects an `Iter` into a Map.
+##
+## `Iter` has seven ways IN -- `range`, `from_seq`, `from_list`, `unfold`,
+## `once`, `empty`, and `.to_iter{}` on any of the seven types implementing
+## `Iterable` -- and had only `to_seq`/`to_list` out, so reaching any other
+## collection meant spelling the intermediate yourself.
+##
+## This is ERGONOMICS, not speed: it is what you would have written. `to_seq`
+## hands its buffer to the sequence without copying it, so the intermediate is
+## a wrapper around the buffer the sink had to fill anyway.
+##
+## Lives here rather than in `iter` because `map` imports `iter` for its
+## `Iterable` impl, so the dependency only runs this way.
+pub let from_iter: { it: Iter { k: 'k, v: 'v } } with Eq 'k -> Map 'k 'v = { it } ->
+  from_list { xs = iter::to_list { it = it } }
+
 impl Iterable for Map 'k 'v having 'elem = { k: 'k, v: 'v } where {
   to_iter = { it } -> iter::from_seq { xs = to_seq { m = it } }
 }

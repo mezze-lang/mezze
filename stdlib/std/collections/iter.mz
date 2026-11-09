@@ -49,7 +49,7 @@ pub let from_list: { xs: List 'a } -> Iter 'a = { xs } ->
 ##     iter::unfold {
 ##       state = 0,
 ##       step = { s } ->
-##         if s >= 10 then Done {}
+##         if s >= 10 then Done
 ##         else Yield { val = s * s, next = s + 1 }
 ##     }
 pub let unfold
