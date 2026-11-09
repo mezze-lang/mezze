@@ -1394,11 +1394,15 @@ public final class BytecodeCompiler {
         // tiers, the native collapses — all refuse SILENTLY, so without a way to
         // see what they were handed, a refusal can only be inferred from a
         // timing. Comma-separated names are accepted; `*` dumps everything.
+        // AND `*` HAS TO MEAN EVERY FUNCTION, not every NAMED one: a top-level
+        // `let go = { i, acc } -> …` arrives here with a null name, which is
+        // most user code, so the guard below used to exclude exactly the
+        // functions a probe is reached for.
         String dumpWanted = System.getenv("MEZZE_DUMP_FN");
-        if (dumpWanted != null && ir.getName() != null) {
+        if (dumpWanted != null) {
             for (String want : dumpWanted.split(",")) {
                 if (want.trim().equals("*") || want.trim().equals(ir.getName())) {
-                    System.err.println("[dump-fn] " + ir.getName()
+                    System.err.println("[dump-fn] " + probeLabel(ir)
                             + " hash=" + ir.getHash().getHex().substring(0, 8)
                             + " params=" + ir.getParamNames()
                             + "\n  body=" + ir.getBody());
@@ -1575,6 +1579,21 @@ public final class BytecodeCompiler {
                             + " params=" + paramCount
                             + " tier=" + (emittedDirect ? "FUSED" : "not-fused"));
                 }
+                // The tier a shape lands on is worth 75x and was only
+                // reportable for one of the three. MEASURED on
+                // `bench/cases/allocsurface` at n=2e7, min of 3, young
+                // collections beside each:
+                //
+                //   counted loop                              219 ps /  2
+                //   acc + str::size { s }                      564    / 13
+                //   acc + str::size { s } + i              41 582    / 68
+                //   acc + str::size { s } + str::size { s } 42 230    / 64
+                //
+                // One extra `+` in the accumulator update, and the loop starts
+                // allocating per iteration. Which tier that is cannot be read
+                // off the source, so it goes on the seam the fused chains
+                // already use.
+                if (emittedDirect) recordFusedEmit("fused-tail:" + ir.getName());
                 // ── Try direct-while optimization ──
                 // When body = IfIR(cond, base, selfTailCall), emit a
                 // tight While loop using the source condition directly
@@ -1714,6 +1733,7 @@ public final class BytecodeCompiler {
                                     b, argCount, localMap);
                             b.endBlock();
                         } else {
+                            recordFusedEmit("direct-while:" + ir.getName());
                             stlEmitParamUpdate(tailCall.getArgs(), stlParams,
                                     b, argCount, localMap);
                         }
@@ -1727,6 +1747,11 @@ public final class BytecodeCompiler {
 
                 if (!emittedDirect) {
                     // ── Fallback: flag-based self-tail-loop ──
+                    // The slowest of the three, by a long way: ~16 extra BDSL
+                    // ops per iteration, and the body is emitted whole inside
+                    // the loop rather than as a param update, so anything in it
+                    // that did not fold to arithmetic allocates per iteration.
+                    recordFusedEmit("flag-fallback:" + ir.getName());
                     BytecodeLocal stlFlag = b.createLocal("_stl_cont", null);
                     BytecodeLocal stlResult = b.createLocal("_stl_res", null);
                     this.selfTailContinueFlag = stlFlag;
@@ -1794,8 +1819,8 @@ public final class BytecodeCompiler {
         // the listing is the only way to see why.
         {
             String want = System.getenv("MEZZE_DUMP_BC");
-            if (want != null && ir.getName() != null && ir.getName().contains(want)) {
-                System.err.println("=== BC " + ir.getName()
+            if (want != null && probeMatches(want, ir.getName())) {
+                System.err.println("=== BC " + probeLabel(ir)
                         + " params=" + ir.getParamNames() + " ===");
                 System.err.println(
                     ((com.oracle.truffle.api.bytecode.BytecodeRootNode) inner)
@@ -9688,6 +9713,27 @@ public final class BytecodeCompiler {
      * dispatch — declines a function. Refusal is otherwise silent, which is how
      * an 11 ns/iter loop allocating ~100 bytes/iter went unnoticed.
      */
+    /**
+     * Does a dump probe's filter select this function?
+     *
+     * <p>`*` IS NOT A CONVENIENCE. A top-level `let go = { i, acc } -> …` reaches
+     * here with a NULL name — which is most user code — so a probe that matches
+     * on the name alone cannot print the function anyone is actually looking at.
+     * `MEZZE_DUMP_BC=go_z` printing nothing for a `go_z` that was right there is
+     * what this is for.
+     */
+    private static boolean probeMatches(String want, String name) {
+        if ("*".equals(want)) return true;
+        return name != null && name.contains(want);
+    }
+
+    /** A name for a probe line, falling back to the hash when there is none. */
+    private static String probeLabel(FunctionIR ir) {
+        String n = ir.getName();
+        if (n != null && !n.isEmpty()) return n;
+        return "<unnamed " + ir.getHash() + ">";
+    }
+
     private static void fltlRefuse(String where) {
         if (System.getenv("MEZZE_TRACE_SELFTAIL") != null) {
             System.err.println("[selftail]   tier-1 declined at " + where);
