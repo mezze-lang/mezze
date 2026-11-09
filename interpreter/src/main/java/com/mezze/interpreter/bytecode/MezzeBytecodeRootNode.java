@@ -6705,6 +6705,27 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      */
     @Operation
     public static final class InlineSeqGetRaw {
+        /**
+         * THE BOUNDARY IS LOAD-BEARING HERE, in the direction nobody expects,
+         * and the only reason this is known is that the three reads were
+         * measured SEPARATELY. Running the recognised read inside compiled
+         * code — a bounds test and one array load — helps Bytes and HURTS
+         * these two:
+         *
+         * <pre>
+         *   row          boundary   inline    (two builds, identical source
+         *     bytes get   3 184 ps   2 092     but for the split; interleaved,
+         *     seq get     3 716      4 781     min of 3; both controls flat at
+         *     list get    3 024      4 250     1.00x and 0.98x; both arms
+         * </pre>                               verified by unzip)
+         *
+         * So Bytes keeps the split (see {@link InlineBytesGetRaw}) and these
+         * two keep the boundary. The difference is what is behind it: a
+         * `MezzeBytes` read is `data[i]` on a final field, while
+         * `MezzeSeq.get` is a polymorphic `SeqStorage` call that boxes, and a
+         * list read is a loop over sealed-interface calls — inlining either
+         * grows the caller's graph for a read that does not get cheaper.
+         */
         @Specialization
         @TruffleBoundary
         @SuppressWarnings("rawtypes")
@@ -6724,6 +6745,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     /** See {@link InlineSeqGetRaw}. */
     @Operation
     public static final class InlineListGetRaw {
+        /** The boundary stays, measured — 0.71x without it. See
+         *  {@link InlineSeqGetRaw} for the table. */
         @Specialization
         @TruffleBoundary
         @SuppressWarnings("rawtypes")
@@ -6747,17 +6770,30 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     /** See {@link InlineSeqGetRaw}. */
     @Operation
     public static final class InlineBytesGetRaw {
+        /**
+         * NO BOUNDARY, and alone among the three — 1.52x, where seq and list
+         * both got WORSE. A recognised `MezzeBytes` read is `data[i]` on a
+         * final `byte[]`, with nothing polymorphic and nothing to box;
+         * {@link InlineSeqGetRaw} carries the table and why the other two
+         * differ. Only the unrecognised representation, which has to allocate
+         * a wrapper to be read at all, is still behind a boundary.
+         */
         @Specialization
-        @TruffleBoundary
         public static Object doOp(Object container, long index) {
             int i = (int) index;
             if (i < 0) return null;
+            if (container instanceof com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes b) {
+                return i >= b.length() ? null : (long) (b.get(i) & 0xFF);
+            }
+            return coerceThenGet(container, i);
+        }
+
+        /** See {@code InlineSeqGetRaw.coerceThenGet}. */
+        @TruffleBoundary
+        private static Object coerceThenGet(Object container, int i) {
             com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes bytes =
-                container instanceof com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes b
-                    ? b
-                    : com.mezze.interpreter.nodes.builtin.NativeDispatch.coerceBytes(container, "b");
-            if (i >= bytes.length()) return null;
-            return (long) (bytes.get(i) & 0xFF);
+                com.mezze.interpreter.nodes.builtin.NativeDispatch.coerceBytes(container, "b");
+            return i >= bytes.length() ? null : (long) (bytes.get(i) & 0xFF);
         }
     }
 
