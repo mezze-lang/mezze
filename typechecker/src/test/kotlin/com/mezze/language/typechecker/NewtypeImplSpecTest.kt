@@ -188,6 +188,71 @@ class NewtypeImplSpecTest : VariantSpecBase() {
         )
     }
 
+    // ============== nothing a newtype carries leaks to what it wraps
+
+    /**
+     * The property the whole design rests on, and the reason a newtype is safe
+     * to be the answer to a coherence refusal.
+     *
+     * `impl Eq for [Int]` is refused because it would give EVERY `[Int]` in the
+     * program an `Eq` that this module does not own. If wrapping were a way
+     * AROUND that — if the impl on `Ids` reached `[Int]` — the refusal would be
+     * cosmetic: two packages could each wrap `[Int]`, each implement `Eq`, and a
+     * plain `[Int]` would have two. The orphan rule would leak through the very
+     * construct offered as its answer.
+     *
+     * It does not. A newtype is not an escape from the rule, it is a type of
+     * your own, and the methods are its alone.
+     */
+    @Test fun `an inherent method on a newtype does not reach the wrapped type`() {
+        rejects(
+            """
+            use std::int
+            newtype Ids = [Int]
+            impl Ids where { howmany = { it: Ids } -> 1 }
+            pub let u = { xs: [Int] } -> xs.howmany {}
+            $MAIN
+            """,
+            "T0201",
+            "A plain `[Int]` is a `Seq`, not an `Ids`. Were this accepted the " +
+                "orphan rule would be unenforceable, since wrapping is always " +
+                "available.",
+        )
+    }
+
+    /** Same for an ability impl, which is the case the orphan rule governs. */
+    @Test fun `an ability impl on a newtype does not reach the wrapped type`() {
+        rejects(
+            """
+            use std::int
+            newtype Ids = [Int]
+            ability Howmany for 'a where { howmany: { it: 'a } -> Int }
+            impl Howmany for Ids where { howmany = { it } -> 1 }
+            pub let u = { xs: [Int] } -> xs.howmany {}
+            $MAIN
+            """,
+            "V0402",
+            "`[Int] does not implement 'Howmany'` — the impl went on `Ids` and " +
+                "stayed there.",
+        )
+    }
+
+    /** And the wrapped type's value cannot stand in for the newtype either. */
+    @Test fun `the wrapped type does not pass where the newtype is asked`() {
+        rejects(
+            """
+            use std::int
+            newtype Ids = [Int]
+            pub let takes = { i: Ids } -> 1
+            pub let u = { xs: [Int] } -> takes { i = xs }
+            $MAIN
+            """,
+            "T0201",
+            "The wall stands in both directions; NewtypeDeriveSpecTest pins that " +
+                "`Ids` does not get `Seq`'s methods, and this is the other side.",
+        )
+    }
+
     // =================================================== across module lines
 
     private fun writeNewtypeModule() = writeModule(
