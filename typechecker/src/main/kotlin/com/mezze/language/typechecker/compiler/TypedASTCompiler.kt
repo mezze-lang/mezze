@@ -651,7 +651,15 @@ class TypedASTCompiler(
         // slot: the fastest self-tail-loop tier matches on the branch BEING the
         // tail call, and a `do` block around it declined the whole tier — 3x on
         // a formatting choice. Off with MEZZE_LET_PROPAGATE=0.
-        val propagatedMap = com.mezze.language.truffleir.LetCopyPropagation.propagate(scalarizedMap)
+        // FOLD AGAIN AFTER PROPAGATING, then propagate the fold's own output. The
+        // fold above runs BEFORE propagation by design, so a variant BOUND TO A
+        // NAME is not yet adjacent to its match when the folder first looks, and
+        // propagation is what makes it so. Worth 5.9x and 10.4x — the
+        // measurement is in LetCopyPropagation's note on constructions.
+        val p0 = com.mezze.language.truffleir.LetCopyPropagation.propagate(scalarizedMap)
+        val refolded = com.mezze.language.truffleir.VariantMatchFolder.fold(p0)
+        val propagatedMap = if (refolded !== p0)
+            com.mezze.language.truffleir.LetCopyPropagation.propagate(refolded) else p0
         // A parameter only ever FIELD-READ becomes one parameter per field, and
         // the record its callers built stops existing — the loop-state shape
         // `go { st = { i = …, acc = … } }`, which allocates once per iteration

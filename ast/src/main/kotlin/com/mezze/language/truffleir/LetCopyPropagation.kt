@@ -200,9 +200,29 @@ object LetCopyPropagation {
 
     /**
      * A value that can be evaluated at the read instead of at the binding with
-     * no observable difference: nothing allocated, nothing called, nothing that
-     * depends on when it runs. Deliberately a short list — see the class note
-     * on why a call that looks like arithmetic is not on it.
+     * no observable difference: nothing called, nothing that depends on when it
+     * runs. Deliberately a short list — see the class note on why a call that
+     * looks like arithmetic is not on it.
+     *
+     * A CONSTRUCTION IS ON THE LIST, which the rule "nothing allocated" would
+     * have excluded, and the reason it is safe is EXACTLY ONE READ. Moving an
+     * allocation to its single read cannot duplicate it, and an allocation has
+     * no effect to reorder: at worst the allocation happens in the same place,
+     * at best it lands somewhere that does not run. Reference identity cannot
+     * distinguish the two placements either, because one read cannot compare
+     * the value with another instance of itself.
+     *
+     * WHAT IT BUYS, and it is not the frame slot. `VariantMatchFolder` elides a
+     * variant that is constructed and matched ADJACENTLY, so a `let` between
+     * the two hides the construction from it. Measured on
+     * `bench/cases/recfields`, the same loop either side of that `let`:
+     *
+     *     let s = Circle { r = i } ; match s is …     4 075 ps/iter   41 GC
+     *     match Circle { r = i } is …                  632            1 GC
+     *
+     * 6.4x and the allocation disappears, for binding the scrutinee to a name
+     * — which is how anyone would write it, and the shape every
+     * `Option`/`Result` helper and `iter::unfold`'s `Step` takes.
      */
     private fun isRecomputable(node: NodeIR): Boolean = when (node) {
         is LongLitIR, is DoubleLitIR, is BoolLitIR, is StringLitIR,
@@ -210,6 +230,10 @@ object LetCopyPropagation {
         is ReadLocalIR, is ReadCaptureIR, is ReadArgIR -> true
         is ReadFieldIR -> isRecomputable(node.record)
         is InlineBinaryOpIR -> isRecomputable(node.left) && isRecomputable(node.right)
+        // A CONSTRUCTION, which the paragraph above says is not on the list,
+        // and it is the one exception worth making. See the note below.
+        is MakeVariantIR -> node.payload == null || isRecomputable(node.payload)
+        is MakeRecordIR -> node.fields.all { isRecomputable(it.value) }
         else -> false
     }
 
