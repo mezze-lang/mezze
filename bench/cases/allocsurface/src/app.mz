@@ -384,6 +384,35 @@ let go_n3: { i: Int, acc: Int, k: Int } -> Int = { i, acc, k } ->
   else go_n3 { i = i - 1, acc = acc + i + k, k = k }
 let k_nest_annot = { n } -> go_n3 { i = n, acc = 0, k = 1 }
 
+
+## 24/25. WHICH OPERAND IS UNGROUNDED — nesting, or a parameter seeded only by
+## an integer LITERAL?
+##
+## Kernel 21 (`acc + i + k`) is 40 783 ps and kernel 23 (the same with the types
+## written out) is 651. Two hypotheses survive: the nesting itself, or that
+## nothing in the loop GROUNDS the arithmetic to `Int` — `i` arrives from argv
+## so it is an `Int`, but `k` is seeded with the literal `1` and `acc` with `0`,
+## and a numeric literal is `Num 'a`.
+##
+## 24 is `acc + i + i`: the same nesting, the same two adds, but the only
+## operands are `acc` and `i`, and `i` traces to argv. If this is FAST the
+## nesting is innocent and an ungrounded parameter is the cause.
+##
+## 25 keeps the third parameter and the nesting but grounds it by passing `i`
+## rather than a literal — `k = i` at the seed. Same shape, same arity.
+##
+## sum for 24 = 2 * n*(n+1)/2 = n*(n+1); for 25 = n + n*(n+1)/2 ... read the
+## printed checksum rather than trusting this line.
+let go_n4 = { i, acc } ->
+  if i <= 0 then acc
+  else go_n4 { i = i - 1, acc = acc + i + i }
+let k_nest_grounded = { n } -> go_n4 { i = n, acc = 0 }
+
+let go_n5 = { i, acc, k } ->
+  if i <= 0 then acc
+  else go_n5 { i = i - 1, acc = acc + i + k, k = k }
+let k_nest_seeded = { n } -> go_n5 { i = n, acc = 0, k = n }
+
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
 
@@ -483,4 +512,12 @@ pub let main = {} -> perform Console in perform SystemArgs in do
     k_nest_annot { n = n }
     report { name = "23 nest annot  ", n = n, r = time_it { f = {} -> k_nest_annot { n = n } } }
     report { name = "23 nest annot  ", n = n, r = time_it { f = {} -> k_nest_annot { n = n } } }
+  else if k == 24 then do
+    k_nest_grounded { n = n }
+    report { name = "24 nest grounded", n = n, r = time_it { f = {} -> k_nest_grounded { n = n } } }
+    report { name = "24 nest grounded", n = n, r = time_it { f = {} -> k_nest_grounded { n = n } } }
+  else if k == 25 then do
+    k_nest_seeded { n = n }
+    report { name = "25 nest seeded ", n = n, r = time_it { f = {} -> k_nest_seeded { n = n } } }
+    report { name = "25 nest seeded ", n = n, r = time_it { f = {} -> k_nest_seeded { n = n } } }
   else println { msg = "unknown kernel" }

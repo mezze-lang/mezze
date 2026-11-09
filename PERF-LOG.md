@@ -10944,3 +10944,183 @@ bounds check, extends the same pattern.
 
 Gate: `:interpreter:test` 7 687 tests 0 failures 14 skipped; `:typechecker:test`
 4 826 tests 0 failures; `:datastructures:test` 753 tests 0 failures 2 skipped.
+
+### LEDGER UPDATE 2026-11-09 — `acc + i + i` is 177x `acc + i`, and it is under every collection row on this bench
+
+I set out to take the largest measured gap on the collections surface — the map
+and set keyed reads at 40-80x the counted-loop control — and the instrument
+answered a different question than the one I asked. The gap is not in the data
+structures. It is in the arithmetic of the loop that calls them, and it is one
+of the largest single numbers this ledger has recorded.
+
+#### The measurement
+
+`bench/cases/allocsurface`, one kernel per process, n=1e7 and n=2e7, min of 2-3
+per size, converged across both, young collections beside each. Checksums are
+printed by every kernel and are identical between every pair compared here.
+
+| kernel | body of the accumulator update | ps/iter | young |
+|---|---|---|---|
+| k1  | `acc + i`, 2 params                 |    223 |  2 |
+| k12 | `acc + str::size { s }`             |  4 178 |  3 |
+| k22 | `acc + (str::size { s } + i)`       |  3 915 |  3 |
+| k20 | `acc + str::size { s } + i`         | 41 886 | 65 |
+| k16 | `acc + str::size { s } + str::size { s }` | 42 230 | 64 |
+| k21 | `acc + i + k`                       | 41 065 | 86 |
+| k24 | `acc + i + i`, 2 params             | 41 885 |  — |
+| k25 | `acc + i + k`, `k` seeded from argv | 40 964 |  — |
+| k23 | `acc + i + k`, parameters annotated |    651 |  3 |
+
+Read the pairs:
+
+- **k12 → k20 → k16.** One more ADD costs 10x; one more CALL costs nothing. The
+  trigger is the arithmetic.
+- **k21 against k22.** The same operations with the tree nested the other way.
+  `acc + (x + y)` is 3 915 ps and `acc + x + y` is 41 065. Left-nesting on the
+  accumulator is the whole difference, and k21 needs no call at all to show it.
+- **k24.** Two parameters, two adds, and the only operands are `acc` and `i` —
+  and `i` traces to `argv`, so nothing here is ungrounded. Still 41 885 against
+  k1's 223. **177x for one extra `+` on the same two variables.**
+- **k25.** Seeding the third parameter from `argv` instead of the literal `1`
+  changes nothing, which retires the "a numeric literal is `Num 'a` and does
+  not ground the loop" hypothesis.
+- **k23 against k21.** The same expression with `{ i: Int, acc: Int, k: Int }`
+  written out: 651 ps against 41 065. **61x for an annotation**, and no
+  annotation should ever be needed.
+
+The control is flat at 223-255 ps across every run above.
+
+#### What is actually happening
+
+`MEZZE_TRACE_COMPILATION` on the two arms, same program, same process shape:
+
+| kernel | `TrampolineRootNode[add]` compilations |
+|---|---|
+| k21 (inferred)  | 36, one of them a BAILOUT |
+| k23 (annotated) | 0 |
+
+So in the inferred arm the outer `+` is dispatched to the **`Num.add` ability
+method and called as a real function per iteration**. The bailout reads
+
+    Object of type FrameWithoutBoxing should not be materialized
+    (must not pass virtual object into an invoke that cannot be inlined)
+
+— the non-inlinable ability call forces the frame to materialise — and the
+enclosing loop is OSR-recompiled ten times. That is the 41 ns and the 86 young
+collections. The annotated arm reaches `DirectAdd` and never compiles `add` at
+all.
+
+#### Where it comes from, localised
+
+`TypedASTCompiler` emits `DictMethodCallIR` for an ability operation whenever
+the enclosing function has a `__dict_<method>` parameter — i.e. whenever the
+function came out of the solver dictionary-passing over `Num`. And **nothing
+ever folds a `DictMethodCallIR` into an inline arithmetic op.** The two places
+that fold ability operations — `InlineOpMapping.foldAbilityOp` and
+`BytecodeCompiler.tryFoldInlineOp` — both match
+`CallIndirectIR(ReadField(x, "add"), MakeRecord{r = y})` and only that. They
+cannot be widened unguarded either: `DirectAddNode`'s `@Fallback` throws a type
+error, so folding a genuinely polymorphic `+` over a user `Num` type would turn
+a working program into a crash.
+
+So the fix belongs upstream of the fold: `acc + i` leaves the solver with a
+ground type and `acc + i + i` does not, in the same function, with the same
+operands. Three candidates, in order of how right they are:
+
+1. **The solver grounds the nested application.** A `Num 'a` operator whose
+   operands are ground has a ground result; propagating that would remove the
+   dictionary from the function entirely. This is the actual fix.
+2. **Monomorphise at the ground call site.** `MonoDriver` already specialises
+   dictionary-passing HOFs (see the full-mono entry above); a self-recursive
+   numeric loop called at `Int` is the same shape and is not being specialised.
+3. **Fold `DictMethodCallIR` when the receiver is statically primitive.** Local
+   and cheap, but it needs exactly the type the solver did not produce, so it is
+   not independent of (1).
+
+#### Two things this is NOT, both pinned by tests
+
+**NOT the self-tail tier.** There are three — the fused Java loop, direct-while
+and the flag fallback — and they are worth two orders of magnitude between them,
+so the tier was the first place I looked. `TailLoopTierProbeTest` asserts that
+k12's shape, k21's shape and k23's shape all land on the SAME tier
+(`direct-while`). All three tiers now report on the `FUSED_EMITS` seam, because
+all three compute the same answer and losing one is otherwise silent.
+
+**NOT a stale project cache.** `.mz/`, `.mez/`, `target/` and `.build/` were all
+deleted and the bench rebuilt from scratch; k21 read 40 783 and k23 651 on the
+clean build.
+
+#### And it explains the collection rows, which is what I was measuring
+
+`bench/cases/mapsurface` builds every row from a FOUR-parameter loop with a
+compound update, and its `map::contains_key` reads **51 ns at ONE key and 67 ns
+at 16 000 keys** — converged across two n. A single-entry map's probe is one
+`Objects.equals`. So ~50 ns of every row in that file is this cliff, the HAMT
+walk is a few ns on top, and the rows are not comparable with `allocsurface`'s.
+Any attempt to shave nanoseconds off a trie underneath a 50 ns loop is
+unmeasurable by construction.
+
+#### Two null results from that attempt, recorded so they are not re-run
+
+Both were tried, measured interleaved against a build from identical source,
+and reverted.
+
+**The long-keyed walk run inside compiled code**, guarded on the storage so the
+receiver is concrete and the walk is allocation-free arithmetic:
+
+| row | base | with the fast path | |
+|---|---|---|---|
+| map has (1-entry)        | 12 077 ps | 12 334 | 0.98x |
+| set has (1-entry)        | 13 116    | 12 408 | 1.06x |
+| map get (1-entry)        | 16 895    | 17 148 | 0.99x |
+| map::contains_key (1k trie) | 56 356 | 55 869 | 1.01x |
+| set::contains (1k trie)  | 54 318    | 54 719 | 0.99x |
+
+**The seq/list/bytes indexed reads**, where a recognised container's read is a
+bounds test and one array load:
+
+| row | base | boundary removed | |
+|---|---|---|---|
+| seq get   | 16 992 ps | 17 152 | 0.99x |
+| list get  | 16 435    | 16 830 | 0.98x |
+| bytes get | 17 480    | 17 681 | 0.99x |
+
+Read both as "below this instrument's noise" rather than as zeros: in the same
+run `str size`, a row nothing touched, read 532 ps in one arm and 2 994 in the
+other, and across four builds of this session it read 505, 532, 2 994 and 4 079.
+**`str::size` is not a floor and must not be quoted as one.** The only stable
+reference on this bench is the counted loop at 223-255 ps.
+
+The `InlineMapContainsKey` note asking for the boundary to be re-tested "on top
+of" the dispatch removal has been answered and now carries the table.
+
+#### Three corrections to this ledger and to the bench's own comments
+
+- **"Kernel 9 minus kernel 12 is the cost of the argument record"** — struck.
+  That rested on `__native_map_size` being undeclared; it is declared now (the
+  table holds 300 signatures) and the row did not move, while `seq::size`, still
+  undeclared, sits on top of it. The record ABI is not what separates
+  `str::size` from the collections.
+- **Genericity is not the cause either.** `bytes::size` takes a concrete `Bytes`
+  and is 8 072 ps; `map::size` is generic and 9 049; `seq::size` is generic and
+  9 142. A concrete receiver buys nothing here.
+- **`MezzeSet.containsLong` is DEAD.** Its missing `LongTrieSetStorage` branch
+  was found while testing the fast path above, and nothing calls the method —
+  a long-keyed set reaches its unboxed probe through `storage.contains`. Named
+  as such in place rather than "fixed" in code with no callers.
+
+#### Instruments repaired along the way
+
+`MEZZE_DUMP_BC` and `MEZZE_DUMP_FN` matched on `ir.getName()`, and a top-level
+`let go = { i, acc } -> …` reaches the compiler with NO name — which is most
+user code. `MEZZE_DUMP_BC=go_z` printed nothing for a `go_z` that was in the
+file, and `MEZZE_DUMP_FN=*`, documented as dumping everything, was gated behind
+`getName() != null`. `*` now means every function and an unnamed one prints its
+hash; that is what made the two IR trees readable.
+
+Still broken, and worth knowing before trusting a probe: **neither dump fires
+for a `mez build` app**, although `MEZZE_BDSL_STATS` reports 8 compiles in the
+same run and every compile path routes through the method that holds them. The
+IR comparisons above were therefore taken in a test JVM, which lowers both
+shapes to `InlineBinaryOpIR` — so the test JVM does NOT reproduce the dictionary
+lowering, and anyone fixing this needs the built-app probe working first.
