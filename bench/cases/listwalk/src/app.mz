@@ -1,0 +1,80 @@
+## WHAT A LIST WALK COSTS AGAINST THE SAME FOLD OVER A SEQ.
+##
+## PERF-LOG records List at 6.2x Seq and attributes all of it to the cons WALK
+## — the per-element callback measured FREE on both. That figure predates a lot
+## of change on this branch, so re-verify before acting on it.
+##
+## Both collections are built ONCE, outside every timed call, so the rows differ
+## only in how the fold traverses. The control is the same arithmetic with no
+## collection in it, timed in this same process.
+use std::collections::seq
+use std::collections::list
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::int
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }, result = r }
+
+let report = { name, n, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/elem  sum=$(int::to_str { n = r.result })" }
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let k_control = { n } -> do
+  let go = { i, acc } -> if i <= 0 then acc else go { i = i - 1, acc = acc + i }
+  go { i = n, acc = 0 }
+
+
+## 4. A list of RECORDS, which `FusedLongPipeline(List)` cannot take — its loop
+##    walks `MezzeLongCons` cells and reads them unboxed, so a record element
+##    sends the fold to `ListNatives.foldTwoArg` instead. That is the path that
+##    copies the whole list with `toArray()` before folding it.
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  let n = arg_at { args = args, i = 1, def = 2000000 }
+  if k == 1 then do
+    k_control { n = n }
+    k_control { n = n }
+    k_control { n = n }
+    report { name = "1 control (no coll)", n = n, r = time_it { f = {} -> k_control { n = n } } }
+    report { name = "1 control (no coll)", n = n, r = time_it { f = {} -> k_control { n = n } } }
+    report { name = "1 control (no coll)", n = n, r = time_it { f = {} -> k_control { n = n } } }
+  else if k == 2 then do
+    let xs = seq::range { start = 0, end = n }
+    let f = {} -> seq::fold { xs = xs, init = 0, f = { acc, x } -> acc + x }
+    f {}
+    f {}
+    f {}
+    report { name = "2 seq fold         ", n = n, r = time_it { f = f } }
+    report { name = "2 seq fold         ", n = n, r = time_it { f = f } }
+    report { name = "2 seq fold         ", n = n, r = time_it { f = f } }
+  else if k == 4 then do
+    let rs = list::from_seq { xs = seq::map { xs = seq::range { start = 0, end = n }, f = { x } -> { n = x } } }
+    let h = {} -> list::fold_left { xs = rs, init = 0, f = { acc, x } -> acc + x.n }
+    h {}
+    h {}
+    h {}
+    report { name = "4 list of records  ", n = n, r = time_it { f = h } }
+    report { name = "4 list of records  ", n = n, r = time_it { f = h } }
+    report { name = "4 list of records  ", n = n, r = time_it { f = h } }
+  else do
+    let ls = list::from_seq { xs = seq::range { start = 0, end = n } }
+    let g = {} -> list::fold_left { xs = ls, init = 0, f = { acc, x } -> acc + x }
+    g {}
+    g {}
+    g {}
+    report { name = "3 list fold        ", n = n, r = time_it { f = g } }
+    report { name = "3 list fold        ", n = n, r = time_it { f = g } }
+    report { name = "3 list fold        ", n = n, r = time_it { f = g } }

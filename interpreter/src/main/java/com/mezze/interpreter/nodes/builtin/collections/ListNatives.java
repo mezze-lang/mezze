@@ -537,6 +537,51 @@ public final class ListNatives {
         Object[] closureValues = folder.getClosureValues();
         int closureLen = closureValues.length;
         CallTarget target = folder.getCallTarget();
+
+        // WALK THE CELLS for a plain forward fold, which is `fold_left` and
+        // `reduce` — everything this shares the loop with.
+        //
+        // `toArray()` below is a FULL O(n) COPY of the list before a single
+        // element is folded: a second pass over every cons cell and an
+        // `Object[n]` that lives as long as the fold. `bench/cases/listwalk`
+        // at n=5e6 measured `list::fold_left` at 1 335 ps/elem against
+        // `seq::fold`'s 328 and a 282 ps control — 4.07x — with the array
+        // showing up as young collections a seq fold does not have.
+        //
+        // The copy exists because `reverse` and `scan` need random access:
+        // a right fold runs backwards and a scan writes `scanOut[i + 1]`, and
+        // a cons list walks one way only. Those two keep the array. A forward
+        // fold with no scan does not need it, and that is the common case.
+        if (!reverse && scanOut == null) {
+            Object acc0 = init;
+            MezzeList cur = list;
+            for (int skip = 0; skip < startIndex && !cur.isEmpty(); skip++) cur = cur.tail();
+            CallTarget inner = ScalarBypass.tryResolve(folder);
+            if (inner != null) {
+                String[] params = folder.getParameterNames();
+                boolean accFirst0 = params.length < 2 || "acc".equals(params[0]);
+                int accSlot0 = accFirst0 ? closureLen : closureLen + 1;
+                int elemSlot0 = accFirst0 ? closureLen + 1 : closureLen;
+                Object[] args0 = new Object[closureLen + 2];
+                System.arraycopy(closureValues, 0, args0, 0, closureLen);
+                while (!cur.isEmpty()) {
+                    args0[accSlot0] = acc0;
+                    args0[elemSlot0] = cur.head();
+                    acc0 = callNode.call(inner, args0);
+                    cur = cur.tail();
+                }
+                return acc0;
+            }
+            Object[] args0 = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, args0, 0, closureLen);
+            while (!cur.isEmpty()) {
+                args0[closureLen] = MezzeRecord.wrapAccX(acc0, cur.head());
+                acc0 = callNode.call(target, args0);
+                cur = cur.tail();
+            }
+            return acc0;
+        }
+
         Object[] elements = list.toArray();
         int size = elements.length;
         int from = reverse ? size - 1 - startIndex : startIndex;
