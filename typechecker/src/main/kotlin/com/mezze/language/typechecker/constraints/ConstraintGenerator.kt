@@ -842,16 +842,26 @@ class ConstraintGenerator(
     ): MezzeType {
         if (pending.isEmpty() || inferredType !is MezzeType.FunctionType) return inferredType
         val extra = mutableSetOf<String>()
+        fun take(fnType: MezzeType.FunctionType, caughtByOp: Set<String>) {
+            val effRow = fnType.effects ?: return
+            extra.addAll(effRow.effects - caughtByOp)
+            for (instance in effRow.effectInstances) {
+                if (instance.name !in caughtByOp) extra.add(instance.name)
+            }
+        }
         for (harvest in pending) {
-            val solvedArg = substitution.apply(harvest.argType)
-            if (solvedArg !is MezzeType.RecordType) continue
-            for ((_, fieldType) in solvedArg.fields) {
-                val fnType = substitution.apply(fieldType) as? MezzeType.FunctionType ?: continue
-                val effRow = fnType.effects ?: continue
-                extra.addAll(effRow.effects - harvest.caughtByOp)
-                for (instance in effRow.effectInstances) {
-                    if (instance.name !in harvest.caughtByOp) extra.add(instance.name)
-                }
+            when (val solved = substitution.apply(harvest.argType)) {
+                // An ARGUMENT record: the callbacks are its fields.
+                is MezzeType.RecordType ->
+                    for ((_, fieldType) in solved.fields) {
+                        (substitution.apply(fieldType) as? MezzeType.FunctionType)
+                            ?.let { take(it, harvest.caughtByOp) }
+                    }
+                // A CALLEE that was not a function type at generation time — a
+                // deferred method call's fresh result var. Post-solve it IS the
+                // applied function, so its own row is what the apply performs.
+                is MezzeType.FunctionType -> take(solved, harvest.caughtByOp)
+                else -> {}
             }
         }
         if (extra.isEmpty()) return inferredType

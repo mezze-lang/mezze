@@ -1365,6 +1365,30 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
         // (sibling of the site above; harvested names land in collector.effects).
         collectClosureArgEffects(argumentResult.type) - caughtByOp2
     } else emptySet()
+    // The CALLEE's own row, when the callee is not a function type YET.
+    //
+    // A deferred method call hands up a fresh var as its result type
+    // (`ExprMethodConstraints`: `val resultType = MezzeType.VarType(TypeVar
+    // .fresh())`), unified with the method's real return type by a constraint
+    // solved later. So for `p.make {} {}` — applying what a method returned —
+    // the branch below sees a VarType, raises nothing, and the row of the
+    // returned function is lost. A plain `make {} {}` is fine, because there the
+    // callee's type is known at generation time.
+    //
+    // Measured consequence before this: `{ p: P } -> Int` was accepted for a
+    // body performing Tick, declaring the TRUE row `<Tick>` was REFUSED, and at
+    // runtime the pure-certified function returned a suspension instead of an
+    // Int. The effect was unreported AND unhandleable — `perform Ticker in …`
+    // was rejected as handling an effect the body does not perform.
+    //
+    // Same deferral the closure-arg harvest uses for the same reason (#331):
+    // re-ask once the substitution knows the answer. Only ADDS effects, so it
+    // can tighten the under-promise check without loosening anything.
+    if (functionResult.type !is MezzeType.FunctionType) {
+        collector.pendingClosureArgEffects.add(
+            ConstraintResult.PendingClosureHarvest(functionResult.type, caughtByOp2)
+        )
+    }
     if (functionResult.type is MezzeType.FunctionType) {
         val fnType = functionResult.type as MezzeType.FunctionType
         collector.effects.addAll(fnType.effects?.effects ?: emptySet())
