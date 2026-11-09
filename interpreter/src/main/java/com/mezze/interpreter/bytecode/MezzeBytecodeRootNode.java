@@ -7821,7 +7821,53 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      */
     @TruffleBoundary
     private static String buildInterpolatedString(String[] parts, Object[] exprValues) {
-        // Pre-size: sum literal chunk lengths + 16 chars per expression slot
+        // EVERY VALUE ALREADY A STRING is the common case — `"a$(b)"` on text,
+        // and `"$(n.to_str {})"` on anything else, because interpolation needs
+        // `Str` and the conversion has happened by the time the value arrives.
+        // It is worth two things: an EXACT size, and for the commonest shape no
+        // builder at all.
+        //
+        // `bench/cases/allocsurface` at n=2e7: interpolating one string into
+        // one literal measured 15 287 ps/iter with 38 young collections against
+        // 9 784 and 17 for `str::concat` of the same two pieces — 1.56x, on a
+        // desugaring whose target is that concat. Four allocations against two:
+        // the variadic array, the builder, its char array, and the result. The
+        // 16-chars-per-slot estimate was most of the difference; a two-character
+        // result was asking for seventeen.
+        int exprLen = 0;
+        boolean allStrings = true;
+        for (Object v : exprValues) {
+            if (v instanceof String s) exprLen += s.length();
+            else { allStrings = false; break; }
+        }
+
+        if (allStrings) {
+            int litLen = 0;
+            int litCount = 0;
+            String onlyLit = null;
+            for (String p : parts) {
+                if (p != null) { litLen += p.length(); litCount++; onlyLit = p; }
+            }
+            // ONE literal and ONE value: `String.concat` allocates once and is
+            // an ordinary method, NOT the `+` operator's `StringConcatHelper`,
+            // which is on native-image's runtime-compilation blocklist (see
+            // project_native_blocklist_string_concat). Behind a boundary here
+            // either way, but the explicit call keeps it that way by
+            // construction.
+            if (parts.length == 2 && litCount == 1 && exprValues.length == 1) {
+                String v = (String) exprValues[0];
+                return parts[0] == null ? v.concat(onlyLit) : onlyLit.concat(v);
+            }
+            StringBuilder sb = new StringBuilder(litLen + exprLen);
+            int exprIdx = 0;
+            for (String p : parts) {
+                sb.append(p != null ? p : (String) exprValues[exprIdx++]);
+            }
+            return sb.toString();
+        }
+
+        // Mixed values: size the literals exactly and leave the old slack for
+        // the parts whose rendered length is not known until `String.valueOf`.
         int estimate = 0;
         for (String p : parts) {
             estimate += (p != null) ? p.length() : 16;
