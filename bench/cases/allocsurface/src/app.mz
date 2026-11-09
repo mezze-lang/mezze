@@ -300,6 +300,90 @@ let go_ss = { i, acc, xs } ->
   else go_ss { i = i - 1, acc = acc + seq::size { xs = xs }, xs = xs }
 let k_seq_size = { n } -> go_ss { i = n, acc = 0, xs = seq::range { start = 1, end = 2 } }
 
+
+## 20. ONE CALL AND TWO ADDS — which splits kernel 16's cliff in half.
+##
+## Kernel 12 (`acc + str::size { s }`) is 505 ps and kernel 16
+## (`acc + str::size { s } + str::size { s }`) is 41 715. Two things changed at
+## once: a second ADD and a second CALL. This changes only the add:
+##
+##     k12   acc + str::size { s = s }
+##     k20   acc + str::size { s = s } + i          <- one call, two adds
+##     k16   acc + str::size { s = s } + str::size { s = s }
+##
+## `+ i` and not `+ 1`, because a literal folds into the constant and the extra
+## add would vanish. `i` is already a parameter of this loop and already read
+## by the condition, so nothing else is added to the body.
+##
+## If k20 sits with k16 the trigger is the ARITHMETIC — kernel 11's cliff, where
+## two more adds in the base case cost 52x. If k20 sits with k12 the trigger is
+## the second CALL, and JFR's stacks for k16 (CallIndirect -> TrampolineRootNode
+## -> normalizeArgs -> unpackRecord, plus a MezzeFunction.hasPartialArgs guard
+## per call) say what that call fell back to.
+##
+## sum = n + n*(n+1)/2.
+let go_y3 = { i, acc, s } ->
+  if i <= 0 then acc
+  else go_y3 { i = i - 1, acc = acc + str::size { s = s } + i, s = s }
+let k_str_size_add = { n } -> go_y3 {
+  i = n, acc = 0,
+  s = str::substring { s = int::to_str { n = n }, start = 0, end = 1 },
+}
+
+
+## 21/22. THE NESTING, with the call taken out of the question.
+##
+## Kernel 20 said the trigger for kernel 16's cliff is the extra ADD and not the
+## extra CALL. The lowered IR of both, dumped with `MEZZE_DUMP_FN=*`, differs in
+## exactly one way: `ADD(acc, call)` against `ADD(ADD(acc, call), i)`. Both are
+## already `InlineBinaryOpIR`, both land on the same self-tail tier
+## (direct-while), and both reach the same record-ABI native call.
+##
+## 21 removes the call entirely: three parameters, pure arithmetic, one nested
+## add. If it is slow then the nesting alone is the cliff and nothing about
+## natives, strings or collections is involved.
+##
+## 22 keeps the call but nests to the RIGHT: `acc + (size + i)`. Same operations,
+## same count, only the tree shape differs — so 21 against 22 says whether it is
+## nesting as such or nesting on the ACCUMULATOR side.
+##
+## sum for 21 = n + n*(n+1)/2; for 22 the same.
+let go_n1 = { i, acc, k } ->
+  if i <= 0 then acc
+  else go_n1 { i = i - 1, acc = acc + i + k, k = k }
+let k_nest_arith = { n } -> go_n1 { i = n, acc = 0, k = 1 }
+
+let go_n2 = { i, acc, s } ->
+  if i <= 0 then acc
+  else go_n2 { i = i - 1, acc = acc + (str::size { s = s } + i), s = s }
+let k_nest_right = { n } -> go_n2 {
+  i = n, acc = 0,
+  s = str::substring { s = int::to_str { n = n }, start = 0, end = 1 },
+}
+
+
+## 23. KERNEL 21 WITH THE TYPES WRITTEN DOWN, as a DIAGNOSTIC.
+##
+## Kernel 21 (`acc + i + k`) costs 41 214 ps and 89 young collections where
+## kernel 22 (`acc + (size + i)`) costs 3 915 and 3. `MEZZE_TRACE_COMPILATION`
+## says what the difference is: the left-nested arm compiles
+## `TrampolineRootNode[add]` FIFTEEN times — the `Num.add` ability method called
+## as a real function per iteration — one of those compilations bails out with
+## "FrameWithoutBoxing should not be materialized (must not pass virtual object
+## into an invoke that cannot be inlined)", and the loop is OSR-recompiled ten
+## times. The right-nested arm never compiles `add` at all.
+##
+## So the outer `+` is not reaching `DirectAdd`. This row writes the types out
+## explicitly. AN ANNOTATION IS NOT A FIX — if this is fast, the receiver type
+## of the outer `+` was inferable and was not inferred, and the bug is in
+## lowering or inference, not in the user's parentheses.
+##
+## sum = n + n*(n+1)/2, the same as kernel 21.
+let go_n3: { i: Int, acc: Int, k: Int } -> Int = { i, acc, k } ->
+  if i <= 0 then acc
+  else go_n3 { i = i - 1, acc = acc + i + k, k = k }
+let k_nest_annot = { n } -> go_n3 { i = n, acc = 0, k = 1 }
+
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
 
@@ -383,4 +467,20 @@ pub let main = {} -> perform Console in perform SystemArgs in do
     k_seq_size { n = n }
     report { name = "19 seq size    ", n = n, r = time_it { f = {} -> k_seq_size { n = n } } }
     report { name = "19 seq size    ", n = n, r = time_it { f = {} -> k_seq_size { n = n } } }
+  else if k == 20 then do
+    k_str_size_add { n = n }
+    report { name = "20 str size +add", n = n, r = time_it { f = {} -> k_str_size_add { n = n } } }
+    report { name = "20 str size +add", n = n, r = time_it { f = {} -> k_str_size_add { n = n } } }
+  else if k == 21 then do
+    k_nest_arith { n = n }
+    report { name = "21 nest arith  ", n = n, r = time_it { f = {} -> k_nest_arith { n = n } } }
+    report { name = "21 nest arith  ", n = n, r = time_it { f = {} -> k_nest_arith { n = n } } }
+  else if k == 22 then do
+    k_nest_right { n = n }
+    report { name = "22 nest right  ", n = n, r = time_it { f = {} -> k_nest_right { n = n } } }
+    report { name = "22 nest right  ", n = n, r = time_it { f = {} -> k_nest_right { n = n } } }
+  else if k == 23 then do
+    k_nest_annot { n = n }
+    report { name = "23 nest annot  ", n = n, r = time_it { f = {} -> k_nest_annot { n = n } } }
+    report { name = "23 nest annot  ", n = n, r = time_it { f = {} -> k_nest_annot { n = n } } }
   else println { msg = "unknown kernel" }
