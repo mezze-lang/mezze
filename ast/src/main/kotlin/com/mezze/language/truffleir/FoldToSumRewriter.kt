@@ -66,6 +66,19 @@ object FoldToSumRewriter {
     private val MAP_SUM_VALUES =
         NativeHofNames.native(NativeHofNames.MAP, NativeHofNames.OP_SUM_VALUES)
 
+    /**
+     * A SortedMap folds entries the same way, so the same rule applies to it
+     * once there is a `sum_values` to rewrite to. There was not one, which is
+     * why `sorted_map::fold` kept its per-element guest call and measured
+     * 13 202 ps/elem against `sorted_set::fold`'s 446 — the same sorted array,
+     * the only difference being that a sorted SET had a `sum` for this pass to
+     * find. Walking the values with no callback is 633.
+     */
+    private val SORTED_MAP_FOLD =
+        NativeHofNames.native(NativeHofNames.SORTED_MAP, NativeHofNames.OP_FOLD)
+    private val SORTED_MAP_SUM_VALUES =
+        NativeHofNames.native(NativeHofNames.SORTED_MAP, NativeHofNames.OP_SUM_VALUES)
+
     fun rewrite(node: NodeIR, allFunctions: Map<Hash, FunctionIR>): NodeIR {
         val descended = node.transformChildren { child -> rewrite(child, allFunctions) }
         return tryRewrite(descended, allFunctions) ?: descended
@@ -73,7 +86,10 @@ object FoldToSumRewriter {
 
     private fun tryRewrite(node: NodeIR, allFunctions: Map<Hash, FunctionIR>): NodeIR? {
         if (node !is CallNativeIR || node.isScalarABI) return null
-        if (node.name == MAP_FOLD) return tryRewriteMapValueSum(node, allFunctions)
+        if (node.name == MAP_FOLD)
+            return tryRewriteMapValueSum(node, allFunctions, MAP_SUM_VALUES)
+        if (node.name == SORTED_MAP_FOLD)
+            return tryRewriteMapValueSum(node, allFunctions, SORTED_MAP_SUM_VALUES)
         val sumName = FOLD_TO_SUM[node.name] ?: return null
         val mr = node.arg as? MakeRecordIR ?: return null
 
@@ -134,6 +150,7 @@ object FoldToSumRewriter {
     private fun tryRewriteMapValueSum(
         node: CallNativeIR,
         allFunctions: Map<Hash, FunctionIR>,
+        sumName: String,
     ): NodeIR? {
         val mr = node.arg as? MakeRecordIR ?: return null
         var src: NodeIR? = null
@@ -168,7 +185,7 @@ object FoldToSumRewriter {
         if (setOf(l.slot, r.slot) != setOf(0, 2)) return null
 
         return CallNativeIR(
-            name = MAP_SUM_VALUES,
+            name = sumName,
             arg = MakeRecordIR(listOf(FieldIR(NativeHofNames.M, srcExpr)), mr.src),
             src = node.src,
         )

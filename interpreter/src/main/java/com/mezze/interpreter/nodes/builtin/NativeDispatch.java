@@ -1722,6 +1722,8 @@ public final class NativeDispatch extends MezzeNode {
         // HOF operations
         HANDLERS.put("__native_sorted_map_filter", (r, c) ->
             SortedMapNatives.filter(getSortedMap(r, "m"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_sorted_map_sum_values", (r, c) ->
+            SortedMapNatives.sumValues(getSortedMap(r, "m")));
         HANDLERS.put("__native_sorted_map_fold", (r, c) ->
             SortedMapNatives.fold(getSortedMap(r, "m"), getField(r, "init"), getFunction(r, "f"), c));
         HANDLERS.put("__native_sorted_map_map_values", (r, c) ->

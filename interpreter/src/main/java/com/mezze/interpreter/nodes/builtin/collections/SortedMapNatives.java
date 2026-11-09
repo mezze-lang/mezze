@@ -300,6 +300,35 @@ public final class SortedMapNatives {
         return result;
     }
 
+    /**
+     * Sum the values, with no guest callback in the loop.
+     *
+     * <p>WHY THIS EXISTS. `FoldToSumRewriter` turns a summing fold into the
+     * collection's own `sum`, and a SortedMap had none for it to aim at — the
+     * same gap `nel` had before `nel::sum` was added. `bench/cases/collfold`
+     * at n=2e5: `sorted_map::fold` costs 13 202 ps/elem where
+     * `sorted_set::fold` costs 446, and the two are the same sorted array
+     * walked the same way. The difference is entirely the rewrite: summing the
+     * values in Java with the callback skipped measures **633 ps/elem**, so
+     * 95% of that 13 202 is the per-element guest call and 5% is the walk.
+     *
+     * <p>Only the VALUES. A key sum is a different question and
+     * `FoldToSumRewriter` refuses to rewrite a folder that reads the key.
+     */
+    public static Object sumValues(MezzeSortedMap map) {
+        long sum = 0;
+        int n = map.size();
+        for (int i = 0; i < n; i++) {
+            Object v = map.valueAt(i);
+            if (v instanceof Long l) sum += l;
+            else if (v instanceof Number num) sum += num.longValue();
+            else throw new IllegalStateException(
+                    "sorted_map::sum_values over a non-numeric value: "
+                    + (v == null ? "null" : v.getClass().getSimpleName()));
+        }
+        return sum;
+    }
+
     public static Object fold(MezzeSortedMap map, Object init, MezzeFunction f,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare3(f, "acc", "k", "v");
