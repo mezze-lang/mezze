@@ -11,6 +11,14 @@
 ## sum the VALUES, so their checksum matches the rest.
 ##
 ## Built ONCE, outside every timed call: this measures the WALK, not the build.
+##
+## SO THE `Pause Young` COUNT IS NOT THE WALK'S. It is process-wide and the
+## build is in it, which for the SORTED collections dominates: every ordered
+## operation allocates a comparator closure and calls back into guest code per
+## comparison, so building n entries is O(n log n) GUEST calls. sorted_map
+## reports 43 collections and ~none of them are the fold. Read the GC column as
+## the walk's only for the rows whose build is cheap — seq, list, deque, and the
+## unordered set and map.
 ## ONE KERNEL PER PROCESS — see bench/scripts/ab.sh on why.
 use std::collections::iter
 use std::collections::seq
