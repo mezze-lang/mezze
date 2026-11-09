@@ -418,4 +418,173 @@ class NewtypeInterpreterTest {
         """
         assertEquals("F", eval(code))
     }
+
+    // ========== Derived Inspect: what opacity does NOT cover ==========
+
+    /**
+     * `to_dbg` on a newtype SHOWS the payload. Decided, not accidental.
+     *
+     * Opacity is complete against code and absent against inspection: from
+     * outside the defining module a value can be neither constructed nor
+     * destructured (M0803, pinned in NewtypeOpacitySpecTest), but `to_dbg`
+     * renders it in full — and a derived impl cannot know the caller's module,
+     * so what it shows here it shows everywhere.
+     *
+     * The alternative was Roc's, where an opaque type inspects to `<opaque>` by
+     * default "so it doesn't leak implementation details", with the
+     * payload-showing version opt-in via `implements [Inspect]`. Rust goes the
+     * other way: `#[derive(Debug)]` on a newtype prints `Secret(7)`.
+     *
+     * Mezze takes Rust's: opacity here means TYPE ABSTRACTION — no code may
+     * depend on the representation — not secrecy. Hiding the payload would cost
+     * every one of the 39 stdlib newtypes its debug output, and for `Nat`,
+     * `Duration` or `MutInt` there is nothing to hide.
+     *
+     * And it cannot be overridden at all. `impl Inspect for Secret` is V0407,
+     * "`Inspect` is derived by the compiler for `Secret`" — true for a locally
+     * declared ability of that name too — and an inherent `to_dbg` is V0422, so
+     * neither route exists. There is therefore NO way to hide a newtype's
+     * payload from `to_dbg`, which is the decision rather than an oversight: an
+     * author who needs a value kept out of debug output should not reach for
+     * opacity, because opacity here is about what code may depend on, not about
+     * what a reader may see.
+     *
+     * Pinned because NewtypeDeriveSpecTest only asserts that `to_dbg`
+     * TYPECHECKS; nothing asserted what it rendered, so a change to `<opaque>`
+     * would have been silent.
+     */
+    @Test
+    fun `derived Inspect renders the newtype's payload`() {
+        assertEquals("Secret.(7)", eval("newtype Secret = Int\nSecret.(7).to_dbg {}"))
+        assertEquals("Token.(\"abc\")", eval("newtype Token = Str\nToken.(\"abc\").to_dbg {}"))
+        assertEquals(
+            "Ids.([1, 2, 3])",
+            eval("newtype Ids = [Int]\nIds.([1, 2, 3]).to_dbg {}"),
+        )
+    }
+
+    /** The wrapper is visible in the rendering — the type name is not hidden either. */
+    @Test
+    fun `derived Inspect names the newtype, not just the payload`() {
+        val wrapped = eval("newtype Secret = Int\nSecret.(7).to_dbg {}")
+        val bare = eval("(7).to_dbg {}")
+        assertEquals("7", bare)
+        assertNotEquals(bare, wrapped, "a wrapped value must not render as its payload alone")
+    }
+
+    /**
+     * An inherent `to_dbg` is REFUSED, because it would silently replace the
+     * derived `Inspect` rather than add anything.
+     *
+     * This was accepted until V0422, and it WON: measured, the program below
+     * rendered `<hidden>` where the derived `Inspect` renders `Secret.(7)`. So
+     * an inherent method quietly displaced a compiler-derived ability op, while
+     * the ability spelling of the same intent — `impl Inspect for Secret` — was
+     * refused outright by V0407, "derived by the compiler for `Secret`". Two
+     * routes to one thing, one refused loudly and one taken silently.
+     *
+     * `Inspect` and `Hash` are in scope for every type whether imported or not,
+     * so this collision was one an author could not notice. It is the mirror of
+     * V0420, which stops an ABILITY impl whose method an inherent one would
+     * displace; this direction had no check.
+     */
+    @Test
+    fun `an inherent to_dbg is refused rather than silently replacing Inspect`() {
+        val e = assertThrows(Throwable::class.java) {
+            eval(
+                """
+                newtype Secret = Int
+                impl Secret where { to_dbg = { it: Secret } -> "<hidden>" }
+                Secret.(7).to_dbg {}
+                """.trimIndent(),
+            )
+        }
+        val msg = e.message ?: ""
+        assertTrue(
+            "answers for you" in msg || "V0422" in msg,
+            "expected the derived-op collision to be reported; got: $msg",
+        )
+        // And the derived rendering is what a newtype still gets.
+        assertEquals("Secret.(7)", eval("newtype Secret = Int\nSecret.(7).to_dbg {}"))
+    }
+
+    /**
+     * The whole reserved set, and each name is here because it produced a WRONG
+     * ANSWER rather than an error — measured, before V0422:
+     *
+     *   to_dbg  rendered `<hidden>`, silently replacing the derived `Inspect`
+     *   hash    the other ability derived for every type
+     *   eq      made `a == b` False for two equal records, while a `Map` keyed
+     *           on them still treated them as ONE key — and on a newtype made
+     *           `==` work with no `Eq` impl, bypassing the matching-`Hash` rule
+     *   lt      made `a < b` answer the inherent method, bypassing `Ord`
+     */
+    @Test
+    fun `every reserved op name is refused on an inherent impl`() {
+        val cases = mapOf(
+            "to_dbg" to "{ it: P } -> \"x\"",
+            "hash" to "{ it: P } -> 1",
+            "eq" to "{ it: P, r: P } -> True",
+            "neq" to "{ it: P, r: P } -> False",
+            "lt" to "{ it: P, r: P } -> True",
+            "le" to "{ it: P, r: P } -> True",
+            "gt" to "{ it: P, r: P } -> False",
+            "ge" to "{ it: P, r: P } -> False",
+        )
+        for ((name, body) in cases) {
+            val e = assertThrows(Throwable::class.java) {
+                eval(
+                    """
+                    type P = { x: Int }
+                    impl P where { $name = $body }
+                    1
+                    """.trimIndent(),
+                )
+            }
+            val msg = e.message ?: ""
+            assertTrue(
+                "answers for you" in msg || "V0422" in msg,
+                "`$name` must be refused on an inherent impl; got: $msg",
+            )
+        }
+    }
+
+    /**
+     * The ARITHMETIC names are NOT reserved, and that is measured rather than
+     * assumed: an inherent `add` does not make `+` work — `+` still demands the
+     * `NumAdd` impl — so `add` is an ordinary method name. The stdlib depends on
+     * this in `Seq`, `SortedSet` and `WaitGroup`, where `add` appends an element.
+     */
+    @Test
+    fun `an inherent add is allowed and does not become the plus operator`() {
+        assertEquals(
+            6L,
+            MezzeTestHelper.asLong(
+                eval(
+                    """
+                    use std::int
+                    type Bag = { n: Int }
+                    impl Bag where { add = { it: Bag, x: Int } -> { n = it.n + x } }
+                    let a: Bag = { n = 1 }
+                    a.add { x = 5 } .n
+                    """.trimIndent(),
+                ),
+            ),
+        )
+    }
+
+    /** A name that is NOT reserved stays fine — the rule is narrow. */
+    @Test
+    fun `an inherent method with an ordinary name is still allowed`() {
+        assertEquals(
+            "<shown>",
+            eval(
+                """
+                newtype Secret = Int
+                impl Secret where { describe = { it: Secret } -> "<shown>" }
+                Secret.(7).describe {}
+                """.trimIndent(),
+            ),
+        )
+    }
 }

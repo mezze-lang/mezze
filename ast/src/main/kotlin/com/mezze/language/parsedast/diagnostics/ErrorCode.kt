@@ -123,6 +123,7 @@ enum class ErrorCode {
     V0419_IMPL_METHOD_FIELD_CONFLICT,
     V0420_ABILITY_METHOD_SHADOWS_BUILTIN_OPERATOR,
     V0421_IMPL_EFFECT_MISMATCH, // impl op effects don't satisfy the ability op's effect contract
+    V0422_INHERENT_METHOD_SHADOWS_DERIVED_OP, // `impl Secret where { to_dbg = … }` — an inherent method named after an op of an ability derived for EVERY type (Inspect, Hash), which it would silently displace
 
     // ─── Validator: effects (V05xx) ──────────────────────────────────────
     V0501_EFFECT_NOT_HANDLED,

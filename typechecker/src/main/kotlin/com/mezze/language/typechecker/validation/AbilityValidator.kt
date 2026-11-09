@@ -71,6 +71,98 @@ object AbilityValidator {
             .toSet()
     }
 
+    /**
+     * True iff an INHERENT method of [hash]'s op names would displace something
+     * the language already provides.
+     *
+     * Four abilities, and the line between them and the rest was MEASURED:
+     *
+     *  - `Inspect` (`to_dbg`) and `Hash` (`hash`) are derived for EVERY type —
+     *    `DerivabilityRules` returns true for both unconditionally. An inherent
+     *    method of those names silently replaced the derived one.
+     *  - `Eq` (`eq`/`neq`) and `Ord` (`lt`/`le`/`gt`/`ge`) are picked up by the
+     *    OPERATOR. An inherent `eq` made `a == b` answer False for two equal
+     *    records while a `Map` keyed on them still treated them as one key; an
+     *    inherent `eq` on a NEWTYPE made `==` work at all, bypassing the rule
+     *    that a newtype writing its own equality must write a matching `Hash`.
+     *
+     * The arithmetic abilities are NOT here, and that is measured too: an
+     * inherent `add` does not make `+` work (`+` still demands the `NumAdd`
+     * impl), so `add` is an ordinary method name — which the stdlib relies on in
+     * `Seq`, `SortedSet` and `WaitGroup`, where `add` appends an element and has
+     * nothing to do with arithmetic.
+     *
+     * Identity, never a name string: a module may declare its own `ability Eq`,
+     * and this must answer for the stdlib's.
+     */
+    private fun isInherentReservedHash(hash: com.mezze.language.typedast.Hash?): Boolean =
+        WellKnownHashConstants.isInspect(hash) ||
+            WellKnownHashConstants.isHash(hash) ||
+            WellKnownHashConstants.isEq(hash) ||
+            WellKnownHashConstants.isOrd(hash)
+
+    /**
+     * Method names an inherent impl may not define, mapped to the ability that
+     * owns each — derived from those abilities' own declarations for the same
+     * reason [builtinOperatorMethodNames] is: a hardcoded list drifts from the
+     * abilities that actually own the names.
+     */
+    private val inherentReservedMethodNames: Map<String, String> by lazy {
+        BuiltInAbilities.getRawAbilityDeclarations()
+            .filterKeys { isInherentReservedHash(WellKnownHashConstants.resolveAbilityHash(it)) }
+            .flatMap { (abilityName, decl) -> decl.operations.map { it.name to abilityName } }
+            .toMap()
+    }
+
+    /**
+     * An INHERENT method may not take a name the language already answers —
+     * `to_dbg`, `hash`, `eq`, `neq`, `lt`, `le`, `gt`, `ge`.
+     *
+     * All four abilities were accepted here before, and each produced a WRONG
+     * ANSWER rather than an error, which is the family the derive rules exist to
+     * prevent:
+     *
+     *   impl Secret where { to_dbg = … }     rendered `<hidden>`, silently
+     *                                        replacing the derived `Inspect`
+     *   impl P where { eq = … }              made `a == b` False for two equal
+     *                                        records, while a `Map` keyed on
+     *                                        them still treated them as one key
+     *   impl M where { eq = … }  (newtype)   made `==` work with no `Eq` impl,
+     *                                        bypassing the rule that writing
+     *                                        equality obliges a matching `Hash`
+     *   impl P where { lt = … }              made `a < b` answer the inherent
+     *                                        method, bypassing `Ord`
+     *
+     * This is the mirror of V0420, which stops an ABILITY impl whose method an
+     * inherent one would displace. That direction was checked; this one was not,
+     * and it is the worse of the two — the ability spelling is refused loudly
+     * (V0407 for a derived ability, V0420 for a clash) while the inherent
+     * spelling went through in silence.
+     */
+    private fun validateInherentImplNoDerivedOpName(
+        impl: ParsedImplAbilityDecl,
+        sourceLocation: Loc,
+    ) {
+        if (!impl.isInherent) return
+        for (op in impl.operations) {
+            val ability = inherentReservedMethodNames[op.name] ?: continue
+            throw TypeCheckError(
+                "`${op.name}` is an operation of `$ability`, which the language answers for " +
+                "you — either by deriving it or by folding the operator to it. An inherent " +
+                "method of that name would not add one, it would silently take over: the " +
+                "operator and the ability would stop agreeing. Choose another name.",
+                sourceLocation,
+                code = ErrorCode.V0422_INHERENT_METHOD_SHADOWS_DERIVED_OP,
+                hints = listOf(
+                    "rename the method — `${op.name}_of`, or whatever reads right for the type",
+                    "to give the type its own behaviour, implement the ability: " +
+                        "`impl $ability for …` (a newtype must; a derived type may not, " +
+                        "because the derived impl already provides it)",
+                ),
+            )
+        }
+    }
+
     fun validateAbilityDeclaration(ability: ParsedAbilityDecl) {
         val sourceLocation = ability.loc
         // Ability-level constraints caught at parse time (P0119) since #212
@@ -218,6 +310,12 @@ object AbilityValidator {
         validateNoFieldMethodConflict(impl, typeDeclarations, sourceLocation)
         if (impl.isInherent) {
             validateInherentImplTargetType(impl, typeDeclarations, sourceLocation)
+            // The mirror of the shadowing check below: that one stops an ABILITY
+            // impl whose method an inherent one would displace, and this one
+            // stops an INHERENT method from displacing a DERIVED ability op.
+            // Only the inherent path reaches here, which is why it sits inside
+            // this branch rather than beside validateNoBuiltinShadowing.
+            validateInherentImplNoDerivedOpName(impl, sourceLocation)
             return
         }
 

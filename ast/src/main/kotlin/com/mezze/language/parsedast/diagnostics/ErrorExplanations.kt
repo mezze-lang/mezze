@@ -532,6 +532,42 @@ fun ErrorCode.explain(): String = when (this) {
 
             "it one type throughout."
 
+    ErrorCode.V0422_INHERENT_METHOD_SHADOWS_DERIVED_OP ->
+
+        "An inherent method took the name of an operation the compiler DERIVES " +
+
+            "for every type.\n\n" +
+
+            "Two abilities are derived for everything: `Inspect` (`to_dbg`) and " +
+
+            "`Hash` (`hash`). They are in scope whether or not you import them, " +
+
+            "so an inherent method of the same name does not add a method — it " +
+
+            "REPLACES the derived one, and does so silently:\n\n" +
+
+            "  newtype Secret = Int\n" +
+            "  Secret.(7).to_dbg {}                      # Secret.(7)\n\n" +
+
+            "  impl Secret where { to_dbg = { it: Secret } -> \"<hidden>\" }\n" +
+            "  Secret.(7).to_dbg {}                      # <hidden>\n\n" +
+
+            "Nothing reported that the second one had displaced a compiler-derived " +
+
+            "op, which is why it is refused now. Rename the method.\n\n" +
+
+            "Implementing the ABILITY is not the way round it: `impl Inspect for " +
+
+            "Secret` is refused by V0407, because the derived impl already " +
+
+            "provides it. So `to_dbg` and `hash` render what the compiler decides, " +
+
+            "for every type, and that is deliberate — a newtype's `to_dbg` shows " +
+
+            "its payload because opacity here means TYPE ABSTRACTION (no code may " +
+
+            "depend on the representation) rather than secrecy."
+
     ErrorCode.V0713_TYPE_ALIAS_OF_NAMED_TYPE ->
 
         "ONE SHAPE, ONE NAME — so that inference has exactly one answer.\n\n" +
