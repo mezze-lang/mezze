@@ -1,5 +1,7 @@
 use std::abilities::compare::{ Eq, Ord, Hash, structural_hash }
 use std::abilities::sized::{ Sized }
+use std::abilities::iter::{ Iterable }
+use std::collections::iter
 use std::int
 
 ## Structural equality for non-empty lists.
@@ -197,6 +199,19 @@ impl NonEmptyList 'a where {
 }
 
 ## NonEmptyList is never empty, so is_empty always returns False.
+
+## NonEmptyList joins the SEVEN other collections that can enter an `Iter` pipeline.
+## It was the odd one out: without this, `nonemptylist` had to be spelled
+## `iter::from_seq { xs = nonemptylist::to_seq { xs = it } }` by hand, while every
+## other collection answers `.to_iter {}`.
+##
+## Routed through `to_seq` exactly as Set, SortedSet, Deque, Map and SortedMap
+## are — `iter::from_seq` is the fused source, so a pipeline from here gets the
+## same treatment as one from a sequence.
+impl Iterable for NonEmptyList 'a having 'elem = 'a where {
+  to_iter = { it } -> iter::from_seq { xs = to_seq { xs = it } }
+}
+
 impl Sized for NonEmptyList 'a where {
   size = { it } -> size { xs = it },
   is_empty = { it } -> False,
