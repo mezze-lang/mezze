@@ -11124,3 +11124,106 @@ same run and every compile path routes through the method that holds them. The
 IR comparisons above were therefore taken in a test JVM, which lowers both
 shapes to `InlineBinaryOpIR` — so the test JVM does NOT reproduce the dictionary
 lowering, and anyone fixing this needs the built-app probe working first.
+
+### RETRACTION 2026-11-09 — the 177x does not exist. `mez` on PATH embeds an EIGHT-DAY-OLD interpreter into every bench binary
+
+The entry immediately above is wrong, and the reason it is wrong invalidates
+more than itself.
+
+`mez` on `PATH` is `~/.mezze/bin/mez`, and `~/.mezze/settings.toml` reads
+
+    default = "nightly-202611010925"
+
+so `mez build` embeds the runtime from that toolchain — **8 days old** — into the
+app jar, whatever the working tree contains. `MEZZE_HOME=` does not change it:
+that routes the CLI (the lowering) to the dev classes, and `.build/.ab-cli`
+duly recorded today's `ast-nightly-202611091246.jar`, which is exactly why this
+went unnoticed. The lowering was fresh and the runtime was from November 1st.
+
+PROVEN BY UNZIPPING THE APP JAR, not inferred. `BytecodeCompiler.class` from a
+`mez build` jar contains no `MEZZE_DUMP_FN` at all — a probe that has been in
+that file for weeks. Built with `cli/build/install/mez/bin/mez` instead, the
+same jar contains it. That is also why every `MEZZE_DUMP_BC` /
+`MEZZE_TRACE_SELFTAIL` invocation against a built app printed nothing while
+`MEZZE_BDSL_STATS` worked: the stats counter lives in `MezzeLanguage`, which the
+old runtime also has, and the probes did not exist in the old `BytecodeCompiler`.
+
+#### What that costs
+
+**The 177x is gone.** Same kernels, same n, binary built by the dev launcher:
+
+| kernel | body | stale runtime | dev runtime |
+|---|---|---|---|
+| k1  | `acc + i`              |    223 ps |   226 |
+| k21 | `acc + i + k`          | 41 065    |   786 |
+| k22 | `acc + (f(s) + i)`     |  3 915    |   724 |
+| k23 | `acc + i + k`, annotated |   651   |   813 |
+| k24 | `acc + i + i`          | 41 885    |   778 |
+
+786 against 813 — the annotation is worth NOTHING, the nesting is worth
+NOTHING, and there is no cliff. `TrampolineRootNode[add]`, the ability call the
+compilation trace showed 36 times, is a property of the November-1 interpreter.
+Everything in the previous entry that rests on those two ratios is struck: the
+cliff, the "61x for an annotation", the `DictMethodCallIR` localisation, and the
+claim that ~50 ns of every `mapsurface` row is loop overhead.
+
+**And the two null results in that entry are not null — they were never
+measured.** The map/set keyed-read fast paths and the seq/list/bytes indexed
+reads are interpreter-side changes, so the "with the fast path" arm of each A/B
+contained the November-1 interpreter in both arms. Two builds from identical
+source would have given the same answer. Those tables say nothing and are
+withdrawn; the changes themselves stay reverted, now for want of evidence
+either way rather than for want of an effect.
+
+#### The surface, measured properly
+
+Binary built with `cli/build/install/mez/bin/mez`, `bench/cases/allocsurface`,
+one kernel per process, n=1e7 and n=2e7, min of 6 at the larger size, converged.
+
+| row | ps/iter | x control | young |
+|---|---|---|---|
+| counted loop (control)   |   226 |  1.0 |  2 |
+| 4-param loop (tier ctl)  |   684 |  3.0 |  3 |
+| `str::size`              |   609 |  2.7 |  3 |
+| `map::size`              |   726 |  3.2 |  3 |
+| `acc + i + k`            |   786 |  3.5 |  — |
+| `map::contains_key`      | 2 183 |  9.7 |  — |
+| `set::contains`          | 2 207 |  9.8 |  — |
+| `map::get`               | 2 919 | 12.9 |  — |
+| `list::get`              | 2 980 | 13.2 |  — |
+| `bytes::get`             | 3 220 | 14.2 |  — |
+| `seq::get`               | 3 729 | 16.5 |  — |
+| **`seq::size`**          | **8 522** | **37.7** | **19** |
+| **`bytes::size`**        | **8 893** | **39.3** | **19** |
+
+`map::size` is 726 ps and 3 young collections — on `str::size`, at the floor.
+The "`str::size` 416 ps against `map::size` 4 519, eleven times for the same
+shape of work" puzzle this ledger has carried **does not exist either**; it was
+the same stale runtime.
+
+#### Which leaves one gap, and it has a name
+
+`seq::size` and `bytes::size` are **37-39x the control and allocate 19 young
+collections against `map::size`'s 3**, and the line between them is exactly the
+native-signature table:
+
+    declared (scalar ABI):    __native_map_size          726 ps /  3
+    NOT declared (record ABI): __native_seq_size        8 522    / 19
+                               __native_bytes_size      8 893    / 19
+
+`__native_seq_size`, `__native_bytes_size`, `__native_list_size`,
+`__native_set_size` and `__native_deque_size` are absent from
+`META-INF/mezze/native-signatures.tsv`, so each call builds a `MezzeRecord` and
+looks its one field up by name. That is the mechanism `MapOps.kt`'s header
+documents at 2.0-3.3x per op when it was done for the map, and here it is 12x
+in time and 6.3x in allocation. **Declaring them is the next move**, and it is
+the first number in this session that is both large and certainly real.
+
+#### The method rule this cost
+
+**Never benchmark an interpreter change through `mez` on `PATH`.** Use
+`cli/build/install/mez/bin/mez` to build the bench, and verify once per session
+by unzipping the app jar and grepping `BytecodeCompiler.class` for a string only
+the current tree has. `MEZZE_HOME=` is not sufficient and `.ab-cli` is
+actively misleading, because both report on the CLI and the stale part is the
+runtime.
