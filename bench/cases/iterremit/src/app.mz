@@ -78,6 +78,22 @@ let k_unfold_bare = { n } -> iter::unfold {
   }
   .fold { init = 0, f = { acc, x } -> acc + x }
 
+
+## ── THE CEILING FUSION COULD REACH ─────────────────────────────────────────
+## The same step function and the same arithmetic as kernel 2, but the driver
+## loop written BY HAND in guest code. Fusing `unfold` moves its loop from the
+## Java walker into exactly this shape, so whatever this costs is the best a
+## fused unfold could do. If this is fast the feature is worth building; if it
+## is also ~40 ns the cost is inherent to the Step protocol and fusion cannot
+## save it.
+let k_handloop = { n } -> do
+  let step = { s } -> if s >= n then Done else Yield { val = s, next = s + 1 }
+  let go = { s, acc } -> match step { s = s } is
+    Yield { val, next } -> go { s = next, acc = acc + val + 1 }
+    Skip { next } -> go { s = next, acc = acc }
+    Done -> acc
+  go { s = 0, acc = 0 }
+
 pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
   let args = argv {}
   let k = arg_at { args = args, i = 0, def = 1 }
@@ -128,6 +144,17 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
     report { name = "5 unfold no stages ", n = n, r = time_it { f = {} -> k_unfold_bare { n = n } } }
     report { name = "5 unfold no stages ", n = n, r = time_it { f = {} -> k_unfold_bare { n = n } } }
     report { name = "5 unfold no stages ", n = n, r = time_it { f = {} -> k_unfold_bare { n = n } } }
+  else if k == 6 then do
+    k_handloop { n = n }
+    k_handloop { n = n }
+    k_handloop { n = n }
+    k_handloop { n = n }
+    k_handloop { n = n }
+    report { name = "6 hand loop (ceiling)", n = n, r = time_it { f = {} -> k_handloop { n = n } } }
+    report { name = "6 hand loop (ceiling)", n = n, r = time_it { f = {} -> k_handloop { n = n } } }
+    report { name = "6 hand loop (ceiling)", n = n, r = time_it { f = {} -> k_handloop { n = n } } }
+    report { name = "6 hand loop (ceiling)", n = n, r = time_it { f = {} -> k_handloop { n = n } } }
+    report { name = "6 hand loop (ceiling)", n = n, r = time_it { f = {} -> k_handloop { n = n } } }
   else do
     let rs = seq::map { xs = seq::range { start = 0, end = n }, f = { x } -> { n = x } }
     k_rec_seq { rs = rs, n = n }
