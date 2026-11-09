@@ -606,6 +606,47 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         public static long doDeque(com.mezze.datastructures.deque.MezzeDeque<?> d) {
             return (long) d.size();
         }
+
+        // Seq, List and Bytes, which had no dedicated operation at all — and
+        // the name of this class is now the only thing map-specific about it.
+        //
+        // DECLARING THEM WAS HALF THE GAP. `bench/cases/allocsurface` at
+        // n=2e7, one kernel per process, binary built by the DEV launcher:
+        //
+        //   row              undeclared   declared   + this operation
+        //     seq::size         8 522 ps      4 107
+        //     bytes::size       8 893         3 990
+        //     map::size (ref)                            613
+        //
+        // The declaration removes the per-call `MezzeRecord`; this removes the
+        // generic native dispatch in front of it, which is what `map::size`
+        // has had since `InlineMapSize` was added and these did not.
+        //
+        // The `Object[]` case is not optional: a seq is EITHER a `MezzeSeq` OR
+        // a bare `Object[]` that was never wrapped, and accepting only the
+        // canonical class is a change of semantics rather than an
+        // optimisation — it cost 39 interpreter tests once already. See
+        // `InlineSeqGetRaw`.
+        @Specialization
+        public static long doSeq(com.mezze.datastructures.seq.MezzeSeq<?> xs) {
+            return (long) xs.size();
+        }
+
+        @Specialization
+        public static long doObjectArray(Object[] xs) {
+            return (long) xs.length;
+        }
+
+        @Specialization
+        public static long doList(com.mezze.datastructures.list.MezzeList<?> xs) {
+            return (long) xs.size();
+        }
+
+        @Specialization
+        public static long doBytes(
+                com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes b) {
+            return (long) b.length();
+        }
     }
 
     /**

@@ -3812,18 +3812,17 @@ public final class BytecodeCompiler {
                             return;
                         }
                     }
-                    // ── Single-field { m } map natives ──
-                    // map::size { m } → InlineMapSize. Separate from the { s }
-                    // block below because that one scans for the string
-                    // natives' parameter name; `map::size` declares `m`.
+                    // ── Single-field CONTAINER size, whatever the field is called ──
+                    // Every one of these answers `size` out of a stored count,
+                    // and they declare SIX different parameter names between
+                    // them — m, s, xs, d, b — which is why this used to be
+                    // three separate scans, one per name, and why seq, list and
+                    // bytes were in none of them.
                     if (mr.getFields().size() == 1
-                            && ("__native_map_size".equals(recName)
-                                || "__native_sorted_map_size".equals(recName))) {
-                        NodeIR mNode = null;
-                        for (FieldIR fld : mr.getFields()) {
-                            if ("m".equals(fld.getName())) mNode = fld.getValue();
-                        }
+                            && INLINE_SIZE_NATIVES.contains(recName)) {
+                        NodeIR mNode = mr.getFields().get(0).getValue();
                         if (mNode != null) {
+                            recordFusedEmit("inline-size:" + recName);
                             b.beginInlineMapSize();
                             emitNode(mNode, b, argCount, localMap);
                             b.endInlineMapSize();
@@ -3867,23 +3866,18 @@ public final class BytecodeCompiler {
                         }
                     }
                     // ── Single-field { d } Deque natives ──
+                    // `deque::size` is not here any more: it rides the
+                    // container-size set above, with the other seven.
                     if (mr.getFields().size() == 1
-                            && ("__native_deque_size".equals(recName)
-                                || "__native_deque_first".equals(recName))) {
+                            && "__native_deque_first".equals(recName)) {
                         NodeIR dNode = null;
                         for (FieldIR fld : mr.getFields()) {
                             if ("d".equals(fld.getName())) dNode = fld.getValue();
                         }
                         if (dNode != null) {
-                            if ("__native_deque_size".equals(recName)) {
-                                b.beginInlineMapSize();
-                                emitNode(dNode, b, argCount, localMap);
-                                b.endInlineMapSize();
-                            } else {
-                                b.beginInlineDequeFirst();
-                                emitNode(dNode, b, argCount, localMap);
-                                b.endInlineDequeFirst();
-                            }
+                            b.beginInlineDequeFirst();
+                            emitNode(dNode, b, argCount, localMap);
+                            b.endInlineDequeFirst();
                             return;
                         }
                     }
@@ -3899,15 +3893,6 @@ public final class BytecodeCompiler {
                                 b.beginInlineStringSize();
                                 emitNode(sNode, b, argCount, localMap);
                                 b.endInlineStringSize();
-                                return;
-                            }
-                            // set::size { s } → InlineMapSize. Declares `s`, so
-                            // it rides this scan rather than the `m` one above.
-                            if ("__native_set_size".equals(recName)
-                                    || "__native_sorted_set_size".equals(recName)) {
-                                b.beginInlineMapSize();
-                                emitNode(sNode, b, argCount, localMap);
-                                b.endInlineMapSize();
                                 return;
                             }
                             // str::trim/to_upper/to_lower/reverse/trim_start/trim_end → InlineStringUnary
@@ -4006,10 +3991,8 @@ public final class BytecodeCompiler {
                     return;
                 }
                 // map::size / set::size → InlineMapSize, same reasoning.
-                if ("__native_map_size".equals(name) || "__native_set_size".equals(name)
-                        || "__native_sorted_map_size".equals(name)
-                        || "__native_sorted_set_size".equals(name)
-                        || "__native_deque_size".equals(name)) {
+                if (INLINE_SIZE_NATIVES.contains(name)) {
+                    recordFusedEmit("inline-size:" + name);
                     b.beginInlineMapSize();
                     emitNode(arg0, b, argCount, localMap);
                     b.endInlineMapSize();
@@ -4358,6 +4341,27 @@ public final class BytecodeCompiler {
      * emits ReadFieldByName("eq") on a Long and dies in the @Fallback with
      * "Expected record for field 'eq', got: Long" (#346).
      */
+    /**
+     * The container-size natives that reach {@link
+     * MezzeBytecodeRootNode.InlineMapSize}, in ONE place.
+     *
+     * <p>This was three separate emitter scans keyed on the PARAMETER NAME —
+     * one for `m`, one for `s`, one for `d` — because these eight natives
+     * declare six different names for the same thing, and seq, list and bytes
+     * were in none of them. A set keyed on the native's own name cannot have
+     * that shape of hole: the operation dispatches on the container's TYPE, so
+     * what the parameter is called never mattered.
+     */
+    private static final java.util.Set<String> INLINE_SIZE_NATIVES = java.util.Set.of(
+            "__native_map_size",
+            "__native_set_size",
+            "__native_sorted_map_size",
+            "__native_sorted_set_size",
+            "__native_deque_size",
+            "__native_seq_size",
+            "__native_list_size",
+            "__native_bytes_size");
+
     private static InlineOp inlineOpFor(String opName) {
         return com.mezze.language.truffleir.InlineOpMapping.INSTANCE.forAbilityMethod(opName);
     }

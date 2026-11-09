@@ -39,6 +39,28 @@ object BytesOps {
         NativeHelpers.asLong(a.obj(i), name)
 
     // ==================== Bytes -> Bool ====================
+    /**
+     * AND `size`, WHICH WAS NOT HERE while `is_empty` directly below it was.
+     *
+     * MEASURED on `bench/cases/allocsurface` at n=1e7 and n=2e7, one kernel per
+     * process, converged, with the binary built by the DEV launcher so the
+     * interpreter in it is the one under test:
+     *
+     *     counted loop (control)    226 ps  x 1.0   2 young
+     *     map::size   (declared)    726     x 3.2   3
+     *     seq::size   (NOT)       8 522     x37.7  19
+     *     bytes::size (NOT)       8 893     x39.3  19
+     *
+     * 12x in time and 6.3x in allocation, and the line between them is exactly
+     * this table: an undeclared native is reached through
+     * `CallNativeIR(arg=MakeRecordIR(...))`, so a `MezzeRecord` is built per
+     * call and its one field looked up by name. `map::size` sits on
+     * `str::size` at the floor.
+     */
+    private val SIZE = NativeOp("__native_bytes_size",
+        listOf(Param("b", SlotKind.OBJECT)), SlotKind.LONG, pure = true,
+    ) { a -> BytesNatives.length(bytes(a, 0)) }
+
     private val IS_EMPTY = NativeOp("__native_bytes_is_empty",
         listOf(Param("b", SlotKind.OBJECT)), SlotKind.BOOLEAN, pure = true,
     ) { a -> BytesNatives.isEmpty(bytes(a, 0)) }

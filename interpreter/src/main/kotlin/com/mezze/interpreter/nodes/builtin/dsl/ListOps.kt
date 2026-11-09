@@ -45,6 +45,39 @@ object ListOps {
         NativeHelpers.asLong(a.obj(i), name)
 
     // ==================== List -> Bool ====================
+    /**
+     * AND `size`, WHICH WAS NOT HERE while `is_empty` directly below it was.
+     *
+     * MEASURED on `bench/cases/allocsurface` at n=1e7 and n=2e7, one kernel per
+     * process, converged, with the binary built by the DEV launcher so the
+     * interpreter in it is the one under test:
+     *
+     *     counted loop (control)    226 ps  x 1.0   2 young
+     *     map::size   (declared)    726     x 3.2   3
+     *     seq::size   (NOT)       8 522     x37.7  19
+     *     bytes::size (NOT)       8 893     x39.3  19
+     *
+     * 12x in time and 6.3x in allocation, and the line between them is exactly
+     * this table: an undeclared native is reached through
+     * `CallNativeIR(arg=MakeRecordIR(...))`, so a `MezzeRecord` is built per
+     * call and its one field looked up by name. `map::size` sits on
+     * `str::size` at the floor.
+     */
+    /**
+     * `size` IS NOT DECLARED HERE, and must not be.
+     *
+     * It is part of `ChainCanonicalizer`'s vocabulary, every one of its match
+     * sites is guarded `&& !node.isScalarABI`, and `seq::map` + `size` is 1503x
+     * on the fused path — so declaring it does not merely fail to help, it makes
+     * the fuser REFUSE the chain with no diagnostic. `SeqOpsFusionGuardTest`
+     * fails the moment such a declaration lands, which is how this was caught.
+     *
+     * What `size` DOES get is the dedicated operation: the emitter maps
+     * `__native_list_size` to `InlineMapSize` on the RECORD ABI too, so the
+     * generic native dispatch is gone without the ABI changing. `bytes::size`,
+     * which the canonicalizer never mentions, keeps both halves and is 13.8x.
+     */
+
     private val IS_EMPTY = NativeOp("__native_list_is_empty",
         listOf(Param("xs", SlotKind.OBJECT)), SlotKind.BOOLEAN, pure = true,
     ) { a -> ListNatives.isEmpty(list(a, 0)) }
