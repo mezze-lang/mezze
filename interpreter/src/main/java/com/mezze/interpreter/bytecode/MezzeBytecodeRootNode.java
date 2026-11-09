@@ -3269,6 +3269,30 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Interpolation with EXACTLY ONE interpolated expression, which is the
+     * commonest shape by a wide margin: `"a$(x)"`, `"$(x)b"`, `"[$(x)]"`.
+     *
+     * <p>WHY A SEPARATE OPERATION. {@link InterpolateString} receives its
+     * values through a {@code @Variadic Object[]}, and the DSL allocates that
+     * array on every execution. With one value there is nothing to collect, so
+     * a fixed operand skips it: `bench/cases/allocsurface` had interpolation at
+     * 11 945 ps/iter with 25 young collections against `str::concat`'s 9 893
+     * and 17, and the variadic array is what the remaining eight are.
+     *
+     * <p>The two-element `parts` case still goes to `String.concat` for one
+     * total allocation; longer part lists size the builder exactly. See
+     * {@link #buildInterpolatedString}, which this shares.
+     */
+    @Operation
+    @ConstantOperand(type = String[].class)
+    public static final class InterpolateString1 {
+        @Specialization
+        public static String doOne(String[] parts, Object value) {
+            return buildInterpolatedString1(parts, value);
+        }
+    }
+
+    /**
      * Seq size equals compile-time N. Used by Seq patterns without a
      * rest — {@code [a, b, c]} matches only length-3 sequences.
      */
@@ -7819,6 +7843,35 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * chunks. Non-string expression values go through
      * {@link String#valueOf(Object)}.
      */
+    /**
+     * {@link #buildInterpolatedString} for exactly one value, with no array to
+     * read it out of. Same three routes and the same reasons; see there.
+     */
+    @TruffleBoundary
+    private static String buildInterpolatedString1(String[] parts, Object value) {
+        if (value instanceof String v) {
+            if (parts.length == 2) {
+                // One literal and one value: `String.concat` allocates once.
+                // Not `+`, whose `StringConcatHelper` is on native-image's
+                // runtime-compilation blocklist.
+                return parts[0] == null ? v.concat(parts[1]) : parts[0].concat(v);
+            }
+            int len = v.length();
+            for (String p : parts) if (p != null) len += p.length();
+            StringBuilder sb = new StringBuilder(len);
+            for (String p : parts) sb.append(p != null ? p : v);
+            return sb.toString();
+        }
+        int estimate = 16;
+        for (String p : parts) if (p != null) estimate += p.length();
+        StringBuilder sb = new StringBuilder(estimate);
+        for (String p : parts) {
+            if (p == null) sb.append(String.valueOf(value));
+            else sb.append(p);
+        }
+        return sb.toString();
+    }
+
     @TruffleBoundary
     private static String buildInterpolatedString(String[] parts, Object[] exprValues) {
         // EVERY VALUE ALREADY A STRING is the common case — `"a$(b)"` on text,

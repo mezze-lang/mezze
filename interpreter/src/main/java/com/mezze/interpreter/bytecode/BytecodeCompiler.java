@@ -3143,7 +3143,12 @@ public final class BytecodeCompiler {
                 StringPartIR p = is.getParts().get(i);
                 parts[i] = (p instanceof StringPartIR.Lit lit) ? lit.getValue() : null;
             }
-            b.beginInterpolateString(parts);
+            int exprParts = 0;
+            for (StringPartIR p : is.getParts()) if (p instanceof StringPartIR.Expr) exprParts++;
+            // ONE expression takes the fixed-arity operation, which has no
+            // variadic array to allocate. See InterpolateString1.
+            boolean one = exprParts == 1;
+            if (one) b.beginInterpolateString1(parts); else b.beginInterpolateString(parts);
             for (StringPartIR p : is.getParts()) {
                 if (p instanceof StringPartIR.Expr e) {
                     // Wrap suspend-capable parts so a MezzeSuspend flows
@@ -3160,7 +3165,7 @@ public final class BytecodeCompiler {
                     }
                 }
             }
-            b.endInterpolateString();
+            if (one) b.endInterpolateString1(); else b.endInterpolateString();
             return;
         }
         if (node instanceof CallIndirectIR ci) {
