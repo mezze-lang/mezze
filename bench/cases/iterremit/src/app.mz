@@ -70,6 +70,14 @@ let k_rec_seq = { rs, n } -> seq::fold {
   f = { acc, x } -> acc + x.n,
 }
 
+
+## ── unfold with NO stages: isolates the SOURCE from the stage chain ─────────
+let k_unfold_bare = { n } -> iter::unfold {
+    state = 0,
+    step = { s } -> if s >= n then Done else Yield { val = s + 1, next = s + 1 },
+  }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
 pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
   let args = argv {}
   let k = arg_at { args = args, i = 0, def = 1 }
@@ -109,6 +117,17 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
     report { name = "3 iter   record    ", n = n, r = time_it { f = {} -> k_rec_iter { rs = rs, n = n } } }
     report { name = "3 iter   record    ", n = n, r = time_it { f = {} -> k_rec_iter { rs = rs, n = n } } }
     report { name = "3 iter   record    ", n = n, r = time_it { f = {} -> k_rec_iter { rs = rs, n = n } } }
+  else if k == 5 then do
+    k_unfold_bare { n = n }
+    k_unfold_bare { n = n }
+    k_unfold_bare { n = n }
+    k_unfold_bare { n = n }
+    k_unfold_bare { n = n }
+    report { name = "5 unfold no stages ", n = n, r = time_it { f = {} -> k_unfold_bare { n = n } } }
+    report { name = "5 unfold no stages ", n = n, r = time_it { f = {} -> k_unfold_bare { n = n } } }
+    report { name = "5 unfold no stages ", n = n, r = time_it { f = {} -> k_unfold_bare { n = n } } }
+    report { name = "5 unfold no stages ", n = n, r = time_it { f = {} -> k_unfold_bare { n = n } } }
+    report { name = "5 unfold no stages ", n = n, r = time_it { f = {} -> k_unfold_bare { n = n } } }
   else do
     let rs = seq::map { xs = seq::range { start = 0, end = n }, f = { x } -> { n = x } }
     k_rec_seq { rs = rs, n = n }
