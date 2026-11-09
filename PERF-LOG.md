@@ -11227,3 +11227,133 @@ by unzipping the app jar and grepping `BytecodeCompiler.class` for a string only
 the current tree has. `MEZZE_HOME=` is not sufficient and `.ab-cli` is
 actively misleading, because both report on the CLI and the stale part is the
 runtime.
+
+### LEDGER UPDATE 2026-11-09 (later) — the collection surface, measured on a binary that contains the interpreter under test
+
+Everything below is measured on a bench built by `cli/build/install/mez/bin/mez`
+and verified by unzipping the app jar, for the reason the retraction above
+gives. Three changes landed, all converged across n=1e7 and n=2e7, one kernel
+per process, with the counted loop flat at 218-254 ps throughout.
+
+#### `size` — 14.1x on Bytes, 3.8x on Seq
+
+The emitter's `InlineMapSize` cases were keyed on the PARAMETER NAME: one scan
+for `m`, one for `s`, one for `d`. These eight natives declare six different
+names for the same thing, so seq, list and bytes were in none of them and every
+`size` call went through the generic native. Keyed on the native's own name
+instead — the operation dispatches on the container's TYPE, so what the
+parameter is called never mattered — and the operation widened from five
+receiver shapes to nine.
+
+| row | before | after | young |
+|---|---|---|---|
+| `bytes::size` | 8 893 ps | **630** | 19 -> 3 |
+| `seq::size` | 8 522 | **2 217** | 19 -> 3 |
+| `map::size` (reference) | | 672 | 3 |
+| `str::size` (reference) | | 577 | 3 |
+| counted loop (control) | | 234 | 3 |
+
+The young-collection count falls to the control's, so the per-call
+`MezzeRecord` is gone rather than cheaper.
+
+**AND ONLY `bytes::size` MAY BE DECLARED, which a guard test is the reason
+for.** Declaring all five was tried first and `SeqOpsFusionGuardTest` refused
+it: `size` is in `ChainCanonicalizer`'s vocabulary, every one of its match sites
+is guarded `&& !node.isScalarABI`, and `seq::map` + `size` is 1503x on the fused
+path. Not theoretical — the full suite with those four declared failed
+`IterMapElementKindTest > a range mapped to Str collects into a list of Str`, so
+the lost fusion changed an ANSWER. `bytes` is safe because the canonicalizer
+contains no reference to `__native_bytes_` at all. Declaring bought 2.2x on top
+of the operation for bytes; for seq it measured 2 182 declared against 2 217
+not, so dropping the four cost ~2%.
+
+#### `is_empty` — 5.22x on Bytes, 1.42x on Seq
+
+All eight were DECLARED and none had an operation: one step further along the
+same half-finished road, with the per-call record already gone and the generic
+scalar native's boundary still there. `InlineContainerIsEmpty` is the Bool peer
+of `InlineMapSize` over the same nine shapes.
+
+| row | base | with the operation | | young |
+|---|---|---|---|---|
+| `bytes::is_empty` | 3 569 ps | **684** | 5.22x | 13 -> 3 |
+| `seq::is_empty` | 3 525 | **2 489** | 1.42x | 12 -> 3 |
+| counted loop (control) | 220 | 226 | 0.97x | |
+| `map::size` (control) | 622 | 711 | 0.87x | |
+
+Read the second control as a caution: a row nothing touched moved 0.87x, so
+this instrument's floor was ~15% that day. `is_empty` is NOT in the fuser's
+vocabulary, so unlike `size` it carries no fusion risk for any container.
+
+And `map::is_empty` / `set::is_empty` never reach their is_empty native at all —
+the stdlib writes them `size { … } == 0`, so they ride the SIZE operation and
+were already fixed by the previous change. The first version of the test assumed
+otherwise and the seam said so.
+
+#### The indexed reads — ONE of the three, and the other two are a regression
+
+Removing the `@TruffleBoundary` so a recognised container's read is a bounds
+test and one array load looks free for all three. It is not:
+
+| row | boundary | inline | |
+|---|---|---|---|
+| `bytes::get` | 3 184 ps | **2 092** | 1.52x |
+| `seq::get` | 3 716 | 4 781 | **0.78x** |
+| `list::get` | 3 024 | 4 250 | **0.71x** |
+
+Confirmed three-way with seq and list put back, so the regressions are shown to
+RETURN rather than assumed to: `bytes::get` 3 210 -> 2 230 (1.44x), `seq::get`
+3 824 -> 3 650 (1.05x), `list::get` 2 995 -> 3 051 (0.98x), control 1.01x.
+
+A recognised `MezzeBytes` read is `data[i]` on a final `byte[]` — nothing
+polymorphic, nothing to box. `MezzeSeq.get` is a polymorphic `SeqStorage` call
+that boxes, and a list read is a loop over sealed-interface calls; inlining
+either grows the caller's graph for a read that does not get cheaper. **A
+boundary can be load-bearing in the GOOD direction**, and this is the second
+instance in this ledger.
+
+`IndexedReadBoundaryTest` asserts the ANNOTATIONS by reflection, because all
+three shapes compute the same answers either way: a value test is green
+whichever side of the split a read is on, and finishing the job on the other two
+would lose 1.3-1.4x silently.
+
+#### Where the surface stands now
+
+| row | ps/iter | x control |
+|---|---|---|
+| counted loop | 226 | 1.0 |
+| `str::size` | 577 | 2.6 |
+| `map::size` | 672 | 3.0 |
+| `bytes::size` | 630 | 2.8 |
+| `bytes::is_empty` | 684 | 3.0 |
+| `map::contains_key` | 2 183 | 9.7 |
+| `set::contains` | 2 207 | 9.8 |
+| `seq::size` | 2 217 | 9.8 |
+| `bytes::get` | 2 230 | 9.9 |
+| `map::get` | 2 919 | 12.9 |
+| `list::get` | 2 995 | 13.3 |
+| `seq::get` | 3 650 | 16.1 |
+
+Everything that reads a stored COUNT is now at 2.6-3.0x. Everything that reads
+an ELEMENT or probes a KEY is at 9.7-16.1x, and that band is what is left.
+
+#### What the band is, as far as it is known
+
+- **The keyed probes.** `map::contains_key` is 2 183 ps against `map::size`'s
+  672 on a ONE-ENTRY map, where the probe is a single `Objects.equals`. The
+  1 500 ps between them is the `MapStorage` interface call, which is
+  megamorphic process-wide. The long-keyed-storage fast path that would make
+  that receiver concrete was tried and measured null — but it guarded on the
+  TRIE storages and `allocsurface`'s map is a `SingleEntryMapStorage`, so it
+  never applied to the kernel it was measured on. That is a second reason the
+  null result says nothing, independent of the stale runtime, and the retest
+  needs the guard widened to the small storages or a bench row with 1 000 keys.
+- **`seq::size` at 9.8x** where `bytes::size` is 2.8x, with the same operation
+  and the same emit path: `MezzeSeq.size()` goes through the `SeqStorage`
+  interface where `MezzeBytes.length()` reads a final field. The same
+  interface-call cost as the keyed probes, on a row with nothing else in it —
+  which makes `seq::size` the cleanest available probe of it.
+- **180 collection natives are still undeclared**: sorted 97, iter 32, nel 30,
+  buffer 21, none of them with a `*Ops.kt` file. `ChainCanonicalizer` mentions
+  neither `__native_nel_` nor `__native_sorted_map_`, so those two families
+  carry no fusion risk; `sorted_set` and `iter` do, op by op.
