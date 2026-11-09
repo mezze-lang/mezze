@@ -165,6 +165,73 @@ class ContainerSizeInlineTest {
         ))
     }
 
+    private fun isEmptyNativesEmitted(): List<String> =
+        emitted.filter { it.startsWith("inline-is-empty:") }
+            .map { it.removePrefix("inline-is-empty:") }
+
+    /**
+     * `is_empty` WAS IN THE SAME POSITION, one step further on: all eight were
+     * DECLARED and none had an operation, so the per-call record was already
+     * gone and the generic scalar native's `@TruffleBoundary` was not.
+     *
+     * MEASURED interleaved, two builds from identical source but for the
+     * operation, BOTH ARMS VERIFIED BY UNZIP to contain or not contain it
+     * (`InlineContainerIsEmpty`: 37 references against 0), n=2e7, min of 3:
+     *
+     * | row | base | with the operation | | young |
+     * |---|---|---|---|---|
+     * | `bytes::is_empty` | 3 569 ps | **684** | 5.22x | 13 -> 3 |
+     * | `seq::is_empty`   | 3 525    | **2 489** | 1.42x | 12 -> 3 |
+     * | counted loop (control) | 220 | 226 | 0.97x | |
+     *
+     * `is_empty` is NOT in `NativeHofNames`'s vocabulary, so unlike `size` it
+     * carries no fusion risk for any container.
+     */
+    @Test
+    fun `seq and bytes is_empty reach the inline operation`() {
+        assertEquals(1L, MezzeTestHelper.run(
+            """
+            use std::collections::seq
+            use std::collections::bytes
+            if seq::is_empty { xs = [1, 2] } then 0 else if bytes::is_empty { b = bytes::from_seq { arr = [1] } } then 0 else 1
+            """.trimIndent()
+        ))
+        val seen = isEmptyNativesEmitted()
+        assertTrue("__native_seq_is_empty" in seen, "seq::is_empty missed: $emitted")
+        assertTrue("__native_bytes_is_empty" in seen, "bytes::is_empty missed: $emitted")
+    }
+
+    /**
+     * AND `map::is_empty` / `set::is_empty` DO NOT USE THEIR is_empty NATIVE
+     * AT ALL: the stdlib writes them `size { … } == 0`, so they ride the SIZE
+     * operation and `__native_map_is_empty` is only reachable from a direct
+     * call. Asserted, because the first version of this test assumed otherwise
+     * and the seam said so — and because it means those two were already fixed
+     * by the size work.
+     */
+    @Test
+    fun `map set list and deque is_empty reach the inline operation`() {
+        assertEquals(4L, MezzeTestHelper.run(
+            """
+            use std::collections::map
+            use std::collections::set
+            use std::collections::list
+            use std::collections::deque
+            use std::collections::seq
+            (if map::is_empty { m = map::empty {} } then 1 else 0) + (if set::is_empty { s = set::from_seq { xs = [1] } } then 0 else 1) + (if list::is_empty { xs = list::from_seq { xs = [1] } } then 0 else 1) + (if deque::is_empty { d = deque::from_seq { xs = [1] } } then 0 else 1)
+            """.trimIndent()
+        ))
+        val seen = isEmptyNativesEmitted()
+        for (n in listOf("__native_list_is_empty", "__native_deque_is_empty")) {
+            assertTrue(n in seen, "$n missed: $emitted")
+        }
+        // These two are `size { … } == 0` in the stdlib, so they reach the SIZE
+        // operation instead and their is_empty native is never emitted here.
+        val sizes = sizeNativesEmitted()
+        assertTrue("__native_map_size" in sizes, "map::is_empty should ride size: $emitted")
+        assertTrue("__native_set_size" in sizes, "set::is_empty should ride size: $emitted")
+    }
+
     /**
      * AND THE FUSED CHAIN STILL FUSES. `seq::map` + `size` is the 1503x path
      * the guard test protects; if the emitter change had cost it, this is the

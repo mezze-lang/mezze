@@ -413,6 +413,33 @@ let go_n5 = { i, acc, k } ->
   else go_n5 { i = i - 1, acc = acc + i + k, k = k }
 let k_nest_seeded = { n } -> go_n5 { i = n, acc = 0, k = n }
 
+
+## 26/27. `is_empty`, which is `size`'s Bool peer and was in the same position.
+##
+## All eight container `is_empty` natives are DECLARED and none of them had a
+## dedicated operation — so the per-call `MezzeRecord` was already gone and the
+## generic scalar native's `@TruffleBoundary` was not. That is exactly where
+## `size` sat between its declaration and its operation: 4 107 ps for
+## `seq::size` against 2 182 once the operation existed.
+##
+## Two rows because the answer must not be foldable: both containers are built
+## outside the timed loop from argv-derived data, so neither emptiness is a
+## compile-time constant. The accumulator counts the `False`s, so a row that
+## stopped calling would read a different checksum.
+let go_ie = { i, acc, xs } ->
+  if i <= 0 then acc
+  else go_ie { i = i - 1, xs = xs,
+               acc = acc + (if seq::is_empty { xs = xs } then 0 else 1) }
+let k_seq_is_empty = { n } -> go_ie { i = n, acc = 0, xs = seq::range { start = 1, end = 3 } }
+
+let go_ib = { i, acc, b } ->
+  if i <= 0 then acc
+  else go_ib { i = i - 1, b = b,
+               acc = acc + (if bytes::is_empty { b = b } then 0 else 1) }
+let k_bytes_is_empty = { n } -> go_ib {
+  i = n, acc = 0, b = bytes::from_seq { arr = seq::range { start = 1, end = 3 } },
+}
+
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
 
@@ -520,4 +547,12 @@ pub let main = {} -> perform Console in perform SystemArgs in do
     k_nest_seeded { n = n }
     report { name = "25 nest seeded ", n = n, r = time_it { f = {} -> k_nest_seeded { n = n } } }
     report { name = "25 nest seeded ", n = n, r = time_it { f = {} -> k_nest_seeded { n = n } } }
+  else if k == 26 then do
+    k_seq_is_empty { n = n }
+    report { name = "26 seq is_empty", n = n, r = time_it { f = {} -> k_seq_is_empty { n = n } } }
+    report { name = "26 seq is_empty", n = n, r = time_it { f = {} -> k_seq_is_empty { n = n } } }
+  else if k == 27 then do
+    k_bytes_is_empty { n = n }
+    report { name = "27 bytes is_empty", n = n, r = time_it { f = {} -> k_bytes_is_empty { n = n } } }
+    report { name = "27 bytes is_empty", n = n, r = time_it { f = {} -> k_bytes_is_empty { n = n } } }
   else println { msg = "unknown kernel" }

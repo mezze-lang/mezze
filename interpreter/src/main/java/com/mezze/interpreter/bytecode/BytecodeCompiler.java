@@ -3819,6 +3819,17 @@ public final class BytecodeCompiler {
                     // three separate scans, one per name, and why seq, list and
                     // bytes were in none of them.
                     if (mr.getFields().size() == 1
+                            && INLINE_IS_EMPTY_NATIVES.contains(recName)) {
+                        NodeIR eNode = mr.getFields().get(0).getValue();
+                        if (eNode != null) {
+                            recordFusedEmit("inline-is-empty:" + recName);
+                            b.beginInlineContainerIsEmpty();
+                            emitNode(eNode, b, argCount, localMap);
+                            b.endInlineContainerIsEmpty();
+                            return;
+                        }
+                    }
+                    if (mr.getFields().size() == 1
                             && INLINE_SIZE_NATIVES.contains(recName)) {
                         NodeIR mNode = mr.getFields().get(0).getValue();
                         if (mNode != null) {
@@ -3996,6 +4007,13 @@ public final class BytecodeCompiler {
                     b.beginInlineMapSize();
                     emitNode(arg0, b, argCount, localMap);
                     b.endInlineMapSize();
+                    return;
+                }
+                if (INLINE_IS_EMPTY_NATIVES.contains(name)) {
+                    recordFusedEmit("inline-is-empty:" + name);
+                    b.beginInlineContainerIsEmpty();
+                    emitNode(arg0, b, argCount, localMap);
+                    b.endInlineContainerIsEmpty();
                     return;
                 }
                 // deque::first → InlineDequeFirst
@@ -4361,6 +4379,28 @@ public final class BytecodeCompiler {
             "__native_seq_size",
             "__native_list_size",
             "__native_bytes_size");
+
+    /**
+     * The container `is_empty` natives, in ONE place — the Bool peer of
+     * {@link #INLINE_SIZE_NATIVES}, and declared the same way for the same
+     * reason: the operation dispatches on the container's TYPE, so keying this
+     * on the native's name rather than on its parameter name is what keeps a
+     * container from being left out of it.
+     *
+     * <p>The MUT ones are deliberately absent: `__native_mut_deque_is_empty`
+     * and `__native_mut_string_is_empty` take a mutable value, which this
+     * operation has no specialization for and which is not a container in the
+     * sense the others are.
+     */
+    private static final java.util.Set<String> INLINE_IS_EMPTY_NATIVES = java.util.Set.of(
+            "__native_map_is_empty",
+            "__native_set_is_empty",
+            "__native_sorted_map_is_empty",
+            "__native_sorted_set_is_empty",
+            "__native_deque_is_empty",
+            "__native_seq_is_empty",
+            "__native_list_is_empty",
+            "__native_bytes_is_empty");
 
     private static InlineOp inlineOpFor(String opName) {
         return com.mezze.language.truffleir.InlineOpMapping.INSTANCE.forAbilityMethod(opName);

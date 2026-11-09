@@ -6761,6 +6761,69 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+
+    /**
+     * `is_empty`, for every container that answers it — the Bool peer of
+     * {@link InlineMapSize}.
+     *
+     * <p>All eight of these were DECLARED and none had an operation, which is
+     * the half-finished position `size` was in: the declaration removes the
+     * per-call `MezzeRecord`, and without an operation the call still goes
+     * through the generic scalar native, whose `@TruffleBoundary` makes it
+     * PE-opaque. Each body here is the same delegate the native runs.
+     *
+     * <p>The `Object[]` case is not optional, for the reason given on
+     * {@link InlineMapSize}: a seq is EITHER a `MezzeSeq` OR a bare array.
+     */
+    @Operation
+    public static final class InlineContainerIsEmpty {
+        @Specialization
+        public static boolean doMap(com.mezze.datastructures.map.MezzeMap<?, ?> m) {
+            return m.isEmpty();
+        }
+
+        @Specialization
+        public static boolean doSet(com.mezze.datastructures.set.MezzeSet<?> s) {
+            return s.isEmpty();
+        }
+
+        @Specialization
+        public static boolean doSortedMap(com.mezze.datastructures.sorted.MezzeSortedMap<?, ?> m) {
+            return m.isEmpty();
+        }
+
+        @Specialization
+        public static boolean doSortedSet(com.mezze.datastructures.sorted.MezzeSortedSet<?> s) {
+            return s.isEmpty();
+        }
+
+        @Specialization
+        public static boolean doDeque(com.mezze.datastructures.deque.MezzeDeque<?> d) {
+            return d.isEmpty();
+        }
+
+        @Specialization
+        public static boolean doSeq(com.mezze.datastructures.seq.MezzeSeq<?> xs) {
+            return xs.isEmpty();
+        }
+
+        @Specialization
+        public static boolean doObjectArray(Object[] xs) {
+            return xs.length == 0;
+        }
+
+        @Specialization
+        public static boolean doList(com.mezze.datastructures.list.MezzeList<?> xs) {
+            return xs.isEmpty();
+        }
+
+        @Specialization
+        public static boolean doBytes(
+                com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes b) {
+            return b.isEmpty();
+        }
+    }
+
     /** Null check — used by the fused MutGetRaw + match pattern. */
     @Operation
     public static final class IsNotNull {
