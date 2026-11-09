@@ -1456,7 +1456,17 @@ class ConstraintGenerator(
                 effects = bodyEffectRow
             )
             // #180: refresh the registered InherentMethodInfo with the body-derived FunctionType
-            if (methodInfo != null && bodyEffectRow != null) {
+            //
+            // Not gated on `bodyEffectRow != null` any more. That gate asked
+            // whether the method performs effects ITSELF, which is the wrong
+            // question: a method that performs nothing but RETURNS something
+            // effectful — `make = { it: P } -> ({} -> Tick.tick {})` — kept the
+            // stale registration made before its body was seen, whose return
+            // carried no row. Applying what it returned then performed an effect
+            // nothing had recorded. The body is the definition of an inherent
+            // method, so the body-derived type is the better answer whether or
+            // not the method's own row is empty.
+            if (methodInfo != null) {
                 val refreshedInfo = methodInfo.copy(methodType = implFunctionType)
                 currentContext = currentContext.extendWithAnonymousMethod(refreshedInfo)
             }

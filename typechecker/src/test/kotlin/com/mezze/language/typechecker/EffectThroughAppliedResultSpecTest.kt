@@ -124,6 +124,85 @@ class EffectThroughAppliedResultSpecTest : VariantSpecBase() {
         )
     }
 
+    // ───────────── the INHERENT spelling, which had a SECOND cause
+
+    /**
+     * `impl P where { make = … }` laundered for a different reason, and the fix
+     * above did not touch it: post-solve its callee resolved to
+     * `FunctionType(pure)`, so the row was genuinely gone rather than merely
+     * unseen.
+     *
+     * The cause was a gate on the `#180` refresh of the registered
+     * `InherentMethodInfo`: `if (methodInfo != null && bodyEffectRow != null)`.
+     * That asks whether the method performs effects ITSELF — the wrong question.
+     * A method performing nothing but RETURNING something effectful has an empty
+     * `bodyEffectRow`, so the refresh was skipped and the registration made
+     * before the body was seen stood, with no row on its return. An inherent
+     * method's body IS its definition, so the body-derived type is the better
+     * answer either way.
+     */
+    @Test fun `applying an inherent method's returned function raises its row`() {
+        rejects(
+            """
+            use std::int
+            $eff
+            type P = { x: Int }
+            impl P where { make = { it: P } -> ({} -> Tick.tick {}) }
+            pub let x: { p: P } -> Int = { p } -> p.make {} {}
+            $MAIN
+            """,
+            "T0210",
+            "The inherent twin of the ability case, with its own cause — the " +
+                "registered method type kept no row on its return.",
+        )
+    }
+
+    @Test fun `the inherent method's true row is writeable`() {
+        accepts(
+            """
+            use std::int
+            $eff
+            type P = { x: Int }
+            impl P where { make = { it: P } -> ({} -> Tick.tick {}) }
+            pub let x: { p: P } -> Int <Tick> = { p } -> p.make {} {}
+            $MAIN
+            """,
+            "Same requirement as the ability case: refusing the lie is only half a " +
+                "fix if the truth is also refused.",
+        )
+    }
+
+    /** Guards: refreshing every registration must not invent rows. */
+    @Test fun `a pure inherent method stays pure`() {
+        accepts(
+            """
+            use std::int
+            $eff
+            type P = { x: Int }
+            impl P where { make = { it: P } -> ({} -> 7) }
+            pub let x: { p: P } -> Int = { p } -> p.make {} {}
+            $MAIN
+            """,
+            "The refresh is now unconditional, so this pins that it carries only " +
+                "what the body actually has.",
+        )
+    }
+
+    @Test fun `an inherent method that performs directly keeps its own row`() {
+        accepts(
+            """
+            use std::int
+            $eff
+            type P = { x: Int }
+            impl P where { go = { it: P } -> Tick.tick {} }
+            pub let x: { p: P } -> Int <Tick> = { p } -> p.go {}
+            $MAIN
+            """,
+            "The case the old gate was written for — a method whose OWN body " +
+                "performs — must keep working now the gate is gone.",
+        )
+    }
+
     /** A pure returned function must NOT gain a row — the fix only adds what is there. */
     @Test fun `applying a pure returned function stays pure`() {
         accepts(
