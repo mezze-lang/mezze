@@ -239,6 +239,67 @@ let k_bytes_get = { n } -> go_b {
   b = bytes::from_seq { arr = seq::range { start = 1, end = 3 } },
 }
 
+
+## 16/17. THE SAME OPERATION TWICE PER ITERATION — a discriminator, not a row.
+##
+## `map::size` costs 8 846 ps and `str::size` 532 for the same shape of work:
+## one declared native, one operand, a stored count out of a container, both on
+## a dedicated PE-transparent operation. The ledger has carried that 17x as an
+## open puzzle with the ABI and the storage interface call both RULED OUT by
+## measurement, and it was read as a per-call cost all along.
+##
+## It need not be one. A loop-invariant receiver means a PURE read can be
+## HOISTED OUT of the loop entirely, in which case kernel 12 measures an add and
+## not a call at all — and the whole 17x would be an artefact of comparing a
+## hoisted operation against one that cannot be.
+##
+## CALLING IT TWICE SPLITS THAT. If the call is hoisted, two calls cost what one
+## does. If it is paid per call, two cost twice. Nothing else about the loop
+## changes: same parameters, same condition, one extra add either way (and
+## kernel 1 says an add is ~0.2 ns, so the add cannot carry the result).
+let go_y2 = { i, acc, s } ->
+  if i <= 0 then acc
+  else go_y2 { i = i - 1, acc = acc + str::size { s = s } + str::size { s = s }, s = s }
+let k_str_size_2x = { n } -> go_y2 {
+  i = n, acc = 0,
+  s = str::substring { s = int::to_str { n = n }, start = 0, end = 1 },
+}
+
+let go_z2 = { i, acc, m } ->
+  if i <= 0 then acc
+  else go_z2 { i = i - 1, acc = acc + map::size { m = m } + map::size { m = m }, m = m }
+let k_map_size_2x = { n } -> go_z2 { i = n, acc = 0, m = map::insert { m = map::empty {}, k = 1, v = 1 } }
+
+
+## 18/19. `size` ON A CONCRETE TYPE AGAINST `size` ON A GENERIC ONE.
+##
+## JFR says the `map::size` loop allocates a `MezzeRecord` PER ITERATION, which
+## means the call is not reaching `InlineMapSize` at all — it is building the
+## argument record the scalar ABI exists to avoid. `str::size` in the same loop
+## shape allocates nothing and costs 0.5 ns against map's 8.8.
+##
+## The two signatures differ in ONE way:
+##
+##     pub let size: { s: Str }        -> Int        -- concrete
+##     pub let size: { m: Map 'k 'v }  -> Int        -- generic
+##
+## so the question is whether a GENERIC callee is what loses the scalar call.
+## `bytes::size` settles it: `Bytes` is concrete and has no type parameters, so
+## if genericity is the cause this row sits with `str::size`, and if it does not
+## this row sits with `map::size` and the cause is something about collections.
+## `seq::size` is the generic control beside it.
+let go_bs = { i, acc, b } ->
+  if i <= 0 then acc
+  else go_bs { i = i - 1, acc = acc + bytes::size { b = b }, b = b }
+let k_bytes_size = { n } -> go_bs {
+  i = n, acc = 0, b = bytes::from_seq { arr = seq::range { start = 1, end = 2 } },
+}
+
+let go_ss = { i, acc, xs } ->
+  if i <= 0 then acc
+  else go_ss { i = i - 1, acc = acc + seq::size { xs = xs }, xs = xs }
+let k_seq_size = { n } -> go_ss { i = n, acc = 0, xs = seq::range { start = 1, end = 2 } }
+
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
 
@@ -306,4 +367,20 @@ pub let main = {} -> perform Console in perform SystemArgs in do
     k_bytes_get { n = n }
     report { name = "15 bytes get   ", n = n, r = time_it { f = {} -> k_bytes_get { n = n } } }
     report { name = "15 bytes get   ", n = n, r = time_it { f = {} -> k_bytes_get { n = n } } }
+  else if k == 16 then do
+    k_str_size_2x { n = n }
+    report { name = "16 str size x2 ", n = n, r = time_it { f = {} -> k_str_size_2x { n = n } } }
+    report { name = "16 str size x2 ", n = n, r = time_it { f = {} -> k_str_size_2x { n = n } } }
+  else if k == 17 then do
+    k_map_size_2x { n = n }
+    report { name = "17 map size x2 ", n = n, r = time_it { f = {} -> k_map_size_2x { n = n } } }
+    report { name = "17 map size x2 ", n = n, r = time_it { f = {} -> k_map_size_2x { n = n } } }
+  else if k == 18 then do
+    k_bytes_size { n = n }
+    report { name = "18 bytes size  ", n = n, r = time_it { f = {} -> k_bytes_size { n = n } } }
+    report { name = "18 bytes size  ", n = n, r = time_it { f = {} -> k_bytes_size { n = n } } }
+  else if k == 19 then do
+    k_seq_size { n = n }
+    report { name = "19 seq size    ", n = n, r = time_it { f = {} -> k_seq_size { n = n } } }
+    report { name = "19 seq size    ", n = n, r = time_it { f = {} -> k_seq_size { n = n } } }
   else println { msg = "unknown kernel" }
