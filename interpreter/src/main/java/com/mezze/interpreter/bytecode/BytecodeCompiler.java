@@ -5711,34 +5711,56 @@ public final class BytecodeCompiler {
             // element pre-transform (e.g. acc + x*x → elemOp=MUL, elemSelfOp)
             // and no explicit Map stage was in the pipeline, inject it as the map.
             if (a.elemOp() != null) {
-                // The pipeline carries ONE map stage. With an explicit map already in
-                // it there is nowhere to put the element transform, and dropping it
-                // silently computes the wrong fold, so refuse and let the fallback run.
-                if (mapOp >= 0) return null;
-                // Nor with extra map stages: this transform is applied at the
-                // SINK, so it has to come after them, and the extras block runs
-                // after the primary slot it would occupy.
-                if (extraOps != 0) return null;
-                // AND IT MUST RUN AFTER EVERY FILTER. This transform belongs to the
-                // SINK -- in `acc + x * x` the square is part of the fold, not a
-                // stage -- so the filter sees the RAW element. Riding in the map slot
-                // it would run first, because `filterFirst` is only set in the
-                // MapInline branch above and no explicit map stage was present to set
-                // it. `filter(x > 5).fold(0, {acc, x} -> acc + x * x)` over 0..10 then
-                // filtered on `x * x > 5` and returned 280 where the same pipeline
-                // with the square written as an explicit map returns 230.
+                // THIS TRANSFORM BELONGS TO THE SINK -- in `acc + x * x` the square
+                // is part of the fold, not a stage -- so it runs LAST: after every
+                // map, and after every filter.
                 //
-                // `filterFirst` means exactly "the filter goes before the map", which
-                // is the order this needs. It is false here whenever a filter exists,
-                // precisely because the branch that would have set it never ran.
+                // A filter that came after a map would have to sit between the maps
+                // and this, which the single extras block cannot express.
+                if (filterAfterMap) return null;
+                // AND AFTER THE FILTER. `filterFirst` means exactly "the filter goes
+                // before the map", which is the order this needs. When an explicit
+                // map preceded the filter, `filterAfterMap` above already refused;
+                // when the filter came first it is already set; and when there is no
+                // map at all it is false only because the branch that sets it never
+                // ran -- which was BUG 42: `filter(x > 5).fold(0, {acc,x} -> acc+x*x)`
+                // over 0..10 filtered on `x * x > 5` and returned 280 where the
+                // explicit-map spelling returns 230.
                 if (filterCmpOp >= 0) filterFirst = true;
-                mapOp = a.elemOp().ordinal();
-                selfMap = a.elemSelfOp();
-                if (!selfMap) {
-                    // A captured rhs arrives as a node (already lifted to the enclosing
-                    // frame); emitFLPOperand emits it in place of the literal.
-                    if (a.elemRhsNode() != null) mapNode = a.elemRhsNode();
-                    else mapLit = a.elemRhs();
+                if (mapOp < 0 && extraOps == 0) {
+                    // The primary slot is free. Keep this path: it is the only one
+                    // that can take a DYNAMIC rhs, which arrives as a node (already
+                    // lifted to the enclosing frame) and is emitted as a child.
+                    mapOp = a.elemOp().ordinal();
+                    selfMap = a.elemSelfOp();
+                    if (!selfMap) {
+                        if (a.elemRhsNode() != null) mapNode = a.elemRhsNode();
+                        else mapLit = a.elemRhs();
+                    }
+                } else {
+                    // AN EXPLICIT MAP HOLDS THE SLOT, so the transform appends as the
+                    // LAST map stage -- which is where it belongs anyway.
+                    //
+                    // This used to `return null`, and that did not merely decline the
+                    // fast path: the chain then hit the blanket refusal below and fell
+                    // back to the REAL folder, unfused. `bench/cases/foldshape` at
+                    // n=2e7 measured the result at 14 024 ps/elem with 80 young
+                    // collections -- against 726 for the SAME pipeline with a DEEPER
+                    // body, which is not the "acc OP f(x)" shape at all and so takes
+                    // the generic loop's inline tree. A one-op transform was 19x
+                    // slower than a two-op one, a cliff pointing the wrong way.
+                    //
+                    // No algebra is involved: the transform is applied to the element
+                    // after the maps, exactly as written. (Reassociating is NOT
+                    // available here -- `acc + x * 2 - 1` parses as `(acc + x*2) - 1`,
+                    // and `Int` overflow RAISES, so moving the subtraction across the
+                    // accumulator changes WHICH operation overflows. That shape keeps
+                    // the tree.)
+                    if (!a.elemSelfOp() && a.elemRhsNode() != null) return null;
+                    if (extraLits.size() >= MezzeBytecodeRootNode.FLP_MAX_EXTRA_MAPS) return null;
+                    extraOps = MezzeBytecodeRootNode.flpPackExtraMap(
+                            extraOps, extraLits.size(), a.elemOp().ordinal(), a.elemSelfOp());
+                    extraLits.add(a.elemSelfOp() ? 0L : a.elemRhs());
                 }
             }
         } else if (mode instanceof FusedSinkMode.ShortCircuit sc) {

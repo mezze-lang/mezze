@@ -250,6 +250,163 @@ class CompoundFoldFusionTest {
         assertEquals(230L, out)
     }
 
+    // ──────── the transform when an explicit map holds the slot ────────
+
+    /**
+     * `map(f).fold(acc + x * k)` — a one-op element transform with an explicit
+     * map already in the pipeline.
+     *
+     * THE WORST ROW MEASURED ON THIS BRANCH, and it looked like the best. The
+     * transform used to `return null` on finding the slot taken, which did not
+     * merely decline the fast path: the chain then hit the blanket refusal and
+     * fell back to the REAL folder, unfused. `bench/cases/foldshape` at n=2e7
+     * read 13 863 ps/elem with 80 young collections against 95 and 4 —
+     * **145.9x**, and 151.1x again at 6e7, with both in-case controls at
+     * exactly 1.0x. For comparison the SAME pipeline with a DEEPER body reads
+     * 724: a one-op transform was 19x slower than a two-op one, a cliff
+     * pointing the wrong way.
+     *
+     * It now appends as the LAST map stage, which is where a sink-side
+     * transform belongs anyway. 0..4 mapped by `* 3` gives 0,3,6,9,12 and the
+     * folder doubles each, so 2 * 30 = 60.
+     */
+    @Test
+    fun `an element transform fuses even when an explicit map holds the slot`() {
+        val out = run(
+            """
+            let main = {} -> iter::range { start = 0, end = 5 }
+              .map { f = { x } -> x * 3 }
+              .fold { init = 0, f = { acc, x } -> acc + x * 2 }
+            main {}
+            """,
+        )
+        assertEquals(60L, out)
+        assertTrue("FusedLongRangePipeline+extraMaps" in emitted, "emitted: $emitted")
+    }
+
+    /**
+     * THE ORDER IS PINNED BY THE ANSWERS. The map runs first and the transform
+     * second, so `map(*3)` then `*2` is 6x and `map(*2)` then `*3` is also 6x —
+     * which would hide a swap. These use ADD against MUL instead, where the two
+     * orders disagree: `(x+1)*2` over 0..4 is 2+4+6+8+10 = 30, while `(x*2)+1`
+     * is 1+3+5+7+9 = 25.
+     */
+    @Test
+    fun `the map runs before the element transform, not after`() {
+        assertEquals(30L, run(
+            """
+            let main = {} -> iter::range { start = 0, end = 5 }
+              .map { f = { x } -> x + 1 }
+              .fold { init = 0, f = { acc, x } -> acc + x * 2 }
+            main {}
+            """,
+        ))
+        assertEquals(25L, run(
+            """
+            let main = {} -> iter::range { start = 0, end = 5 }
+              .map { f = { x } -> x * 2 }
+              .fold { init = 0, f = { acc, x } -> acc + x + 1 }
+            main {}
+            """,
+        ))
+    }
+
+    /** A SELF op as the transform, behind an explicit map: (x+1)^2 over 0..4 = 55. */
+    @Test
+    fun `a self op transform fuses behind an explicit map`() {
+        val out = run(
+            """
+            let main = {} -> iter::range { start = 0, end = 5 }
+              .map { f = { x } -> x + 1 }
+              .fold { init = 0, f = { acc, x } -> acc + x * x }
+            main {}
+            """,
+        )
+        assertEquals(55L, out)
+        assertTrue("FusedLongRangePipeline+extraMaps" in emitted, "emitted: $emitted")
+    }
+
+    /** TWO explicit maps and a transform: ((x+1)*2) then *3 over 0..4 = 90. */
+    @Test
+    fun `a transform appends after several maps`() {
+        val out = run(
+            """
+            let main = {} -> iter::range { start = 0, end = 5 }
+              .map { f = { x } -> x + 1 }
+              .map { f = { x } -> x * 2 }
+              .fold { init = 0, f = { acc, x } -> acc + x * 3 }
+            main {}
+            """,
+        )
+        assertEquals(90L, out)
+        assertTrue("FusedLongRangePipeline+extraMaps" in emitted, "emitted: $emitted")
+    }
+
+    /**
+     * A FILTER BEFORE the map. The transform still runs last, and the filter
+     * still sees the RAW element: keep x > 2 of 0..4 -> 3,4; map +1 -> 4,5;
+     * double -> 8,10 = 18. Filtering any later value would keep a different
+     * set.
+     */
+    @Test
+    fun `a filter before the map still sees the raw element`() {
+        val out = run(
+            """
+            let main = {} -> iter::range { start = 0, end = 5 }
+              .filter { p = { x } -> x > 2 }
+              .map { f = { x } -> x + 1 }
+              .fold { init = 0, f = { acc, x } -> acc + x * 2 }
+            main {}
+            """,
+        )
+        assertEquals(18L, out)
+    }
+
+    /**
+     * A FILTER AFTER the map. The transform belongs at the sink, so it must run
+     * after the filter — but the extras block runs BEFORE the second filter
+     * test, so this cannot be expressed and must be REFUSED rather than
+     * reordered. map +1 over 0..4 -> 1..5; keep > 2 -> 3,4,5; double -> 24.
+     * Running the transform before the filter would keep `2x > 2`, i.e. from
+     * x=1, and answer 28.
+     */
+    @Test
+    fun `a filter after the map refuses rather than reordering`() {
+        val out = run(
+            """
+            let main = {} -> iter::range { start = 0, end = 5 }
+              .map { f = { x } -> x + 1 }
+              .filter { p = { x } -> x > 2 }
+              .fold { init = 0, f = { acc, x } -> acc + x * 2 }
+            main {}
+            """,
+        )
+        assertEquals(24L, out)
+        assertTrue("FusedLongRangePipeline+extraMaps" !in emitted,
+            "a filter after the map must not ride the extras; emitted: $emitted")
+    }
+
+    /**
+     * SIZED PAST THE VECTOR THRESHOLD, because the extras block is applied by
+     * `FlpSimd` lanewise as well and that is a separate implementation. The
+     * oracle is computed in Kotlin.
+     */
+    @Test
+    fun `an element transform behind a map holds past the SIMD threshold`() {
+        val n = 4099
+        val expected = (0 until n).sumOf { (it.toLong() + 1L) * 2L }
+        val out = run(
+            """
+            let main = {} -> iter::range { start = 0, end = $n }
+              .map { f = { x } -> x + 1 }
+              .fold { init = 0, f = { acc, x } -> acc + x * 2 }
+            main {}
+            """,
+        )
+        assertEquals(expected, out)
+        assertTrue("FusedLongRangePipeline+extraMaps" in emitted, "emitted: $emitted")
+    }
+
     @Test
     fun `an impure fold body is declined, not mis-emitted`() {
         // A body that calls something is outside the grammar: it must fall back
