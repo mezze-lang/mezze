@@ -11834,3 +11834,99 @@ they open with `STATE.get()` on a plain `ThreadLocal` — so a compiled loop
 cannot inline either and pays two boundary crossings an iteration. A Truffle
 `ContextThreadLocal` is partial-evaluation friendly where a plain one is not,
 and that is the next thing to measure.
+
+#### The handler a content hash names cannot change — install/iter 1.61x more
+
+With the monitor gone, a fresh profile of the FIXED build named a frame nothing
+had looked at: `LookupParameterizedHandlerByHash.doLookup`, 137 of 476 samples,
+with `MezzeContext.lookupHandler` (54) and `getCachedStdlibCallTarget` (68)
+beneath it. The surviving `ConcurrentHashMap.get` samples (84) belong to THOSE
+two, not to the map I had just removed. `perform Ones {} in …` re-resolved its
+handler record on every install.
+
+A branch counter settled what the resolution actually does: **`via factory=0,
+via ctx=1`**. The stdlib-factory branch never answers for this shape — it costs
+one map probe and is discarded — and the answer comes from
+`MezzeContext.lookupHandler`. So the per-install cost is two
+`ConcurrentHashMap` probes whose keys are 64-character hex strings, which means
+a hit runs `String.equals` over all 64 characters, plus two context lookups.
+
+WHY THE RECORD IS CACHEABLE, which is the whole of the correctness argument.
+`handlersByHash` has exactly two writers: module load puts a `PerformerInfo`
+under the hash, and `lookupHandler` upgrades that entry in place to the inflated
+record the first time it is asked. Nothing removes an entry, nothing replaces a
+record, and the key is the content hash of the performer's structure — so a
+re-registration under the same hash cannot mean anything different. Once a hash
+resolves to a `MezzeRecord`, that record IS the answer for the life of the
+context. That branch also ignores `params`, which is why a cache of it may.
+
+The factory branch is NOT cacheable and is excluded by construction: it CALLS a
+guest factory with `params`, and a parameterized performer — `impl Sample for
+Recording { seed: Int, key: Int, size: Nat }` in std::property is a real one —
+needs a fresh handler per install.
+
+| row | baseline | per-site | n=1.5e7 | n=5e6 |
+|---|---|---|---|---|
+| `5 install/iter` | 45 277 ps | **28 103** | 1.61x | 1.61x |
+| `11 install/iter, no params` | 37 165 | **27 843** | 1.33x | 1.32x |
+| `6 abort/iter` | 107 389 | **85 630** | 1.25x | 1.29x |
+| `3 op, 1 install` (control) | 454 | 458 | 0.99x | 1.04x |
+| `1 control` | 209 | 208 | 1.00x | 1.02x |
+
+**The sound fix beat the ceiling probe**, 1.61x against 1.47x, and that is the
+useful part of the method. The probe short-circuited `doLookup` behind a static
+one-element cache — it still had to cross the `@TruffleBoundary` and read a
+static field. The real specialization is a node field partial evaluation folds.
+A hand-written probe measures the shape you wrote, not the shape the compiler
+can produce, so a ceiling built from one is a FLOOR when the optimisation
+changes what the compiler can see.
+
+ROW 11 IS NEW AND IT EXISTS BECAUSE THE RANKING WAS BLIND. Every impl in this
+bench is declared `for Ones {}` — with a parameter list, even an empty one — so
+every row went through the parameterized operation. A performer declared
+`for OnesBare`, with no list at all, emits a DIFFERENT operation,
+`LookupHandlerByHash`, which no row reached and which paid the same per-install
+probe. It was also cheaper to begin with (37 165 against 45 277: one lookup
+instead of two), and both forms now land at ~28 000.
+
+Cumulatively on this row, with the memo and the monitor: 54 044 → 28 103, 1.92x.
+
+NO GUARD ON THE HASH, deliberately. It is a `@ConstantOperand`, so a site
+carries exactly one hash and a per-site cache can never be asked about a
+second; I wrote the guard first, then deleted it, because a guard against a
+variation that cannot occur reads as though it can. The CONTEXT guard is
+load-bearing and stays: Mezze is `ContextPolicy.SHARED`, this AST is shared
+between contexts of one engine, and a record resolved in one must never be
+handed to another.
+
+COVERAGE, AND WHAT IT HONESTLY DOES AND DOES NOT PIN. Five tests assert answers
+across the two branches: a parameterized performer with a different parameter
+every install (straight-line and compiled), two impls of one effect at two
+sites, a cacheable and a non-cacheable site in one loop, and a plain handler
+installed 5 000 times. Making the cache cross-site — a static one-element memo
+instead of a node field, which is the realistic mistake — fails
+`two impls of one effect at two sites` with 2 150 against 3 000.
+
+What I could NOT demonstrate, stated rather than implied: removing the guard
+that excludes the factory branch breaks nothing I can observe, including the 26
+property and sampling tests, because a user-defined parameterized impl has no
+context record either, so the cache simply never engages for it. Both that
+guard and the context guard are structural conservatism. Said plainly so no one
+later reads a passing suite as proof they are unnecessary.
+
+THE GATE CAUGHT WHAT MY OWN TESTS COULD NOT, and it is the best evidence in
+this entry. The full suite failed with **"A guard was assumed idempotent, but
+returned a different value for a consecutive execution"** out of
+`EffectPicIntegrationTest` — which runs two contexts over one shared AST. The
+Truffle DSL asserts that a guard returns the same value on consecutive
+executions, and a guard that reads the CURRENT context does not.
+
+Two things follow. First, the fix is to declare the honest contract —
+`@NonIdempotent` on the context accessor — and not to weaken the guard; it
+costs nothing, re-measured at 1.61x / 1.34x / 1.30x after the annotation.
+Second, and more useful: I had written in the test file that the context guard
+was justified "structurally, not by a test", because two contexts resolve the
+same hash to structurally identical records and answers cannot tell a leak from
+correct behaviour. The suite then proved the two-context case is REACHED, by
+failing on it. The guard is not theoretical, and the thing that established
+that was a gate on code I had already measured and believed finished.
