@@ -440,6 +440,38 @@ let k_bytes_is_empty = { n } -> go_ib {
   i = n, acc = 0, b = bytes::from_seq { arr = seq::range { start = 1, end = 3 } },
 }
 
+
+## 28. THE CEILING FOR AN ELEMENT READ, before any more is spent trying to
+##     close kernel 7.
+##
+## `seq::get` is 3 650 ps, 16x the counted loop, and the two obvious fixes are
+## spent: removing `InlineSeqGetRaw`'s boundary measured 0.78x (a REGRESSION)
+## and naming the storage type inside `MezzeSeq.get` measured null. So the
+## question is no longer "how do I make `get` faster" but "what does reading
+## one element cost AT ALL here".
+##
+## A SEQ PATTERN answers it, because it reads the element through a completely
+## different route: `SeqSizeEquals` and `SeqGetAt`, both boundary-free
+## operations with a compile-time index, and no `Option` anywhere — where
+## `seq::get` goes through `InlineSeqGetRaw` behind a `@TruffleBoundary` and a
+## fused `Some`/`None` match. Same seq, same element, same accumulator.
+##
+## If this row is near the control, the ~3 000 ps is the ROUTE and not the read,
+## and the fix is to route a constant-index read through the pattern ops. If it
+## is also ~3 000, `seq::get` is near its floor and the band is somewhere else
+## entirely. Either answer is worth more than a third guess.
+##
+## An EXACT-length pattern, not `[a, ...rest]`: a rest binding allocates a drop
+## view per iteration and would measure that instead. The seq has two elements,
+## so `[a, b]` matches and `b` is deliberately unused.
+let go_pat = { i, acc, xs } ->
+  if i <= 0 then acc
+  else go_pat { i = i - 1, xs = xs,
+                acc = acc + (match xs is
+                               [a, b] -> a
+                               _ -> 0) }
+let k_seq_pattern = { n } -> go_pat { i = n, acc = 0, xs = seq::range { start = 1, end = 3 } }
+
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
 
@@ -555,4 +587,8 @@ pub let main = {} -> perform Console in perform SystemArgs in do
     k_bytes_is_empty { n = n }
     report { name = "27 bytes is_empty", n = n, r = time_it { f = {} -> k_bytes_is_empty { n = n } } }
     report { name = "27 bytes is_empty", n = n, r = time_it { f = {} -> k_bytes_is_empty { n = n } } }
+  else if k == 28 then do
+    k_seq_pattern { n = n }
+    report { name = "28 seq pattern ", n = n, r = time_it { f = {} -> k_seq_pattern { n = n } } }
+    report { name = "28 seq pattern ", n = n, r = time_it { f = {} -> k_seq_pattern { n = n } } }
   else println { msg = "unknown kernel" }

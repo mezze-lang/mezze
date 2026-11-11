@@ -11389,3 +11389,46 @@ narrowed one.**
 So `seq::get` at 16x the control is still open, and the remaining band is
 unchanged: the element reads and keyed probes at 9.7-16.1x, whose cost is NOT
 simply the interface call.
+
+#### The ceiling for an element read says the ROUTE is not the cost
+
+Two fixes for `seq::get` were spent — removing `InlineSeqGetRaw`'s boundary
+measured 0.78x and naming the storage type inside `MezzeSeq.get` measured null —
+so instead of a third guess, kernel 28 measures what reading one element costs
+through a COMPLETELY DIFFERENT route: a seq PATTERN, which reaches the element
+via `SeqSizeEquals` + `SeqGetAt`, both boundary-free, with a compile-time index
+and no `Option` anywhere.
+
+| row | ps/iter (min of 6) | x control |
+|---|---|---|
+| counted loop | 220 | 1.0 |
+| `seq::size` | 694 | 3.2 |
+| `bytes::get` | 2 206 | 10.0 |
+| **`seq::get`** | **3 526** | **16.0** |
+| **seq pattern `[a, b] -> a`** | **3 947** | **17.9** |
+
+**The boundary-free, Option-free route is no faster — it is slightly slower.**
+So the ~3.5 ns is not the boundary, not the `Option`, and not the generic native
+dispatch: all three are absent from kernel 28 and the cost is unchanged. That
+retires route-shaving for this row, which is where the last two attempts went.
+
+The box was loaded for this run — medians are 2-3x the mins across every row —
+so the MIN is the statistic, and it is cross-checked: `bytes::get` 2 206 against
+2 230 measured earlier, `seq::size` 694 against 665, `seq::get` 3 526 against
+3 650. The three agreeing is what makes the fourth readable.
+
+#### What is left in it, and the codebase already named it
+
+`bytes::get` is 2 206 and `seq::get` 3 526 on element reads that are otherwise
+the same shape, so ~1 300 ps separates a `byte[]` read from a seq read. The seq
+in the kernel is a LAZY range, so `LongSeqStorage.getLong` is a null check and
+two arithmetic ops — not 1.3 ns of work — and `storage.get` boxing its `long`
+into a `Long` to satisfy an `Object` return is the one step neither route avoids.
+
+`InlineSeqGetRaw`'s own comment names the missing move: *"the MUT version of
+this pattern could split into a bounds check and a read because both were free…
+that is only worth it when the read can come back UNBOXED, which is a further
+step these do not take."* The mut path already has `MutInBounds` + `MutReadLong`
+for exactly this. An unboxed immutable read — a bounds test plus a `long`-typed
+operation, emitted when the `Some` branch binds a long — is the remaining
+candidate, and it is the only one the two spent attempts did not touch.
