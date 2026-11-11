@@ -472,6 +472,33 @@ let go_pat = { i, acc, xs } ->
                                _ -> 0) }
 let k_seq_pattern = { n } -> go_pat { i = n, acc = 0, xs = seq::range { start = 1, end = 3 } }
 
+
+## 29. IS IT THE LAZY RANGE? One line, and it splits the last question.
+##
+## Kernel 28 retired route-shaving, and the numbers left a narrower question
+## than "why is `seq::get` slow": `bytes::get` is 2 206 ps and `seq::get` 3 526
+## for reads that go through the SAME fused machinery, with the `Option` elided
+## in both. So ~1 300 ps separates a seq element read from a `byte[]` one, and
+## there are only three candidates — the `SeqStorage` interface call (naming the
+## type inside `MezzeSeq.get` measured NULL, so not this), the boxing of the
+## `long` into an `Object`, or the LAZY RANGE.
+##
+## `seq::range` never materialises an array: `LongSeqStorage.getLong` tests
+## `data == null` and computes `lazyStart + index * lazyStep`. Every other seq
+## row on this bench is built the same way, so if that branch is the cost then
+## every one of them has been measuring it.
+##
+## This row is kernel 7 with ONE difference: a seq LITERAL, which is
+## materialised, so `getLong` reads `data[offset + index]`. Same two elements,
+## same index, same match, same accumulator. Kernel 7 minus this row is the lazy
+## branch and nothing else.
+let go_lit = { i, acc, xs } ->
+  if i <= 0 then acc
+  else go_lit { i = i - 1, acc = acc + (match seq::get { xs = xs, i = 0 } is
+                                          Some { val } -> val
+                                          None -> 0), xs = xs }
+let k_seq_get_literal = { n } -> go_lit { i = n, acc = 0, xs = [1, 2] }
+
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
 
@@ -591,4 +618,8 @@ pub let main = {} -> perform Console in perform SystemArgs in do
     k_seq_pattern { n = n }
     report { name = "28 seq pattern ", n = n, r = time_it { f = {} -> k_seq_pattern { n = n } } }
     report { name = "28 seq pattern ", n = n, r = time_it { f = {} -> k_seq_pattern { n = n } } }
+  else if k == 29 then do
+    k_seq_get_literal { n = n }
+    report { name = "29 seq get (lit)", n = n, r = time_it { f = {} -> k_seq_get_literal { n = n } } }
+    report { name = "29 seq get (lit)", n = n, r = time_it { f = {} -> k_seq_get_literal { n = n } } }
   else println { msg = "unknown kernel" }

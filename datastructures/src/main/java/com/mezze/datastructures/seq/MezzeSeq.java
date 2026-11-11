@@ -198,31 +198,51 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
      */
     @SuppressWarnings("unchecked")
     public A get(int index) {
-        // NAMING THE STORAGE TYPE HERE WAS TRIED AND MEASURED NULL, which is
-        // worth writing down because `size` right above made the same move and
-        // it was worth 3.29x. An explicit
-        // `instanceof LongSeqStorage / ObjectSeqStorage / Double / Boolean`
-        // chain, so every branch has a concrete receiver, measured:
+        // NAMING THE STORAGE TYPE IS WORTH 1.21x, BUT ONLY TOGETHER WITH
+        // REMOVING `InlineSeqGetRaw`'s BOUNDARY. Either one alone does nothing
+        // or harm, which is why the 2x2 had to be finished rather than stopped
+        // at the first null:
         //
-        //   row                    delegating   chained
-        //     seq get (target)       3 690 ps     3 550    1.04x
-        //     seq size  (control)      665          622    1.07x
-        //     bytes size(control)      609          629    0.97x
-        //     map size  (control)      544          632    0.86x
-        //     counted loop             230          224    1.03x
+        //   boundary   MezzeSeq.get     seq::get
+        //     kept     delegating       3 561 ps   baseline
+        //     kept     concrete         3 550      null
+        //     REMOVED  delegating       4 781      0.78x WORSE
+        //     REMOVED  concrete         2 949      1.21x
         //
-        // n=2e7, min of 3, interleaved, both arms built by the dev launcher and
-        // the extracted `MezzeSeq.class` confirmed to differ. The target moved
-        // 1.04x while an UNTOUCHED row moved 0.86x, so the effect is inside the
-        // control spread and this instrument cannot see it.
+        // THE PAIR IS THE POINT. Without the boundary gone this runs where
+        // HotSpot compiles it, and its inline cache already handled a site
+        // monomorphic within any one compiled method — so naming the type buys
+        // nothing. With the boundary gone but the call still an interface call,
+        // partial evaluation inlines a four-implementation megamorphic call and
+        // the caller's graph grows for a read that did not get cheaper — hence
+        // 0.78x. Removing BOTH leaves one concrete array read to inline, which
+        // is the shape `bytes::get` always had and why that one was 1.44x on
+        // the boundary alone.
         //
-        // WHY IT DIFFERS FROM `size`. `size` stopped calling anything at all —
-        // it became a field read. This still calls, just on a concrete
-        // receiver; and `InlineSeqGetRaw` keeps its `@TruffleBoundary` (removing
-        // it measured 0.78x), so this runs where HotSpot compiles it rather than
-        // partial evaluation, and HotSpot's inline cache already handled a site
-        // that is monomorphic within any one compiled method. The chain also
-        // duplicated what `getLong`/`getDouble` below already encode.
+        // Measured n=2e7 and n=1e7, min of 8 per arm, interleaved, both arms
+        // built by the dev launcher with the extracted classes confirmed to
+        // differ. `seq::get` 1.21x and 1.18x across the two sizes; the
+        // materialised twin (a seq LITERAL rather than a lazy range) 1.18x and
+        // 1.11x, which is the second independent row. Controls at the quieter
+        // size: counted loop 1.00x, `bytes::get` 0.99x, `seq::size` 0.94x.
+        //
+        // AND THE GAIN IS MODEST AGAINST THE NOISE — at n=2e7 `bytes::get`, a
+        // row nothing here touches, moved 1.10x on its own, because it is
+        // BIMODAL across runs (~1 200 or ~2 200 ps, a compilation lottery).
+        // Min-of-8 and the second size are what make 1.2x readable; three reps
+        // showed the same target with a 1.80x control and said nothing.
+        if (storage instanceof LongSeqStorage l) {
+            return (A) (Long) l.getLong(index);
+        }
+        if (storage instanceof ObjectSeqStorage o) {
+            return (A) o.get(index);
+        }
+        if (storage instanceof DoubleSeqStorage d) {
+            return (A) (Double) d.getDouble(index);
+        }
+        if (storage instanceof BooleanSeqStorage b) {
+            return (A) (Boolean) b.getBoolean(index);
+        }
         return (A) storage.get(index);
     }
 

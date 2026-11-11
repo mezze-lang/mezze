@@ -11432,3 +11432,64 @@ step these do not take."* The mut path already has `MutInBounds` + `MutReadLong`
 for exactly this. An unboxed immutable read — a bounds test plus a `long`-typed
 operation, emitted when the `Some` branch binds a long — is the remaining
 candidate, and it is the only one the two spent attempts did not touch.
+
+#### The 2x2 finishes: `seq::get` is 1.21x, and NEITHER half was a fix
+
+Two separate negative results were sitting in this ledger — removing
+`InlineSeqGetRaw`'s boundary measured 0.78x, and naming the storage type inside
+`MezzeSeq.get` measured null — and the kernel-28 ceiling said the route was not
+the cost. What none of that had tried was BOTH AT ONCE, which is the only cell
+of the 2x2 that was never measured:
+
+| `InlineSeqGetRaw` boundary | `MezzeSeq.get` | `seq::get` | |
+|---|---|---|---|
+| kept | delegating | 3 561 ps | baseline |
+| kept | concrete | 3 550 | null |
+| REMOVED | delegating | 4 781 | **0.78x worse** |
+| REMOVED | concrete | **2 949** | **1.21x** |
+
+With the boundary gone and the call still an interface call over four storages,
+partial evaluation inlines a megamorphic call and the caller's graph grows for a
+read that did not get cheaper. With both gone there is one concrete array read
+to inline — the shape `bytes::get` always had, which is exactly why the boundary
+*alone* was 1.44x there and 0.78x here.
+
+Converged across two sizes, min of 8 per arm, interleaved, both arms built by
+the dev launcher with the extracted classes confirmed to differ:
+
+| row | n=2e7 | n=1e7 |
+|---|---|---|
+| **`seq::get`** | **1.21x** | **1.18x** |
+| **`seq::get`, materialised twin** | **1.18x** | **1.11x** |
+| counted loop (control) | 1.01x | 1.00x |
+| `bytes::get` (control) | 1.10x | 0.99x |
+| `seq::size` (control) | 1.04x | 0.94x |
+
+The materialised twin is kernel 29 — the same read on a seq LITERAL instead of a
+lazy range — and it is a second independent row, not a repeat.
+
+**AND THE NOISE NEARLY HID IT.** `bytes::get` is BIMODAL across runs (~1 200 or
+~2 200 ps, a compilation lottery), so at three reps it moved 1.80x on its own
+while nothing touched it, and the first reading of this experiment was
+unusable. Min-of-8 plus the second size is what made 1.2x readable. A row that
+swings 1.8x untouched cannot adjudicate a 1.2x claim.
+
+#### What this says about method, which outlasts the row
+
+A null result on A and a regression on B do not mean A+B is worthless. Both of
+those readings were correct and both were published here as closed; the
+combination reverses the sign. The reason is mechanical and was visible in the
+earlier note — "inlining either grows the caller's graph for a read that does
+not get cheaper" — which is a statement about the PAIR, and I had written it
+while testing only the halves. **Where a fix removes a barrier that was hiding a
+second cost, test the pair before recording the half as closed.**
+
+List keeps its boundary: removing it alone measured 0.71x and the paired
+experiment has NOT been run for it, because a list read is a loop over
+sealed-interface calls rather than one indexed load, so the shape that rescued
+seq may not exist there.
+
+Where the band stands: `seq::get` 2 949 (13.6x the control, from 16.4x),
+`list::get` ~3 000, `map::get` 2 919, `map::contains_key` 2 183,
+`set::contains` 2 207, `bytes::get` ~1 200. The map and set probes are untouched
+by any of this and are now the largest rows left.

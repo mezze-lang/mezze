@@ -6706,28 +6706,33 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @Operation
     public static final class InlineSeqGetRaw {
         /**
-         * THE BOUNDARY IS LOAD-BEARING HERE, in the direction nobody expects,
-         * and the only reason this is known is that the three reads were
-         * measured SEPARATELY. Running the recognised read inside compiled
-         * code — a bounds test and one array load — helps Bytes and HURTS
-         * these two:
+         * THE BOUNDARY IS GONE, BUT ONLY BECAUSE `MezzeSeq.get` STOPPED BEING
+         * A MEGAMORPHIC CALL AT THE SAME TIME. Removing it alone measured
+         * 0.78x — a REGRESSION — and that reading stood for a while:
          *
          * <pre>
-         *   row          boundary   inline    (two builds, identical source
-         *     bytes get   3 184 ps   2 092     but for the split; interleaved,
-         *     seq get     3 716      4 781     min of 3; both controls flat at
-         *     list get    3 024      4 250     1.00x and 0.98x; both arms
-         * </pre>                               verified by unzip)
+         *   this boundary   MezzeSeq.get   seq::get
+         *     kept          delegating     3 561 ps   baseline
+         *     kept          concrete       3 550      null
+         *     REMOVED       delegating     4 781      0.78x WORSE
+         *     REMOVED       concrete       2 949      1.21x
+         * </pre>
          *
-         * So Bytes keeps the split (see {@link InlineBytesGetRaw}) and these
-         * two keep the boundary. The difference is what is behind it: a
-         * `MezzeBytes` read is `data[i]` on a final field, while
-         * `MezzeSeq.get` is a polymorphic `SeqStorage` call that boxes, and a
-         * list read is a loop over sealed-interface calls — inlining either
-         * grows the caller's graph for a read that does not get cheaper.
+         * With the boundary gone and the call still an interface call over four
+         * storages, partial evaluation inlines a megamorphic call and the
+         * caller's graph grows for a read that did not get cheaper. With both
+         * gone there is one concrete array read to inline — the shape
+         * {@link InlineBytesGetRaw} always had, which is why the boundary alone
+         * was 1.44x there. Neither half is a fix on its own; see
+         * `MezzeSeq.get` for the measurement and the noise it had to clear.
+         *
+         * <p>LIST STILL KEEPS ITS BOUNDARY, and deliberately: removing it alone
+         * measured 0.71x and the PAIRED experiment has not been run for it. A
+         * list read is a loop over sealed-interface calls rather than one
+         * indexed load, so the shape that made seq work may not exist there.
+         * Do not remove it on the strength of this entry.
          */
         @Specialization
-        @TruffleBoundary
         @SuppressWarnings("rawtypes")
         public static Object doOp(Object container, long index) {
             int i = (int) index;
@@ -6735,9 +6740,17 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             if (container instanceof Object[] arr) {
                 return i >= arr.length ? null : arr[i];
             }
+            if (container instanceof com.mezze.datastructures.seq.MezzeSeq s) {
+                return i >= s.size() ? null : s.get(i);
+            }
+            return coerceThenGet(container, i);
+        }
+
+        @TruffleBoundary
+        @SuppressWarnings("rawtypes")
+        private static Object coerceThenGet(Object container, int i) {
             com.mezze.datastructures.seq.MezzeSeq seq =
-                container instanceof com.mezze.datastructures.seq.MezzeSeq s ? s
-                    : com.mezze.interpreter.nodes.builtin.NativeDispatch.coerceSeq(container, "xs");
+                com.mezze.interpreter.nodes.builtin.NativeDispatch.coerceSeq(container, "xs");
             return i >= seq.size() ? null : seq.get(i);
         }
     }
