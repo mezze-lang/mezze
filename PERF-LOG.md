@@ -12282,3 +12282,56 @@ bench here does. With one kernel per process the seq controls read 0.88x, 1.07x,
 1.28x and 1.04x across eight interleaved processes — wandering in both
 directions with overlapping distributions, which is what noise looks like and
 what a single blocked run dressed up as a regression.
+
+#### `enumerate` consumed by its fold — 61x, and the record was never the problem
+
+`iter::enumerate` has a `StageIR.Enumerate`, a `tryPeelIterEnumerate`, and a
+comment on that peel claiming 124 247 ps/elem down to 93. It measured
+**75 049 ps/elem against `sum`'s 72 — 1 036x** — and in four shapes, not one:
+the sink reading `.val`, the sink reading `.i`, a map between the enumerate and
+the fold, and `.i` alone. So the peel's claim holds for some chain, and not for
+an iter chain with a fold sink.
+
+The emitter says why in one line of its own debug output: **"enumerate record
+reaches the sink"**. It walks the stages in application order, tracks whether
+the `{i, val}` record is still live, and declines the chain if anything still
+live arrives at a sink — because the sink classifiers do not read records.
+
+That is the ordinary way to use an enumerate. And the record is NEVER BUILT:
+`x.val` is the element, which the loop already holds in its element local, and
+`x.i` is the index, which it already holds in the local the Enumerate stage
+maintains. A `MapInline` with `leftIsIndex` has resolved them that way all
+along; the fold was simply not allowed to.
+
+| row | base | fused | n=1e7, 4 processes |
+|---|---|---|---|
+| `enumerate+fold`, reads `.val` | 386 456 952 ns | **6 326 505** | **61.09x** |
+| `enumerate+fold`, reads `.i` | 387 972 920 | **6 416 391** | **60.47x** |
+| `enumerate+map+fold` | 488 767 951 | 491 752 817 | 0.99x |
+| `record, field in FOLDER` | 4 070 300 | 4 140 879 | 0.98x |
+| `sum` / `filter+fold` / `count` | | | 1.05x / 1.66x / 0.91x |
+
+Distributions do not overlap: 386-835 ms against 6.3-7.1 ms. The 1.66x on
+`filter+fold` is one slow base sample in four — the same row reads 0.98-1.00x
+everywhere else in this ledger.
+
+TWO CONDITIONS, AND BOTH ARE CORRECTNESS RATHER THAN TUNING. The gate now
+admits a live record at the sink only when the sink is a fold whose folder is
+the TREE form, and only when the folder reads nothing off the element but `i`
+and `val`. The tree form is required because `AccumulateCall` hands the folder
+the raw element — a folder expecting a record would read fields off a Long. The
+field-name restriction is required because any other name means the element is
+not the record this analysis believes it is.
+
+THE TESTS ARE BUILT AROUND ONE MISTAKE: resolving a field NAME to the wrong
+local. Every case uses a range whose `start` is not 0, so the index and the
+value DIFFER — over `0..n` they are equal and a test cannot tell them apart,
+which is exactly the test that passes while the two are swapped. Swapping them
+fails four of seven, with the values exchanged (60 for 10, 10 for 70). The
+three that survive are the ones summing BOTH fields, which is the
+symmetric-error blindness this ledger already records for round trips, and the
+reason the asymmetric cases are there.
+
+`enumerate+map+fold` stays at 1 036x and is NOT fixed by this: it declines
+earlier, in the map classifier, because `{x} -> x.val + x.i` is not a shape
+`classifyUnaryLiteralLambda` can read. Still open, with a row for it.
