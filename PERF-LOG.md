@@ -11930,3 +11930,82 @@ same hash to structurally identical records and answers cannot tell a leak from
 correct behaviour. The suite then proved the two-context case is REACHED, by
 failing on it. The guard is not theoretical, and the thing that established
 that was a gate on code I had already measured and believed finished.
+
+#### The OTHER early return in `invalidate()` — 1.43x, and two negatives worth more
+
+With the per-site handler record landed, install was 28 421 ps and the profile's
+top frame was `ThreadLocal.get()` at 286 of ~2 600 samples, paid TWICE an
+iteration because push and pop each look the state up. That looked like the
+answer. It was not, and getting there cost two negatives that are worth more
+than the win.
+
+**PROBE: THE THREADLOCAL IS 1.31x AND THE BOUNDARY IS FREE.** Replacing the
+lookup in the two hot operations with a static field — unshippable, it is the
+cross-context leak this codebase has been bitten by — took install to 21 639.
+Also dropping `@TruffleBoundary` from `pushSimple`/`popSimple` measured 21 439:
+**the same number**. The boundary those two carry costs nothing; the lookup it
+forces is the whole of it. That is worth knowing before anyone ports 26 call
+sites to a `ContextThreadLocal` for the boundary's sake.
+
+**NEGATIVE: GIVING A HOT STATELESS OPERATION A `@Cached` FIELD COST 3.8x.** A
+node cannot hold a static `EffectState` — nodes are shared across threads and
+that state is per-thread — but it can hold one and prove ownership, so
+`EffectState` got a final `owner` and the two operations got a specialization
+guarded on `state.owner == currentThread()`: a field read and a thread compare
+in place of the lookup.
+
+| row | before | with the cached state | |
+|---|---|---|---|
+| `5 install/iter` | 28 421 ps | 106 879 | **0.27x** |
+| `11 install/iter, no params` | 27 727 | 96 875 | **0.29x** |
+
+Checksums equal, and a counter proved the fast path was the one running:
+**cached=11 999 985, slow=20**. So this is not a guard that failed to match —
+it is what making a hot stateless Bytecode DSL operation STATEFUL costs. A
+stateless `@Operation` needs no node instance; adding one `@Cached` field takes
+it off that path, and the 7 ns lookup it saved was dwarfed by what it paid.
+**Reverted.** The rule generalises: in the Bytecode DSL, the cheapest operation
+is one with no state at all, and an inline cache is not free the way it is in a
+plain Truffle node.
+
+**THE WIN WAS THE MONITOR AGAIN, AND IT BEAT THE THREADLOCAL CEILING.**
+`StabilityAssumption.invalidate()` has two early returns: one for an effect that
+has given up (made lock-free in the previous commit) and one for an assumption
+NOBODY CURRENTLY HOLDS. The second still took the monitor to discover there was
+nothing to do, and a profile still had 124 of ~2 600 install samples inside
+`invalidateLocked`. Reading that flag without the monitor:
+
+| row | base | lock-free | n=1.5e7 | n=5e6 |
+|---|---|---|---|---|
+| `5 install/iter` | 28 338 ps | **19 781** | 1.43x | 1.42x |
+| `11 install/iter, no params` | 28 343 | **19 710** | 1.44x | 1.42x |
+| `6 abort/iter` | 86 404 | 87 588 | 0.99x | 0.98x |
+| `9 op AFTER churn` | 1 540 | 1 461 | 1.05x | 1.02x |
+| `3 op, 1 install` (control) | 465 | 458 | 1.02x | 1.00x |
+| `1 control` | 206 | 205 | 1.00x | 1.03x |
+
+19 781 is BELOW the 21 639 the ThreadLocal probe reached, so the monitor was
+still the larger of the two — on 124 samples against 286. **A sampling profile
+ranked them backwards**, which is the second time in this session it has done so
+on this exact loop and both times in the same direction: time parked in a
+monitor-enter gets credited to whatever frame sits beside it.
+
+`abort/iter` does not move, 0.98-0.99x, and is reported rather than quietly
+dropped: its 87 ns is dominated by throwing `AbortPerformException`, so an
+install that got 1.43x cheaper is a small part of it. That is also the next
+thing to look at on this surface.
+
+WHY A LOCK-FREE READ IS NO WEAKER THAN THE MONITOR, which is the only claim that
+matters: the monitor never ordered an arbitrary `get()` on one thread against an
+`invalidate()` on another, it only made them mutually exclusive. A `get()` that
+lands first is seen by a later volatile read exactly as it was seen under the
+lock, and a `get()` that lands concurrently was already missable. When the flag
+reads true the monitor is still taken, so the composite action — test, clear,
+invalidate, count the churn — stays atomic.
+
+COVERAGE. `a second hand-out is invalidated as well as the first`, because the
+flag is CLEARED by each invalidation and so must be re-armed by each hand-out:
+one round trip passes even when `get()` arms it only once, which is exactly the
+bug to fear. Arming it once fails that test and `a reset clears the lock-free
+mirror` with it. Cumulatively on install: 54 044 → 19 781, **2.73x**, with
+`install/iter` and the parameterless form now within 70 ps of each other.
