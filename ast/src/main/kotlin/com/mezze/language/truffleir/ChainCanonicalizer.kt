@@ -247,6 +247,15 @@ object ChainCanonicalizer {
             // through this walk to be fused.
             val distributed = tryDistributeOverIf(descended, allFunctions)
             if (distributed != null) return rewrite(distributed, classifier, allFunctions, ext, scope)
+            // A FOLD OVER A CHAIN IS TWO FOLDS. `iter::chain` has no `StageIR`
+            // and cannot get one cheaply — a stage sees one element at a time
+            // and a chain is two sources — so a chain anywhere in a pipeline
+            // left it unfused: 13 777 ps/elem against 72 for `sum`, 190x. But a
+            // LEFT fold needs no stage at all, because folding `a ++ b` is
+            // folding `b` from where folding `a` finished. Rewritten, both
+            // halves are ordinary chains and this walk fuses each.
+            val sequenced = trySequenceChainFold(descended)
+            if (sequenced != null) return rewrite(sequenced, classifier, allFunctions, ext, scope)
             return descended
         }
         // Preserve the original node as fallback. FusedChainIR replaces
@@ -1816,6 +1825,102 @@ object ChainCanonicalizer {
     @Suppress("UNUSED_PARAMETER")
     private fun isEffectSafe(chain: FusedChainIR, allFunctions: Map<Hash, FunctionIR>): Boolean {
         return true
+    }
+
+    /**
+     * `fold(chain(a, b), init, f)` -> `fold(b, fold(a, init, f), f)`, or null.
+     *
+     * WHY THIS IS THE SAME COMPUTATION. A left fold is defined by its order,
+     * and `chain` concatenates: the elements of `a` in order, then those of
+     * `b`. Folding `b` with the result of folding `a` as its seed visits
+     * exactly the same elements in exactly the same order, applies `f` the same
+     * number of times, and evaluates `init` once — inside the inner fold. The
+     * folder is duplicated in the IR, never in the work.
+     *
+     * WHAT THE GUARD IS FOR, and it is not the folder. The rewrite moves WHEN
+     * the second source expression is EVALUATED: `chain { a, b }` builds both
+     * descriptors before folding anything, and afterwards `b` is built only
+     * once the fold of `a` has finished. For a range or a map over a local that
+     * is nothing, but an arbitrary expression could perform an effect, and this
+     * pass has no effect analysis to lean on — `isEffectSafe` is a stub that
+     * returns true. So both operands must be built from a small whitelist of
+     * iterator constructors and stages over locals, captures and literals, and
+     * anything else declines. A lambda is exempt: this rewrite cannot change
+     * how often or in what order a stage's callback runs, only when the
+     * descriptor holding it is allocated.
+     *
+     * Stages BETWEEN the fold and the chain are not handled: distributing them
+     * over both halves is sound but duplicates each stage's lambda, and no row
+     * measured needs it yet. Such a chain declines and stays as it was.
+     */
+    private fun trySequenceChainFold(node: NodeIR): NodeIR? {
+        if (node !is CallNativeIR) return null
+        if (node.name != "__native_iter_fold" || node.isScalarABI) return null
+        val mr = node.arg as? MakeRecordIR ?: return null
+        var src: NodeIR? = null; var init: NodeIR? = null; var f: NodeIR? = null
+        for (fld in mr.fields) when (fld.name) {
+            NativeHofNames.IT -> src = fld.value
+            "init" -> init = fld.value
+            "f" -> f = fld.value
+        }
+        val chain = src as? CallNativeIR ?: return null
+        if (chain.name != "__native_iter_chain" || chain.isScalarABI) return null
+        val initExpr = init ?: return null
+        val folder = f ?: return null
+        val chainRec = chain.arg as? MakeRecordIR ?: return null
+        var a: NodeIR? = null; var b: NodeIR? = null
+        for (fld in chainRec.fields) when (fld.name) {
+            "a" -> a = fld.value
+            "b" -> b = fld.value
+        }
+        val aExpr = a ?: return null
+        val bExpr = b ?: return null
+        if (!isLaterEvaluationSafe(aExpr) || !isLaterEvaluationSafe(bExpr)) return null
+
+        fun foldOver(source: NodeIR, seed: NodeIR) = CallNativeIR(
+            name = node.name,
+            arg = MakeRecordIR(
+                fields = listOf(
+                    FieldIR(NativeHofNames.IT, source),
+                    FieldIR("init", seed),
+                    FieldIR("f", folder),
+                ),
+                src = mr.src,
+            ),
+            src = node.src,
+            isPure = node.isPure,
+        )
+        return foldOver(bExpr, foldOver(aExpr, initExpr))
+    }
+
+    /** Iterator constructors and stages whose evaluation allocates a
+     *  descriptor and nothing else — see [trySequenceChainFold]. */
+    private val LATER_SAFE_NATIVES = setOf(
+        "__native_iter_range", "__native_iter_range_step",
+        "__native_iter_from_seq", "__native_iter_from_list",
+        "__native_iter_map", "__native_iter_filter", "__native_iter_enumerate",
+        "__native_iter_take", "__native_iter_drop",
+        "__native_iter_take_while", "__native_iter_drop_while",
+        "__native_iter_chain", "__native_iter_zip",
+        "__native_iter_empty", "__native_iter_once",
+    )
+
+    /** True when evaluating [node] later than written cannot be observed —
+     *  see [trySequenceChainFold] for why that is the question. */
+    private fun isLaterEvaluationSafe(node: NodeIR): Boolean = when (node) {
+        is ReadLocalIR, is ReadCaptureIR, is ReadArgIR -> true
+        // A top-level binding, already initialised by the time any of this
+        // runs. `let n = 10000000` arriving here as a global read is what
+        // declined the first version of this rewrite outright.
+        is ReadGlobalByHashIR, is ReadGlobalFnByHashIR -> true
+        is LongLitIR, is DoubleLitIR, is BoolLitIR, is StringLitIR, is UnitLitIR -> true
+        is MakeLambdaIR -> true
+        is MakeRecordIR -> node.fields.all { isLaterEvaluationSafe(it.value) }
+        is CallNativeIR ->
+            node.name in LATER_SAFE_NATIVES
+                && isLaterEvaluationSafe(node.arg)
+                && node.args.all { isLaterEvaluationSafe(it) }
+        else -> false
     }
 
     /**
