@@ -12009,3 +12009,98 @@ one round trip passes even when `get()` arms it only once, which is exactly the
 bug to fear. Arming it once fails that test and `a reset clears the lock-free
 mirror` with it. Cumulatively on install: 54 044 → 19 781, **2.73x**, with
 `install/iter` and the parameterless form now within 70 ps of each other.
+
+#### A string search per parameter per call — 8.73x, after four wrong answers
+
+`bench/cases/ability_dispatch` reports a plain top-level function call at 12-17
+ns against an ability method at 2-3 ns, stable over five runs: the simplest call
+in the language, five times the cost of a dispatched one. Its own header says
+not to quote its numbers — one run per row, integer nanoseconds — so the first
+job was to put the same comparison on `coresurface`, which reports picoseconds,
+one kernel per process, beside controls with known values.
+
+**AT PS RESOLUTION THE GAP IS NOT THERE.** Direct 621, closure 626, ability 617,
+ability-through-a-constraint 621 — four spellings of a call, all the same number
+within noise, against a 208 ps control loop. `ability_dispatch`'s 5x was an
+artifact of integer division and a single run. **That bench's warning about
+itself is correct and now has a measured replacement.**
+
+**WHAT WAS THERE INSTEAD WAS 39x.** The constraint-carrying call measured 25 321
+ps when the loop around it is written as `let go = … ` inside a `do` block —
+which is how every loop in Mezze is written — and 621 ps when the identical loop
+is written at top level. Same call, same dictionary, same checksum.
+
+FOUR HYPOTHESES, EACH KILLED BY A MEASUREMENT RATHER THAN BY THOUGHT. Recording
+them because each was plausible and three of them had supporting evidence in
+this ledger already:
+
+1. **The lazy-stub trampoline** — a top-level function's root is a
+   `LazyStubRootNode` and this ledger has three separate entries about call
+   sites that cached a decision against it. A counter in the stub's `execute`
+   said **34 calls** in a run of four million. Not it, and the probe cost two
+   minutes against a fix that would have cost an afternoon.
+2. **A missing annotation.** Added one to the slow kernel: 25 514 against
+   25 489. The annotation changes nothing, which is the answer this project
+   wants — an annotation that fixes a performance problem means inference is
+   the bug, and here inference was not the bug either.
+3. **Do-block generalization**, via `LocalLambdaSpecializer` declining
+   `isRecursive`. Allowed recursion — the self-call needs no repointing, it
+   resolves by name to the binding being specialized in place — and the pass
+   then specialized 8 bindings. **The row did not move.**
+4. **The specializer's unpinned-variable guard.** The generic type named
+   `['o50, 'w50, 's50]` and unification pinned only two: `'s50` is the
+   intermediate `having out=` of `acc + f{…} - 1`, which appears nowhere in the
+   function type and so cannot be pinned by unifying types — though `NumAdd Int
+   Int` determines it. Relaxed the guard to ignore constraint-only variables:
+   **the row still did not move.** So the dictionary was never the cost.
+
+**THEN THE PROFILE, which named it in one line.** 1 422 of ~5 500 samples in
+`TrampolineRootNode.execute`, 752 in `checkPartialApplication`, and 404 each in
+`MezzeRecord.getFieldIndex(String)` and `Shape.findFieldIndex` with 229 more in
+`findFieldIndexSmall`. On every call, that root asks whether the incoming record
+is a PARTIAL APPLICATION by looking up each parameter name in the record — **a
+string search per parameter per call, behind a `@TruffleBoundary`**.
+
+The question depends only on whether the record HAS a field per parameter, which
+is a property of its field NAMES alone — which is exactly what a `Shape` is. So
+remember the shape that answered "complete":
+
+| row | base | shape-keyed | n=1e8 | n=2e7 |
+|---|---|---|---|---|
+| `9 dict call` (do-block loop) | 25 321 ps | **2 899** | 8.73x | 8.19x |
+| `11 dict call + annotation` | 25 106 | **2 917** | 8.61x | 8.38x |
+| `10 dict, top-level loop` | 621 | 620 | 1.00x | 1.00x |
+| `8 ability call` | 617 | 619 | 1.00x | 1.04x |
+| `6 direct call` | 620 | 623 | 1.00x | 0.98x |
+| `7 closure call` | 626 | 619 | 1.01x | 1.11x |
+| `5 tier control` | 419 | 419 | 1.00x | 1.01x |
+| `2 effect op` | 458 | 465 | 0.98x | 1.23x |
+| `1 control` | 208 | 209 | 1.00x | 1.04x |
+
+Every control is 1.00x at a size that matches its own cost; the 2e7 column's
+1.11x and 1.23x are rows getting 13 ms of work, which is the row-sizing rule
+again and why the 1e8 column is the one to read.
+
+ONLY THE COMPLETE ANSWER IS CACHED, and that is a correctness condition rather
+than a tuning choice: a partial application allocates a `MezzeFunction` holding
+THAT record's supplied arguments, so remembering it would hand a later caller
+another caller's arguments. Caching it fails `two partial applications of one
+function keep their own arguments`, which is the test for exactly that.
+
+A PRE-EXISTING DEFECT FELL OUT OF WRITING THE TESTS, and it is not this
+change's: **a partial application called from inside another function does not
+complete.** It returns a function, and the arithmetic around it fails with
+"Cannot add Long and MezzeFunction". Minimal shape, with recursion ruled out:
+
+```
+let add = { a, b } -> a + b
+let add1 = add { a = 1 }
+let call = { x } -> add1 { b = x }
+call { x = 1 }
+```
+
+The same call at top level works. It fails identically with the shape cache
+reverted, which is how I know whose it is. Pinned as a disabled test next to
+the cache, with its minimal shape, so it starts passing the day the capture
+path merges the stored arguments before the completeness check instead of
+after.
