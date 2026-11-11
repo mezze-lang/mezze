@@ -198,6 +198,31 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
      */
     @SuppressWarnings("unchecked")
     public A get(int index) {
+        // NAMING THE STORAGE TYPE HERE WAS TRIED AND MEASURED NULL, which is
+        // worth writing down because `size` right above made the same move and
+        // it was worth 3.29x. An explicit
+        // `instanceof LongSeqStorage / ObjectSeqStorage / Double / Boolean`
+        // chain, so every branch has a concrete receiver, measured:
+        //
+        //   row                    delegating   chained
+        //     seq get (target)       3 690 ps     3 550    1.04x
+        //     seq size  (control)      665          622    1.07x
+        //     bytes size(control)      609          629    0.97x
+        //     map size  (control)      544          632    0.86x
+        //     counted loop             230          224    1.03x
+        //
+        // n=2e7, min of 3, interleaved, both arms built by the dev launcher and
+        // the extracted `MezzeSeq.class` confirmed to differ. The target moved
+        // 1.04x while an UNTOUCHED row moved 0.86x, so the effect is inside the
+        // control spread and this instrument cannot see it.
+        //
+        // WHY IT DIFFERS FROM `size`. `size` stopped calling anything at all —
+        // it became a field read. This still calls, just on a concrete
+        // receiver; and `InlineSeqGetRaw` keeps its `@TruffleBoundary` (removing
+        // it measured 0.78x), so this runs where HotSpot compiles it rather than
+        // partial evaluation, and HotSpot's inline cache already handled a site
+        // that is monomorphic within any one compiled method. The chain also
+        // duplicated what `getLong`/`getDouble` below already encode.
         return (A) storage.get(index);
     }
 

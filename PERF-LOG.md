@@ -11357,3 +11357,35 @@ an ELEMENT or probes a KEY is at 9.7-16.1x, and that band is what is left.
   buffer 21, none of them with a `*Ops.kt` file. `ChainCanonicalizer` mentions
   neither `__native_nel_` nor `__native_sorted_map_`, so those two families
   carry no fusion risk; `sorted_set` and `iter` do, op by op.
+
+#### `MezzeSeq.get` — the same move as `size`, and it measures NULL
+
+`size` became 3.29x by stopping an interface call, so naming the storage type in
+`get` the same way looked obviously right. It is not:
+
+| row | delegating | chained | |
+|---|---|---|---|
+| **`seq::get`** (target) | 3 690 ps | 3 550 | **1.04x** |
+| `seq::size` (control) | 665 | 622 | 1.07x |
+| `bytes::size` (control) | 609 | 629 | 0.97x |
+| `map::size` (control) | 544 | 632 | **0.86x** |
+| counted loop (control) | 230 | 224 | 1.03x |
+
+n=2e7, min of 3, interleaved, both arms built by the dev launcher with the
+extracted `MezzeSeq.class` confirmed to differ. **The target moved 1.04x while
+an untouched row moved 0.86x**, so the effect is inside the control spread and
+this instrument cannot see it. Reverted; the numbers are on
+`MezzeSeq.get` so the next person does not re-run them.
+
+WHY IT DIFFERS FROM `size`, which is the part worth keeping. `size` stopped
+calling anything at all — it became a field read. `get` still calls, just on a
+concrete receiver; and `InlineSeqGetRaw` keeps its `@TruffleBoundary` because
+removing it measured 0.78x, so `get` runs where HotSpot compiles it rather than
+where partial evaluation does, and HotSpot's inline cache already covered a site
+that is monomorphic within any one compiled method. **"Devirtualise the storage
+call" is not a general win — it paid where it removed the call, not where it
+narrowed one.**
+
+So `seq::get` at 16x the control is still open, and the remaining band is
+unchanged: the element reads and keyed probes at 9.7-16.1x, whose cost is NOT
+simply the interface call.
