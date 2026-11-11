@@ -4537,3 +4537,38 @@ either a field type, a method signature on a non-lazy class, or a
 existing comment in `MezzeBytecodeRootNode` that BDSL `Uncached` node paths do
 not respect `@TruffleBoundary`, which is how a similar reference reached the SVM
 blocklist before.
+
+## BUG 43 — a captured partial application never completes
+
+A partial application called from inside ANOTHER FUNCTION returns a function
+instead of completing. The arithmetic around it then fails with
+`Cannot add Long and MezzeFunction`.
+
+```
+let add = { a, b } -> a + b
+let add1 = add { a = 1 }
+let call = { x } -> add1 { b = x }
+call { x = 1 }                       # expected 2, raises instead
+```
+
+### What is and is not involved
+
+Recursion is NOT involved — the shape above is a plain lambda, and a recursive
+loop fails the same way. The same call AT TOP LEVEL works:
+`(add1 { b = 1 }) + (add1 { b = 1 })` is 4. So the difference is being called
+through a capture.
+
+### Not a regression, and not the shape cache
+
+Found while writing `TrampolinePartialShapeCacheTest` for the per-call shape
+cache in `TrampolineRootNode`, and it fails identically with that cache
+reverted — checked, because the cache touches exactly this code path.
+
+### Where to look
+
+`TrampolineRootNode.checkPartialApplication` decides completeness from the
+INCOMING record. A `MezzeFunction.withPartialArgs` value carries the arguments
+already supplied, so a call that completes one has to merge those in BEFORE the
+completeness check; the capture path appears to check first and merge after, so
+the second call looks partial again. Pinned as a disabled test with the minimal
+shape in `TrampolinePartialShapeCacheTest`.
