@@ -11758,3 +11758,79 @@ is what can actually break: a deque whose contents have wrapped has
 and is wrong in service. Two tests push at the front first and then index.
 One is a warm loop — the fused read is a compiled path, and a straight-line
 test exercises only its first execution.
+
+#### Installing a handler: 1.20x, and the profile named the wrong frame
+
+`install/iter` 54 ns and `abort/iter` 130 ns were the two largest measured gaps
+in the system — 322x and 672x the counted loop. A CPU profile put **307 of ~700
+steady-state samples in `ConcurrentHashMap.get`**, which is
+`EFFECT_ASSUMPTIONS.get(effectHash)` running on every push AND every pop, keyed
+on a 64-byte `Hash`. At any one push site the effect's `Hash` is the same
+OBJECT every time, so a one-element identity memo on the per-thread
+`EffectState` removes the lookup; passing the state the caller already holds
+drops a `ThreadLocal.get` per push and pop with it.
+
+**It is worth 1.06x.** A frame that is 44% of a loop is worth 1.8x when you
+remove it. So the attribution was wrong, and the most likely reason is that the
+sampler credited to the map the time actually spent in the monitor-enter beside
+it — which is where the cost turned out to be.
+
+`StabilityAssumption.invalidate()` was `synchronized`, and it runs on every push
+and every pop for the per-effect assumption AND the process-global one: **four
+monitor-enters an iteration, on two objects shared by every thread in the
+process**, with biased locking long gone from the JVM. Past `CHURN_LIMIT` every
+one of them is a guaranteed no-op — `get()` returns `NEVER_VALID`, so nobody
+can hold a valid assumption and there is nothing to invalidate. The lock was
+being taken in order to discover that there was nothing to do.
+
+| row | base | memo | | pair | |
+|---|---|---|---|---|---|
+| `5 install/iter` | 54 044 ps | 50 910 | 1.06x | **45 038** | 1.20x |
+| `6 abort/iter` | 130 075 | 122 448 | 1.06x | **110 747** | 1.17x |
+| `3 op, 1 install` (control) | 457 | 457 | 1.00x | 454 | 1.01x |
+| `1 control` | 208 | 205 | 1.01x | 207 | 1.00x |
+
+Three arms interleaved in one invocation, min of 4 processes x min of 3 reports,
+every arm unzip-verified to differ. Converged at n=5e6 (1.20x / 1.18x) and
+n=1.5e7 (1.20x / 1.17x).
+
+THE CONTROLS HAD TO BE RESIZED BEFORE THEY SAID ANYTHING, which is the
+row-sizing rule biting again. At the targets' n of 5e6, row 3 is ~2 ns an op =
+10 ms of work, and it read **0.81x** with a spread of 2 569 to 10 464 ps. At
+2e8 it reads 1.01x. A control measured below its own cost reports the machine
+and would have sunk a real 1.20x.
+
+WHY A LOCK-FREE READ OF A GUARDED FIELD IS SOUND HERE, since it is not in
+general. `gaveUpFast` is MONOTONIC: once set, `get()` returns `NEVER_VALID`
+forever, so a reader that sees it true is right that invalidating is nothing,
+and a reader that sees a STALE false takes the monitor and does exactly what it
+did before. Only `reset()` clears it, under the monitor.
+
+COVERAGE, AND THE REASON IT IS AT THE REGISTRY AND NOT IN THE LANGUAGE. Both
+fast paths can only fail one way: by silently keeping a stale handler. And the
+guest language cannot observe either, because `effectStable` guards cached Mut
+and Async dispatch and an ordinary `perform … in` loop never builds one — I
+wrote four alternating-handler programs, broke each fix in turn, and **all four
+kept passing**. A test that cannot fail is not coverage. So the two
+load-bearing tests drive `HandlerChainRegistry` directly, and each fails
+without its fix:
+
+  - the memo stores only a NON-NULL result, because an effect HAS no entry
+    until a perform site specializes (they are created lazily by
+    `@Cached("getEffectStableAssumption(…)")`). Caching the absence makes every
+    later push for that effect take the memo and skip invalidating the
+    assumption created in between.
+  - `reset()` clears the mirror, or an effect that recovers never invalidates
+    again for the life of the process.
+
+The four guest-level tests stay, as the correctness-of-answers half: alternating
+handlers straight-line and compiled, alternating after churn has given up, and
+two effects alternating so the identity memo misses every time and has to fall
+back rather than be wrong.
+
+WHAT IS STILL OPEN HERE. 45 ns against a 0.2 ns loop is still 220x. Both
+`pushSimple` and `popSimple` are `@TruffleBoundary` — they have to be, because
+they open with `STATE.get()` on a plain `ThreadLocal` — so a compiled loop
+cannot inline either and pays two boundary crossings an iteration. A Truffle
+`ContextThreadLocal` is partial-evaluation friendly where a plain one is not,
+and that is the next thing to measure.
