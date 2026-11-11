@@ -12135,3 +12135,79 @@ and still was not real: six interleaved reps put base at 700-943 and new at
 689-928, so the 0.85x was a single low base sample. **A ratio whose two
 distributions overlap is not a result**, and three of them in one table is a
 sizing problem rather than three regressions.
+
+#### `iter::count` was 88x `iter::sum` for doing less — a constant declared with no users
+
+`bench/cases/iter_perf_compare` had been built but never run. Run, over 1e7:
+
+| row | ps/elem |
+|---|---|
+| `reduce` | 70 |
+| `sum` | 84 |
+| `filter+fold` | 129 |
+| `filter+map+fold` | 171 |
+| `any` / `all` / `find` | ~410-434 |
+| `filter+to_seq` | 1 733 |
+| **`count`** | **7 430** |
+
+`count` is 88x `sum` while doing strictly LESS per element — `sum` walks the
+same source and also unboxes and adds. And the two natives are structurally
+identical: `IterNatives.countAll` and `IterNatives.sum` are both one
+`walkElements` with a one-line lambda.
+
+So the gap was never in the native. `sum` FUSES and `count` did not, and the
+reason is as small as it gets: **`NativeHofNames.OP_COUNT_ALL` was declared and
+had no users.** The constant existed, nothing referenced it, and so the one
+iter sink that asks only "how many" was the only one left out —
+`size`-over-a-chain fused, predicate `count` fused, `any`/`all`/`find` fused,
+and `SinkIR.Count` was already built and emittable.
+
+| row | base | fused | |
+|---|---|---|---|
+| `count(0..10M)` | 67 461 165 ns | **876 363** | **76.98x** |
+| `sum` | 805 162 | 736 085 | 1.09x |
+| `filter+fold` | 779 916 | 795 183 | 0.98x |
+| `filter+map+fold` | 1 664 343 | 1 669 773 | 1.00x |
+| `find` / `any` / `all` | | | 1.03x / 0.98x / 1.00x |
+| `filter+to_seq` | 16 977 377 | 16 952 842 | 1.00x |
+| `seq_sum` / `seq_fold` (controls) | 525 197 / 536 798 | 524 545 / 528 713 | 1.00x / 1.02x |
+
+`count` lands at 88 ps/elem, level with `sum`'s 74.
+
+ONE DIFFERENCE FROM THE `size` CASE, AND IT IS THE WHOLE CORRECTNESS OF IT.
+`size` over a chain refuses a STAGELESS chain on purpose: a materialised
+collection knows its size in O(1), and routing that through a counting sink
+would make an O(1) question O(n). An `Iter` has no such answer — `count` walks
+whatever is behind it either way — so for this sink the stageless case is
+exactly the one worth fusing. Opaque sources are refused for the reason
+`iter_sum` refuses them: a value typed `Iter` could be an iterator over
+anything, and the pass cannot see what.
+
+TWO ROWS MOVED THAT I AM NOT CLAIMING. `reduce` reads 1.61x and
+`seq_filter+fold` 1.64x, and both run AFTER `count` in a harness that puts
+every row in ONE process. In the base arm they follow 67 ms of megamorphic
+descriptor walking; in the fused arm they follow a counting loop. That is
+cross-row contamination, not a result — the same reason the method requires
+interleaving rather than blocking. The honest reading of this table is one
+number: `count`, 76.98x.
+
+COVERAGE, AND WHY IT IS VALUE TESTS. `BytecodeCompiler.FUSED_EMITS` records
+nothing for an `iter` chain and a typechecker lowering test lowers the stdlib
+FROM SOURCE, where the pipeline fuses either way — so neither can tell the
+fused path from the native one, which is already in this ledger as the
+blindness that nearly let the local-lambda work ship unproven. The evidence for
+the change is the measurement above on a real `mez build`.
+
+What the seven tests DO catch is the defect this sink is prone to: counting the
+wrong POPULATION. Stages run outer-to-inner, and getting that order wrong makes
+a stage filter the SOURCE instead of the chain. Reversing the stage list fails
+`count after a map then a filter sees the mapped values` with **expected 4 but
+was 5** — the identical symptom the predicate-`count` branch records in its own
+comment, from when that order was wrong there.
+
+AND THE AUDIT THAT FOUND IT APPLIES TO SEVEN MORE NAMES. `OP_COUNT_ALL` was not
+alone: `OP_FLAT_MAP`, `OP_ZIP`, `OP_CHAIN`, `OP_ONCE`, `OP_EMPTY`, `OP_UNFOLD`
+and `OP_SUM_VALUES` are also declared in `NativeHofNames` and never referenced
+by `ChainCanonicalizer`. `flat_map`, `zip` and `chain` are stages a real
+pipeline uses, and no row in any bench exercises them — which is how `count`
+stayed hidden too. Next.
