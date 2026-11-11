@@ -12104,3 +12104,34 @@ reverted, which is how I know whose it is. Pinned as a disabled test next to
 the cache, with its minimal shape, so it starts passing the day the capture
 path merges the stored arguments before the completeness check instead of
 after.
+
+#### The same change across the other surfaces: a second 4.19x, and two non-regressions
+
+Every call with a record argument and two or more parameters reaches
+`TrampolineRootNode`, so the shape cache had to be swept across the surfaces it
+could touch — for a second win and, more importantly, for a regression.
+
+| row | base | new | | |
+|---|---|---|---|---|
+| `defunc 4 own HOF 2 fns`, n=5e7 | 39 835 ps | **9 517** | **4.19x** | 6 reps |
+| `defunc 4`, n=2e7 | 45 130 | **14 575** | 3.10x | 6 reps |
+| `defunc 3 own HOF` | 696 | 697 | 1.00x | control |
+| `defunc 6 stdlib fold` | 700 | 689 | 1.02x | |
+| `defunc 1/2/5/7` | | | 0.98-1.01x | |
+| `dsmore 9/10 deque reads` | 2 139 / 3 166 | 2 104 / 3 126 | 1.02x / 1.01x | |
+| `dsmore 12 sorted_map` | 181 455 | 184 668 | 0.98x | |
+| `effectsurface 3/5/6` | | | 1.02-1.10x | |
+
+A user-written higher-order function called with TWO different function
+arguments is the second-largest beneficiary in the language so far, and it is
+the same cause: a megamorphic callback site pays the partial-application check
+on every call.
+
+**THE FIRST PASS REPORTED THREE REGRESSIONS THAT DO NOT EXIST**, and the reason
+is the row-sizing rule yet again. `defunc` rows 3, 5 and 6 cost ~700-1 000 ps,
+so at n=2e7 they get 14-26 ms of work and read 0.60x, 0.73x and 0.79x. At
+n=2e8 they read 1.00x, 1.00x and 1.02x. Row 6's 0.85x survived one more round
+and still was not real: six interleaved reps put base at 700-943 and new at
+689-928, so the 0.85x was a single low base sample. **A ratio whose two
+distributions overlap is not a result**, and three of them in one table is a
+sizing problem rather than three regressions.
