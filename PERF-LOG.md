@@ -11659,3 +11659,61 @@ The element reads are no longer the band — `list::get` is at 3.3x and
 (`map has` 2 192, `set has` 2 180, `map::get` 2 836), whose cause is now known
 NOT to be a megamorphic `equals`, and `seq::get` at 13.4x, where the pair has
 already been spent and `bytes::get` at 1 200 shows 2.4x of headroom remains.
+
+#### The keyed probes: a CPU profile, then the pair — set 1.2-1.3x, map NOT demonstrated, and the wide version is 40x WORSE
+
+Three guesses at the one-entry probe had failed (the Option, the route, the
+megamorphic `equals`), so this one started with a profile instead. The built
+binary does not ship `cpusampler`, so JFR execution samples:
+
+```
+69  MapNatives.containsKey(MezzeMap, Object)     <- @TruffleBoundary
+49  InlineMapContainsKey.doMap(MezzeMap, Object)
+```
+
+118 of ~130 steady-state samples in two frames, with `MezzeMap` and
+`SingleEntryMapStorage` inlined INTO the boundary-compiled unit. So the ~2 000 ps
+is the boundary — and the earlier "boundary re-tested on top of the dispatch
+removal, still null" test had never made the storage receiver concrete, which is
+the configuration that measured 0.78x on seq and 0.71x on list.
+
+**THE WIDE VERSION IS A DISASTER, and it is the useful half of this entry.**
+Naming SIX storage implementations so every branch has a concrete receiver:
+
+| row | base | six branches | |
+|---|---|---|---|
+| `set has` | 2 099 ps | 86 399 | **0.02x** |
+| `map has` | 2 167 | 87 033 | **0.02x** |
+| `map get` | 2 791 | 133 636 | **0.02x** |
+| controls | | | 0.99-1.03x |
+
+40-48x worse on all three at once, checksums still correct. Each branch is a
+whole hash-map probe — one an `@ExplodeLoop` 8-way scan, another a general HAMT
+walk over `hashCode`/`equals` — so partial evaluation inlined six map
+implementations into the caller. On seq each branch was ONE ARRAY LOAD and on
+list ONE FIELD READ. **The concrete-receiver chain pays only where each branch
+is a constant number of field reads**, and that is the rule the three results
+together give, which none of them gives alone.
+
+Narrowed to the constant-time storages only — one element, or none — with
+everything else kept behind the boundary:
+
+| run | `set has` | `map has` | `map get` | controls |
+|---|---|---|---|---|
+| n=2e7, 8 reps | **1.34x** | 1.29x | 1.08x | 0.92-1.01x |
+| n=1e7, 14 reps | **1.33x** | 1.13x | 1.01x | 0.99-1.09x |
+| n=1e7, 14 reps, map half reverted | **1.22x** | 1.02x | 0.98x | 0.90-1.13x |
+
+`set::contains` is the largest mover in all three runs. `map has` does not
+converge — 1.29x then 1.13x against a 1.09x control ceiling — and `map::get` is
+null, so **the map half is not shipped**. An unproven type test is exactly what
+cost 10% on the one-element storages earlier today.
+
+Stated honestly: `set::contains` ~1.2-1.3x, not a sharper figure, because
+`bytes::get` is bimodal and moves 1.09-1.19x untouched on this bench. Three runs
+agreeing on the direction and the ranking is what carries it, not any one ratio.
+
+COVERAGE. SetDirectProbeTest, 6 tests, including one that asserts ONLY the
+constant-time storages take the direct probe — widening that set is what
+measured 0.02x and nothing else would catch it — and a differential against
+`HashSet` over 150 trials of mixed element types.

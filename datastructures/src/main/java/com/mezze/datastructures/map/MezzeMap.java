@@ -129,6 +129,36 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
 
     /**
      * Gets the value for a key, or null if not present.
+     *
+     * <p>A CONCRETE-RECEIVER PROBE WAS TRIED HERE AND NOT DEMONSTRATED, which
+     * is worth recording because the identical move is 1.33x on
+     * {@code MezzeSet.containsDirect} and was 1.21x on `seq::get` and 4.19x on
+     * `list::get`. A CPU profile of the one-entry probe put 118 of ~130
+     * steady-state samples in `MapNatives.containsKey` — a `@TruffleBoundary` —
+     * and `InlineMapContainsKey.doMap`, so the boundary looked like the whole
+     * cost. Removing it with the storage receiver named:
+     *
+     * <pre>
+     *   row            n=2e7 (8 reps)   n=1e7 (14 reps)
+     *     map has          1.29x             1.13x
+     *     map get          1.08x             1.01x
+     *     set has          1.34x             1.33x   <- shipped
+     *     controls      0.92-1.01x        0.99-1.09x
+     * </pre>
+     *
+     * `map has` does not converge and 1.13x sits on the control ceiling;
+     * `map::get` is null. So the map half is NOT here, while the set half is —
+     * an unproven type test is exactly what cost 10% on the one-element
+     * storages.
+     *
+     * <p>AND THE WIDE VERSION OF IT IS A DISASTER. Naming SIX storage
+     * implementations rather than one measured **0.02x** — 40-48x WORSE on all
+     * three rows at once, checksums still correct. Each branch is a whole
+     * hash-map probe, one an `@ExplodeLoop` 8-way scan and another a general
+     * HAMT walk, so partial evaluation inlined six map implementations into the
+     * caller. The chain pays when each branch is a CONSTANT number of field
+     * reads — one array load on seq, one field read on list — and not
+     * otherwise.
      */
     @SuppressWarnings("unchecked")
     public V get(K key) {

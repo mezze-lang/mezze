@@ -538,6 +538,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      */
     @Operation
     public static final class InlineMapContainsKey {
+        /** The map half of this was measured and NOT demonstrated — see
+         *  `MezzeMap.get` for the table. The set half below was 1.33x. */
         @Specialization
         public static boolean doMap(com.mezze.datastructures.map.MezzeMap<?, ?> m, Object k) {
             return com.mezze.interpreter.nodes.builtin.collections.MapNatives.containsKey(m, k);
@@ -545,6 +547,9 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
         @Specialization
         public static boolean doSet(com.mezze.datastructures.set.MezzeSet<?> s, Object x) {
+            if (s.hasDirectProbe()) {
+                return s.containsDirect(x);
+            }
             return com.mezze.interpreter.nodes.builtin.collections.SetNatives.contains(s, x);
         }
     }
@@ -6637,6 +6642,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      */
     @Operation
     public static final class InlineMapGetRaw {
+        /** THE BOUNDARY STAYS: the paired probe measured 1.08x then 1.01x here,
+         *  inside the control spread. See `MezzeMap.get` for the table. */
         @Specialization
         @TruffleBoundary
         @SuppressWarnings({"unchecked", "rawtypes"})

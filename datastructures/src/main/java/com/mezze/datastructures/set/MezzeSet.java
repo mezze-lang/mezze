@@ -133,6 +133,26 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
     }
 
     /**
+     * True when a probe may run INSIDE compiled code — everything except
+     * {@link EvidenceSetStorage}, which dispatches through guest closures. The
+     * set counterpart of {@code MezzeMap.hasDirectProbe}.
+     */
+    public boolean hasDirectProbe() {
+        return storage instanceof SingleElemSetStorage
+                || storage instanceof EmptySetStorage;
+    }
+
+    /**
+     * {@link #contains} with the storage type NAMED, so each branch has a
+     * concrete receiver. See {@code MezzeMap.getDirect} for the measurement
+     * that says both halves are needed.
+     */
+    public boolean containsDirect(Object elem) {
+        if (storage instanceof SingleElemSetStorage s) return s.contains(elem);
+        return storage.contains(elem);
+    }
+
+    /**
      * Returns true if the element is present.
      */
     public boolean contains(A elem) {
