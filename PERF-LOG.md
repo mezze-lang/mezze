@@ -12211,3 +12211,74 @@ and `OP_SUM_VALUES` are also declared in `NativeHofNames` and never referenced
 by `ChainCanonicalizer`. `flat_map`, `zip` and `chain` are stages a real
 pipeline uses, and no row in any bench exercises them — which is how `count`
 stayed hidden too. Next.
+
+#### A folder that reads a field of its element refused the whole chain — 37.22x
+
+Chasing why `zip`, `enumerate`, `chain` and `flat_map` all measured 190x to
+1 036x the fused rows turned up something much more general than four missing
+stages.
+
+`ChainCanonicalizer.isPureArithTree` admitted two leaves — a local and a
+literal. A FIELD READ was not one of them, so `{ acc, x } -> acc + x.v` was
+refused; and the comment on that predicate's own Pattern 1c says what a refused
+folder does: **it declines the WHOLE chain.** Any pipeline whose elements are
+RECORDS therefore ran element-at-a-time the moment the folder read a field
+instead of the whole element. Records are what `zip` produces, what `enumerate`
+produces, and what every row of real data is.
+
+ISOLATED WITH NEITHER `zip` NOR `enumerate` INVOLVED, a range mapped to
+`{ v = x }` over 1e7, and the only difference between the two rows is WHERE the
+field is read:
+
+| row | ps/elem |
+|---|---|
+| field read in the FOLDER | **15 744** |
+| field read in a MAP stage, bare `acc + x` folder | **403** |
+
+39x for moving a field access from one lambda to another. A field read is one
+load, exactly like the `ReadLocalIR` sitting beside it in that grammar; the only
+reason it was absent is that nobody had written it down.
+
+| row | base | fused | n=1e7, 6 processes |
+|---|---|---|---|
+| `record, field in FOLDER` | 151 707 470 ns | **4 075 491** | **37.22x** |
+| `record, field in MAP` (same work) | 4 093 103 | 4 055 644 | 1.01x |
+| `filter+fold` | 975 593 | 1 056 792 | 0.92x |
+
+The target's distributions do not overlap at all — 151.7-152.7 ms against
+4.08-4.34 — and the two record rows now cost the SAME, which is what a fixed
+cliff looks like rather than a shifted one.
+
+BOTH GRAMMARS, AND THE SECOND ONE IS WHY THE FIRST TEST OF THE EMIT PASSED
+WRONGLY. There are two predicates: `ChainCanonicalizer.isPureArithTree` decides
+whether to fuse at all, and `BytecodeCompiler.isPureArithFoldTree` decides
+whether the emitter inlines the folder's body as a TREE. With only the first
+extended, the chain fused and the emitter fell back to
+`FusedSinkMode.AccumulateCall` — the folder called once per element — which is
+already 36.57x and within 2% of the tree. **So the emit half was unreachable,
+and breaking it on purpose changed nothing**: I swapped the accumulator and
+element locals in the new leaf and all six tests still passed. Extending the
+emit predicate made the path live, the same break then failed four of the six,
+and the loop's per-element call became a field load: 4 075 491 against
+4 168 111.
+
+That is the useful part. A test that cannot fail is worthless, and the way to
+find out is to break the thing on purpose — twice, if the first break says
+nothing.
+
+WHAT THIS DOES NOT FIX. `zip` (1 031x), `enumerate` (1 036x), `flat_map` (480x)
+and `chain` (190x) are unchanged by it: `zip`, `chain` and `flat_map` have no
+`StageIR` at all, so a chain containing one cannot fuse whatever its folder
+looks like, and `enumerate` has a stage and a peel and still does not fuse in
+any of the four shapes measured. Those remain open, with rows now in the bench
+for each.
+
+AND THE HARNESS GOT A ROW SELECTOR, because without one it could not answer
+this question. Every row ran in ONE process, so when the target row's cost fell
+143 ms, three rows that run after it read 0.82-0.93x — they inherit a different
+JIT and GC state. The same thing happened in the other direction when `count`
+was fixed. `bench_iter_perf_compare <row>` now runs a single row, as every other
+bench here does. With one kernel per process the seq controls read 0.88x, 1.07x,
+1.28x and 1.04x across eight interleaved processes — wandering in both
+directions with overlapping distributions, which is what noise looks like and
+what a single blocked run dressed up as a regression.
