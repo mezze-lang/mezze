@@ -151,6 +151,41 @@ class HandlerAssumptionFastPathTest {
     }
 
     /**
+     * EVERY HAND-OUT MUST RE-ARM THE MIRROR, which is the one way the second
+     * lock-free early return can go wrong. `invalidate()` now returns without
+     * taking the monitor when nobody holds the assumption — worth 1.43x on
+     * `install/iter`, because the monitor was being taken on every push and
+     * every pop to discover there was nothing to do — and the flag that says
+     * so is cleared by each invalidation. If `get()` does not set it again,
+     * the SECOND hand-out is never invalidated: a perform site caches a
+     * handler and keeps it across a handler change, which is a wrong answer.
+     *
+     * <p>So this runs the cycle twice. One round trip passes even with the
+     * flag armed only once, which is why the first test of this file is not
+     * enough on its own.
+     */
+    @Test
+    fun `a second hand-out is invalidated as well as the first`() {
+        val hash = com.mezze.language.typedast.Hash("5ecc0d" + "0".repeat(58))
+
+        val first = HandlerChainRegistry.getEffectStableAssumption(hash)
+        HandlerChainRegistry.pushSimple(null, hash)
+        HandlerChainRegistry.popSimple()
+        assertFalse(first.isValid, "the first hand-out must be invalidated")
+
+        val second = HandlerChainRegistry.getEffectStableAssumption(hash)
+        assertTrue(second.isValid, "a fresh hand-out starts valid")
+
+        HandlerChainRegistry.pushSimple(null, hash)
+        try {
+            assertFalse(second.isValid,
+                "the second hand-out must be invalidated too")
+        } finally {
+            HandlerChainRegistry.popSimple()
+        }
+    }
+
+    /**
      * RESET MUST UNWIND THE MIRROR, and like the memo's null this is only
      * observable on the assumption object: the guest-level test below passes
      * either way — I checked, by deleting the line — because an ordinary
