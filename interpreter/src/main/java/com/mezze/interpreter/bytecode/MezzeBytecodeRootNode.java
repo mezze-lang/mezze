@@ -6920,6 +6920,52 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    /**
+     * A deque's indexed read and its front read, returning the ELEMENT or null
+     * for the same fused `match … is Some/None` pattern as
+     * {@link InlineMapGetRaw} — and the reason they are here is that the
+     * elision covered map, seq, list and bytes and never deque, which left
+     * these two the slowest element reads in the language:
+     *
+     * <pre>
+     *   row                       before
+     *     deque::get by index    8 525 ps   41x the floor
+     *     deque::first           5 430      25x
+     *     list::get (reference)    730       3.3x
+     * </pre>
+     *
+     * A `MezzeDeque` is FINAL and its `get` is `buffer[(head + index) & mask]`
+     * — one array load behind some arithmetic, which is the shape that made
+     * the boundary removal worth 1.44x on bytes and 4.19x on list, rather than
+     * the shape that made it 0.78x on seq.
+     *
+     * <p>NULL MEANS ABSENT, as everywhere in this family: Mezze has no null
+     * value, so no container can hold one.
+     *
+     * <p>`revokeOwnership` inside `MezzeDeque.get` early-returns once the flag
+     * is set, so it is a boolean read here and not a per-call write.
+     */
+    @Operation
+    public static final class InlineDequeGetRaw {
+        @Specialization
+        @SuppressWarnings("rawtypes")
+        public static Object doOp(com.mezze.datastructures.deque.MezzeDeque d, long index) {
+            int i = (int) index;
+            if (i < 0 || i >= d.size()) return null;
+            return d.get(i);
+        }
+    }
+
+    /** See {@link InlineDequeGetRaw}; the front element, or null when empty. */
+    @Operation
+    public static final class InlineDequeFirstRaw {
+        @Specialization
+        @SuppressWarnings("rawtypes")
+        public static Object doOp(com.mezze.datastructures.deque.MezzeDeque d) {
+            return d.size() == 0 ? null : d.get(0);
+        }
+    }
+
     /** Null check — used by the fused MutGetRaw + match pattern. */
     @Operation
     public static final class IsNotNull {

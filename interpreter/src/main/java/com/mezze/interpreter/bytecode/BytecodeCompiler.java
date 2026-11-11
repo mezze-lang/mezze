@@ -9070,7 +9070,13 @@ public final class BytecodeCompiler {
         boolean isSeqGet = "__native_seq_get".equals(getName);
         boolean isListGet = "__native_list_get".equals(getName);
         boolean isBytesGet = "__native_bytes_get".equals(getName);
-        if (!isMapGet && !isSeqGet && !isListGet && !isBytesGet) return false;
+        boolean isDequeGet = "__native_deque_get".equals(getName);
+        // ONE-ARGUMENT MEMBER OF THE FAMILY. `deque::first` returns the same
+        // `Option` for the same reason and was unfused for the same reason, so
+        // it belongs here; the only difference is that there is no key operand.
+        boolean isDequeFirst = "__native_deque_first".equals(getName);
+        if (!isMapGet && !isSeqGet && !isListGet && !isBytesGet
+                && !isDequeGet && !isDequeFirst) return false;
 
         // BOTH ABIs, and the scalar one is what actually turns up here. A probe
         // printing the scrutinee reported
@@ -9082,7 +9088,19 @@ public final class BytecodeCompiler {
         // applied, and so fired only in straight-line test code and never
         // where the cost is.
         NodeIR mapArg, keyArg;
-        if (cn.isScalarABI()) {
+        if (isDequeFirst) {
+            // No key operand: one positional arg, or a one-field `{ d }`.
+            if (cn.isScalarABI()) {
+                if (cn.getArgs().size() != 1) return false;
+                mapArg = cn.getArgs().get(0);
+            } else {
+                if (!(cn.getArg() instanceof MakeRecordIR mr1)) return false;
+                if (mr1.getFields().size() != 1) return false;
+                if (!"d".equals(mr1.getFields().get(0).getName())) return false;
+                mapArg = mr1.getFields().get(0).getValue();
+            }
+            keyArg = null;
+        } else if (cn.isScalarABI()) {
             // Positional, already in signature order, so there is no written
             // field order to preserve.
             if (cn.getArgs().size() != 2) return false;
@@ -9096,14 +9114,16 @@ public final class BytecodeCompiler {
             // either can be a call. So the record path is taken only when the
             // written order already matches, exactly as the generic record-ABI
             // collapse above requires.
-            String f0 = isMapGet ? "m" : isSeqGet ? "xs" : isListGet ? "xs" : "b";
+            String f0 = isMapGet ? "m" : isSeqGet ? "xs" : isListGet ? "xs"
+                    : isDequeGet ? "d" : "b";
             String f1 = isMapGet ? "k" : isListGet ? "index" : "i";
             if (!f0.equals(mr.getFields().get(0).getName())
                     || !f1.equals(mr.getFields().get(1).getName())) return false;
             mapArg = mr.getFields().get(0).getValue();
             keyArg = mr.getFields().get(1).getValue();
         }
-        if (mapArg == null || keyArg == null) return false;
+        if (mapArg == null) return false;
+        if (keyArg == null && !isDequeFirst) return false;
 
         var cases = m.getCases();
         if (cases.size() != 2) return false;
@@ -9139,12 +9159,16 @@ public final class BytecodeCompiler {
         if (isMapGet) b.beginInlineMapGetRaw();
         else if (isSeqGet) b.beginInlineSeqGetRaw();
         else if (isListGet) b.beginInlineListGetRaw();
+        else if (isDequeGet) b.beginInlineDequeGetRaw();
+        else if (isDequeFirst) b.beginInlineDequeFirstRaw();
         else b.beginInlineBytesGetRaw();
         emitNode(mapArg, b, argCount, localMap);
-        emitNode(keyArg, b, argCount, localMap);
+        if (keyArg != null) emitNode(keyArg, b, argCount, localMap);
         if (isMapGet) b.endInlineMapGetRaw();
         else if (isSeqGet) b.endInlineSeqGetRaw();
         else if (isListGet) b.endInlineListGetRaw();
+        else if (isDequeGet) b.endInlineDequeGetRaw();
+        else if (isDequeFirst) b.endInlineDequeFirstRaw();
         else b.endInlineBytesGetRaw();
         b.endStoreLocal();
 
