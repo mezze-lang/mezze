@@ -239,7 +239,7 @@ public final class TrampolineRootNode extends RootNode {
                 && rawArgs.length == closureCount + 1
                 && closureCount < rawArgs.length
                 && rawArgs[closureCount] instanceof com.mezze.interpreter.values.MezzeRecord rec) {
-            Object partial = checkPartialApplication(rec, rawArgs);
+            Object partial = checkPartialApplicationShaped(rec, rawArgs);
             if (partial != null) return partial;
         }
         Object[] flatArgs = parameterCount == 0
@@ -256,6 +256,50 @@ public final class TrampolineRootNode extends RootNode {
         frame.setObject(targetSlot, innerTarget);
         loop.execute(frame);
         return frame.getObject(resultSlot);
+    }
+
+    /**
+     * A SHAPE THAT HAS EVERY PARAMETER, remembered so the check below does not
+     * run again for it.
+     *
+     * <p>WHAT IT COSTS WITHOUT THIS. `checkPartialApplication` is a
+     * `@TruffleBoundary` that walks the parameter names and asks the record for
+     * each one BY NAME — `getFieldIndex(String)` → `Shape.findFieldIndex` → a
+     * string search — on every call. A profile of a loop calling a
+     * constraint-carrying function put 1 422 of ~5 500 samples in this root's
+     * `execute`, 752 in this check, and 404 each in `getFieldIndex` and
+     * `findFieldIndex`. The loop cost 25 731 ps an iteration against 640 for
+     * the identical loop whose call does not come through here.
+     *
+     * <p>WHY A SHAPE IS THE RIGHT KEY, and the whole correctness argument: the
+     * question this check asks is whether the record HAS a field for each
+     * parameter, which is a property of its field NAMES alone — exactly what a
+     * `Shape` is. Two records sharing a shape always get the same answer. A
+     * call site builds its record from one shape, so the first call answers for
+     * every later one.
+     *
+     * <p>ONLY THE COMPLETE ANSWER IS CACHED. A partial application allocates a
+     * `MezzeFunction` holding THAT record's supplied arguments, so it is a
+     * per-call value and remembering it would hand a later caller another
+     * caller's arguments.
+     */
+    @CompilerDirectives.CompilationFinal
+    private com.mezze.interpreter.values.MezzeRecord.Shape completeShape;
+
+    /**
+     * {@link #checkPartialApplication} with the shape remembered — see
+     * {@link #completeShape}. A hit is one reference compare and no boundary.
+     */
+    private Object checkPartialApplicationShaped(
+            com.mezze.interpreter.values.MezzeRecord rec, Object[] rawArgs) {
+        com.mezze.interpreter.values.MezzeRecord.Shape shape = rec.getShape();
+        if (shape != null && shape == completeShape) return null;
+        Object partial = checkPartialApplication(rec, rawArgs);
+        if (partial == null && shape != null && completeShape == null) {
+            CompilerDirectives.transferToInterpreterAndInvalidate();
+            completeShape = shape;
+        }
+        return partial;
     }
 
     /**

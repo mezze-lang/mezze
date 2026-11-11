@@ -101,6 +101,87 @@ let k_tier = { n } -> do
     else go { i = i - heavy_one { i = i }, acc = acc + i }
   go { i = n, acc = 0 }
 
+## 6. A PLAIN TOP-LEVEL FUNCTION called once per iteration, in the
+##    accumulator. `plain` is as small as a function can be, so if this costs
+##    more than kernel 8 the difference is dispatch and not work.
+let plain = { x } -> x + 1
+
+let k_direct = { n } -> do
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - 1, acc = acc + plain { x = i } - 1 }
+  go { i = n, acc = 0 }
+
+## 7. THE SAME CALL, TO A LOCAL CLOSURE. A closure is built eagerly and is
+##    never a lazy stub, which is the known tell from the stub-bypass work: when
+##    the simpler thing is slower, suspect a decision cached too early.
+let k_closure = { n } -> do
+  let bump = { x } -> x + 1
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - 1, acc = acc + bump { x = i } - 1 }
+  go { i = n, acc = 0 }
+
+## 8. AN ABILITY METHOD ON A CONCRETE RECEIVER. The impl is knowable at the
+##    call, and BytecodeCompiler lowers this to an indirect call through the
+##    dictionary field that CallIndirect caches and force-inlines.
+ability Step for 'c where {
+  step: { it: 'c, x: Int } -> Int,
+}
+
+pub type Cfg = { bump: Int }
+
+impl Step for Cfg where {
+  step = { it, x } -> x + 1,
+}
+
+let cfg: Cfg = { bump = 1 }
+
+let k_ability = { n } -> do
+  let go = { c, i, acc } ->
+    if i <= 0 then acc
+    else go { c = c, i = i - 1, acc = acc + c.step { x = i } - 1 }
+  go { c = cfg, i = n, acc = 0 }
+
+## 9. THE SAME ABILITY METHOD THROUGH A `with` CONSTRAINT, so the impl arrives
+##    as evidence rather than being known at the call.
+let via_dict: { c: 'c, x: Int } with Step 'c -> Int = { c, x } -> c.step { x = x }
+
+let k_dict = { n } -> do
+  let go = { c, i, acc } ->
+    if i <= 0 then acc
+    else go { c = c, i = i - 1, acc = acc + via_dict { c = c, x = i } - 1 }
+  go { c = cfg, i = n, acc = 0 }
+
+## 10. ROW 9 WITH THE LOOP AT TOP LEVEL, which is how `ability_dispatch`
+##     spells it — and that bench sees no gap at all here. Every other kernel in
+##     this file wraps its loop in a do-block `let`, and a do-block let lambda
+##     generalizes where a top-level one specializes, so row 10 minus row 9 is
+##     the SPELLING and row 9 minus row 8 is only a dictionary if row 10 is slow
+##     too.
+let go_dict_top: { c: Cfg, i: Int, acc: Int } -> Int =
+  { c, i, acc } ->
+    if i <= 0 then acc
+    else go_dict_top { c = c, i = i - 1, acc = acc + via_dict { c = c, x = i } - 1 }
+
+let k_dict_top = { n } -> go_dict_top { c = cfg, i = n, acc = 0 }
+
+## 11. ROW 9 WITH AN ANNOTATION on the do-block loop, nothing else changed.
+let k_dict_annot = { n } -> do
+  let go: { c: Cfg, i: Int, acc: Int } -> Int =
+    { c, i, acc } ->
+      if i <= 0 then acc
+      else go { c = c, i = i - 1, acc = acc + via_dict { c = c, x = i } - 1 }
+  go { c = cfg, i = n, acc = 0 }
+
+## 12. ROW 10 WITHOUT its annotation, nothing else changed.
+let go_dict_bare =
+  { c, i, acc } ->
+    if i <= 0 then acc
+    else go_dict_bare { c = c, i = i - 1, acc = acc + via_dict { c = c, x = i } - 1 }
+
+let k_dict_bare = { n } -> go_dict_bare { c = cfg, i = n, acc = 0 }
+
 let report = { name, n, r } ->
   println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
 
@@ -143,4 +224,53 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
     report { name = "5 tier control ", n = n, r = time_it { f = {} -> k_tier { n = n } } }
     report { name = "5 tier control ", n = n, r = time_it { f = {} -> k_tier { n = n } } }
     report { name = "5 tier control ", n = n, r = time_it { f = {} -> k_tier { n = n } } }
+  else if k == 6 then do
+    k_direct { n = n }
+    k_direct { n = n }
+    k_direct { n = n }
+    report { name = "6 direct call  ", n = n, r = time_it { f = {} -> k_direct { n = n } } }
+    report { name = "6 direct call  ", n = n, r = time_it { f = {} -> k_direct { n = n } } }
+    report { name = "6 direct call  ", n = n, r = time_it { f = {} -> k_direct { n = n } } }
+  else if k == 7 then do
+    k_closure { n = n }
+    k_closure { n = n }
+    k_closure { n = n }
+    report { name = "7 closure call ", n = n, r = time_it { f = {} -> k_closure { n = n } } }
+    report { name = "7 closure call ", n = n, r = time_it { f = {} -> k_closure { n = n } } }
+    report { name = "7 closure call ", n = n, r = time_it { f = {} -> k_closure { n = n } } }
+  else if k == 8 then do
+    k_ability { n = n }
+    k_ability { n = n }
+    k_ability { n = n }
+    report { name = "8 ability call ", n = n, r = time_it { f = {} -> k_ability { n = n } } }
+    report { name = "8 ability call ", n = n, r = time_it { f = {} -> k_ability { n = n } } }
+    report { name = "8 ability call ", n = n, r = time_it { f = {} -> k_ability { n = n } } }
+  else if k == 9 then do
+    k_dict { n = n }
+    k_dict { n = n }
+    k_dict { n = n }
+    report { name = "9 dict call    ", n = n, r = time_it { f = {} -> k_dict { n = n } } }
+    report { name = "9 dict call    ", n = n, r = time_it { f = {} -> k_dict { n = n } } }
+    report { name = "9 dict call    ", n = n, r = time_it { f = {} -> k_dict { n = n } } }
+  else if k == 10 then do
+    k_dict_top { n = n }
+    k_dict_top { n = n }
+    k_dict_top { n = n }
+    report { name = "10 dict, top-level loop", n = n, r = time_it { f = {} -> k_dict_top { n = n } } }
+    report { name = "10 dict, top-level loop", n = n, r = time_it { f = {} -> k_dict_top { n = n } } }
+    report { name = "10 dict, top-level loop", n = n, r = time_it { f = {} -> k_dict_top { n = n } } }
+  else if k == 11 then do
+    k_dict_annot { n = n }
+    k_dict_annot { n = n }
+    k_dict_annot { n = n }
+    report { name = "11 dict, do-block + annotation", n = n, r = time_it { f = {} -> k_dict_annot { n = n } } }
+    report { name = "11 dict, do-block + annotation", n = n, r = time_it { f = {} -> k_dict_annot { n = n } } }
+    report { name = "11 dict, do-block + annotation", n = n, r = time_it { f = {} -> k_dict_annot { n = n } } }
+  else if k == 12 then do
+    k_dict_bare { n = n }
+    k_dict_bare { n = n }
+    k_dict_bare { n = n }
+    report { name = "12 dict, top-level, no annotation", n = n, r = time_it { f = {} -> k_dict_bare { n = n } } }
+    report { name = "12 dict, top-level, no annotation", n = n, r = time_it { f = {} -> k_dict_bare { n = n } } }
+    report { name = "12 dict, top-level, no annotation", n = n, r = time_it { f = {} -> k_dict_bare { n = n } } }
   else println { msg = "unknown kernel" }
