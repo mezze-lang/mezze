@@ -5257,12 +5257,32 @@ public final class BytecodeCompiler {
             if (st instanceof StageIR.Enumerate) recordLive = true;
             else if (st instanceof StageIR.Map) recordLive = false;
         }
-        // Whatever is still live after the outermost stage reaches the SINK,
-        // whose classifiers do not read the record — decline rather than feed
-        // them an element that is not the shape they expect.
+        // WHATEVER IS STILL LIVE AFTER THE OUTERMOST STAGE REACHES THE SINK.
+        // Most sinks cannot read the `{i, val}` record and must decline rather
+        // than be handed an element that is not the shape they expect.
+        //
+        // A FOLD WHOSE FOLDER IS AN EXPRESSION CAN, and refusing it was the
+        // whole of `enumerate`'s cost: `iter::fold { it = enumerate(src), f =
+        // {acc, x} -> acc + x.val }` is the ordinary way to use an enumerate,
+        // and it measured 75 049 ps/elem against 72 for `sum` — 1 036x — for
+        // want of resolving two field names the loop already has in locals.
+        // `x.val` is the element, which is in `xSlot`; `x.i` is the index,
+        // which is in `enumIndex`. A `MapInline` with `leftIsIndex` has
+        // resolved them that way all along.
+        //
+        // The folder must be the TREE form, and that is a correctness
+        // condition rather than a preference: `AccumulateCall` hands the folder
+        // the raw element, and a folder expecting a record would read fields
+        // off a Long. It must also read NOTHING but `i` and `val` off the
+        // element — any other field name means the shape is not what this
+        // analysis thinks it is, so it declines.
         if (recordLive) {
-            if (dbg) System.err.println("[chain-canon-emit] reject: enumerate record reaches the sink");
-            return false;
+            boolean foldCanRead = sinkMode instanceof FusedSinkMode.AccumulateTree t
+                    && foldTreeReadsOnlyEnumFields(t.body(), t.elemParamSlot());
+            if (!foldCanRead) {
+                if (dbg) System.err.println("[chain-canon-emit] reject: enumerate record reaches the sink");
+                return false;
+            }
         }
         var classifiedStages = new java.util.ArrayList<ClassifiedStage>();
         for (int si = 0; si < stageList.size(); si++) {
@@ -6553,6 +6573,30 @@ public final class BytecodeCompiler {
      * Classify the chain's sink into a {@link FusedSinkMode}, doing
      * lambda/folder classification up front. Returns null on rejection.
      */
+    /**
+     * True when every field this fold tree reads off its ELEMENT parameter is
+     * one of the enumerate record's own two, `i` and `val` — the two the fused
+     * loop can resolve to locals. A read of any other name means the element is
+     * not the record this analysis believes it is, and the caller declines.
+     *
+     * <p>Fields of the ACCUMULATOR are not restricted: the accumulator is
+     * whatever the fold's `init` made it, never the enumerate record.
+     */
+    private static boolean foldTreeReadsOnlyEnumFields(NodeIR node, int elemParam) {
+        if (node instanceof ReadFieldIR rf) {
+            if (rf.getRecord() instanceof ReadLocalIR rl && rl.getSlot() == elemParam) {
+                String n = rf.getFieldName();
+                return "i".equals(n) || "val".equals(n);
+            }
+            return foldTreeReadsOnlyEnumFields(rf.getRecord(), elemParam);
+        }
+        if (node instanceof InlineBinaryOpIR bin) {
+            return foldTreeReadsOnlyEnumFields(bin.getLeft(), elemParam)
+                    && foldTreeReadsOnlyEnumFields(bin.getRight(), elemParam);
+        }
+        return true;
+    }
+
     private FusedSinkMode classifySinkMode(FusedChainIR chain, boolean dbg) {
         if (chain.getSink() instanceof SinkIR.Fold foldSink) {
             var folderShape = classifyBinaryFolder(foldSink.getF(), dbg, "folder");
@@ -6854,11 +6898,44 @@ public final class BytecodeCompiler {
                               com.oracle.truffle.api.bytecode.BytecodeLocal accLocal,
                               com.oracle.truffle.api.bytecode.BytecodeLocal xLocal,
                               MezzeBytecodeRootNodeGen.Builder b) {
+        emitFoldTree(node, accParam, elemParam, accLocal, xLocal, false, null, b);
+    }
+
+    /**
+     * As above, and when [elemIsEnumRecord] the element is the `{i, val}`
+     * record an Enumerate stage nominally produced — which is never built. A
+     * read of `val` is the element in [xLocal] and a read of `i` is the index
+     * in [enumIndexLocal]; see the note on the record-reaches-the-sink gate.
+     */
+    private void emitFoldTree(NodeIR node, int accParam, int elemParam,
+                              com.oracle.truffle.api.bytecode.BytecodeLocal accLocal,
+                              com.oracle.truffle.api.bytecode.BytecodeLocal xLocal,
+                              boolean elemIsEnumRecord,
+                              com.oracle.truffle.api.bytecode.BytecodeLocal enumIndexLocal,
+                              MezzeBytecodeRootNodeGen.Builder b) {
         if (node instanceof InlineBinaryOpIR bin) {
             beginInlineArithOp(bin.getOp(), b);
-              emitFoldTree(bin.getLeft(), accParam, elemParam, accLocal, xLocal, b);
-              emitFoldTree(bin.getRight(), accParam, elemParam, accLocal, xLocal, b);
+              emitFoldTree(bin.getLeft(), accParam, elemParam, accLocal, xLocal,
+                           elemIsEnumRecord, enumIndexLocal, b);
+              emitFoldTree(bin.getRight(), accParam, elemParam, accLocal, xLocal,
+                           elemIsEnumRecord, enumIndexLocal, b);
             endInlineArithOp(bin.getOp(), b);
+            return;
+        }
+        // The enumerate record's two fields, resolved to the loop's locals
+        // rather than read off a record that was never built.
+        if (elemIsEnumRecord
+                && node instanceof ReadFieldIR erf
+                && erf.getRecord() instanceof ReadLocalIR erl
+                && erl.getSlot() == elemParam) {
+            if ("i".equals(erf.getFieldName())) {
+                b.emitLoadLocal(enumIndexLocal);
+            } else if ("val".equals(erf.getFieldName())) {
+                b.emitLoadLocal(xLocal);
+            } else {
+                throw new IllegalStateException(
+                    "emitFoldTree: enumerate record has no field " + erf.getFieldName());
+            }
             return;
         }
         if (node instanceof ReadLocalIR rl) {
@@ -7449,6 +7526,19 @@ public final class BytecodeCompiler {
         // ── Pre-allocate the enumerate counter and the current index ──
         // Two locals, not one: the element needs ITS index while the counter
         // moves on, and the index has to be read before the increment.
+        // IS THE ELEMENT REACHING THE SINK THE ENUMERATE RECORD? The same
+        // application-order walk `emitCanonicalIterChain` does to decide
+        // whether to accept the chain at all: the record is live from an
+        // Enumerate until a map consumes it. Recomputed here rather than
+        // threaded, because this is where the locals it resolves to live.
+        boolean enumRecordAtSink = false;
+        for (int i = stages.size() - 1; i >= 0; i--) {
+            var st = stages.get(i);
+            if (st instanceof ClassifiedStage.EnumerateStep) enumRecordAtSink = true;
+            else if (st instanceof ClassifiedStage.MapInline
+                    || st instanceof ClassifiedStage.MapCall) enumRecordAtSink = false;
+        }
+
         com.oracle.truffle.api.bytecode.BytecodeLocal enumCounter = null;
         com.oracle.truffle.api.bytecode.BytecodeLocal enumIndex = null;
         if (stages.stream().anyMatch(st -> st instanceof ClassifiedStage.EnumerateStep)) {
@@ -7683,10 +7773,13 @@ public final class BytecodeCompiler {
             }
             case FusedSinkMode.AccumulateTree t -> {
                 // acc = <the folder's own body, with its params rewritten to
-                // the loop's locals>.
+                // the loop's locals>. When an Enumerate's record is still live
+                // here, `x.val` and `x.i` are two of those locals — the gate in
+                // `emitCanonicalIterChain` has already established that the
+                // folder reads nothing else off the element.
                 b.beginStoreLocal(accSlot);
                   emitFoldTree(t.body(), t.accParamSlot(), t.elemParamSlot(),
-                               accSlot, xSlot, b);
+                               accSlot, xSlot, enumRecordAtSink, enumIndex, b);
                 b.endStoreLocal();
             }
             case FusedSinkMode.AccumulateCall ac -> {
