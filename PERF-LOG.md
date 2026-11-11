@@ -11566,3 +11566,43 @@ mixed key types — which is what the differential is there for.
   ordered insert at an arbitrary position (wants a tree), BitSet unwired.
 - **The dump probes still do not fire for a `mez build` app**, so IR and
   bytecode listings are only available in a test JVM.
+
+#### …and the SAME change on the ONE-element storages is a REGRESSION
+
+The obvious next step after 2.04x at eight keys was the one-element storages,
+which is what `allocsurface`'s `map has`, `map get` and `set has` rows probe.
+It measures worse:
+
+| row | `Objects.equals` | type-tested | |
+|---|---|---|---|
+| `map has` (target) | 2 192 ps | 2 425 | **0.90x** |
+| `map get` (target) | 2 836 | 3 091 | **0.92x** |
+| `set has` (target) | 2 180 | 2 403 | **0.91x** |
+| `seq get` (control) | 2 922 | 2 866 | 1.02x |
+| `seq size` (control) | 646 | 595 | 1.09x |
+| counted loop (control) | 225 | 234 | 0.96x |
+
+n=2e7, min of 8 per arm, interleaved, both arms built by the dev launcher with
+the extracted class confirmed to differ. Three independent target rows moved
+together to 0.90-0.92x while three controls sat at 0.96-1.09x, so this is a
+regression and not noise. Reverted.
+
+WHY IT DIFFERS FROM THE EIGHT-ENTRY SCAN. `SingleEntryMapStorage.key` is a
+single `@CompilationFinal` field, so partial evaluation already knows its TYPE
+and devirtualises the `equals` completely — there is nothing megamorphic left to
+remove, and an `instanceof` plus two `longValue()` calls on top is pure added
+work. **A megamorphic call is worth removing; a call PE has already
+devirtualised is not** — and "is it megamorphic" is a question about the SITE,
+not about the method.
+
+AND ONE OF THE THREE WAS DEAD CODE. `SmallFlatSetStorage` is unreachable for
+long elements: `SingleElemSetStorage.add` sends two Longs to `LongSetStorage`,
+which keeps a primitive `long[]` and binary searches it. A long fast path was
+added there and measured before that was checked. Reachability first, then the
+measurement.
+
+So the band's one-element rows — `map has` 2 192, `set has` 2 180, `map get`
+2 836 — are NOT a megamorphic-equals problem and remain open with their cause
+unidentified. The three storage sizes now read: one entry ~2 200 (open), two to
+eight entries 3 095-4 783 after the flat-scan fix, nine and above ~5 900 flat to
+a thousand keys.

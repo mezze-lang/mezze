@@ -29,6 +29,11 @@ public final class SmallFlatSetStorage implements SetStorage {
 
     @Override
     @ExplodeLoop(kind = ExplodeLoop.LoopExplosionKind.FULL_UNROLL_UNTIL_RETURN)
+    // NO LONG FAST PATH HERE, and not for a performance reason: this storage
+    // is UNREACHABLE for long elements. `SingleElemSetStorage.add` sends two
+    // Longs to `LongSetStorage`, which keeps a primitive `long[]` and binary
+    // searches it, so a long-element set never arrives here at all. A fast path
+    // was added and measured before that was checked; it was dead code.
     public boolean contains(Object elem) {
         for (int i = 0; i < elements.length; i++) {
             if (Objects.equals(elements[i], elem)) {

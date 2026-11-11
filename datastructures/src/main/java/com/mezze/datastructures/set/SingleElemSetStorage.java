@@ -21,6 +21,8 @@ public final class SingleElemSetStorage implements SetStorage {
         return 1;
     }
 
+    /** `Objects.equals` stays — see {@code SingleEntryMapStorage.get} for the
+     *  measurement that says so (0.91x on this row). */
     @Override
     public boolean contains(Object elem) {
         return Objects.equals(element, elem);
