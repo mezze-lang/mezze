@@ -12335,3 +12335,56 @@ reason the asymmetric cases are there.
 `enumerate+map+fold` stays at 1 036x and is NOT fixed by this: it declines
 earlier, in the map classifier, because `{x} -> x.val + x.i` is not a shape
 `classifyUnaryLiteralLambda` can read. Still open, with a row for it.
+
+#### A fold over a chain is two folds — 46.72x, with no new stage
+
+`iter::chain` cannot have a `StageIR` and never will: a stage sees one element
+at a time and a chain is two SOURCES. So a chain anywhere in a pipeline left it
+unfused — 13 777 ps an element against 72 for `sum`, 190x — and the obvious fix
+is a second source in the fused loop, which is a feature.
+
+It needs no feature. A LEFT fold over `a ++ b` is a fold over `b` seeded with
+the fold over `a`: same elements, same order, `f` applied the same number of
+times, `init` evaluated once. So `fold(chain(a, b), init, f)` is rewritten to
+`fold(b, fold(a, init, f), f)` and both halves go back through the walk as
+ordinary chains, which it already knows how to fuse.
+
+There was a precedent sitting next to it: `tryDistributeOverIf` pushes a chain
+into the branches of an `if` the same way — rewrite the IR, feed it back, let
+the existing machinery do the work.
+
+| row | base | rewritten | n=1e7, 4 processes |
+|---|---|---|---|
+| `chain+fold` | 244 476 053 ns | **5 232 364** | **46.72x** |
+| `flat_map+fold` | 348 658 417 | 354 316 857 | 0.98x |
+| `enumerate+fold` | 6 343 005 | 6 358 965 | 1.00x |
+| `zip+fold` | 623 105 815 | 440 059 816 | 1.42x |
+| `sum` / `count` / `record field in FOLDER` | | | 0.99x / 1.00x / 1.01x |
+
+Distributions: 244-385 ms against 5.23-5.54. `zip`'s 1.42x has base 623-800
+against new 440-783 — overlapping, and nothing in this change touches it.
+
+THE GUARD IS ABOUT EVALUATION ORDER, NOT THE FOLDER. The rewrite moves WHEN the
+second source EXPRESSION is evaluated: `chain { a, b }` builds both descriptors
+before folding anything, and afterwards `b` is built only once the fold of `a`
+has finished. For a range that is nothing, but an arbitrary expression could
+perform an effect and this pass has no effect analysis to lean on —
+`isEffectSafe` is a stub that returns `true`. So both operands must be built
+from a whitelist of iterator constructors and stages over locals, captures,
+globals and literals. **A lambda is exempt**, which is worth stating because it
+looks like the risky case: this rewrite cannot change how often or in what order
+a stage's callback runs, only when the descriptor holding it is allocated.
+
+The first version of the whitelist left out `ReadGlobalByHashIR` and declined
+the bench's own row, where `b = iter::range { start = half, end = n }` reads a
+top-level `let n = 10000000`. `a` was safe and `b` was not, both being
+`__native_iter_range` — which is what the probe printed, and what sent me
+looking at the operands instead of the shape.
+
+THE TESTS PIN ORDER, because this is a semantic rewrite and can be WRONG where a
+fusion gate can only be slow. A commutative folder cannot tell the halves apart
+— `sum` gives the same answer either way — so the order tests fold with
+`acc * 10 + x`, whose result is the digits in the order they were visited.
+Swapping the halves fails four of eight: 1234 becomes 3412, 12345 becomes 45312,
+and the four sum-shaped tests pass throughout, which is exactly why they are not
+enough on their own.
