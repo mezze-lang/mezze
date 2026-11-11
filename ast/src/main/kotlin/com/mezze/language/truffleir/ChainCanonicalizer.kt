@@ -1387,6 +1387,42 @@ object ChainCanonicalizer {
                 val candidate0 = FusedChainIR(effectiveSource, stages, SinkIR.Count, node.src)
                 if (isEffectSafe(candidate0, allFunctions)) candidate0 else null
             }
+            // ── count_all: `iter::count`, with NO predicate ──
+            //
+            // `NativeHofNames.OP_COUNT_ALL` was declared and had no users: the
+            // constant existed, nothing referenced it, and so the one iter sink
+            // that asks only "how many" never fused. It is the slowest row on
+            // the whole iter surface by a wide margin — N=1e7 over a range:
+            //
+            //   iter::count     7 430 ps/elem
+            //   iter::sum          84          the same walk, with MORE work
+            //   iter::reduce       70
+            //
+            // 88x for doing LESS per element, because the fused path drives a
+            // counting loop while the native walks the descriptor calling a
+            // guest-visible lambda per element across a boundary.
+            //
+            // THE `size` CASE ABOVE REFUSES A STAGELESS CHAIN AND THIS ONE MUST
+            // NOT, which is the only interesting difference between them. That
+            // refusal is there because a materialised collection knows its size
+            // in O(1), so routing it through a counting sink would make an O(1)
+            // question O(n). An ITER has no such answer — `count` walks whatever
+            // is behind it either way — so the stageless case is exactly the one
+            // worth fusing here.
+            //
+            // Opaque is refused for the reason `iter_sum` refuses it: an opaque
+            // value typed `Iter` could be an iterator over anything, and this
+            // pass cannot see what.
+            NativeHofNames.isIter(node.name, NativeHofNames.OP_COUNT_ALL) -> {
+                val srcField = NativeHofNames.srcFieldFor(node.name)
+                var src: NodeIR? = null
+                for (fld in mr.fields) if (fld.name == srcField) src = fld.value
+                val srcInner = src ?: return null
+                val (stages, source) = peelSource(srcInner, classifier, allFunctions, ext)
+                if (source is SourceIR.Opaque) return null
+                val candidate0 = FusedChainIR(source, stages, SinkIR.Count, node.src)
+                if (isEffectSafe(candidate0, allFunctions)) candidate0 else null
+            }
             // ── Count (predicate → filter + count) ──
             NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_COUNT) -> {
                 val srcField = NativeHofNames.srcFieldFor(node.name)
