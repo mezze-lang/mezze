@@ -79,6 +79,23 @@ public final class HandlerChainRegistry {
         // during op dispatch. Per-thread, so no cross-thread contention.
         Object currentScope;
 
+        // ONE-ELEMENT MEMO FOR THE PER-EFFECT ASSUMPTION, keyed by IDENTITY.
+        //
+        // `invalidateAssumptions` ran `EFFECT_ASSUMPTIONS.get(effectHash)` on
+        // every push AND every pop — a ConcurrentHashMap lookup keyed on a
+        // 64-byte Hash, which a CPU profile of the per-iteration install found
+        // in 307 of ~700 steady-state samples, the single largest frame. A loop
+        // that installs a handler therefore paid two of them per iteration.
+        //
+        // At any one push site the effect's Hash is the SAME OBJECT every time,
+        // so reference equality hits and the lookup disappears; a miss falls
+        // back to the map and re-arms the memo, so a chain that alternates
+        // between effects is correct, just not memoised. These live here rather
+        // than in a static because this state is per-thread by construction —
+        // see `currentScope` above — so there is no sharing and no contention.
+        com.mezze.language.typedast.Hash lastAssumptionHash;
+        StabilityAssumption lastAssumption;
+
         HandlerChainRegistry dispatching;
         HandlerChainRegistry dispatchPool;
 
@@ -374,12 +391,44 @@ public final class HandlerChainRegistry {
 
     /** Invalidate both per-effect and global assumptions. */
     private static void invalidateAssumptions(com.mezze.language.typedast.Hash effectHash) {
+        invalidateAssumptions(STATE.get(), effectHash);
+    }
+
+    /**
+     * The same thing for a caller that already holds the state, which the hot
+     * push/pop pair does — see {@code EffectState.lastAssumptionHash} for why
+     * the map lookup is worth memoising.
+     */
+    private static void invalidateAssumptions(
+            EffectState s, com.mezze.language.typedast.Hash effectHash) {
         noteEffectStateThread();
         HANDLER_CHAIN_STABLE.invalidate();
-        if (effectHash != null) {
-            StabilityAssumption ea = EFFECT_ASSUMPTIONS.get(effectHash);
-            if (ea != null) ea.invalidate();
+        if (effectHash == null) return;
+        StabilityAssumption ea;
+        if (effectHash == s.lastAssumptionHash) {
+            ea = s.lastAssumption;
+        } else {
+            ea = EFFECT_ASSUMPTIONS.get(effectHash);
+            // ONLY A NON-NULL RESULT MAY BE MEMOISED, and this is a soundness
+            // condition rather than a tuning choice. An effect has no entry
+            // until a perform site for it specializes — the assumptions are
+            // created lazily by `@Cached("getEffectStableAssumption(...)")` —
+            // so a push that happens first legitimately looks up null. Caching
+            // that null would make every later push for the same effect take
+            // the memo and skip invalidating the assumption created in the
+            // meantime, leaving a perform node holding cached dispatch across
+            // a handler change: the WRONG HANDLER, not merely a slow one.
+            //
+            // A non-null entry can never go stale: `getOrCreateEffectAssumption`
+            // only ever computeIfAbsent's, nothing removes or replaces an
+            // entry, and `resetStabilityForTests` resets the object in place.
+            // So once armed, the memo is valid for the life of the process.
+            if (ea != null) {
+                s.lastAssumptionHash = effectHash;
+                s.lastAssumption = ea;
+            }
         }
+        if (ea != null) ea.invalidate();
     }
 
     // ----------------------------------------------------------------
@@ -408,7 +457,7 @@ public final class HandlerChainRegistry {
         s.depth = d + 1;
         s.generation++;
         s.bdslHandleDepth++;
-        invalidateAssumptions(effectHash);
+        invalidateAssumptions(s, effectHash);
     }
 
     /**
@@ -426,7 +475,7 @@ public final class HandlerChainRegistry {
         s.depth = d;
         s.generation++;
         s.bdslHandleDepth--;
-        invalidateAssumptions(effectHash);
+        invalidateAssumptions(s, effectHash);
     }
 
     /**

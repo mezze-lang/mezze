@@ -52,6 +52,24 @@ final class StabilityAssumption {
     private int churns;
     private boolean unstable;
 
+    /**
+     * {@link #unstable}, readable WITHOUT the monitor — and the reason it
+     * exists is that {@link #invalidate()} is on the hot path of every handler
+     * push and every handler pop, for this object and the process-global one,
+     * which is four monitor-enters per iteration of a loop that installs a
+     * handler. Past {@link #CHURN_LIMIT} all four are a guaranteed no-op.
+     *
+     * <p>WHY A LOCK-FREE READ IS SOUND HERE, which is not a general property of
+     * mirroring a guarded field. This one is MONOTONIC: {@link #get()} returns
+     * {@link Assumption#NEVER_VALID} forever once set, so no caller can be
+     * holding a valid assumption for this object, and invalidating is then
+     * genuinely nothing. A read that is STALE can only be stale in the safe
+     * direction — it sees {@code false}, takes the monitor, and does exactly
+     * what it did before. Only {@link #reset}, which is for tests, clears it,
+     * and it does so under the monitor.
+     */
+    private volatile boolean gaveUpFast;
+
     StabilityAssumption(String name) {
         this.cyclic = new CyclicAssumption(name);
         this.recoveryGate = new CyclicAssumption(name + "-tier");
@@ -78,12 +96,24 @@ final class StabilityAssumption {
         return cyclic.getAssumption();
     }
 
-    /** The state this assumption guards has changed. */
-    synchronized void invalidate() {
+    /**
+     * The state this assumption guards has changed.
+     *
+     * <p>The lock-free early return is the point — see {@link #gaveUpFast}.
+     */
+    void invalidate() {
+        if (gaveUpFast) return;
+        invalidateLocked();
+    }
+
+    private synchronized void invalidateLocked() {
         if (!handedOut) return;
         handedOut = false;
         cyclic.invalidate();
-        if (++churns >= CHURN_LIMIT) unstable = true;
+        if (++churns >= CHURN_LIMIT) {
+            unstable = true;
+            gaveUpFast = true;
+        }
     }
 
     /** Start over, as if never churned. Invalidates first, so nothing still
@@ -95,5 +125,6 @@ final class StabilityAssumption {
         handedOut = false;
         churns = 0;
         unstable = false;
+        gaveUpFast = false;
     }
 }
