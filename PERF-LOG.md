@@ -11717,3 +11717,44 @@ COVERAGE. SetDirectProbeTest, 6 tests, including one that asserts ONLY the
 constant-time storages take the direct probe — widening that set is what
 measured 0.02x and nothing else would catch it — and a differential against
 `HashSet` over 150 trials of mixed element types.
+
+#### Deque had never been fused at all — 2.50x and 2.75x, the last unmeasured read
+
+`dsmore` on a correct build handed me two rows nobody had ever looked at:
+`deque::first` 5 449 ps and `deque::get by index` 8 557 — **the slowest element
+reads in the language**, 7x and 12x `list::get`'s 730. The cause was not a slow
+deque. The fused `match … is Some/None` elision covers map, seq, list and bytes
+and simply never covered deque, so both still allocated a `MezzeVariant` per
+call and crossed a `@TruffleBoundary` to do it.
+
+`MezzeDeque` is final and its `get` is `buffer[(head + index) & mask]` — one
+array load behind some arithmetic. By the CONSTANT-TIME-BRANCH rule from the
+keyed-probe entry above, that is the shape that pays:
+
+| row | base | fused | n=1e7 | n=3e6 |
+|---|---|---|---|---|
+| `deque::first` | 5 449 ps | **2 177** | 2.50x | 2.81x |
+| `deque::get by index` | 8 557 | **3 114** | 2.75x | 2.92x |
+| `deque::size` (control) | 414 | 424 | 0.98x | 1.03x |
+| `sorted_map::insert` (control) | 184 351 | 183 363 | 1.01x | 1.02x |
+
+Converged across both n, deque's own `size` flat beside the two movers,
+checksums equal, both arms unzip-verified to differ.
+
+`deque::first` takes ONE argument and the fused emitter took exactly two, so
+the generalisation was part of the work: the match shape, the local and the
+`IsNotNull` test are identical, only the key operand is absent. The emitter now
+accepts a one-operand member of the family, which is what any future `first`/
+`last`/`peek` will need.
+
+WHERE THE BAND STANDS NOW. bytes 1 200 (bimodal), list 730, seq ~2 000,
+deque 2 177 / 3 114. Deque was outside the band by an order of magnitude and is
+now inside it; the remaining spread is the ring arithmetic and the seq storage
+indirection, not a boundary.
+
+COVERAGE. `DequeFusedReadTest`, 6 tests, aimed at the RING BUFFER, because that
+is what can actually break: a deque whose contents have wrapped has
+`head != 0`, so a fast path that only ever saw `head == 0` passes a naive test
+and is wrong in service. Two tests push at the front first and then index.
+One is a warm loop — the fused read is a compiled path, and a straight-line
+test exercises only its first execution.
