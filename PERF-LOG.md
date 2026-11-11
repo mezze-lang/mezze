@@ -11493,3 +11493,76 @@ Where the band stands: `seq::get` 2 949 (13.6x the control, from 16.4x),
 `list::get` ~3 000, `map::get` 2 919, `map::contains_key` 2 183,
 `set::contains` 2 207, `bytes::get` ~1 200. The map and set probes are untouched
 by any of this and are now the largest rows left.
+
+### LEDGER UPDATE 2026-11-11 — the keyed probes, re-measured on a correct build, and an INVERSION in the promotion curve
+
+`bench/cases/mapsurface` had only ever been measured on the November-1 runtime,
+where every row read 51-67 ns flat and I concluded "the probe barely depends on
+the structure". **That conclusion is struck.** Rebuilt with the dev launcher,
+n=1e7, no WARMUP flags:
+
+| keys | storage | `contains_key` | `get` |
+|---|---|---|---|
+| 2 | SmallFlat | 4 131 ps | 5 239 |
+| 4 | SmallFlat | 5 714 | 6 718 |
+| 7 | SmallFlat | 8 710 | 9 929 |
+| **8** | SmallFlat (full) | **9 876** | **10 701** |
+| **9** | long trie | **6 005** | **6 992** |
+| 16 | long trie | 5 986 | 6 914 |
+| 1 000 | long trie | 7 409 | 9 308 |
+| 16 000 | long trie | 15 249 | 17 387 |
+
+The probe depends on the structure a great deal: the flat scan is LINEAR at
+~820 ps per entry while the trie is flat to a thousand keys. And the curve had
+an inversion in it — **an 8-key map probed 1.65x slower than the 9-key map it
+promotes to**, so the crossover sat at four or five keys and not at
+`MAX_SIZE = 8`.
+
+#### 820 ps to compare two numbers is a megamorphic `equals`
+
+`SmallFlatMapStorage` keeps `Object[] keys`, so
+`Objects.equals(keys[i], searchKey)` is a VIRTUAL `equals` on a receiver whose
+type varies across the process — megamorphic, once per entry, eight times per
+probe. Testing the search key's type ONCE and then comparing primitives:
+
+| keys | `contains_key` | | `get` | |
+|---|---|---|---|---|
+| 2 | 4 103 -> 3 095 | **1.33x** | | 1.12x |
+| 4 | 5 804 -> 3 779 | **1.54x** | | **1.44x** |
+| **8** | 9 765 -> 4 783 | **2.04x** | | **1.81x** |
+| 9 (trie, control) | | 1.05x | | 0.99x |
+| 16 (trie, control) | | 1.00x | | 1.01x |
+
+The gain scales with the entry count, which is what removing a PER-ENTRY cost
+predicts and a fixed cost does not; the trie rows this cannot touch are flat;
+checksums agree in every row. **The inversion is gone** — 8 keys now probes at
+4 783 against the trie's ~5 900, so the promotion threshold finally sits the
+right way round and `MAX_SIZE` needs no change.
+
+This is the third row today whose cost was a megamorphic call —
+`MezzeSeq.size` (3.29x), `seq::get` (1.21x, paired), and now the small-map scan
+(2.04x). The general path is kept verbatim for every other key type, so a
+Str-keyed or Double-keyed small map behaves exactly as before.
+
+COVERAGE, and the break is verified rather than assumed. The plausible wrong
+implementation is `((Number) keys[i]).longValue() == s`, which would make a
+`Double` key of 1.0 answer for a `Long` key of 1. Injected, it fails two of the
+six tests — the targeted case and the `HashMap` differential over deliberately
+mixed key types — which is what the differential is there for.
+
+#### What is still open
+
+- **`map::get` and `set::contains` above the small sizes.** The trie is flat to
+  a thousand keys and then climbs (7 409 at 1 000, 15 249 at 16 000) — cache
+  behaviour, not algorithm, and untouched.
+- **`list::get`.** 0.71x on boundary removal alone; the PAIRED experiment that
+  rescued `seq::get` has not been run for it.
+- **180 collection natives undeclared**: sorted 97, iter 32, nel 30, buffer 21,
+  none with a `*Ops.kt`. `ChainCanonicalizer` mentions neither `__native_nel_`
+  nor `__native_sorted_map_`, so those two families carry no fusion risk;
+  `sorted_set` and `iter` need checking op by op.
+- **Structural, characterised but not attempted**: the HAMT's unboxed trie
+  values, List's chunked backing, `unfold`'s cross-function variant elision,
+  ordered insert at an arbitrary position (wants a tree), BitSet unwired.
+- **The dump probes still do not fire for a `mez build` app**, so IR and
+  bytecode listings are only available in a test JVM.

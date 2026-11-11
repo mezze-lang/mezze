@@ -31,9 +31,49 @@ public final class SmallFlatMapStorage implements MapStorage {
         return keys.length;
     }
 
+    /**
+     * A LONG KEY IS COMPARED AS A LONG, not through {@code Objects.equals}.
+     *
+     * <p>MEASURED on `bench/cases/mapsurface`, n=1e7, probe cost against the
+     * key count — and the curve had an inversion in it:
+     *
+     * <pre>
+     *   keys  storage           contains_key   get
+     *      2  SmallFlat            4 131 ps   5 239
+     *      4  SmallFlat            5 714      6 718
+     *      7  SmallFlat            8 710      9 929
+     *      8  SmallFlat (full)     9 876     10 701
+     *      9  long trie            6 005      6 992
+     *     16  long trie            5 986      6 914
+     * </pre>
+     *
+     * The flat scan was ~820 ps PER ENTRY and the trie is flat at ~6 000, so an
+     * 8-key map probed 1.65x slower than the 9-key map it promotes to — the
+     * crossover sat at four or five keys, not at {@link #MAX_SIZE}.
+     *
+     * <p>820 ps is far too much for comparing two numbers. {@code keys} is an
+     * {@code Object[]}, so {@code Objects.equals(keys[i], searchKey)} is a
+     * VIRTUAL {@code equals} on a receiver whose type varies across the
+     * process: megamorphic, once per entry, eight times per probe. Testing the
+     * search key once and then comparing primitives removes the call entirely —
+     * the same move that took `MezzeSeq.size` 3.29x and `seq::get` 1.21x.
+     *
+     * <p>The general path is kept verbatim underneath for every other key type,
+     * so this narrows nothing: a Str-keyed or Double-keyed small map behaves
+     * exactly as before.
+     */
     @Override
     @ExplodeLoop(kind = ExplodeLoop.LoopExplosionKind.FULL_UNROLL_UNTIL_RETURN)
     public Object get(Object searchKey) {
+        if (searchKey instanceof Long sk) {
+            long s = sk;
+            for (int i = 0; i < keys.length; i++) {
+                if (keys[i] instanceof Long k && k.longValue() == s) {
+                    return values[i];
+                }
+            }
+            return null;
+        }
         for (int i = 0; i < keys.length; i++) {
             if (Objects.equals(keys[i], searchKey)) {
                 return values[i];
@@ -42,9 +82,19 @@ public final class SmallFlatMapStorage implements MapStorage {
         return null;
     }
 
+    /** The Bool peer of {@link #get}; see its comment for the measurement. */
     @Override
     @ExplodeLoop(kind = ExplodeLoop.LoopExplosionKind.FULL_UNROLL_UNTIL_RETURN)
     public boolean containsKey(Object searchKey) {
+        if (searchKey instanceof Long sk) {
+            long s = sk;
+            for (int i = 0; i < keys.length; i++) {
+                if (keys[i] instanceof Long k && k.longValue() == s) {
+                    return true;
+                }
+            }
+            return false;
+        }
         for (int i = 0; i < keys.length; i++) {
             if (Objects.equals(keys[i], searchKey)) {
                 return true;
