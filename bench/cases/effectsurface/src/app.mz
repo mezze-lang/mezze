@@ -40,6 +40,13 @@ impl Unit1 for Ones {} where {
   one = {} -> 1
 }
 
+## NO PARAMETER LIST AT ALL, which is a different operation and not a different
+## spelling: `for OnesBare` emits LookupHandlerByHash and `for Ones {}` emits
+## LookupParameterizedHandlerByHash. Kernel 11 is kernel 5 against this one.
+impl Unit1 for OnesBare where {
+  one = {} -> 1
+}
+
 ## The explicit form. `PerformD`'s comment says resume is fall-through, so this
 ## should cost what Ones costs; if it does not, the two forms compile
 ## differently and that is worth knowing.
@@ -152,6 +159,18 @@ let go_n = { i, acc } ->
   else go_n { i = i - one_installed {}, acc = acc + i }
 
 let k_install = { n } -> go_n { i = n, acc = 0 }
+
+## 11. KERNEL 5 WITH A PARAMETERLESS PERFORMER, so the install resolves its
+##     handler through LookupHandlerByHash instead of the parameterized
+##     operation. Same loop, same op, same checksum — the only difference is
+##     which lookup the install pays.
+let one_bare = {} -> perform OnesBare in Unit1.one {}
+
+let go_b = { i, acc } ->
+  if i <= 0 then acc
+  else go_b { i = i - one_bare {}, acc = acc + i }
+
+let k_install_bare = { n } -> go_b { i = n, acc = 0 }
 
 ## 6. ABORT instead of resume, installed per iteration. Kernel 6 minus kernel 5
 ##    is what throwing AbortPerformException costs, with the install held equal.
@@ -314,4 +333,11 @@ pub let main = {} -> perform Console in perform SystemArgs in do
     report { name = "10 op AFTER churning ANOTHER effect", n = n, r = time_it { f = {} -> k_churn_other { n = n } } }
     report { name = "10 op AFTER churning ANOTHER effect", n = n, r = time_it { f = {} -> k_churn_other { n = n } } }
     report { name = "10 op AFTER churning ANOTHER effect", n = n, r = time_it { f = {} -> k_churn_other { n = n } } }
+  else if k == 11 then do
+    k_install_bare { n = n }
+    k_install_bare { n = n }
+    k_install_bare { n = n }
+    report { name = "11 install/iter, no params", n = n, r = time_it { f = {} -> k_install_bare { n = n } } }
+    report { name = "11 install/iter, no params", n = n, r = time_it { f = {} -> k_install_bare { n = n } } }
+    report { name = "11 install/iter, no params", n = n, r = time_it { f = {} -> k_install_bare { n = n } } }
   else println { msg = "unknown kernel" }

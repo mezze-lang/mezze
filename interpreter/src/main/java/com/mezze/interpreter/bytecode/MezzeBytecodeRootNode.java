@@ -5626,6 +5626,45 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
          *  a hash-keyed map + throws a String-formatted RuntimeException on miss;
          *  both reach blocklisted methods under SVM. Handler lookup happens
          *  once per handle-block install, not per op-call. #402. */
+        /**
+         * Resolved once per site, for the reasons given at length on
+         * {@link LookupParameterizedHandlerByHash#doCachedFromContext} — and
+         * here there is no second branch to exclude: the context is this
+         * operation's only source of an answer, and it does not take `params`
+         * at all. A parameterless performer installed in a loop was paying a
+         * `ConcurrentHashMap` probe against a 64-character hex key per install
+         * for a record that cannot change.
+         *
+         * <p>The context guard is load-bearing under
+         * {@code ContextPolicy.SHARED}; the hash needs none, being a
+         * {@code @ConstantOperand}.
+         */
+        @Specialization(guards = {"cachedHandler != null",
+                                  "contextOf(node) == cachedContext"},
+                        excludeForUncached = true)
+        @SuppressWarnings("unused")
+        public static Object doCached(Hash contentHash,
+                @Bind Node node,
+                @Cached("contextOf(node)")
+                    com.mezze.interpreter.runtime.MezzeContext cachedContext,
+                @Cached("resolveOrNull(contentHash, node)") Object cachedHandler) {
+            return cachedHandler;
+        }
+
+        /** Reads the CURRENT context, so it is not idempotent — see the
+         *  note on {@link LookupParameterizedHandlerByHash#contextOf}. */
+        @com.oracle.truffle.api.dsl.NonIdempotent
+        static com.mezze.interpreter.runtime.MezzeContext contextOf(Node node) {
+            return com.mezze.interpreter.runtime.MezzeContext.get(node);
+        }
+
+        /** The record, or null so the guard declines and the loud path runs. */
+        @TruffleBoundary
+        static Object resolveOrNull(Hash contentHash, Node node) {
+            Object handler = contextOf(node).lookupHandler(contentHash);
+            return handler instanceof MezzeRecord ? handler : null;
+        }
+
         @Specialization
         @TruffleBoundary
         public static Object doLookup(Hash contentHash, @Bind Node node) {
@@ -5650,6 +5689,82 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @Operation
     @ConstantOperand(type = Hash.class)
     public static final class LookupParameterizedHandlerByHash {
+        /**
+         * THE HANDLER A CONTENT HASH NAMES CANNOT CHANGE, so resolving it once
+         * per site is enough — and resolving it per INSTALL was 14 ns of the
+         * 45 ns `install/iter`: two `ConcurrentHashMap` probes whose keys are
+         * 64-character hex strings, so a hit runs `String.equals` over all 64.
+         *
+         * <p>WHY THIS IS SOUND, AND WHY ONLY FOR ONE OF THE TWO BRANCHES.
+         * `handlersByHash` has exactly two writers: module load stores a
+         * `PerformerInfo` under the hash, and `lookupHandler` upgrades that
+         * entry in place to the inflated record on first use. Nothing removes
+         * an entry and nothing replaces a record, and a content hash is the
+         * identity of the performer's structure — so once a hash resolves to a
+         * `MezzeRecord`, that record IS the answer for the life of the context.
+         * That branch also ignores `params` entirely, which is why this
+         * specialization may.
+         *
+         * <p>The stdlib-factory branch below is NOT cacheable and this never
+         * caches it: it CALLS a guest factory with `params`, so reusing its
+         * result would call it once instead of once per install.
+         * {@link #resolveFromContextOnly} returns null whenever that branch
+         * could answer, and the guard then declines to cache.
+         *
+         * <p>THE CONTEXT GUARD IS NOT OPTIONAL. Mezze is
+         * {@code ContextPolicy.SHARED}, so this AST is shared between contexts
+         * in one engine, and a record resolved in one context must never be
+         * handed to another — the cross-context leak this codebase has been
+         * bitten by before. Comparing the context is two reference compares
+         * against a map probe plus a 64-character `equals`.
+         *
+         * <p>THERE IS NO GUARD ON THE HASH and there must not be one: it is a
+         * {@code @ConstantOperand}, so a site carries exactly one hash and a
+         * per-site cache can never be asked about a second. A guard against a
+         * variation that cannot occur reads as though it can.
+         */
+        @Specialization(guards = {"cachedRecord != null",
+                                  "contextOf(node) == cachedContext"},
+                        excludeForUncached = true)
+        @SuppressWarnings("unused")
+        public static Object doCachedFromContext(Hash contentHash, Object params,
+                @Bind Node node,
+                @Cached("contextOf(node)")
+                    com.mezze.interpreter.runtime.MezzeContext cachedContext,
+                @Cached("resolveFromContextOnly(contentHash, node)") Object cachedRecord) {
+            return cachedRecord;
+        }
+
+        /**
+         * NOT IDEMPOTENT, and the DSL has to be told so — this is the one place
+         * where the context guard's whole purpose shows up as a contract.
+         * Truffle asserts that a guard returns the same value for consecutive
+         * executions, and a guard that reads the CURRENT context does not: the
+         * full suite failed with "a guard was assumed idempotent" out of
+         * EffectPicIntegrationTest, which runs two contexts over one shared
+         * AST. That is exactly the case the guard exists for, so the answer is
+         * to declare the honest contract rather than to weaken the guard.
+         */
+        @com.oracle.truffle.api.dsl.NonIdempotent
+        static com.mezze.interpreter.runtime.MezzeContext contextOf(Node node) {
+            return com.mezze.interpreter.runtime.MezzeContext.get(node);
+        }
+
+        /**
+         * The record for this hash IF the context is what answers for it, and
+         * null otherwise — including whenever the stdlib factory could answer,
+         * because that branch must run per install. See
+         * {@link #doCachedFromContext}.
+         */
+        @TruffleBoundary
+        static Object resolveFromContextOnly(Hash contentHash, Node node) {
+            if (MezzeLanguage.get(node).getCachedStdlibCallTarget(contentHash) != null) {
+                return null;
+            }
+            Object record = contextOf(node).lookupHandler(contentHash);
+            return record instanceof MezzeRecord ? record : null;
+        }
+
         @TruffleBoundary
         @Specialization
         public static Object doLookup(Hash contentHash, Object params, @Bind Node node) {
