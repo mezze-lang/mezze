@@ -772,11 +772,57 @@ object ChainCanonicalizer {
      * enclosing frame — the one-level patterns above already handle that case
      * and keep it.
      */
+    /**
+     * A FIELD READ ON A PARAM IS A LEAF, and leaving it out of this grammar
+     * cost 39x on the most ordinary pipeline there is.
+     *
+     * `{ acc, x } -> acc + x.v` was refused, and the comment on Pattern 1c
+     * above says what a refused folder does: it declines the WHOLE chain. So
+     * any pipeline whose elements are RECORDS — rows of data, the output of
+     * `zip`, the output of `enumerate` — ran element-at-a-time the moment the
+     * folder read a field instead of the whole element. Measured over 1e7 with
+     * neither `zip` nor `enumerate` involved, a range mapped to `{ v = x }`:
+     *
+     *   field read in the FOLDER   15 744 ps/elem
+     *   field read in a MAP stage      403     the same work, 39x apart
+     *
+     * A field read is one load, exactly like `ReadLocalIR` beside it — the only
+     * reason it was not here is that nothing had written it down.
+     * `emitFoldTree` learns the same leaf in the same commit; the two
+     * predicates have to agree on the grammar, and when they disagree
+     * `FusedChainIR.fallback` runs the real folder, so a mismatch is slow and
+     * never wrong.
+     */
+    /**
+     * A FIELD READ ON A PARAM IS A LEAF, and leaving it out of this grammar
+     * cost 39x on the most ordinary pipeline there is.
+     *
+     * `{ acc, x } -> acc + x.v` was refused, and the comment on Pattern 1c
+     * above says what a refused folder does: it declines the WHOLE chain. So
+     * any pipeline whose elements are RECORDS — rows of data, the output of
+     * `zip`, the output of `enumerate` — ran element-at-a-time the moment the
+     * folder read a field instead of the whole element. Measured over 1e7 with
+     * neither `zip` nor `enumerate` involved, a range mapped to `{ v = x }`:
+     *
+     *   field read in the FOLDER   15 744 ps/elem
+     *   field read in a MAP stage      403     the same work, 39x apart
+     *
+     * A field read is one load, exactly like `ReadLocalIR` beside it — the only
+     * reason it was not here is that nothing had written it down.
+     * `emitFoldTree` learns the same leaf in the same commit; the two
+     * predicates have to agree on the grammar, and when they disagree
+     * `FusedChainIR.fallback` runs the real folder, so a mismatch is slow and
+     * never wrong.
+     */
     private fun isPureArithTree(node: NodeIR, depth: Int): Boolean {
         if (depth > FOLD_TREE_MAX_DEPTH) return false
         return when (node) {
             is ReadLocalIR -> true
             is LongLitIR -> true
+            // A field of one of the two params: `x.v`, `acc.total`.
+            is ReadFieldIR -> node.record is ReadLocalIR
+            // A field of one of the two params: `x.v`, `acc.total`.
+            is ReadFieldIR -> node.record is ReadLocalIR
             is InlineBinaryOpIR -> when (node.op) {
                 InlineOp.ADD, InlineOp.SUB, InlineOp.MUL, InlineOp.DIV, InlineOp.MOD ->
                     isPureArithTree(node.left, depth + 1) && isPureArithTree(node.right, depth + 1)

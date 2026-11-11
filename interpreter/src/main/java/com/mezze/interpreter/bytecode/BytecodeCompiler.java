@@ -6741,6 +6741,17 @@ public final class BytecodeCompiler {
             return rl.getSlot() == accParam || rl.getSlot() == elemParam;
         }
         if (node instanceof LongLitIR) return true;
+        // A FIELD OF ONE OF THE TWO PARAMS — `acc + x.v`. This predicate is the
+        // emit side of `ChainCanonicalizer.isPureArithTree`, which admits the
+        // same leaf; the two have to agree, or a chain the canonicalizer
+        // accepted arrives at `emitFoldTree` and throws. Without it, such a
+        // chain still FUSES — the folder is called per element through
+        // `AccumulateCall` — so this is the difference between a loop with a
+        // field load in it and a loop with a call in it, not between fused and
+        // unfused.
+        if (node instanceof ReadFieldIR rf && rf.getRecord() instanceof ReadLocalIR rl) {
+            return rl.getSlot() == accParam || rl.getSlot() == elemParam;
+        }
         if (node instanceof InlineBinaryOpIR bin) {
             switch (bin.getOp()) {
                 case ADD, SUB, MUL, DIV, MOD -> { }
@@ -6856,6 +6867,17 @@ public final class BytecodeCompiler {
         }
         if (node instanceof LongLitIR lit) {
             b.emitLoadLongConstant(lit.getValue());
+            return;
+        }
+        // A FIELD OF ONE OF THE TWO PARAMS — `acc + x.v`. The canonicalizer's
+        // `isPureArithTree` admits this leaf and the two have to agree, or a
+        // chain it accepted arrives here and throws. Only a field read whose
+        // record is one of the params is vetted; anything else still throws,
+        // because it would mean the grammars have drifted apart.
+        if (node instanceof ReadFieldIR rf && rf.getRecord() instanceof ReadLocalIR rl) {
+            b.beginReadFieldByName(rf.getFieldName());
+              b.emitLoadLocal(rl.getSlot() == accParam ? accLocal : xLocal);
+            b.endReadFieldByName();
             return;
         }
         throw new IllegalStateException("emitFoldTree: unvetted node " + node.getClass().getSimpleName());
