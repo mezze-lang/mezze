@@ -6,16 +6,17 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertTrue
 
 /**
- * WHICH INDEXED READS RUN INSIDE COMPILED CODE, and for seq it is HALF OF A
- * PAIR — neither half is a fix alone.
+ * EVERY INDEXED READ NOW RUNS INSIDE COMPILED CODE, and for seq and list each
+ * is HALF OF A PAIR — neither half is a fix alone, and for both the boundary
+ * ALONE was a regression.
  *
  * Removing the `@TruffleBoundary` so a recognised container's read is a bounds
- * test and one array load helped Bytes (1.44x) and measured 0.78x on seq — a
- * REGRESSION — and naming the storage type inside `MezzeSeq.get` measured null.
- * Both of those stood as separate negative results until the 2x2 was finished:
+ * test and one array load helped Bytes (1.44x) and measured 0.78x on seq and
+ * 0.71x on list — REGRESSIONS — and naming the storage type inside
+ * `MezzeSeq.get` measured null. Those stood as separate negative results until
+ * the 2x2 was finished:
  *
  * | `InlineSeqGetRaw` boundary | `MezzeSeq.get` | `seq::get` | |
  * |---|---|---|---|
@@ -30,21 +31,28 @@ import kotlin.test.assertTrue
  * concrete array read to inline — the shape `bytes::get` always had, which is
  * why the boundary alone was enough there.
  *
- * Measured at n=2e7 and n=1e7, min of 8 per arm, interleaved, both arms built
- * by the dev launcher with the extracted classes confirmed to differ.
- * `seq::get` 1.21x and 1.18x across the two sizes, and its materialised twin —
- * a seq LITERAL rather than a lazy range — 1.18x and 1.11x, which is a second
- * independent row. Controls at the quieter size: counted loop 1.00x,
- * `bytes::get` 0.99x, `seq::size` 0.94x.
+ * AND THEN LIST, the same pair, which is the largest of the three by far:
+ * removing its boundary while naming the three cons shapes so `head` and `tail`
+ * are FIELD READS took `list::get` from 3 056 ps to **730** — **4.19x**,
+ * converged (4.19x at n=2e7, 3.65x at n=1e7) with `seq::get`, `bytes::get` and
+ * the counted loop flat beside it. A cons cell's head is a field once the
+ * receiver is concrete; a sealed-interface call is not. `list::get` now reads
+ * BELOW `bytes::get` and close to the count-read floor.
+ *
+ * The walk's fallback is the interface call rather than `null`: `MezzeList` is
+ * sealed, so the three cons shapes plus `MezzeNil` are all of it and the
+ * fallback is unreachable today — but writing `null` there would mean that
+ * adding a fourth cons shape makes `list::get` answer `None` for an element
+ * that is present. A fast path may be slower than the general one, never
+ * different from it.
  *
  * WHAT THIS TEST CANNOT SEE, stated so its green is not read as more than it
- * is: the annotations below are checkable by reflection and the DEVIRTUALISATION
- * IN `MezzeSeq.get` IS NOT. `BooleanSeqStorage` appears six times in that file
- * for unrelated reasons, so no constant-pool check distinguishes the chain being
- * present from absent. If someone simplifies `MezzeSeq.get` back to
- * `storage.get(index)` and leaves the boundary off, these assertions still pass
- * and the row goes to 4 781 ps — the WORST cell of the table. The pairing is
- * documented on both sites; this test holds the half it can reach.
+ * is: the annotations below are checkable by reflection and the CONCRETE-RECEIVER
+ * half of each pair IS NOT. If someone simplifies `MezzeSeq.get` back to
+ * `storage.get(index)`, or collapses the list walk back to interface calls, and
+ * leaves the boundaries off, these assertions still pass and both rows land in
+ * the WORST cell of their table — 4 781 ps for seq. The pairing is documented at
+ * each site; this test holds the half it can reach.
  */
 class IndexedReadBoundaryTest {
 
@@ -58,7 +66,7 @@ class IndexedReadBoundaryTest {
             .isAnnotationPresent(TruffleBoundary::class.java)
 
     @Test
-    fun `bytes and seq run inside compiled code and list does not`() {
+    fun `all three indexed reads run inside compiled code`() {
         assertFalse(
             hasBoundary(MezzeBytecodeRootNode.InlineBytesGetRaw::class.java),
             "bytes::get measured 1.44x WITHOUT a boundary; putting one back costs that",
@@ -66,18 +74,18 @@ class IndexedReadBoundaryTest {
         assertFalse(
             hasBoundary(MezzeBytecodeRootNode.InlineSeqGetRaw::class.java),
             "seq::get measured 1.21x without a boundary AND with a concrete " +
-                "MezzeSeq.get; restoring the boundary gives back that 1.21x",
+                "MezzeSeq.get; the boundary ALONE was 0.78x, so neither half " +
+                "may be restored on its own",
         )
-        assertTrue(
+        assertFalse(
             hasBoundary(MezzeBytecodeRootNode.InlineListGetRaw::class.java),
-            "list::get measured 0.71x WITHOUT its boundary, and the PAIRED " +
-                "experiment that rescued seq has not been run for list — a list " +
-                "read is a loop over sealed-interface calls, not one indexed " +
-                "load, so do not remove it on seq's evidence",
+            "list::get measured 4.19x without a boundary AND with the three cons " +
+                "shapes named so head/tail are field reads; the boundary ALONE " +
+                "was 0.71x, so neither half may be restored on its own",
         )
     }
 
-    /** The bounds logic lives in compiled code for both now, so exercise it. */
+    /** The bounds logic lives in compiled code for all three now. */
     @Test
     fun `bytes get in range, out of range and at the edges`() {
         assertEquals(1L, MezzeTestHelper.run(
@@ -112,11 +120,10 @@ class IndexedReadBoundaryTest {
     }
 
     /**
-     * EVERY STORAGE KIND THROUGH THE NEW CHAIN. `MezzeSeq.get` now dispatches
-     * on the storage type, so a seq of each kind must still read correctly —
-     * and the `Object[]` form, which is a seq that was never wrapped, must not
-     * fall off the end of it. Reading past the end must still be `None` rather
-     * than an exception now that the bounds test is in compiled code.
+     * EVERY STORAGE KIND THROUGH THE NEW CHAIN. `MezzeSeq.get` dispatches on
+     * the storage type, so a seq of each kind must still read correctly — and
+     * the `Object[]` form, which is a seq that was never wrapped, must not fall
+     * off the end of it.
      */
     @Test
     fun `seq get across the storage kinds and off the end`() {
@@ -160,6 +167,64 @@ class IndexedReadBoundaryTest {
             use std::collections::seq
             use std::str
             match seq::get { xs = ["ab", "cd"], i = 1 } is
+              Some { val } -> str::size { s = val }
+              None -> 0 - 1
+            """.trimIndent()
+        ))
+    }
+
+    /**
+     * EVERY LIST SHAPE THROUGH THE NEW WALK. The three cons types are named
+     * explicitly, so each must still read correctly — plus `MezzeNil`, an index
+     * past the end, and a NON-ZERO index so the walking loop itself runs rather
+     * than only the head case.
+     */
+    @Test
+    fun `list get across the cons shapes and off the end`() {
+        assertEquals(1L, MezzeTestHelper.run(
+            """
+            use std::collections::list
+            use std::collections::seq
+            match list::get { xs = list::from_seq { xs = [1, 2, 3] }, index = 0 } is
+              Some { val } -> val
+              None -> 0 - 1
+            """.trimIndent()
+        ))
+        // A non-zero index, so the loop runs rather than only the head case.
+        assertEquals(3L, MezzeTestHelper.run(
+            """
+            use std::collections::list
+            use std::collections::seq
+            match list::get { xs = list::from_seq { xs = [1, 2, 3] }, index = 2 } is
+              Some { val } -> val
+              None -> 0 - 1
+            """.trimIndent()
+        ))
+        // Past the end, and the empty list: both None, not an exception.
+        assertEquals(0L - 1L, MezzeTestHelper.run(
+            """
+            use std::collections::list
+            use std::collections::seq
+            match list::get { xs = list::from_seq { xs = [1, 2] }, index = 5 } is
+              Some { val } -> val
+              None -> 0 - 1
+            """.trimIndent()
+        ))
+        assertEquals(0L - 1L, MezzeTestHelper.run(
+            """
+            use std::collections::list
+            match list::get { xs = list::empty {}, index = 0 } is
+              Some { val } -> val
+              None -> 0 - 1
+            """.trimIndent()
+        ))
+        // An Object list, so MezzeCons is exercised and not MezzeLongCons.
+        assertEquals(2L, MezzeTestHelper.run(
+            """
+            use std::collections::list
+            use std::collections::seq
+            use std::str
+            match list::get { xs = list::from_seq { xs = ["ab", "cd"] }, index = 1 } is
               Some { val } -> str::size { s = val }
               None -> 0 - 1
             """.trimIndent()

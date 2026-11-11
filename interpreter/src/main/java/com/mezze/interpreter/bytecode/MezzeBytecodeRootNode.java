@@ -6758,10 +6758,9 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     /** See {@link InlineSeqGetRaw}. */
     @Operation
     public static final class InlineListGetRaw {
-        /** The boundary stays, measured — 0.71x without it. See
-         *  {@link InlineSeqGetRaw} for the table. */
+        /** PROBE: the paired cell, boundary off AND the walk's calls made
+         *  concrete — the combination that rescued {@link InlineSeqGetRaw}. */
         @Specialization
-        @TruffleBoundary
         @SuppressWarnings("rawtypes")
         public static Object doOp(Object container, long index) {
             int i = (int) index;
@@ -6769,14 +6768,55 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             if (container instanceof Object[] arr) {
                 return i >= arr.length ? null : arr[i];
             }
-            com.mezze.datastructures.list.MezzeList cur =
-                container instanceof com.mezze.datastructures.list.MezzeList l ? l
-                    : com.mezze.interpreter.nodes.builtin.NativeDispatch.coerceList(container, "xs");
+            if (container instanceof com.mezze.datastructures.list.MezzeList l) {
+                return walk(l, i);
+            }
+            return coerceThenWalk(container, i);
+        }
+
+        /**
+         * A cons cell's head and tail are FIELD READS once the receiver is
+         * concrete, where a sealed-interface call is not — and naming the three
+         * cons shapes is what makes removing the boundary pay instead of cost.
+         *
+         * <p>THE LAST BRANCH OF EACH CHAIN IS THE INTERFACE CALL, not `null`.
+         * `MezzeList` is sealed and the three shapes plus `MezzeNil` are all of
+         * it, so the fallback is unreachable today; writing it as `null` would
+         * mean that adding a fourth cons shape makes `list::get` answer `None`
+         * for an element that is present. A fast path may be slower than the
+         * general one, never different from it.
+         */
+        @SuppressWarnings("rawtypes")
+        private static Object walk(com.mezze.datastructures.list.MezzeList cur, int i) {
             for (int k = 0; k < i; k++) {
-                if (cur.isEmpty()) return null;
-                cur = cur.tail();
+                if (cur instanceof com.mezze.datastructures.list.MezzeLongCons c) {
+                    cur = c.tail();
+                } else if (cur instanceof com.mezze.datastructures.list.MezzeCons c) {
+                    cur = c.tail();
+                } else if (cur instanceof com.mezze.datastructures.list.MezzeDoubleCons c) {
+                    cur = c.tail();
+                } else if (cur.isEmpty()) {
+                    return null;
+                } else {
+                    cur = cur.tail();
+                }
+            }
+            if (cur instanceof com.mezze.datastructures.list.MezzeLongCons c) {
+                return c.head();
+            }
+            if (cur instanceof com.mezze.datastructures.list.MezzeCons c) {
+                return c.head();
+            }
+            if (cur instanceof com.mezze.datastructures.list.MezzeDoubleCons c) {
+                return c.head();
             }
             return cur.isEmpty() ? null : cur.head();
+        }
+
+        @TruffleBoundary
+        @SuppressWarnings("rawtypes")
+        private static Object coerceThenWalk(Object container, int i) {
+            return walk(com.mezze.interpreter.nodes.builtin.NativeDispatch.coerceList(container, "xs"), i);
         }
     }
 

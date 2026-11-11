@@ -11606,3 +11606,56 @@ So the band's one-element rows — `map has` 2 192, `set has` 2 180, `map get`
 unidentified. The three storage sizes now read: one entry ~2 200 (open), two to
 eight entries 3 095-4 783 after the flat-scan fix, nine and above ~5 900 flat to
 a thousand keys.
+
+#### The same pair on LIST: 4.19x, and it is the largest of the three
+
+`list::get` was the last untested cell of the family. Its boundary alone had
+measured 0.71x and I had written "a list read is a loop over sealed-interface
+calls rather than one indexed load, so the shape that rescued seq may not exist
+there" — which was a reason to test it, not a reason to stop.
+
+Removing the boundary AND naming the three cons shapes, so `head` and `tail` are
+field reads on a concrete receiver:
+
+| row | base | paired | |
+|---|---|---|---|
+| **`list::get`** | 3 056 ps | **730** | **4.19x** |
+| `seq::get` (control) | 2 907 | 2 937 | 0.99x |
+| `bytes::get` (control) | 1 280 | 1 133 | 1.13x |
+| counted loop (control) | 239 | 219 | 1.09x |
+
+Converged — 4.19x at n=2e7 and 3.65x at n=1e7, min of 8 per arm, interleaved,
+both arms built by the dev launcher with the extracted class confirmed to
+differ, checksums equal. **`list::get` now reads BELOW `bytes::get` and close to
+the count-read floor**, from 13.3x the control to 3.3x.
+
+A cons cell's head is a FIELD once the receiver is concrete, and a
+sealed-interface call is not — the same statement as seq's, and the reason the
+boundary alone hurt in both cases: inlining a megamorphic call grows the
+caller's graph for a read that did not get cheaper.
+
+The walk's fallback is the interface call rather than `null`. `MezzeList` is
+sealed, so the three cons shapes plus `MezzeNil` are all of it and the fallback
+is unreachable today — but writing `null` would mean a fourth cons shape makes
+`list::get` answer `None` for an element that is present. **A fast path may be
+slower than the general one, never different from it.**
+
+#### Where the indexed reads stand, and what the band is now
+
+| row | ps/iter | x control | |
+|---|---|---|---|
+| counted loop | 219 | 1.0 | |
+| `map::size` | 672 | 3.0 | |
+| **`list::get`** | **730** | **3.3** | was 13.3 |
+| `seq::size` | 595 | 2.7 | |
+| `bytes::get` | ~1 200 | 5.4 | |
+| `map has` | 2 192 | 10.0 | open |
+| `set has` | 2 180 | 9.9 | open |
+| `map::get` | 2 836 | 12.9 | open |
+| `seq::get` | 2 937 | 13.4 | |
+
+The element reads are no longer the band — `list::get` is at 3.3x and
+`bytes::get` at 5.4x. What is left is the KEYED probes on one-entry containers
+(`map has` 2 192, `set has` 2 180, `map::get` 2 836), whose cause is now known
+NOT to be a megamorphic `equals`, and `seq::get` at 13.4x, where the pair has
+already been spent and `bytes::get` at 1 200 shows 2.4x of headroom remains.
