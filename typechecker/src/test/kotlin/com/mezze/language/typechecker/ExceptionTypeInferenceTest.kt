@@ -14,6 +14,26 @@ import kotlin.test.assertFailsWith
  *
  * This tests the critical exception type checking feature that ensures
  * handlers match the actual error types thrown by functions.
+ *
+ * Every handler here ABORTS, and each performing function returns the type its
+ * handler aborts with. Both are forced, and neither is incidental:
+ *
+ *  - A bare value RESUMES — it is handed back AT THE THROW SITE, so it must be
+ *    the type the site chose for the op's `-> 'a`. These handlers produce a
+ *    value FOR the error (`{status = 400}`, `None`), which is an abort, not a
+ *    resume. Written as `-> {status = 400}` it pinned the site's `'a` and was
+ *    accepted: measured, `divide : … -> Int` then returned a Str and died at
+ *    `Cannot multiply String and Long`. HandlerResumeTypeSpecTest pins that.
+ *  - An abort's value becomes the PERFORM BLOCK's result, and the block also
+ *    finishes normally when nothing throws — one expression, one type. So
+ *    `abort {val = {status = 400}}` requires the performing function to return
+ *    `{status: Int}`, and an `else` arm to produce one. Same shape as
+ *    `std/effects/exception.mz`, where `ExceptionToResult` aborts with
+ *    `Err {error}` because the normal path yields `Ok`.
+ *
+ * The `'error` matching these tests exist for is untouched by either: `error` is
+ * still bound at the declared associated type, and matching on it still drives
+ * the inference.
  */
 class ExceptionTypeInferenceTest {
     private lateinit var parser: MezzeParser
@@ -45,7 +65,7 @@ class ExceptionTypeInferenceTest {
             }
 
             impl Exception for StringHandler having 'error = Str where {
-                throw = {error} -> error
+                throw = {error} -> abort {val = 0}
             }
 
             pub let divide : {a: Int, b: Int} -> Int <Exception> = {a, b} ->
@@ -76,7 +96,7 @@ class ExceptionTypeInferenceTest {
             type ValidationError = | FieldRequired {field: Str} |
 
             impl Exception for StringHandler having 'error = Str where {
-                throw = {error} -> error
+                throw = {error} -> abort {val = {}}
             }
 
             pub let validate : {} -> {} <Exception> = {} ->
@@ -112,10 +132,10 @@ class ExceptionTypeInferenceTest {
             impl Exception for ValidationHandler having 'error = ValidationError where {
                 throw = {error} ->
                     match error is
-                        FieldRequired {field} -> None
+                        FieldRequired {field} -> abort {val = None}
             }
 
-            pub let validate : {} -> {} <Exception> = {} ->
+            pub let validate : {} -> Option Str <Exception> = {} ->
                 Exception.throw {error = FieldRequired {field = "x"}}
 
             let getGood = {} -> perform ValidationHandler in validate {}
@@ -141,12 +161,12 @@ class ExceptionTypeInferenceTest {
             impl Exception for ApiHandler having 'error = ApiError where {
                 throw = {error} ->
                     match error is
-                        BadRequest {msg} -> {status = 400}
-                        NotFound {id} -> {status = 404}
-                        ServerError {reason} -> {status = 500}
+                        BadRequest {msg} -> abort {val = {status = 400}}
+                        NotFound {id} -> abort {val = {status = 404}}
+                        ServerError {reason} -> abort {val = {status = 500}}
             }
 
-            pub let api_call : {id: Str} -> {} <Exception> = {id} ->
+            pub let api_call : {id: Str} -> {status: Int} <Exception> = {id} ->
                 if id == "" then
                     Exception.throw {error = BadRequest {msg = "Empty ID"}}
                 else if id == "404" then
@@ -177,10 +197,10 @@ class ExceptionTypeInferenceTest {
             impl Exception for PartialHandler having 'error = PartialError where {
                 throw = {error} ->
                     match error is
-                        BadRequest {msg} -> {status = 400}
+                        BadRequest {msg} -> abort {val = {status = 400}}
             }
 
-            pub let api_call : {id: Str} -> {} <Exception> = {id} ->
+            pub let api_call : {id: Str} -> {status: Int} <Exception> = {id} ->
                 if id == "" then
                     Exception.throw {error = BadRequest {msg = "Empty ID"}}
                 else if id == "404" then
@@ -225,11 +245,11 @@ class ExceptionTypeInferenceTest {
             impl Exception for ValidationHandler having 'error = ValidationError where {
                 throw = {error} ->
                     match error is
-                        FieldRequired {field} -> None
-                        FieldTooShort {field} -> None
+                        FieldRequired {field} -> abort {val = None}
+                        FieldTooShort {field} -> abort {val = None}
             }
 
-            pub let validate : {} -> {} <Exception> = {} ->
+            pub let validate : {} -> Option Str <Exception> = {} ->
                 Exception.throw {error = FieldRequired {field = "username"}}
 
             let getResult = {} -> perform ValidationHandler in validate {}
@@ -281,19 +301,19 @@ class ExceptionTypeInferenceTest {
             impl Exception for OuterHandler having 'error = OuterError where {
                 throw = {error} ->
                     match error is
-                        OuterBad -> None
+                        OuterBad -> abort {val = None}
             }
 
             impl Exception for InnerHandler having 'error = InnerError where {
                 throw = {error} ->
                     match error is
-                        InnerBad -> None
+                        InnerBad -> abort {val = None}
             }
 
-            pub let inner_fn : {} -> {} <Exception> = {} ->
+            pub let inner_fn : {} -> Option Str <Exception> = {} ->
                 Exception.throw {error = InnerBad}
 
-            pub let outer_fn : {} -> {} <Exception> = {} -> do
+            pub let outer_fn : {} -> Option Str <Exception> = {} -> do
                 let getResult = {} -> perform InnerHandler in inner_fn {}
                 Exception.throw {error = OuterBad}
 
@@ -320,7 +340,7 @@ class ExceptionTypeInferenceTest {
             impl Exception for MyHandler having 'error = MyError where {
                 throw = {error} ->
                     match error is
-                        ErrorA -> None
+                        ErrorA -> abort {val = None}
             }
 
             let getResult = {} -> perform MyHandler in Exception.throw {error = ErrorA}
@@ -346,11 +366,11 @@ class ExceptionTypeInferenceTest {
             impl Exception for MyHandler having 'error = MyError where {
                 throw = {error} ->
                     match error is
-                        ErrorA -> None
-                        ErrorB -> None
+                        ErrorA -> abort {val = None}
+                        ErrorB -> abort {val = None}
             }
 
-            pub let multi_throw : {} -> {} <Exception> = {} -> do
+            pub let multi_throw : {} -> Option Str <Exception> = {} -> do
                 Exception.throw {error = ErrorA}
                 Exception.throw {error = ErrorB}
 
@@ -377,11 +397,11 @@ class ExceptionTypeInferenceTest {
             impl Exception for MyHandler having 'error = MyError where {
                 throw = {error} ->
                     match error is
-                        ErrorA -> None
-                        ErrorB -> None
+                        ErrorA -> abort {val = None}
+                        ErrorB -> abort {val = None}
             }
 
-            pub let conditional : {flag: Bool} -> {} <Exception> = {flag} ->
+            pub let conditional : {flag: Bool} -> Option Str <Exception> = {flag} ->
                 if flag then
                     Exception.throw {error = ErrorA}
                 else
@@ -411,12 +431,12 @@ class ExceptionTypeInferenceTest {
             impl Exception for MyHandler having 'error = MyError where {
                 throw = {error} ->
                     match error is
-                        ErrorRed -> None
-                        ErrorBlue -> None
-                        ErrorGreen -> None
+                        ErrorRed -> abort {val = None}
+                        ErrorBlue -> abort {val = None}
+                        ErrorGreen -> abort {val = None}
             }
 
-            pub let process_color : {c: Color} -> {} <Exception> = {c} ->
+            pub let process_color : {c: Color} -> Option Str <Exception> = {c} ->
                 match c is
                     Red -> Exception.throw {error = ErrorRed}
                     Blue -> Exception.throw {error = ErrorBlue}
@@ -446,11 +466,11 @@ class ExceptionTypeInferenceTest {
             impl Exception for DbHandler having 'error = DatabaseError where {
                 throw = {error} ->
                     match error is
-                        HttpConnectionFailed -> {status = "db_error"}
-                        QueryFailed {query} -> {status = "query_error"}
+                        HttpConnectionFailed -> abort {val = {status = "db_error"}}
+                        QueryFailed {query} -> abort {val = {status = "query_error"}}
             }
 
-            pub let make_api_call : {} -> {} <Exception> = {} ->
+            pub let make_api_call : {} -> {status: Str} <Exception> = {} ->
                 Exception.throw {error = Timeout}
 
             let getResult = {} -> perform DbHandler in make_api_call {}
@@ -481,13 +501,13 @@ class ExceptionTypeInferenceTest {
             impl Exception for ApiHandler having 'error = ApiError where {
                 throw = {error} ->
                     match error is
-                        BadRequest {msg} -> {status = 400}
-                        NotFound {id} -> {status = 404}
-                        ServerError {reason} -> {status = 500}
-                        Unauthorized -> {status = 401}
+                        BadRequest {msg} -> abort {val = {status = 400}}
+                        NotFound {id} -> abort {val = {status = 404}}
+                        ServerError {reason} -> abort {val = {status = 500}}
+                        Unauthorized -> abort {val = {status = 401}}
             }
 
-            pub let handle_request : {id: Str, auth: Bool} -> {} <Exception> = {id, auth} ->
+            pub let handle_request : {id: Str, auth: Bool} -> {status: Int} <Exception> = {id, auth} ->
                 if auth == False then
                     Exception.throw {error = Unauthorized}
                 else if id == "" then
@@ -497,7 +517,7 @@ class ExceptionTypeInferenceTest {
                 else if id == "500" then
                     Exception.throw {error = ServerError {reason = "Database down"}}
                 else
-                    {}
+                    {status = 200}
 
             let getResult = {} -> perform ApiHandler in handle_request {id = "", auth = True}
         """.trimIndent()
@@ -522,11 +542,11 @@ class ExceptionTypeInferenceTest {
             impl Exception for PartialHandler having 'error = PartialError where {
                 throw = {error} ->
                     match error is
-                        BadRequest {msg} -> {status = 400}
-                        NotFound {id} -> {status = 404}
+                        BadRequest {msg} -> abort {val = {status = 400}}
+                        NotFound {id} -> abort {val = {status = 404}}
             }
 
-            pub let handle_request : {id: Str, auth: Bool} -> {} <Exception> = {id, auth} ->
+            pub let handle_request : {id: Str, auth: Bool} -> {status: Int} <Exception> = {id, auth} ->
                 if auth == False then
                     Exception.throw {error = Unauthorized}
                 else if id == "" then
@@ -536,7 +556,7 @@ class ExceptionTypeInferenceTest {
                 else if id == "500" then
                     Exception.throw {error = ServerError {reason = "Database down"}}
                 else
-                    {}
+                    {status = 200}
 
             let getResult = {} -> perform PartialHandler in handle_request {id = "", auth = True}
         """.trimIndent()
@@ -576,9 +596,9 @@ class ExceptionTypeInferenceTest {
             impl Exception for MyHandler having 'error = MyError where {
                 throw = {error} ->
                     match error is
-                        Error1 -> {}
-                        Error2 -> {}
-                        Error3 -> {}
+                        Error1 -> abort {val = {}}
+                        Error2 -> abort {val = {}}
+                        Error3 -> abort {val = {}}
             }
 
             pub let test_fn : {x: Int} -> {} <Exception> = {x} ->
@@ -613,28 +633,28 @@ class ExceptionTypeInferenceTest {
             impl Exception for DbHandler having 'error = DatabaseError where {
                 throw = {error} ->
                     match error is
-                        HttpConnectionFailed -> {status = "db_error"}
-                        QueryFailed {query} -> {status = "query_error"}
+                        HttpConnectionFailed -> abort {val = {status = "db_error"}}
+                        QueryFailed {query} -> abort {val = {status = "query_error"}}
             }
 
             impl Exception for ValidationHandler having 'error = ValidationError where {
                 throw = {error} ->
                     match error is
-                        InvalidInput {field} -> {status = "validation_error"}
+                        InvalidInput {field} -> abort {val = {status = "validation_error"}}
             }
 
-            pub let validate_input : {input: Str} -> {} <Exception> = {input} ->
+            pub let validate_input : {input: Str} -> {status: Str} <Exception> = {input} ->
                 if input == "" then
                     Exception.throw {error = InvalidInput {field = "input"}}
                 else
-                    {}
+                    {status = "ok"}
 
-            pub let save_to_db : {data: Str} -> {} <Exception> = {data} -> do
+            pub let save_to_db : {data: Str} -> {status: Str} <Exception> = {data} -> do
                 let getValidated = {} -> perform ValidationHandler in validate_input {input = data}
                 if data == "fail" then
                     Exception.throw {error = QueryFailed {query = "INSERT"}}
                 else
-                    {}
+                    {status = "ok"}
 
             let getResult = {} -> perform DbHandler in save_to_db {data = "test"}
         """.trimIndent()
@@ -659,11 +679,11 @@ class ExceptionTypeInferenceTest {
             impl Exception for AllHandler having 'error = AllErrors where {
                 throw = {error} ->
                     match error is
-                        Error1 -> {}
-                        Error2 -> {}
-                        Error3 -> {}
-                        Error4 -> {}
-                        Error5 -> {}
+                        Error1 -> abort {val = {}}
+                        Error2 -> abort {val = {}}
+                        Error3 -> abort {val = {}}
+                        Error4 -> abort {val = {}}
+                        Error5 -> abort {val = {}}
             }
 
             pub let test_fn : {x: Int} -> {} <Exception> = {x} ->

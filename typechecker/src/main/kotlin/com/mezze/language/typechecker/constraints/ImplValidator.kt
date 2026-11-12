@@ -509,6 +509,16 @@ internal class ImplValidator(
         // preconditions (like a top-level fn records `with Ord 'a` in its sig).
         implForallVars: Set<String> = emptySet(),
         inferredSink: MutableList<ParsedFnAbilityConstraint>? = null,
+        // Type variables in the op's declared return that the CALL SITE chooses,
+        // not the performer. A body that resumes with a concrete value pins one,
+        // which is a lie — see the check in the Success branch below.
+        //
+        // Opt-in rather than derived here, and only the EFFECT PERFORMER call site
+        // passes it. An ability impl op reaches the same function, and whether the
+        // identical rule holds there is untested — an ability op has no `resume`,
+        // so the reasoning that makes the performer case a soundness bug does not
+        // transfer unexamined. One measured bug, one rule.
+        siteChosenReturnVars: Set<TypeVar> = emptySet(),
     ) {
         val paramNames = when (val params = lambda.params) {
             is ParsedLambdaParams.Untyped -> params.names
@@ -662,6 +672,67 @@ internal class ImplValidator(
                         opLoc,
                         code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
                         hints = listOf(DiagnosticHints.ANNOTATION_VS_BODY),
+                    )
+                }
+
+                // A body that RESUMES may not pin a variable the site owns.
+                //
+                // The equality above cannot catch this: it unifies the body's type
+                // with the declared return, and when the declared return is a bare
+                // `'a` that unification SUCCEEDS by binding `'a` — so a body of any
+                // type at all passes. The lie is in the binding, not in the failure.
+                //
+                // Why it matters is the two ways an op body ends, which are
+                // different operations (measured):
+                //
+                //   throw = { e } -> 7                  the site gets 7, body resumes
+                //   throw = { e } -> abort { val = 7 }  the block yields 7
+                //
+                // A bare value RESUMES, so it becomes the value of `Effect.op {}`
+                // inside the performing function — a claim about the DECLARED
+                // RETURN at that site. `-> 'a` means the site picks, so pinning it
+                // here makes the performing function return something other than
+                // what it declared. Measured with `throw = { error } -> error` on
+                // `-> 'a`: `divide : … -> Int` checks clean, then returns a Str and
+                // dies at `Cannot multiply String and Long`.
+                //
+                // `abort` is unaffected: its result type is a fresh variable, so
+                // `'a` resolves to a variable and nothing is pinned. That is what
+                // keeps the whole of `std/effects/exception.mz` compiling, and the
+                // rule is about PINNING, not about resuming — a body whose type IS
+                // the variable (`recover = { fallback } -> fallback`) still works
+                // for every site and is still accepted.
+                //
+                // Concreteness is the same test `validatePolymorphismPreserved`
+                // uses for the identical rule on an ordinary annotated function:
+                // no variables left after substitution. Deliberately not stricter
+                // — `'a := ['b]` is also unsound in principle, but tightening that
+                // belongs with that check, not in a second half-rule here.
+                for (siteVar in siteChosenReturnVars) {
+                    val resolved = substitution.apply(MezzeType.VarType(siteVar))
+                    if (collectTypeVarsInOrder(resolved).isNotEmpty()) continue
+                    throw TypeCheckError(
+                        "Operation '$opName' in $implLabel is declared to return " +
+                            "${siteVar.name}, but the body resumes with " +
+                            "${prettyPrintType(resolved)}. That type is the call " +
+                            "site's to choose, so the body has to work for every " +
+                            "site.\n" +
+                            "To make ${prettyPrintType(resolved)} the result of the " +
+                            "`perform` block instead of a value handed back where " +
+                            "the effect was performed, return " +
+                            "`abort { val = … }`.",
+                        opLoc,
+                        code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                        // Not the shared ANNOTATION_VS_BODY hint: "change the
+                        // annotation to match the body" is true here but points at
+                        // the wrong file, since the annotation is the EFFECT's op
+                        // declaration and changing it rewrites every performer and
+                        // every site. Naming both real resolutions, nearest first.
+                        hints = listOf(
+                            "return `abort { val = … }` to end the `perform` block " +
+                                "with that value, or declare the op as returning " +
+                                "${prettyPrintType(resolved)} if it always does",
+                        ),
                     )
                 }
 
@@ -989,6 +1060,33 @@ internal class ImplValidator(
                     prepareContext = { ctx ->
                         EffectHandlerBindings
                             .extendWithAbortAndResume(ctx, expectedReturnType)
+                    },
+                    // Whatever variables SURVIVE the `having` substitution are the
+                    // site's — EXCEPT the ones the effect declared as associated
+                    // types. `having 'val = Int` leaves `load: {} -> 'val` as
+                    // `-> Int` (concrete, nothing to check) while `throw: … -> 'a`
+                    // keeps its `'a` (the site's).
+                    //
+                    // The exclusion is what keeps a ROOT CAUSE ahead of a symptom.
+                    // An impl that omits a binding entirely —
+                    //
+                    //   effect State having 'state where { get: {} -> 'state … }
+                    //   impl State for Counter {} where { get = {} -> 42 }
+                    //
+                    // leaves `'state` unsubstituted too, and `42` then looks like
+                    // it pins a site-chosen variable. It does not: `'state` is the
+                    // PERFORMER's to choose, via `having`, and the real mistake is
+                    // the missing binding — which has its own diagnostic naming the
+                    // unbound names. Reporting this check there would answer a
+                    // question the author did not ask and bury the one they did.
+                    // Measured: three EffectAssociatedTypesTest cases lost their
+                    // own error to it before this line excluded them.
+                    siteChosenReturnVars = run {
+                        val declaredAssociated =
+                            effectDeclaration.associatedTypes.map { it.removePrefix("'") }.toSet()
+                        collectTypeVarsInOrder(expectedReturnType)
+                            .filterNot { it.name.removePrefix("'") in declaredAssociated }
+                            .toSet()
                     },
                     onBodyResult = { bodyResult, _ ->
                         val bodyEffects = bodyResult.effects - effectRef.localName

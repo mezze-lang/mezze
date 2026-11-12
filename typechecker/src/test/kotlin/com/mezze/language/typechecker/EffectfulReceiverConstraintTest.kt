@@ -190,7 +190,7 @@ class EffectfulReceiverConstraintTest {
             use std::effects::exception::{Exception, throw}
 
             impl Exception for ExnHandler having 'error = Str where {
-                throw = {error} -> {}
+                throw = {error} -> abort {val = {}}
             }
 
             let maybeThrow = {shouldThrow: Bool, value: Int} ->
