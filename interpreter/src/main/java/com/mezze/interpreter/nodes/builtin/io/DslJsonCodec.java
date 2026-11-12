@@ -269,47 +269,62 @@ public final class DslJsonCodec {
         return new String(bytes, StandardCharsets.UTF_8);
     }
 
+
+    // ──────────────────────── constructor tags ────────────────────────
+    //
+    // THE TAG IS THE IDENTITY; THE NAME IS FOR DISPLAY, which `MezzeVariant`
+    // says in as many words and then shows how — `SOME_TAG`, `NIL_TAG` and the
+    // rest are computed once from the name and compared as ints, "instead of
+    // reverse-resolving the tag to a String and comparing spellings".
+    //
+    // This codec was doing exactly that reverse resolution, once per JSON node:
+    // `getConstructorName()` then a switch on the String. And the resolution is
+    // not a lookup — for a dynamic registry, which the global one is,
+    // `TagRegistry.getConstructorName(tag)` SCANS `nameToTagMap.entrySet()`
+    // until it finds the tag. That map holds every constructor name in the
+    // program, so a serialize walked all of them per node and its cost grew
+    // with code that has nothing to do with json.
+    //
+    // A tag is a pure function of the name, the same in every registry, so
+    // these seven are computed once here and the switch is on an int.
+    public static final int TAG_JNULL = tagOf("JNull");
+    public static final int TAG_JBOOL = tagOf("JBool");
+    public static final int TAG_JINT = tagOf("JInt");
+    public static final int TAG_JFLOAT = tagOf("JFloat");
+    public static final int TAG_JSTRING = tagOf("JString");
+    public static final int TAG_JARRAY = tagOf("JArray");
+    public static final int TAG_JOBJECT = tagOf("JObject");
+
+    static int tagOf(String constructor) {
+        return com.mezze.language.ast.BuiltinTypes.INSTANCE
+            .computeVariantTag(constructor, null);
+    }
+
     /**
      * Serialize a Json variant value (compact mode).
      * Uses DSL-JSON's NumberConverter and BoolConverter for optimal serialization.
      */
     private static void serializeValue(JsonWriter writer, MezzeVariant json) throws IOException {
-        String constructor = json.getConstructorName();
+        int tag = json.getTag();
 
-        switch (constructor) {
-            case "JNull" -> writer.writeNull();
-
-            case "JBool" -> {
-                Boolean b = (Boolean) json.getPayloadFieldByName("val");
-                BoolConverter.serialize(b, writer);
-            }
-
-            case "JInt" -> {
-                Long l = (Long) json.getPayloadFieldByName("val");
-                NumberConverter.serialize(l, writer);
-            }
-
-            case "JFloat" -> {
-                Double d = (Double) json.getPayloadFieldByName("val");
-                NumberConverter.serialize(d, writer);
-            }
-
-            case "JString" -> {
-                String s = (String) json.getPayloadFieldByName("val");
-                writer.writeString(s);
-            }
-
-            case "JArray" -> {
-                Object items = json.getPayloadFieldByName("items");
-                serializeArray(writer, items);
-            }
-
-            case "JObject" -> {
-                Object fields = json.getPayloadFieldByName("fields");
-                serializeObject(writer, fields);
-            }
-
-            default -> throw new IOException("Unknown Json variant: " + constructor);
+        if (tag == TAG_JNULL) {
+            writer.writeNull();
+        } else if (tag == TAG_JBOOL) {
+            BoolConverter.serialize((Boolean) json.getPayloadFieldByName("val"), writer);
+        } else if (tag == TAG_JINT) {
+            NumberConverter.serialize((Long) json.getPayloadFieldByName("val"), writer);
+        } else if (tag == TAG_JFLOAT) {
+            NumberConverter.serialize((Double) json.getPayloadFieldByName("val"), writer);
+        } else if (tag == TAG_JSTRING) {
+            writer.writeString((String) json.getPayloadFieldByName("val"));
+        } else if (tag == TAG_JARRAY) {
+            serializeArray(writer, json.getPayloadFieldByName("items"));
+        } else if (tag == TAG_JOBJECT) {
+            serializeObject(writer, json.getPayloadFieldByName("fields"));
+        } else {
+            // The name is resolved only HERE, where the cost does not matter and
+            // the reader needs it.
+            throw new IOException("Unknown Json variant: " + json.getConstructorName());
         }
     }
 
@@ -365,42 +380,24 @@ public final class DslJsonCodec {
      * Serialize with pretty printing.
      */
     private static void serializeValuePretty(JsonWriter writer, MezzeVariant json, int indent) throws IOException {
-        String constructor = json.getConstructorName();
+        int tag = json.getTag();
 
-        switch (constructor) {
-            case "JNull" -> writer.writeNull();
-
-            case "JBool" -> {
-                Boolean b = (Boolean) json.getPayloadFieldByName("val");
-                BoolConverter.serialize(b, writer);
-            }
-
-            case "JInt" -> {
-                Long l = (Long) json.getPayloadFieldByName("val");
-                NumberConverter.serialize(l, writer);
-            }
-
-            case "JFloat" -> {
-                Double d = (Double) json.getPayloadFieldByName("val");
-                NumberConverter.serialize(d, writer);
-            }
-
-            case "JString" -> {
-                String s = (String) json.getPayloadFieldByName("val");
-                writer.writeString(s);
-            }
-
-            case "JArray" -> {
-                Object items = json.getPayloadFieldByName("items");
-                serializeArrayPretty(writer, items, indent);
-            }
-
-            case "JObject" -> {
-                Object fields = json.getPayloadFieldByName("fields");
-                serializeObjectPretty(writer, fields, indent);
-            }
-
-            default -> throw new IOException("Unknown Json variant: " + constructor);
+        if (tag == TAG_JNULL) {
+            writer.writeNull();
+        } else if (tag == TAG_JBOOL) {
+            BoolConverter.serialize((Boolean) json.getPayloadFieldByName("val"), writer);
+        } else if (tag == TAG_JINT) {
+            NumberConverter.serialize((Long) json.getPayloadFieldByName("val"), writer);
+        } else if (tag == TAG_JFLOAT) {
+            NumberConverter.serialize((Double) json.getPayloadFieldByName("val"), writer);
+        } else if (tag == TAG_JSTRING) {
+            writer.writeString((String) json.getPayloadFieldByName("val"));
+        } else if (tag == TAG_JARRAY) {
+            serializeArrayPretty(writer, json.getPayloadFieldByName("items"), indent);
+        } else if (tag == TAG_JOBJECT) {
+            serializeObjectPretty(writer, json.getPayloadFieldByName("fields"), indent);
+        } else {
+            throw new IOException("Unknown Json variant: " + json.getConstructorName());
         }
     }
 

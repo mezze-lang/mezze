@@ -4,7 +4,7 @@
 
 # json
 
-`std::codec::json` · 10 operations · 0 with a bench row · 0 with a number
+`std::codec::json` · 10 operations · 4 with a bench row · 4 with a number
 
 | op | ps/op | elems | ps/elem | vs floor | bench |
 |---|---|---|---|---|---|
@@ -13,12 +13,12 @@
 | `json_strict` | **UNMEASURED** | | | | |
 | `json_utf8_camel` | **UNMEASURED** | | | | |
 | `json_utf8_default` | **UNMEASURED** | | | | |
-| `parse` | **UNMEASURED** | | | | |
-| `parse_str` | **UNMEASURED** | | | | |
+| `parse` | 12 635 064 | 501 | 25 219 | — | jsonsurface:4 |
+| `parse_str` | 12 702 172 | 501 | 25 353 | — | jsonsurface:3 |
 | `serialize_to_str` | **UNMEASURED** | | | | |
-| `to_bytes` | **UNMEASURED** | | | | |
-| `to_str` | **UNMEASURED** | | | | |
+| `to_bytes` | 4 614 136 | 501 | 9 209 | — | jsonsurface:2 |
+| `to_str` | 4 646 776 | 501 | 9 275 | — | jsonsurface:1 |
 
-## Unmeasured (10 of 10)
+## Unmeasured (6 of 10)
 
-`json_default`, `json_pretty`, `json_strict`, `json_utf8_camel`, `json_utf8_default`, `parse`, `parse_str`, `serialize_to_str`, `to_bytes`, `to_str`
+`json_default`, `json_pretty`, `json_strict`, `json_utf8_camel`, `json_utf8_default`, `serialize_to_str`

@@ -4803,7 +4803,7 @@ public final class NativeDispatch extends MezzeNode {
             return makeDecodeError("Expected Json value, got " + (jsonObj == null ? "null" : jsonObj.getClass().getSimpleName()));
         }
 
-        if (!"JObject".equals(jv.getConstructorName())) {
+        if (jv.getTag() != com.mezze.interpreter.nodes.builtin.io.DslJsonCodec.TAG_JOBJECT) {
             return makeDecodeError("Expected JObject, got " + jv.getConstructorName());
         }
 
@@ -4867,15 +4867,22 @@ public final class NativeDispatch extends MezzeNode {
         if (!(json instanceof MezzeVariant jv)) {
             return makeDecodeError("Expected Json variant");
         }
-        String tag = jv.getConstructorName();
-        return switch (tag) {
-            case "JString", "JInt", "JFloat", "JBool" -> jv.getPayloadFieldByName("val");
-            case "JNull" -> {
-                int noneTag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("None");
-                yield MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), noneTag);
-            }
-            default -> makeDecodeError("Unsupported Json type: " + tag);
-        };
+        // THE TAG, not the name. This ran once per decoded FIELD, and
+        // `getConstructorName` reverse-resolves by SCANNING the global
+        // name-to-tag map — see the note on DslJsonCodec's tags, where the same
+        // shape in the serializer measured 2.74x.
+        int tag = jv.getTag();
+        if (tag == com.mezze.interpreter.nodes.builtin.io.DslJsonCodec.TAG_JSTRING || tag == com.mezze.interpreter.nodes.builtin.io.DslJsonCodec.TAG_JINT
+                || tag == com.mezze.interpreter.nodes.builtin.io.DslJsonCodec.TAG_JFLOAT || tag == com.mezze.interpreter.nodes.builtin.io.DslJsonCodec.TAG_JBOOL) {
+            return jv.getPayloadFieldByName("val");
+        }
+        if (tag == com.mezze.interpreter.nodes.builtin.io.DslJsonCodec.TAG_JNULL) {
+            int noneTag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("None");
+            return MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), noneTag);
+        }
+        // The name is resolved only for the error, where it is what the reader
+        // needs and the cost does not matter.
+        return makeDecodeError("Unsupported Json type: " + jv.getConstructorName());
     }
 
     /**

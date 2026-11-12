@@ -95,3 +95,7 @@ datetime	zone_offset_at	32575	2e5	1	datetimesurface:11	2026-11-12
 datetime	hour	27091	2e5	1	datetimesurface:12	2026-11-12
 datetime	nanos	12444	2e5	1	datetimesurface:13	2026-11-12
 datetime	year	33757	2e5	1	datetimesurface:6	2026-11-12
+json	to_str	4646776	2e3	501	jsonsurface:1	2026-11-12
+json	to_bytes	4614136	2e3	501	jsonsurface:2	2026-11-12
+json	parse_str	12702172	2e3	501	jsonsurface:3	2026-11-12
+json	parse	12635064	2e3	501	jsonsurface:4	2026-11-12

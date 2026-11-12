@@ -13838,3 +13838,56 @@ of New York's DST transitions, 200 instants a zone BEFORE the epoch where the
 epoch second is negative, and at midnight exactly plus and minus a nanosecond.
 Plain division instead of `floorDiv` fails only the pre-epoch test, with the day
 one too high, which is why that one is there.
+
+#### The JSON serializer dispatched on a string per node — 2.74x, and the name was a map SCAN
+
+`std::codec::json` was 10 operations at zero coverage, on the request path of
+anything that serves. The first look at the serializer found this, once per
+node:
+
+```java
+private static void serializeValue(JsonWriter writer, MezzeVariant json) {
+    String constructor = json.getConstructorName();
+    switch (constructor) {
+        case "JNull" -> …
+```
+
+**And the name is not a lookup.** For a DYNAMIC registry — which the global one
+is, because tags are hash-based — `TagRegistry.getConstructorName(tag)` walks
+`nameToTagMap.entrySet()` until the value matches. That map holds every
+constructor name in the program, so a serialize scanned all of them PER NODE and
+its cost grew with code that has nothing to do with json.
+
+`MezzeVariant` already says what to do instead, and already does it for
+`SOME_TAG`, `NONE_TAG`, `NIL_TAG` and `CONS_TAG`: *"the tag is the structural
+identity; the name is only for display"*, and a tag is a pure function of the
+name, the same in every registry. So the seven Json tags are computed once and
+the dispatch is an int comparison.
+
+`jsonsurface`, an array of 100 two-field objects (501 nodes, 2 293 characters),
+min of three interleaved passes:
+
+| row | base | tag dispatch | |
+|---|---|---|---|
+| `json::to_str` | 12 741 414 ps | **4 646 776** | **2.74x** |
+| `json::to_bytes` | 12 433 037 | **4 614 136** | **2.69x** |
+| `json::parse_str` (control) | 13 103 099 | 12 702 172 | 1.03x |
+| `json::parse` (control) | 12 259 563 | 12 635 064 | 0.97x |
+| `str::size` (control) | 539 | 529 | 1.02x |
+
+24.3 ns a node down to 9.3, checksums equal. **The parse rows are the right
+controls** and not merely convenient ones: parsing CONSTRUCTS variants rather
+than dispatching on them, so the change cannot reach them — and it did not.
+
+THE SWEEP FOUND TWO MORE OF THE SAME. `decodeJsonFieldValue` string-switched
+once per decoded FIELD, and the `JObject` check once per decode; both compare
+tags now, sharing the codec's constants rather than recomputing them. The
+filesystem natives already compared tags, with a comment explaining why — so
+this pattern had been found and fixed once before, and these sites were missed.
+What is left of `getConstructorName` in the codec is the two error arms, where
+the name is what the reader wants and the cost cannot matter.
+
+COVERAGE. Five rows: `to_str`, `to_bytes`, `parse_str`, `parse` and a
+`str::size` control over the same document. The codec group goes from 0 to 18%,
+and the first numbers already name the next target — PARSE is now the expensive
+direction at 12.7 µs against serialize's 4.6.

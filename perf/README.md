@@ -94,12 +94,12 @@ was reverted.
 
 | module | ops | benched | numbered | cover |
 |---|---|---|---|---|
-| [json](codecs/codec-json.md) | 10 | 0 | 0 | 0% |
+| [json](codecs/codec-json.md) | 10 | 4 | 4 | 40% |
 | [core](codecs/codec-core.md) | 9 | 0 | 0 | 0% |
 | [url](codecs/codec-url.md) | 5 | 0 | 0 | 0% |
 | [query](codecs/codec-query.md) | 3 | 0 | 0 | 0% |
 | [jvm](codecs/codec-jvm.md) | 1 | 0 | 0 | 0% |
-| **subtotal** | **28** | **0** | **0** | **0%** |
+| **subtotal** | **28** | **4** | **4** | **14%** |
 
 ## Abilities, meta and tooling
 
@@ -135,8 +135,8 @@ was reverted.
 | Numbers and math | 102 | 4 | 0 | 4% |
 | Core types | 98 | 20 | 13 | 20% |
 | Abilities, meta and tooling | 44 | 0 | 0 | 0% |
-| Codecs | 28 | 0 | 0 | 0% |
-| **TOTAL** | **1433** | **165** | **69** | **12%** |
+| Codecs | 28 | 4 | 4 | 14% |
+| **TOTAL** | **1433** | **169** | **73** | **12%** |
 
 **Effects reads 0% and is not zero.** An effect operation is invoked
 through an ability call (`Console.println {}`, `Mut.set {}`) or a
