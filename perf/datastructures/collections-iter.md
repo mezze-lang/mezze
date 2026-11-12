@@ -21,7 +21,7 @@
 | `filter` | 131 |  |  | 2.0x | iter_perf_compare:2 |
 | `find` | 441 |  |  | 6.8x | iter_perf_compare:6 |
 | `first` | **UNMEASURED** | | | | |
-| `flat_map` | 41 713 |  |  | 641.7x | iter_perf_compare:10 |
+| `flat_map` | 13 902 |  |  | 213.9x | iter_perf_compare:10 |
 | `fold` | 65 |  |  | 1.0x | iter_perf_compare:1 |
 | `for_each` | **UNMEASURED** | | | | |
 | `from_list` | **UNMEASURED** | | | | |
@@ -38,7 +38,7 @@
 | `to_list` | **UNMEASURED** | | | | |
 | `to_seq` | 1 719 |  |  | 26.4x | iter_perf_compare:5 |
 | `unfold` | — | | | | called in iterremit, recfields, no number |
-| `zip` | 73 284 |  |  | 1127.4x | iter_perf_compare:11 |
+| `zip` | 23 691 |  |  | 364.5x | iter_perf_compare:11 |
 
 ## Unmeasured (15 of 31)
 

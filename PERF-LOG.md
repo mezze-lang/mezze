@@ -13439,3 +13439,81 @@ DELETED: `TrieSetStorage.fromCollection`, `MezzeSet.fromMutableSet` and
 NOT CONVERTED, on purpose: `set::insert_all` and `map::merge_with` both start
 from an EXISTING structure and add a handful of elements, so a bulk rebuild
 would walk the whole base to save those few adds.
+
+#### The unfused iter fold materialised the whole iterator — 2.70x on zip, and it broke laziness
+
+`iter::zip` was the worst per-element number in the whole collection table:
+73 284 ps an element against `iter::map`'s 133, and against 13 505 for a map
+walk that calls a guest predicate per entry and fuses nothing. A 550x spread
+between two members of the same module is not a tier gap, it is a clue.
+
+`IterNatives.foldViaRecursion` says what it is doing:
+
+```java
+// Materialize into an ArrayList and fold — the correctness path
+// isn't asked to be fast, only to work. Fusion is the fast path's job.
+java.util.ArrayList<Object> buf = new java.util.ArrayList<>();
+collect(node, buf, callNode);
+```
+
+The first half is fair. **The second half is the bug**: for a shape the emitter
+REFUSES there is no fast path, so the correctness path is the only path, and at
+`iter_perf_compare`'s n it buffered TEN MILLION elements and held every one of
+them until the fold ended.
+
+It also contradicted the rule `iter` exists for — *"a pipeline expressed with
+`iter` never materialises what it is about to discard"* — which names this very
+shape, a `zip` whose only consumer is a `fold`, as the thing to use `iter` FOR.
+
+THE FIX IS NOT NEW MACHINERY. `walkElements` already pushes elements one at a
+time, already handles every descriptor kind, and already stops early when the
+consumer says so; `collect` was literally `walkElements(node, out::add,
+callNode)`. Folding inside the walk visits the same elements in the same order
+with nothing buffered, and `collect` is deleted.
+
+**The buffer bought nothing here, which took reading two callers to establish.**
+`collectToArray` materialises ON PURPOSE — behind its boundary, so that its
+caller's loop runs outside one and the JIT can inline the callback. This path
+has no such caller: `fold` is itself `@TruffleBoundary`, so the fold loop was
+already inside the boundary either way.
+
+| row | base | streaming | |
+|---|---|---|---|
+| `zip+fold` | 640 147 309 ns | **236 909 960** | **2.70x** |
+| `flat_map+fold` | 321 657 864 | **139 023 588** | **2.31x** |
+| `chain+fold` | 5 348 397 | 5 318 072 | 1.01x |
+| `enumerate+fold` | 6 448 559 | 6 569 502 | 0.98x |
+| `sum` (control) | 696 971 | 696 921 | 1.00x |
+| `filter+fold` (control) | 1 291 193 | 1 334 512 | 0.97x |
+| `count` (control) | 1 295 491 | 1 233 126 | 1.05x |
+
+n=10M, min of three interleaved passes.
+
+**ZIP AND FLAT_MAP ARE THE ONLY SHAPES THAT ARRIVE HERE**, which the table says
+and the code does not. `chain` and `enumerate` are both in `foldWalk`'s list of
+recursion kinds, and both are flat — because their chains FUSE at compile time
+and this native is never called. Reading the kind list would have predicted four
+movers; measuring found two.
+
+THE BASE ARM'S VARIANCE IS THE OTHER HALF OF THE RESULT. Five passes of
+`zip+fold` read 603, 1283, 833, 1330 and 742 ms; the streaming arm read 252 to
+261. A 2.2x swing within one arm is what retaining ten million elements does to
+a collector, and it is why the min-of-k is the only honest statistic here —
+the averages were 958 ms against 254, which flatters the fix to 3.8x.
+
+After it, `zip` is 23 691 ps an element and `flat_map` 13 902 — no longer
+outliers but ordinary unfused per-element costs, beside a map walk's 13 505.
+What remains in them is the pair record, the boxing and the per-element guest
+call, and removing those means fusing, which for `zip` means a fused loop that
+carries TWO values.
+
+COVERAGE. `LazyIterFoldTest` pins the observable consequence rather than the
+speed: materialising means every element is produced BEFORE the folder sees any,
+streaming means they interleave. The source side (a `flat_map` function) and the
+folder each append to an atom, so the log reads `sfsfsf` when streaming and
+`sssfff` when buffered — restoring the buffer fails exactly those two tests with
+that exact diff, and leaves the seven value tests green, because materialising
+never changed an answer. The value tests are there anyway: both zip components,
+zip stopping at the shorter side, flat_map's inner elements, a non-commutative
+folder over `chain` where the order IS the answer, `enumerate` threading `.i`
+and `.val`, and a Str accumulator so nothing can quietly sum past it.

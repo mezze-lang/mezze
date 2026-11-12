@@ -940,14 +940,41 @@ public final class IterNatives {
     @TruffleBoundary
     private static Object foldViaRecursion(IterNode node, Object initAcc,
                                            MezzeFunction folder, IndirectCallNode callNode) {
-        // Materialize into an ArrayList and fold — the correctness path
-        // isn't asked to be fast, only to work. Fusion is the fast
-        // path's job.
-        java.util.ArrayList<Object> buf = new java.util.ArrayList<>();
-        collect(node, buf, callNode);
+        // STREAM IT. This used to materialize the whole iterator into a
+        // `java.util.ArrayList` and fold that, under the note "the correctness
+        // path isn't asked to be fast, only to work. Fusion is the fast path's
+        // job." The second half is the problem: for a shape the emitter
+        // REFUSES there is no fast path, so the correctness path is the only
+        // one. MEASURED on `iter_perf_compare` at n=10M, min of three
+        // interleaved passes: `zip+fold` 640 ms to 237 (2.70x) and
+        // `flat_map+fold` 322 ms to 139 (2.31x), with `sum`, `filter+fold` and
+        // `count` flat beside them at 1.00x, 0.97x and 1.05x.
+        //
+        // THOSE TWO ARE THE SHAPES THAT ACTUALLY ARRIVE HERE. `chain` and
+        // `enumerate` are in the list of kinds above and measure 1.01x and
+        // 0.98x, because their chains FUSE at compile time and this native is
+        // never called; the other kinds reach it only when something else about
+        // the chain declined.
+        //
+        // At that n the buffer held ten million elements, every one retained
+        // until the fold ended, which is why the base arm also SWUNG — 603,
+        // 1283, 833, 1330 and 742 ms across five passes against the streaming
+        // arm's 252 to 261.
+        //
+        // {@link #walkElements} already pushes elements one at a time, handles
+        // every descriptor kind, and stops early when the consumer says so.
+        // `collect` was literally `walkElements(node, out::add, callNode)`, so
+        // folding inside the walk visits exactly the same elements in exactly
+        // the same order with nothing buffered.
+        //
+        // THE BUFFER BOUGHT NOTHING HERE. {@link #collectToArray} materializes
+        // on purpose — behind its boundary, so that ITS caller's loop runs
+        // outside one and the JIT can inline the callback. This path has no
+        // such caller: {@link #fold} is itself `@TruffleBoundary`, so the fold
+        // loop was already inside it either way.
         Object[] folderClosure = folder.getClosureValues();
         int folderClosureLen = folderClosure.length;
-        Object acc = initAcc;
+        Object[] accBox = {initAcc};
         CallTarget folderInner = ScalarBypass.tryResolve(folder);
         if (folderInner != null) {
             String[] params = folder.getParameterNames();
@@ -956,30 +983,22 @@ public final class IterNatives {
             int elemSlot = accFirst ? folderClosureLen + 1 : folderClosureLen;
             Object[] fArgs = new Object[folderClosureLen + 2];
             System.arraycopy(folderClosure, 0, fArgs, 0, folderClosureLen);
-            for (Object x : buf) {
-                fArgs[accSlot] = acc;
+            walkElements(node, x -> {
+                fArgs[accSlot] = accBox[0];
                 fArgs[elemSlot] = x;
-                acc = callNode.call(folderInner, fArgs);
-            }
+                accBox[0] = callNode.call(folderInner, fArgs);
+                return true;
+            }, callNode);
         } else {
             com.oracle.truffle.api.CallTarget folderTarget = folder.getCallTarget();
             Object[] fArgs = new Object[folderClosureLen + 1];
             System.arraycopy(folderClosure, 0, fArgs, 0, folderClosureLen);
-            for (Object x : buf) {
-                fArgs[folderClosureLen] = MezzeRecord.wrapAccX(acc, x);
-                acc = callNode.call(folderTarget, fArgs);
-            }
+            walkElements(node, x -> {
+                fArgs[folderClosureLen] = MezzeRecord.wrapAccX(accBox[0], x);
+                accBox[0] = callNode.call(folderTarget, fArgs);
+                return true;
+            }, callNode);
         }
-        return acc;
-    }
-
-    /**
-     * Collect all elements into an ArrayList. Delegates to walkElements
-     * for all node types — keeps a single source of truth for walking.
-     */
-    @TruffleBoundary
-    private static void collect(IterNode node, java.util.ArrayList<Object> out,
-                                IndirectCallNode callNode) {
-        walkElements(node, out::add, callNode);
+        return accBox[0];
     }
 }

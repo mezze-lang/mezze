@@ -4,7 +4,7 @@
 
 # bytes
 
-`std::collections::bytes` · 25 operations · 15 with a bench row · 12 with a number · floor `bytes::size` = 657 ps
+`std::collections::bytes` · 25 operations · 16 with a bench row · 12 with a number · floor `bytes::size` = 657 ps
 
 | op | ps/op | elems | ps/elem | vs floor | bench |
 |---|---|---|---|---|---|
@@ -24,7 +24,7 @@
 | `is_empty` | 354 |  |  | 0.5x | bytesurface:2 |
 | `map` | 4 591 494 | 1024 | 4 483 | 6.8x | bytesurface:9 |
 | `repeat` | **UNMEASURED** | | | | |
-| `reverse` | **UNMEASURED** | | | | |
+| `reverse` | — | | | | called in bytesurface, no number |
 | `size` | 657 |  |  | 1.0x | bytesurface:1 |
 | `slice` | 28 766 | 512 | 56 | 0.1x | bytesurface:6 |
 | `starts_with` | 5 411 | 1024 | 5 | 0.0x | bytesurface:4 |
@@ -34,6 +34,6 @@
 | `to_seq` | 376 639 | 1024 | 367 | 0.6x | bytesurface:12 |
 | `to_str` | **UNMEASURED** | | | | |
 
-## Unmeasured (10 of 25)
+## Unmeasured (9 of 25)
 
-`concat_all`, `contains`, `empty`, `ends_with`, `from_base64`, `from_hex`, `repeat`, `reverse`, `take`, `to_str`
+`concat_all`, `contains`, `empty`, `ends_with`, `from_base64`, `from_hex`, `repeat`, `take`, `to_str`

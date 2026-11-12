@@ -26,10 +26,10 @@ was reverted.
 | [str](datastructures/str.md) | 32 | 9 | 0 | 28% |
 | [iter](datastructures/collections-iter.md) | 31 | 16 | 14 | 52% |
 | [nonemptylist](datastructures/collections-nonemptylist.md) | 29 | 2 | 0 | 7% |
-| [bytes](datastructures/collections-bytes.md) | 25 | 15 | 12 | 60% |
+| [bytes](datastructures/collections-bytes.md) | 25 | 16 | 12 | 64% |
 | [char](datastructures/char.md) | 14 | 0 | 0 | 0% |
 | [buffer](datastructures/collections-buffer.md) | 9 | 0 | 0 | 0% |
-| **subtotal** | **635** | **140** | **56** | **22%** |
+| **subtotal** | **635** | **141** | **56** | **22%** |
 
 ## Core types
 
@@ -130,13 +130,13 @@ was reverted.
 
 | group | ops | benched | numbered | cover |
 |---|---|---|---|---|
-| Data structures | 635 | 140 | 56 | 22% |
+| Data structures | 635 | 141 | 56 | 22% |
 | Effects | 526 | 0 | 0 | 0% |
 | Numbers and math | 102 | 4 | 0 | 4% |
 | Core types | 98 | 2 | 0 | 2% |
 | Abilities, meta and tooling | 44 | 0 | 0 | 0% |
 | Codecs | 28 | 0 | 0 | 0% |
-| **TOTAL** | **1433** | **146** | **56** | **10%** |
+| **TOTAL** | **1433** | **147** | **56** | **10%** |
 
 **Effects reads 0% and is not zero.** An effect operation is invoked
 through an ability call (`Console.println {}`, `Mut.set {}`) or a

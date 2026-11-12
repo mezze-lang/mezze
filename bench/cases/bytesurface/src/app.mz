@@ -133,10 +133,27 @@ let l_fold = { i, total, b } -> if i <= 0 then total
   else l_fold { i = i - 1, b = b,
                 total = total + bytes::fold { b = b, init = 0, f = { acc, byte } -> acc + byte } }
 
-## ── 9. map — a guest callback per byte AND a new buffer ────────────────────
+## ── 9. map — a guest callback per byte AND a new buffer, WHICH MUST EXIST.
+## This row used to read `bytes::size { b = bytes::map { … } }`, and a `size`
+## over a transform is the shape a fused pipeline collapses into a count that
+## builds nothing at all — the same trap two of the set rows fell into, where
+## filter and map read 0.99x either side of a change that made the build 2.9x
+## faster. `bytes::get` is not a chain sink, so the buffer has to be built.
 let l_map = { i, acc, b } -> if i <= 0 then acc
-  else l_map { i = i - 1, b = b,
-               acc = acc + bytes::size { b = bytes::map { b = b, f = { x } -> x } } }
+  else do
+    let mapped = bytes::map { b = b, f = { x } -> x }
+    l_map { i = i - 1, b = b,
+            acc = acc + option::get_or { opt = bytes::get { b = mapped, i = 7 }, def = 0 } }
+
+## ── 13. reverse — THE CEILING FOR A FUSED `map`. It reads every byte, writes
+## every byte into a new buffer, and calls no guest code, which is exactly the
+## shape a fused `bytes::map` would emit. Whatever `map` can be worth, it cannot
+## beat this.
+let l_reverse = { i, acc, b } -> if i <= 0 then acc
+  else do
+    let r = bytes::reverse { b = b }
+    l_reverse { i = i - 1, b = b,
+                acc = acc + option::get_or { opt = bytes::get { b = r, i = 7 }, def = 0 } }
 
 ## ── 10. to_hex — the codec path, two characters a byte ─────────────────────
 let l_to_hex = { i, acc, b } -> if i <= 0 then acc
@@ -199,3 +216,5 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
            label = "bytes::to_base64    ", thunk = {} -> l_to_b64 { i = n, acc = 0, b = b } }
   report { idx = 12, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "bytes::to_seq       ", thunk = {} -> l_to_seq { i = n, acc = 0, b = b } }
+  report { idx = 13, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "bytes::reverse CEILING", thunk = {} -> l_reverse { i = n, acc = 0, b = b } }
