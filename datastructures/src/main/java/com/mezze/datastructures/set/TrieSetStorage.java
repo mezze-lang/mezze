@@ -298,6 +298,50 @@ public final class TrieSetStorage implements SetStorage {
         return out;
     }
 
+    /**
+     * ONE WALK, NO ARRAY. {@code SetStorage.forEach}'s default goes through
+     * {@link #toArray()}, so until this override existed every set walk paid
+     * for an n-element array it threw away. The map measured the same change at
+     * 3.6x on the walk itself.
+     */
+    @Override
+    public void forEach(java.util.function.Consumer<Object> consumer) {
+        walkAll(root, consumer);
+    }
+
+    private static void walkAll(Node n, java.util.function.Consumer<Object> consumer) {
+        if (n instanceof Collision c) {
+            for (Object e : c.elems) consumer.accept(e);
+            return;
+        }
+        Bitmap b = (Bitmap) n;
+        for (Object e : b.elems) consumer.accept(e);
+        for (Node child : b.nodes) walkAll(child, consumer);
+    }
+
+    @Override
+    public boolean forEachUntil(java.util.function.Predicate<Object> p) {
+        return walkUntilAll(root, p);
+    }
+
+    /** As {@link #walkAll}, stopping the moment the predicate says so. */
+    private static boolean walkUntilAll(Node n, java.util.function.Predicate<Object> p) {
+        if (n instanceof Collision c) {
+            for (Object e : c.elems) {
+                if (!p.test(e)) return false;
+            }
+            return true;
+        }
+        Bitmap b = (Bitmap) n;
+        for (Object e : b.elems) {
+            if (!p.test(e)) return false;
+        }
+        for (Node child : b.nodes) {
+            if (!walkUntilAll(child, p)) return false;
+        }
+        return true;
+    }
+
     private static void collect(Node n, Object[] out, int[] at) {
         if (n instanceof Collision c) {
             for (Object e : c.elems) out[at[0]++] = e;

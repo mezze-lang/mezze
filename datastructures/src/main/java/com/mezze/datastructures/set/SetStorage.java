@@ -59,6 +59,23 @@ public sealed interface SetStorage permits
     }
 
     /**
+     * {@link #forEach} that can STOP, for the operations that answer before the
+     * end: `any`, `all`, `none` and `find`. Returns false iff the predicate
+     * stopped it.
+     *
+     * <p>The two tries override both this and {@link #forEach}; the default
+     * pays for {@link #toArray()}, which is what every storage used to do and
+     * is no worse than it was — the storages that take it hold at most 32
+     * elements, where the array is the cheap answer anyway.
+     */
+    default boolean forEachUntil(java.util.function.Predicate<Object> p) {
+        for (Object elem : toArray()) {
+            if (!p.test(elem)) return false;
+        }
+        return true;
+    }
+
+    /**
      * Returns the storage strategy tag.
      */
     byte getStrategyTag();

@@ -295,6 +295,14 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
         if (other.isEmpty()) return this;
         if (isEmpty()) return other;
 
+        // THE FOUR ARRAYS STAY HERE, and that is a measurement, not an
+        // oversight. Everywhere else in this family, replacing `keys()` and
+        // `values()` with a `storage.forEach` walk paid — 1.33x on
+        // `map::count`, 1.23x and 1.24x on the set's intersection and
+        // difference. Here it measured 1.01x on `map::merge` and 0.99x on
+        // `set::union`, because this shape COPIES both sides into the output
+        // wholesale: `System.arraycopy` moves them in bulk, and a per-element
+        // consumer walk gives that up to save the allocation. The two cancel.
         Object[] mine = keys();
         Object[] mineV = values();
         Object[] theirs = other.keys();
@@ -340,17 +348,18 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     public <K2, V2> MezzeMap<K2, V2> map(BiFunction<K, V, Entry<K2, V2>> fn) {
         if (isEmpty()) return empty();
 
-        Object[] ks = keys();
-        Object[] vs = values();
-        Object[] outK = new Object[ks.length];
-        Object[] outV = new Object[ks.length];
-        for (int i = 0; i < ks.length; i++) {
-            Entry<K2, V2> mapped = fn.apply((K) ks[i], (V) vs[i]);
-            outK[i] = mapped.key;
-            outV[i] = mapped.value;
-        }
+        int size = size();
+        Object[] outK = new Object[size];
+        Object[] outV = new Object[size];
+        int[] n = {0};
+        storage.forEach((k, v) -> {
+            Entry<K2, V2> mapped = fn.apply((K) k, (V) v);
+            outK[n[0]] = mapped.key;
+            outV[n[0]] = mapped.value;
+            n[0]++;
+        });
         // Two entries may map to one key: the later wins, as the puts did.
-        return (MezzeMap<K2, V2>) fromEntries(outK, outV, ks.length);
+        return (MezzeMap<K2, V2>) fromEntries(outK, outV, size);
     }
 
     /**
@@ -361,13 +370,17 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     public <K2> MezzeMap<K2, V> mapKeys(Function<K, K2> fn) {
         if (isEmpty()) return empty();
 
-        Object[] ks = keys();
-        Object[] outK = new Object[ks.length];
-        for (int i = 0; i < ks.length; i++) {
-            outK[i] = fn.apply((K) ks[i]);
-        }
+        int size = size();
+        Object[] outK = new Object[size];
+        Object[] outV = new Object[size];
+        int[] n = {0};
+        storage.forEach((k, v) -> {
+            outK[n[0]] = fn.apply((K) k);
+            outV[n[0]] = v;
+            n[0]++;
+        });
         // Two keys may map to one: the later wins, as the puts did.
-        return (MezzeMap<K2, V>) fromEntries(outK, values(), ks.length);
+        return (MezzeMap<K2, V>) fromEntries(outK, outV, size);
     }
 
     /**
@@ -383,13 +396,16 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     public <V2> MezzeMap<K, V2> mapValues(Function<V, V2> fn) {
         if (isEmpty()) return empty();
 
-        Object[] ks = keys();
-        Object[] vs = values();
-        Object[] outV = new Object[ks.length];
-        for (int i = 0; i < ks.length; i++) {
-            outV[i] = fn.apply((V) vs[i]);
-        }
-        return (MezzeMap<K, V2>) fromEntries(ks, outV, ks.length);
+        int size = size();
+        Object[] outK = new Object[size];
+        Object[] outV = new Object[size];
+        int[] n = {0};
+        storage.forEach((k, v) -> {
+            outK[n[0]] = k;
+            outV[n[0]] = fn.apply((V) v);
+            n[0]++;
+        });
+        return (MezzeMap<K, V2>) fromEntries(outK, outV, size);
     }
 
     /**
@@ -403,21 +419,20 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     public MezzeMap<K, V> filter(BiPredicate<K, V> p) {
         if (isEmpty()) return this;
 
-        Object[] ks = keys();
-        Object[] vs = values();
-        Object[] outK = new Object[ks.length];
-        Object[] outV = new Object[ks.length];
-        int n = 0;
-        for (int i = 0; i < ks.length; i++) {
-            if (p.test((K) ks[i], (V) vs[i])) {
-                outK[n] = ks[i];
-                outV[n] = vs[i];
-                n++;
+        int size = size();
+        Object[] outK = new Object[size];
+        Object[] outV = new Object[size];
+        int[] n = {0};
+        storage.forEach((k, v) -> {
+            if (p.test((K) k, (V) v)) {
+                outK[n[0]] = k;
+                outV[n[0]] = v;
+                n[0]++;
             }
-        }
-        if (n == ks.length) return this;
+        });
+        if (n[0] == size) return this;
 
-        return (MezzeMap<K, V>) fromEntries(outK, outV, n);
+        return (MezzeMap<K, V>) fromEntries(outK, outV, n[0]);
     }
 
     /**

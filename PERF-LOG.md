@@ -13631,3 +13631,47 @@ with `fromEntries`. No row measures it.
 it starts from an existing `map1` and adds `map2`'s entries, so a bulk rebuild
 would walk the whole base to save however few puts `map2` asks for. The same
 argument as `set::insert_all`.
+
+#### The set had no fast walk at all — 1.24x on difference, and where the walk does NOT pay
+
+`SetStorage.forEach`'s javadoc says "more efficient than extracting toArray()
+first", and its default implementation **calls `toArray()`**. Neither trie
+overrode it, so there was no fast set walk in the language: every whole-set
+operation paid for an n-element array it threw away. Both tries override
+`forEach` now, and `forEachUntil` beside it for the operations that answer
+early.
+
+| row | base | one walk | |
+|---|---|---|---|
+| `set::difference` | 14 180 367 ps | **11 447 000** | **1.24x** |
+| `set::intersection` | 14 076 017 | **11 423 834** | **1.23x** |
+| `set::symmetric_difference` | 30 128 619 | **26 651 363** | **1.13x** |
+| `set::filter` | 16 727 475 | **15 498 984** | **1.08x** |
+| `map::merge` | 38 351 937 | 37 981 056 | 1.01x |
+| `set::union` | 31 065 291 | 31 463 094 | 0.99x |
+| `set::map` | 24 927 311 | 25 259 875 | 0.99x |
+| `map::count` (converted earlier) | 10 240 227 | 10 278 973 | 1.00x |
+| `map::map_values` (same) | 31 071 145 | 31 210 476 | 1.00x |
+| `map::keys` | 7 093 453 | 6 678 555 | 1.06x |
+| `map::size` | 445 | 432 | 1.03x |
+
+**WHERE THE WALK DOES NOT PAY, AND WHY.** `merge` and `union` were the two I
+expected most from — `putAll` took `keys()` AND `values()` of BOTH sides, four
+traversals and four arrays, to fill the two it needs. They measured 1.01x and
+0.99x, and the reason is in the shape: those two COPY both sides into the output
+wholesale, so `System.arraycopy` moves them in bulk while a per-element consumer
+walk gives that up to save the allocation. The two cancel almost exactly.
+
+Both are **reverted to the arrays**, with the measurement written where the code
+is, because the next reader will otherwise see an inconsistency and "fix" it.
+An array that is `arraycopy`-ed is not the same cost as an array that is indexed
+element by element, and this family contains both.
+
+`set::map` is 0.99x for a different reason: it loops per element either way, and
+the one input array it loses is ~1.5 ns against a row where the build is ~22 and
+the guest call ~5. Kept, because it is the same shape as `filter`, which did
+show 1.08x.
+
+The four that paid are the ones that walk ONE side and probe the other, where
+the input array is pure overhead: difference, intersection, symmetric_difference
+and filter.

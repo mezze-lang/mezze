@@ -133,6 +133,19 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
     }
 
     /**
+     * ONE WALK, NO ARRAY, for the whole-set operations — the Set's twin of
+     * {@code MezzeMap.walkEntries}. MEASURED there at 3.6x on the walk itself.
+     */
+    public void walkElems(java.util.function.Consumer<Object> fn) {
+        storage.forEach(fn);
+    }
+
+    /** {@link #walkElems} that stops, for `any`, `all`, `none` and `find`. */
+    public boolean walkElemsUntil(java.util.function.Predicate<Object> p) {
+        return storage.forEachUntil(p);
+    }
+
+    /**
      * Creates a set of longs (unboxed).
      */
     public static MezzeSet<Long> ofLongs(long... elements) {
@@ -273,6 +286,9 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
         if (other.isEmpty()) return this;
         if (isEmpty()) return other;
 
+        // THE TWO ARRAYS STAY, measured: see `MezzeMap.putAll`. A walk saves
+        // the allocation and gives up `System.arraycopy`, and on `set::union`
+        // that read 0.99x.
         Object[] mine = toArray();
         Object[] theirs = other.toArray();
         Object[] out = new Object[mine.length + theirs.length];
@@ -322,16 +338,16 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
         MezzeSet<A> smaller = size() <= other.size() ? this : other;
         MezzeSet<A> larger = size() > other.size() ? this : other;
 
-        Object[] es = smaller.toArray();
-        Object[] out = new Object[es.length];
-        int n = 0;
-        for (int i = 0; i < es.length; i++) {
-            if (larger.contains((A) es[i])) {
-                out[n++] = es[i];
+        int size = smaller.size();
+        Object[] out = new Object[size];
+        int[] n = {0};
+        smaller.storage.forEach(e -> {
+            if (larger.contains((A) e)) {
+                out[n[0]++] = e;
             }
-        }
-        if (n == es.length) return smaller;
-        return (MezzeSet<A>) fromElements(out, n);
+        });
+        if (n[0] == size) return smaller;
+        return (MezzeSet<A>) fromElements(out, n[0]);
     }
 
     /**
@@ -348,16 +364,16 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
             return new MezzeSet<>(result);
         }
 
-        Object[] es = toArray();
-        Object[] out = new Object[es.length];
-        int n = 0;
-        for (int i = 0; i < es.length; i++) {
-            if (!other.contains((A) es[i])) {
-                out[n++] = es[i];
+        int size = size();
+        Object[] out = new Object[size];
+        int[] n = {0};
+        storage.forEach(e -> {
+            if (!other.contains((A) e)) {
+                out[n[0]++] = e;
             }
-        }
-        if (n == es.length) return this;
-        return (MezzeSet<A>) fromElements(out, n);
+        });
+        if (n[0] == size) return this;
+        return (MezzeSet<A>) fromElements(out, n[0]);
     }
 
     /**
@@ -417,13 +433,12 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
     public <B> MezzeSet<B> map(Function<A, B> fn) {
         if (isEmpty()) return empty();
 
-        Object[] es = toArray();
-        Object[] out = new Object[es.length];
-        for (int i = 0; i < es.length; i++) {
-            out[i] = fn.apply((A) es[i]);
-        }
+        int size = size();
+        Object[] out = new Object[size];
+        int[] n = {0};
+        storage.forEach(e -> out[n[0]++] = fn.apply((A) e));
         // Two elements may map to one: they collapse, as the adds did.
-        return (MezzeSet<B>) fromElements(out, es.length);
+        return (MezzeSet<B>) fromElements(out, size);
     }
 
     /**
@@ -451,17 +466,17 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
     public MezzeSet<A> filter(Predicate<A> p) {
         if (isEmpty()) return this;
 
-        Object[] es = toArray();
-        Object[] out = new Object[es.length];
-        int n = 0;
-        for (int i = 0; i < es.length; i++) {
-            if (p.test((A) es[i])) {
-                out[n++] = es[i];
+        int size = size();
+        Object[] out = new Object[size];
+        int[] n = {0};
+        storage.forEach(e -> {
+            if (p.test((A) e)) {
+                out[n[0]++] = e;
             }
-        }
-        if (n == es.length) return this;
+        });
+        if (n[0] == size) return this;
 
-        return (MezzeSet<A>) fromElements(out, n);
+        return (MezzeSet<A>) fromElements(out, n[0]);
     }
 
     // ===== FOLD =====

@@ -265,6 +265,37 @@ public final class LongTrieSetStorage implements SetStorage {
         for (Node child : n.nodes) collect(child, out, at);
     }
 
+    /**
+     * ONE WALK, NO ARRAY. The boxing per element stays — a `Consumer<Object>`
+     * takes an Object — but the n-element array and the second traversal that
+     * `SetStorage.forEach`'s default pays for do not.
+     */
+    @Override
+    public void forEach(java.util.function.Consumer<Object> consumer) {
+        walkAll(root, consumer);
+    }
+
+    private static void walkAll(Node n, java.util.function.Consumer<Object> consumer) {
+        for (long e : n.elems) consumer.accept(Long.valueOf(e));
+        for (Node child : n.nodes) walkAll(child, consumer);
+    }
+
+    @Override
+    public boolean forEachUntil(java.util.function.Predicate<Object> p) {
+        return walkUntilAll(root, p);
+    }
+
+    /** As {@link #walkAll}, stopping the moment the predicate says so. */
+    private static boolean walkUntilAll(Node n, java.util.function.Predicate<Object> p) {
+        for (long e : n.elems) {
+            if (!p.test(Long.valueOf(e))) return false;
+        }
+        for (Node child : n.nodes) {
+            if (!walkUntilAll(child, p)) return false;
+        }
+        return true;
+    }
+
     /** Promote to {@link TrieSetStorage} when a non-Long element arrives. */
     private SetStorage transitionToGeneric() {
         SetStorage out = new TrieSetStorage();

@@ -195,31 +195,30 @@ public final class SetNatives {
     public static MezzeSet filter(MezzeSet set, MezzeFunction predicate,
                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "val");
-        Object[] es = set.toArray();
-        Object[] out = new Object[es.length];
-        int n = 0;
-        for (int i = 0; i < es.length; i++) {
-            Object res = ctx.call1(callNode, es[i]);
+        int size = set.size();
+        Object[] out = new Object[size];
+        int[] n = {0};
+        set.walkElems(e -> {
+            Object res = ctx.call1(callNode, e);
             if (res instanceof Boolean && (Boolean) res) {
-                out[n++] = es[i];
+                out[n[0]++] = e;
             }
-        }
-        if (n == es.length) {
+        });
+        if (n[0] == size) {
             return set;
         }
-        return MezzeSet.fromElements(out, n);
+        return MezzeSet.fromElements(out, n[0]);
     }
 
     public static MezzeSet map(MezzeSet set, MezzeFunction mapper,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(mapper, "val");
-        Object[] es = set.toArray();
-        Object[] out = new Object[es.length];
-        for (int i = 0; i < es.length; i++) {
-            out[i] = ctx.call1(callNode, es[i]);
-        }
+        int size = set.size();
+        Object[] out = new Object[size];
+        int[] n = {0};
+        set.walkElems(e -> out[n[0]++] = ctx.call1(callNode, e));
         // Two elements may map to one: they collapse, as the adds did.
-        return MezzeSet.fromElements(out, es.length);
+        return MezzeSet.fromElements(out, size);
     }
 
     public static Object fold(MezzeSet set, Object init, MezzeFunction folder,
@@ -492,21 +491,19 @@ public final class SetNatives {
 
     @TruffleBoundary
     public static MezzeSet symmetricDifference(MezzeSet s1, MezzeSet s2) {
-        Object[] a = s1.toArray();
-        Object[] b = s2.toArray();
-        Object[] out = new Object[a.length + b.length];
-        int n = 0;
-        for (int i = 0; i < a.length; i++) {
-            if (!s2.contains(a[i])) {
-                out[n++] = a[i];
+        Object[] out = new Object[s1.size() + s2.size()];
+        int[] n = {0};
+        s1.walkElems(e -> {
+            if (!s2.contains(e)) {
+                out[n[0]++] = e;
             }
-        }
-        for (int i = 0; i < b.length; i++) {
-            if (!s1.contains(b[i])) {
-                out[n++] = b[i];
+        });
+        s2.walkElems(e -> {
+            if (!s1.contains(e)) {
+                out[n[0]++] = e;
             }
-        }
-        return MezzeSet.fromElements(out, n);
+        });
+        return MezzeSet.fromElements(out, n[0]);
     }
 
     // ==================== Task #30: Collect Operations ====================
@@ -518,16 +515,15 @@ public final class SetNatives {
     public static MezzeSet filterMap(MezzeSet set, MezzeFunction f,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");
-        Object[] es = set.toArray();
-        Object[] out = new Object[es.length];
-        int n = 0;
-        for (int i = 0; i < es.length; i++) {
-            Object mapped = ctx.call1(callNode, es[i]);
+        Object[] out = new Object[set.size()];
+        int[] n = {0};
+        set.walkElems(e -> {
+            Object mapped = ctx.call1(callNode, e);
             if (mapped instanceof MezzeVariant v && v.isSome()) {
-                out[n++] = v.getPayloadFieldByName("val");
+                out[n[0]++] = v.getPayloadFieldByName("val");
             }
-        }
-        return MezzeSet.fromElements(out, n);
+        });
+        return MezzeSet.fromElements(out, n[0]);
     }
 
     /**
