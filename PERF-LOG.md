@@ -13270,3 +13270,80 @@ branch is not dead — dropping its size bookkeeping instead fails four tests �
 the shift is simply UNOBSERVABLE: a `Collision` is made only once the 32 bits
 are spent, so every key that can reach one shares its full hash, and
 `insertIntoCollision` never reads the shift. The code now says so.
+
+#### A fused stage re-emitted a capture in the wrong frame — my own regression, and it answered 0
+
+Found while building the set's first rebuild bench rows: `mapsurface` row 26,
+`set::filter` keeping half a 1 000-element set, reported **`sum=0`**. The row
+was not slow, it was WRONG, and the map's row 22 — the same predicate shape
+over a map — reported the correct 1 000 000 in the same binary.
+
+The shape matters, and only one of these is wrong:
+
+| predicate | answer |
+|---|---|
+| `val > half` — a bare capture | correct |
+| `val > pre` — the arithmetic done outside the lambda | correct |
+| `val * 2 / 2 > 100` — arithmetic on the PARAMETER | correct |
+| `val > half + 1` — arithmetic on the CAPTURE | **wrong** |
+
+`MEZZE_CHAIN_CANONICALIZE=0` made all four correct, so it was the fused path;
+`git log -L` on the grammar names `f0236e4f8`, 2026-11-03, branch-local.
+**This was mine**, from the compound-fold work, not something inherited.
+
+THE CAUSE. `BytecodeCompiler.isParamFree` decided whether a stage's right-hand
+side may be emitted inline in the fused loop, and it asked whether the tree
+mentions THE CALLBACK'S OWN PARAMETER:
+
+```java
+if (node instanceof ReadLocalIR rl) return rl.getSlot() != paramSlot;
+if (node instanceof ReadCaptureIR) return true;
+```
+
+Both of those are FRAME-RELATIVE. The node comes from the callback's body, where
+index 0 is the callback's first capture; the fused loop runs in the ENCLOSING
+frame, where index 0 is whatever that function put there. For a one-argument
+native HOF callback that slot holds the ARGUMENT RECORD — which is why the
+failure has two faces. With arithmetic around the capture it threw `Cannot add
+MezzeRecord and Long`, a message pointing at `DirectAddNode` and saying nothing
+about frames. Without it, the comparison just answered wrongly and `set::filter`
+returned an empty set.
+
+"Does not mention the parameter" is not the question. "Means the same thing in
+the other frame" is, and a literal or a global does while a local does not.
+
+THE FIX, in two parts, either of which restores correctness.
+
+`liftCaptureRhs` already rewrote a BARE capture to the enclosing slot it was
+captured from; it now walks THROUGH arithmetic, so `half + 1` is lifted rather
+than passed over. That is the part that keeps these shapes FAST.
+
+`isParamFree` now refuses `ReadLocalIR` and `ReadCaptureIR` outright, so a
+frame-relative read the lift cannot express declines the fusion instead of
+answering wrongly. That is the part that makes the next shape of this kind slow
+rather than silent — and there will be one, because the matcher accepts whole
+subtrees.
+
+`MEZZE_CHAIN_CANON_EMIT_DEBUG` reports no rejections for the probe shapes, so
+they still fuse; row 26 now checksums 1 000 000.
+
+Six call sites share that one gate — three in the predicate matcher and three
+in the unary/map matcher — so `set::map { f = {x} -> x * scale + 1 }` with a
+captured `scale` was wrong in the same way and is pinned too.
+
+ALSO REMOVED: a duplicated `is ReadFieldIR` branch in `ChainCanonicalizer`, from
+the same earlier commit, whose second copy was unreachable.
+
+AND A COMMENT THAT WAS FALSE. The Kotlin `isPureArithTree` says its grammar and
+the emitter's agree; it accepts any `ReadLocalIR` as a leaf, including a
+capture, while `classifyFolderTree` declines captures outright. The disagreement
+is benign — the emitter decides and `FusedChainIR.fallback` runs the real folder
+— but the comment claimed a guarantee that is not there.
+
+COVERAGE. `CapturedOperandFusionTest` is ten tests asserting VALUES, because a
+fusion bug that declines to fuse is not a failure while one that returns 0 is.
+Restoring both halves of the old behaviour fails SEVEN of them. The three that
+stay green reach the right answer another way and are there to keep it: the bare
+capture, the literal composite, and the fold — whose `classifyBinaryFolder`
+lifts its own element rhs and declines when it cannot, so that path was never
+wrong.

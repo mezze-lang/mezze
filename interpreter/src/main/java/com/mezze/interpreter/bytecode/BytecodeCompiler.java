@@ -8760,36 +8760,85 @@ public final class BytecodeCompiler {
      */
     private NodeIR liftCaptureRhs(NodeIR rhs,
                                   java.util.List<com.mezze.language.truffleir.CaptureIR> capturesOnEnclosing) {
-        if (!(rhs instanceof ReadCaptureIR rc)) return null;
-        if (capturesOnEnclosing == null) return null;
-        int idx = rc.getIndex();
-        if (idx < 0 || idx >= capturesOnEnclosing.size()) return null;
-        var cap = capturesOnEnclosing.get(idx);
-        // capturesOnEnclosing[i].slot is a frame slot in the ENCLOSING
-        // function's `[captures..., params..., locals...]` layout. A
-        // plain ReadLocalIR(slot) at emit time thus loads whichever
-        // arg/local held the captured value at the MakeLambda site.
-        return new ReadLocalIR(cap.getSlot(), cap.getKind(), rc.getSrc(), null);
+        if (rhs instanceof ReadCaptureIR rc) {
+            if (capturesOnEnclosing == null) return null;
+            int idx = rc.getIndex();
+            if (idx < 0 || idx >= capturesOnEnclosing.size()) return null;
+            var cap = capturesOnEnclosing.get(idx);
+            // capturesOnEnclosing[i].slot is a frame slot in the ENCLOSING
+            // function's `[captures..., params..., locals...]` layout. A
+            // plain ReadLocalIR(slot) at emit time thus loads whichever
+            // arg/local held the captured value at the MakeLambda site.
+            return new ReadLocalIR(cap.getSlot(), cap.getKind(), rc.getSrc(), null);
+        }
+        // THE LIFT GOES THROUGH ARITHMETIC, because a capture is not always the
+        // whole right-hand side. `{val} -> val > half + 1` has the capture one
+        // level down, and lifting only a BARE capture left that shape to Shape
+        // A′ below, which emitted the capture read UNCHANGED in the fused
+        // loop's frame — where the index means something else entirely. A
+        // literal or a global is the same value in any frame and passes
+        // through; anything else refuses, and the chain declines.
+        if (rhs instanceof LongLitIR || rhs instanceof DoubleLitIR
+                || rhs instanceof BoolLitIR || rhs instanceof StringLitIR
+                || rhs instanceof CharLitIR || rhs instanceof FracLitIR
+                || rhs instanceof UnitLitIR
+                || rhs instanceof ReadGlobalByHashIR
+                || rhs instanceof ReadGlobalFnByHashIR) {
+            return rhs;
+        }
+        if (rhs instanceof InlineBinaryOpIR bin) {
+            switch (bin.getOp()) {
+                case ADD, SUB, MUL, DIV, MOD -> { }
+                default -> { return null; }
+            }
+            NodeIR left = liftCaptureRhs(bin.getLeft(), capturesOnEnclosing);
+            if (left == null) return null;
+            NodeIR right = liftCaptureRhs(bin.getRight(), capturesOnEnclosing);
+            if (right == null) return null;
+            if (left == bin.getLeft() && right == bin.getRight()) return bin;
+            return new InlineBinaryOpIR(bin.getOp(), left, right, bin.getSrc());
+        }
+        return null;
     }
 
     /**
-     * #442 — returns true iff the expression tree rooted at {@code node}
-     * does NOT reference {@link ReadLocalIR} at {@code paramSlot}. Used to
-     * determine whether a comparison RHS can be emitted inline in the
-     * fused loop body (evaluated each iteration but independent of the
-     * loop variable). Conservatively returns false for IR shapes with
-     * children we don't walk (e.g. LetIR, MatchIR, BlockIR) — those are
-     * too complex to inline safely.
+     * Whether the expression tree rooted at {@code node} means the SAME THING
+     * when it is re-emitted in the fused loop's frame.
+     *
+     * <p>This used to ask a weaker question — whether the tree mentions the
+     * callback's own parameter — and answered yes for every other
+     * {@link ReadLocalIR} and for {@link ReadCaptureIR}. Those are
+     * FRAME-RELATIVE: the node comes from the callback's body, where index 0 is
+     * the callback's first capture, and the fused loop runs in the ENCLOSING
+     * frame, where index 0 is whatever that function put there. So
+     * `{val} -> val > half + 1` fused with the capture read left as written and
+     * the loop compared against the enclosing frame's slot 0 — which for a
+     * one-argument native HOF callback is the argument record, giving "Cannot
+     * add MezzeRecord and Long" where the record is a number's worth of
+     * arithmetic away, and a SILENTLY WRONG answer where it is not: the same
+     * predicate inside `set::filter` returned an empty set instead of half the
+     * elements, and `mapsurface` row 26 reported a checksum of 0.
+     *
+     * <p>A literal, a global and arithmetic over them denote the same value in
+     * any frame, so they still pass. A capture is handled by
+     * {@link #liftCaptureRhs}, which rewrites it to the enclosing slot it was
+     * captured FROM and is tried before this; what reaches here and is
+     * frame-relative cannot be expressed, so the chain declines and runs
+     * unfused.
+     *
+     * <p>Conservatively false for IR shapes whose children are not walked
+     * (LetIR, MatchIR, BlockIR) — too complex to inline safely.
      */
     private static boolean isParamFree(NodeIR node, int paramSlot) {
-        if (node instanceof ReadLocalIR rl) return rl.getSlot() != paramSlot;
+        // Frame-relative: see the note above. `paramSlot` is not consulted,
+        // because EVERY local read is wrong here, not only the parameter's.
+        if (node instanceof ReadLocalIR || node instanceof ReadCaptureIR) return false;
         if (node instanceof LongLitIR || node instanceof DoubleLitIR
                 || node instanceof BoolLitIR || node instanceof StringLitIR
                 || node instanceof CharLitIR || node instanceof FracLitIR
                 || node instanceof UnitLitIR) return true;
         if (node instanceof ReadGlobalByHashIR || node instanceof ReadGlobalFnByHashIR)
             return true;
-        if (node instanceof ReadCaptureIR) return true;
         if (node instanceof InlineBinaryOpIR bin)
             return isParamFree(bin.getLeft(), paramSlot)
                 && isParamFree(bin.getRight(), paramSlot);

@@ -830,8 +830,6 @@ object ChainCanonicalizer {
             is LongLitIR -> true
             // A field of one of the two params: `x.v`, `acc.total`.
             is ReadFieldIR -> node.record is ReadLocalIR
-            // A field of one of the two params: `x.v`, `acc.total`.
-            is ReadFieldIR -> node.record is ReadLocalIR
             is InlineBinaryOpIR -> when (node.op) {
                 InlineOp.ADD, InlineOp.SUB, InlineOp.MUL, InlineOp.DIV, InlineOp.MOD ->
                     isPureArithTree(node.left, depth + 1) && isPureArithTree(node.right, depth + 1)
