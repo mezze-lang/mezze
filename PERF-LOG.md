@@ -12494,3 +12494,63 @@ leak, which makes the n=2000 behaviour an anomaly rather than a slope.
 Recorded rather than chased: this surface costs minutes a measurement, its floor
 is two thirds JDK, and the iter surface in the same session had cliffs of 37x to
 122x against a floor of its own making.
+
+#### Two polymorphic callbacks in one program cost 11.6x — and adding a row to the bench moved the cliff
+
+`bench/cases/defunc` row 4 ("own HOF 2 fns") is 10 279 ps an iteration against
+row 3's 886 for the SAME higher-order function with one callback. Counters in
+every call operation say what the difference is, and it is not a cache tier:
+
+| row | indirect | scalar1 | scalar2 | direct1 |
+|---|---|---|---|---|
+| 3, one callback | 0 | 0 | 0 | 0 |
+| 4, two callbacks | 2 999 970 | 0 | 0 | 1 499 985 |
+
+**With one callback the HOF is specialised and inlined away to nothing** — no
+call of any kind survives. With two, three million generic record-ABI indirect
+calls appear, one per element. The mono trace agrees: both of row 4's references
+resolve `inst=null`, with a site type carrying an undetermined `'out#2028`, so
+the sites call the generic `apply_fold` and the callback arrives as a runtime
+value.
+
+THE BISECTION, each step its own build:
+
+| shape | ps/iter |
+|---|---|
+| one call, one callback (row 3) | 886 |
+| one call, annotated callback (row 7) | 913 |
+| one call in OPERAND position (`… + 0`) | 935 |
+| one call passing `n / 2` | 993 |
+| **two calls, the SAME callback** | **652** |
+| two calls, two callbacks (row 4) | 10 279 |
+| two calls, two callbacks, **a HOF copy each** | 9 718 |
+| two calls, two ANNOTATED callbacks | 1 146 |
+
+So it is not the call count, not operand position, not the divisor, and not the
+call site being bimorphic — a HOF copy per callback is just as slow. What it
+takes is **two distinct UNANNOTATED callbacks in the program**: each is
+polymorphic over its numeric type and carries `__dict_mul`/`__dict_add`, and
+with two of them present, sites that each see only one lose the specialisation
+anyway.
+
+Ruled out on the way: the two callbacks in that row have IDENTICAL bodies
+(`x * 2 + 1`), and Mezze identity is content-addressed, so they may be one
+declaration. Giving the second a different body (`x * 3 + 1`) and interleaving
+the two bench sources measured **1.03x** — identity is not the mechanism.
+
+**AND THE MEASUREMENT MOVED WHEN I ADDED A ROW TO MEASURE IT WITH.** Adding
+`step_mono2` (a second annotated callback) and its kernel took row 4 from
+~10 300 ps to **2 102** in the same runtime. Nothing about row 4 changed. So
+whether a site gets specialised depends on what else the MODULE contains, which
+is consistent with `inst=null` being a seeding outcome rather than a property of
+the site — and it is why these diagnostic rows are NOT being committed: a row
+added to study this cliff perturbs it. Row 4 as committed reproduces at 10 279
+and 10 669 across two runs.
+
+Where a fix would go: `MonoDriver.fillHavingOutTypeArgs` already resolves a
+`having out` from the matching impl's `associatedTypeBindings` and its comment
+records 700x for doing so. The same treatment for a reference whose site type
+carries an undetermined output var is the shape of the fix, and the same
+unresolved-output pattern blocked `LocalLambdaSpecializer` earlier in this
+session (`['o50, 'w50, 's50]`, with only `'s50` left unpinned). Two separate
+cliffs now point at one missing determination.
