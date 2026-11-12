@@ -26,8 +26,14 @@ effect Condition having 'ctx where {
 ##
 ## The computation runs to completion and every signal is tolerated, so the
 ## result reflects ALL the recoveries rather than the first failure.
+##
+## Spelled as a bare value rather than `resume { val = fallback }`: the two are
+## the same operation ("falling off the op body normally is treated as
+## `resume {val = <last expr>}`") and the bare form is measured ~2.4x cheaper,
+## because referencing `resume` crosses a @TruffleBoundary. See the note in
+## `std/comptime.mz`.
 impl Condition for UseFallback having 'ctx = 'c where {
-  signal = { ctx, fallback } -> resume { val = fallback }
+  signal = { ctx, fallback } -> fallback
 }
 
 ## Give up at the first signal, with the context as the error.

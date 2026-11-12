@@ -100,9 +100,15 @@ effect Comptime where {
 ## The body is the run-time fallback. It only fires for a site the reduction pass
 ## left alone, and it computes the same value — just at run time instead of for
 ## free.
+## A bare value IS an implicit resume ("falling off the op body normally is
+## treated as `resume {val = <last expr>}`" — ScopedEffectConstants), and it is
+## MEASURED CHEAPER: ~14 ns/op against ~34 ns for the explicit form, built-JAR,
+## consistent over four runs. Referencing `resume` goes through
+## `EffectBindingNode.lookupOnFiber`, which is @TruffleBoundary over a
+## ThreadLocal, so partial evaluation stops there. Same semantics, half the cost.
 impl Comptime for ComptimeEval where {
-  comptime = { eval } -> resume { val = __native_comptime_eval { eval = eval } },
-  codebase = { run } -> resume { val = run {} }
+  comptime = { eval } -> __native_comptime_eval { eval = eval },
+  codebase = { run } -> run {}
 }
 
 ## Fail the build, from inside a `comptime` block.

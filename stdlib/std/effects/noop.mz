@@ -24,8 +24,11 @@ effect NoOp where {
 }
 
 ## The only handler `NoOp` needs — it does nothing, which is the whole point.
+## `{}` is an implicit resume with unit — same semantics as
+## `resume { val = {} }` and measured ~2.4x cheaper, because referencing
+## `resume` crosses a @TruffleBoundary. See the note in `std/comptime.mz`.
 impl NoOp for NoOpHandler where {
-  noop = {} -> resume { val = {} }
+  noop = {} -> {}
 }
 
 ## Perform-and-handle `NoOp` in one call, so a computation that needs no effects
