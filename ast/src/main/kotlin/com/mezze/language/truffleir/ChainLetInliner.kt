@@ -79,18 +79,23 @@ object ChainLetInliner {
      * result, an ordinary value that happens to come from a chain, and moving it
      * buys nothing because there is no outer chain for it to join.
      */
-    private val MOVABLE_OPS = setOf(
-        NativeHofNames.OP_MAP,
-        NativeHofNames.OP_FILTER,
-        NativeHofNames.OP_TAKE,
-        NativeHofNames.OP_DROP,
-        NativeHofNames.OP_TAKE_WHILE,
-        NativeHofNames.OP_DROP_WHILE,
-        NativeHofNames.OP_ENUMERATE,
-        NativeHofNames.OP_RANGE,
-        NativeHofNames.OP_FROM_SEQ,
-        NativeHofNames.OP_FROM_LIST,
+    private val MOVABLE_OPS: Set<NativeOp> = setOf(
+        NativeOp.MAP,
+        NativeOp.FILTER,
+        NativeOp.TAKE,
+        NativeOp.DROP,
+        NativeOp.TAKE_WHILE,
+        NativeOp.DROP_WHILE,
+        NativeOp.ENUMERATE,
+        NativeOp.RANGE,
+        NativeOp.FROM_SEQ,
+        NativeOp.FROM_LIST,
     )
+    /** This node is one of [ops], on a collection whose elements a chain can
+     *  walk — the set form of [isElementOp]. */
+    private fun CallNativeIR.isElementOpIn(ops: Set<NativeOp>): Boolean =
+        opKind in ops && ownerKind?.isElementCollection == true
+
 
     fun inline(functions: Map<Hash, FunctionIR>): Map<Hash, FunctionIR> {
         var anyChanged = false
@@ -168,7 +173,7 @@ object ChainLetInliner {
     private fun isMovableChainExpr(node: NodeIR, fns: Map<Hash, FunctionIR>): Boolean =
         when (node) {
             is CallNativeIR ->
-                MOVABLE_OPS.any { op -> NativeHofNames.isAnyElementCollection(node.name, op) }
+                node.isElementOpIn(MOVABLE_OPS)
             // A DIRECT CALL TO THE STDLIB WRAPPER counts too. Whether a stage
             // appears as a native or as a call depends on whether this function
             // was monomorphised: the mono clone has `__native_iter_map` inlined,
@@ -190,7 +195,7 @@ object ChainLetInliner {
         val body = fns[hash]?.body ?: return false
         return when (body) {
             is CallNativeIR ->
-                MOVABLE_OPS.any { op -> NativeHofNames.isAnyElementCollection(body.name, op) }
+                body.isElementOpIn(MOVABLE_OPS)
             is CallDirectIR -> isChainOpFunction(body.targetHash, fns, depth + 1)
             else -> false
         }

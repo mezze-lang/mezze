@@ -56,6 +56,33 @@ object ChainCanonicalizer {
      *   look through it to the function's body for shape classification,
      *   so no actual closure is created at runtime.
      */
+
+    /**
+     * This node IS [op], on a collection whose elements a chain can walk.
+     *
+     * Exactly what `NativeHofNames.isAnyElementCollection(name, op)` computed —
+     * seq, iter, list, set, sorted_set or deque — read off the two decisions
+     * the compiler carried instead of building and comparing six native names
+     * per call. See [NativeOp].
+     */
+    /**
+     * This node is a FOLD over something a fused chain can walk.
+     *
+     * Wider than [isElementOp] in two deliberate ways. `list` names its fold
+     * `fold_left` where the others say `fold`, so the OP is either; and BYTES
+     * folds here too although its elements are not boxed, so it is admitted
+     * explicitly rather than through [CollectionKind.isElementCollection].
+     *
+     * MAP and SORTED_MAP are excluded by both: `map::fold`'s callback takes an
+     * ENTRY, so it is not this shape.
+     */
+    private fun CallNativeIR.isFoldOp(): Boolean =
+        (opKind == NativeOp.FOLD || opKind == NativeOp.FOLD_LEFT) &&
+            (ownerKind?.isElementCollection == true || ownerKind == CollectionKind.BYTES)
+
+    private fun CallNativeIR.isElementOp(op: NativeOp): Boolean =
+        opKind == op && ownerKind?.isElementCollection == true
+
     private fun asMakeLambda(node: NodeIR?): MakeLambdaIR? = when (node) {
         is MakeLambdaIR -> node
         is ReadGlobalFnByHashIR -> MakeLambdaIR(node.hash, emptyList(), node.src)
@@ -433,7 +460,7 @@ object ChainCanonicalizer {
     ): NodeIR? {
         if (node !is CallNativeIR || node.isScalarABI) return null
         val record = node.arg as? MakeRecordIR ?: return null
-        val srcField = NativeHofNames.srcFieldFor(node.name)
+        val srcField = NativeHofNames.srcFieldFor(node.ownerKind)
         val srcIdx = record.fields.indexOfFirst { it.name == srcField }
         if (srcIdx < 0) return null
 
@@ -487,14 +514,31 @@ object ChainCanonicalizer {
     /** A lazy source or stage the fuser itself consumes. */
     private fun isChainExpr(node: NodeIR): Boolean {
         if (node !is CallNativeIR) return false
-        return CHAIN_SHAPES.any { op -> NativeHofNames.isAnyElementCollection(node.name, op) }
+        return node.isElementOpIn(CHAIN_SHAPES)
     }
 
-    private val CHAIN_SHAPES = setOf(
-        NativeHofNames.OP_MAP, NativeHofNames.OP_FILTER, NativeHofNames.OP_TAKE,
-        NativeHofNames.OP_DROP, NativeHofNames.OP_TAKE_WHILE, NativeHofNames.OP_DROP_WHILE,
-        NativeHofNames.OP_ENUMERATE, NativeHofNames.OP_RANGE,
-        NativeHofNames.OP_FROM_SEQ, NativeHofNames.OP_FROM_LIST,
+
+    /** This node is [op] on a seq or an iter — what `isSeqOrIter(name, op)`
+     *  spelled out. */
+    private fun CallNativeIR.isSeqOrIterOp(op: NativeOp): Boolean =
+        opKind == op && (ownerKind == CollectionKind.SEQ || ownerKind == CollectionKind.ITER)
+
+    /** This node is one of [ops], on a collection whose elements a chain can
+     *  walk — the set form of [isElementOp]. */
+    private fun CallNativeIR.isElementOpIn(ops: Set<NativeOp>): Boolean =
+        opKind in ops && ownerKind?.isElementCollection == true
+
+    private val CHAIN_SHAPES: Set<NativeOp> = setOf(
+        NativeOp.MAP,
+        NativeOp.FILTER,
+        NativeOp.TAKE,
+        NativeOp.DROP,
+        NativeOp.TAKE_WHILE,
+        NativeOp.DROP_WHILE,
+        NativeOp.ENUMERATE,
+        NativeOp.RANGE,
+        NativeOp.FROM_SEQ,
+        NativeOp.FROM_LIST,
     )
 
     /** Replace `ReadLocalIR(slot)` for every slot the map names. */
@@ -513,15 +557,12 @@ object ChainCanonicalizer {
         allFunctions: Map<Hash, FunctionIR>,
         ext: FrameExtender,
     ): FusedChainIR? {
-        // Bare __native_seq_sum / __native_iter_sum — desugared body of
-        // seq::sum / iter::sum. Rewrite to FusedChainIR with a Sum sink so
-        // the BDSL emit can drive BuiltinSumLongSeq / BuiltinSumRangeLong
-        // through the canonical path.
+        // A bare SUM over any element collection — the desugared body of
+        // `seq::sum`, `iter::sum` and the four others. Rewrite to FusedChainIR
+        // with a Sum sink so the BDSL emit can drive BuiltinSumLongSeq /
+        // BuiltinSumRangeLong through the canonical path.
         if (node is CallNativeIR
-            && (node.name == "__native_seq_sum" || node.name == "__native_iter_sum"
-                || node.name == "__native_list_sum"
-                || node.name == "__native_set_sum" || node.name == "__native_sorted_set_sum"
-                || node.name == "__native_deque_sum")
+            && node.isElementOp(NativeOp.SUM)
             && !node.isScalarABI) {
             val mr = node.arg as? MakeRecordIR ?: return null
             if (mr.fields.size != 1) return null
@@ -537,13 +578,14 @@ object ChainCanonicalizer {
             //   Same as list: only fuse when there are stages to benefit from.
             // iter_sum: source could be any collection — must reject Opaque.
             val effectiveSource = when {
-                source is SourceIR.Opaque && node.name == "__native_seq_sum" -> SourceIR.RawSeq(source.expr)
-                source is SourceIR.Opaque && node.name == "__native_list_sum" ->
+                source is SourceIR.Opaque && node.ownerKind == CollectionKind.SEQ ->
+                    SourceIR.RawSeq(source.expr)
+                source is SourceIR.Opaque && node.ownerKind == CollectionKind.LIST ->
                     if (stages.isNotEmpty()) SourceIR.RawList(source.expr) else return null
-                source is SourceIR.Opaque && (NativeHofNames.isSetNative(node.name)
-                        || NativeHofNames.isSortedSetNative(node.name)
-                        || NativeHofNames.isDequeNative(node.name)) ->
-                    if (stages.isNotEmpty()) promoteOpaqueSource(source, node.name, true) ?: return null else return null
+                source is SourceIR.Opaque && (node.ownerKind == CollectionKind.SET
+                        || node.ownerKind == CollectionKind.SORTED_SET
+                        || node.ownerKind == CollectionKind.DEQUE) ->
+                    if (stages.isNotEmpty()) promoteOpaqueSource(source, node.ownerKind, true) ?: return null else return null
                 source is SourceIR.Opaque -> return null
                 else -> source
             }
@@ -552,10 +594,10 @@ object ChainCanonicalizer {
         }
         // __native_{seq,iter,list,set,sorted_set,deque}_for_each
         if (node is CallNativeIR
-            && NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_FOR_EACH)
+            && node.isElementOp(NativeOp.FOR_EACH)
             && !node.isScalarABI) {
             val mr = node.arg as? MakeRecordIR ?: return null
-            val srcField = NativeHofNames.srcFieldFor(node.name)
+            val srcField = NativeHofNames.srcFieldFor(node.ownerKind)
             var src: NodeIR? = null; var f: NodeIR? = null
             for (fld in mr.fields) when (fld.name) {
                 srcField -> src = fld.value
@@ -565,24 +607,19 @@ object ChainCanonicalizer {
             val fLambda = asMakeLambda(f) ?: return null
             // Captures OK — emit-side handles them via capture slot remap.
             val (stages, source) = peelSource(srcInner, classifier, allFunctions, ext)
-            val effectiveSource = promoteOpaqueSource(source, node.name, stages.isNotEmpty()) ?: return null
+            val effectiveSource = promoteOpaqueSource(source, node.ownerKind, stages.isNotEmpty()) ?: return null
             val candidate = FusedChainIR(effectiveSource, stages, SinkIR.ForEach(fLambda), node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
-        // __native_{iter,seq,list,set,sorted_set,deque}_fold{,_left}
+        // A FOLD over anything a chain can walk. `list` spells it `fold_left`,
+        // which is why the op set has both and the SPELLING is not asked: the
+        // decision is "a fold over elements", and it reads the same whichever
+        // name the stdlib gave it.
         if (node is CallNativeIR
-            && (node.name == "__native_iter_fold" || node.name == "__native_seq_fold"
-                || node.name == "__native_list_fold_left"
-                || node.name == "__native_set_fold" || node.name == "__native_sorted_set_fold"
-                || node.name == "__native_deque_fold"
-                // Bytes reaches the fuser HERE and through the twin list in
-                // tryCanonicalizeNativeFoldSumForEach, which sees calls peeked
-                // through a mono wrapper. A name added to one and not the other
-                // fuses in some spellings and not others.
-                || node.name == "__native_bytes_fold")
+            && node.isFoldOp()
             && !node.isScalarABI) {
             val mr = node.arg as? MakeRecordIR ?: return null
-            val srcField = NativeHofNames.srcFieldFor(node.name)
+            val srcField = NativeHofNames.srcFieldFor(node.ownerKind)
             var src: NodeIR? = null; var init: NodeIR? = null; var f: NodeIR? = null
             for (fld in mr.fields) when (fld.name) {
                 srcField -> src = fld.value
@@ -594,7 +631,7 @@ object ChainCanonicalizer {
             val fLambda = asMakeLambda(f) ?: return null
             if (!isFoldLambdaEmittable(fLambda, allFunctions)) return null
             val (stages, source) = peelSource(srcInner, classifier, allFunctions, ext)
-            val effectiveSource = promoteOpaqueSource(source, node.name, stages.isNotEmpty()) ?: return null
+            val effectiveSource = promoteOpaqueSource(source, node.ownerKind, stages.isNotEmpty()) ?: return null
             val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Fold(initExpr, fLambda), node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
@@ -1339,27 +1376,28 @@ object ChainCanonicalizer {
     ): FusedChainIR? {
         if (node.isScalarABI) return null
         // Sum (any element-based collection)
-        if (NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_SUM)) {
+        if (node.isElementOp(NativeOp.SUM)) {
             val mr = node.arg as? MakeRecordIR ?: return null
             if (mr.fields.size != 1) return null
             val fld = mr.fields[0]
             if (fld.name !in NativeHofNames.SRC_FIELDS) return null
             val (stages, source) = peelSource(fld.value, classifier, allFunctions, ext)
             val effectiveSource = when {
-                source is SourceIR.Opaque && NativeHofNames.isSeqNative(node.name) -> SourceIR.RawSeq(source.expr)
-                source is SourceIR.Opaque && NativeHofNames.isListNative(node.name) ->
+                source is SourceIR.Opaque && node.ownerKind == CollectionKind.SEQ ->
+                    SourceIR.RawSeq(source.expr)
+                source is SourceIR.Opaque && node.ownerKind == CollectionKind.LIST ->
                     if (stages.isNotEmpty()) SourceIR.RawList(source.expr) else return null
                 source is SourceIR.Opaque ->
-                    if (stages.isNotEmpty()) promoteOpaqueSource(source, node.name, true) ?: return null else return null
+                    if (stages.isNotEmpty()) promoteOpaqueSource(source, node.ownerKind, true) ?: return null else return null
                 else -> source
             }
             val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Sum, node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
         // For-each (any element-based collection)
-        if (NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_FOR_EACH)) {
+        if (node.isElementOp(NativeOp.FOR_EACH)) {
             val mr = node.arg as? MakeRecordIR ?: return null
-            val srcField = NativeHofNames.srcFieldFor(node.name)
+            val srcField = NativeHofNames.srcFieldFor(node.ownerKind)
             var src: NodeIR? = null; var f: NodeIR? = null
             for (fld in mr.fields) when (fld.name) {
                 srcField -> src = fld.value
@@ -1368,18 +1406,18 @@ object ChainCanonicalizer {
             val srcInner = src ?: return null
             val fLambda = asMakeLambda(f) ?: return null
             val (stages, source) = peelSource(srcInner, classifier, allFunctions, ext)
-            val effectiveSource = promoteOpaqueSource(source, node.name, stages.isNotEmpty()) ?: return null
+            val effectiveSource = promoteOpaqueSource(source, node.ownerKind, stages.isNotEmpty()) ?: return null
             val candidate = FusedChainIR(effectiveSource, stages, SinkIR.ForEach(fLambda), node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
-        // Fold (any element-based collection — fold / fold_left)
-        if (node.name == "__native_iter_fold" || node.name == "__native_seq_fold"
-            || node.name == "__native_list_fold_left"
-            || node.name == "__native_set_fold" || node.name == "__native_sorted_set_fold"
-            || node.name == "__native_deque_fold"
-            || node.name == "__native_bytes_fold") {
+        // Fold — THE SAME PREDICATE as the copy in `tryCanonicalize`, which is
+        // the point. These two lists were spelled out separately and the first
+        // one carried a comment warning that "a name added to one and not the
+        // other fuses in some spellings and not others". One predicate cannot
+        // diverge from itself.
+        if (node.isFoldOp()) {
             val mr = node.arg as? MakeRecordIR ?: return null
-            val srcField = NativeHofNames.srcFieldFor(node.name)
+            val srcField = NativeHofNames.srcFieldFor(node.ownerKind)
             var src: NodeIR? = null; var init: NodeIR? = null; var f: NodeIR? = null
             for (fld in mr.fields) when (fld.name) {
                 srcField -> src = fld.value
@@ -1391,7 +1429,7 @@ object ChainCanonicalizer {
             val fLambda = asMakeLambda(f) ?: return null
             if (!isFoldLambdaEmittable(fLambda, allFunctions)) return null
             val (stages, source) = peelSource(srcInner, classifier, allFunctions, ext)
-            val effectiveSource = promoteOpaqueSource(source, node.name, stages.isNotEmpty()) ?: return null
+            val effectiveSource = promoteOpaqueSource(source, node.ownerKind, stages.isNotEmpty()) ?: return null
             val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Fold(initExpr, fLambda), node.src)
             return if (isEffectSafe(candidate, allFunctions)) candidate else null
         }
@@ -1428,15 +1466,15 @@ object ChainCanonicalizer {
             // it: `size` of a materialised collection is O(1), and routing that
             // through a counting sink would make it O(n). A chain with no stages
             // is exactly that case, so it is left as the native it was.
-            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_SIZE) &&
+            node.isElementOp(NativeOp.SIZE) &&
                 true -> {
-                val srcField = NativeHofNames.srcFieldFor(node.name)
+                val srcField = NativeHofNames.srcFieldFor(node.ownerKind)
                 var src: NodeIR? = null
                 for (fld in mr.fields) if (fld.name == srcField) src = fld.value
                 val srcInner = src ?: return null
                 val (stages, source) = peelSource(srcInner, classifier, allFunctions, ext)
                 if (stages.isEmpty()) return null
-                val effectiveSource = promoteOpaqueSource(source, node.name, stages.isNotEmpty()) ?: return null
+                val effectiveSource = promoteOpaqueSource(source, node.ownerKind, stages.isNotEmpty()) ?: return null
                 val candidate0 = FusedChainIR(effectiveSource, stages, SinkIR.Count, node.src)
                 if (isEffectSafe(candidate0, allFunctions)) candidate0 else null
             }
@@ -1466,8 +1504,8 @@ object ChainCanonicalizer {
             // Opaque is refused for the reason `iter_sum` refuses it: an opaque
             // value typed `Iter` could be an iterator over anything, and this
             // pass cannot see what.
-            NativeHofNames.isIter(node.name, NativeHofNames.OP_COUNT_ALL) -> {
-                val srcField = NativeHofNames.srcFieldFor(node.name)
+            (node.ownerKind == CollectionKind.ITER && node.opKind == NativeOp.COUNT_ALL) -> {
+                val srcField = NativeHofNames.srcFieldFor(node.ownerKind)
                 var src: NodeIR? = null
                 for (fld in mr.fields) if (fld.name == srcField) src = fld.value
                 val srcInner = src ?: return null
@@ -1477,8 +1515,8 @@ object ChainCanonicalizer {
                 if (isEffectSafe(candidate0, allFunctions)) candidate0 else null
             }
             // ── Count (predicate → filter + count) ──
-            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_COUNT) -> {
-                val srcField = NativeHofNames.srcFieldFor(node.name)
+            node.isElementOp(NativeOp.COUNT) -> {
+                val srcField = NativeHofNames.srcFieldFor(node.ownerKind)
                 var src: NodeIR? = null; var p: NodeIR? = null
                 for (fld in mr.fields) when (fld.name) {
                     srcField -> src = fld.value; NativeHofNames.P -> p = fld.value
@@ -1486,7 +1524,7 @@ object ChainCanonicalizer {
                 val srcInner = src ?: return null
                 val pLambda = asMakeLambda(p) ?: return null
                 val (stages, source) = peelSource(srcInner, classifier, allFunctions, ext)
-                val effectiveSource = promoteOpaqueSource(source, node.name, stages.isNotEmpty()) ?: return null
+                val effectiveSource = promoteOpaqueSource(source, node.ownerKind, stages.isNotEmpty()) ?: return null
                 // The sink's own predicate is applied LAST, after every peeled
                 // stage, so under the outer-to-inner convention it goes FIRST.
                 // Appending it made it the innermost stage and it filtered the
@@ -1496,22 +1534,22 @@ object ChainCanonicalizer {
                 if (isEffectSafe(candidate, allFunctions)) candidate else null
             }
             // ── Any / All / Find / None / Partition (predicate sinks) ──
-            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_ANY) ->
-                buildPredicateFusedGeneric(mr, node.name, classifier, allFunctions, node.src, ext) { SinkIR.Any(it) }
-            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_ALL) ->
-                buildPredicateFusedGeneric(mr, node.name, classifier, allFunctions, node.src, ext) { SinkIR.All(it) }
-            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_FIND) ->
-                buildPredicateFusedGeneric(mr, node.name, classifier, allFunctions, node.src, ext) { SinkIR.Find(it) }
-            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_NONE) ->
-                buildPredicateFusedGeneric(mr, node.name, classifier, allFunctions, node.src, ext) { SinkIR.None(it) }
+            node.isElementOp(NativeOp.ANY) ->
+                buildPredicateFusedGeneric(mr, node.ownerKind, classifier, allFunctions, node.src, ext) { SinkIR.Any(it) }
+            node.isElementOp(NativeOp.ALL) ->
+                buildPredicateFusedGeneric(mr, node.ownerKind, classifier, allFunctions, node.src, ext) { SinkIR.All(it) }
+            node.isElementOp(NativeOp.FIND) ->
+                buildPredicateFusedGeneric(mr, node.ownerKind, classifier, allFunctions, node.src, ext) { SinkIR.Find(it) }
+            node.isElementOp(NativeOp.NONE_MATCH) ->
+                buildPredicateFusedGeneric(mr, node.ownerKind, classifier, allFunctions, node.src, ext) { SinkIR.None(it) }
             // Partition returns {pass: T, fail: T} where T matches the source collection.
             // Only fuse for seq/iter where T=Seq (fused loop emits Seq builders).
             // For list/set/deque etc. the result type would change — skip fusion.
-            NativeHofNames.isSeqOrIter(node.name, NativeHofNames.OP_PARTITION) ->
-                buildPredicateFusedGeneric(mr, node.name, classifier, allFunctions, node.src, ext) { SinkIR.Partition(it) }
+            node.isSeqOrIterOp(NativeOp.PARTITION) ->
+                buildPredicateFusedGeneric(mr, node.ownerKind, classifier, allFunctions, node.src, ext) { SinkIR.Partition(it) }
             // ── Reduce (function sink) ──
-            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_REDUCE) -> {
-                val srcField = NativeHofNames.srcFieldFor(node.name)
+            node.isElementOp(NativeOp.REDUCE) -> {
+                val srcField = NativeHofNames.srcFieldFor(node.ownerKind)
                 var src: NodeIR? = null; var f: NodeIR? = null
                 for (fld in mr.fields) when (fld.name) {
                     srcField -> src = fld.value; NativeHofNames.F -> f = fld.value
@@ -1519,28 +1557,28 @@ object ChainCanonicalizer {
                 val srcInner = src ?: return null
                 val fLambda = asMakeLambda(f) ?: return null
                 val (stages, source) = peelSource(srcInner, classifier, allFunctions, ext)
-                val effectiveSource = promoteOpaqueSource(source, node.name, stages.isNotEmpty()) ?: return null
+                val effectiveSource = promoteOpaqueSource(source, node.ownerKind, stages.isNotEmpty()) ?: return null
                 val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Reduce(fLambda), node.src)
                 if (isEffectSafe(candidate, allFunctions)) candidate else null
             }
             // ── ToSeq / ToList ──
-            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_TO_SEQ)
-                    || NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_TO_LIST) -> {
-                val srcField = NativeHofNames.srcFieldFor(node.name)
+            node.isElementOp(NativeOp.TO_SEQ)
+                    || node.isElementOp(NativeOp.TO_LIST) -> {
+                val srcField = NativeHofNames.srcFieldFor(node.ownerKind)
                 var src: NodeIR? = null
                 for (fld in mr.fields) { if (fld.name == srcField) src = fld.value }
                 val srcInner = src ?: return null
                 val sink = if (node.name.endsWith("_to_seq")) SinkIR.ToSeq else SinkIR.ToList
                 val (stages, source) = peelSource(srcInner, classifier, allFunctions, ext)
-                val effectiveSource = promoteOpaqueSource(source, node.name, stages.isNotEmpty()) ?: return null
+                val effectiveSource = promoteOpaqueSource(source, node.ownerKind, stages.isNotEmpty()) ?: return null
                 val candidate = FusedChainIR(effectiveSource, stages, sink, node.src)
                 if (isEffectSafe(candidate, allFunctions)) candidate else null
             }
             // ── Unary sinks: First / Last / Min / Max ──
-            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_FIRST) ->
-                buildUnarySinkFused(mr, node.name, classifier, allFunctions, node.src, ext, SinkIR.First)
-            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_LAST) ->
-                buildUnarySinkFused(mr, node.name, classifier, allFunctions, node.src, ext, SinkIR.Last)
+            node.isElementOp(NativeOp.FIRST) ->
+                buildUnarySinkFused(mr, node.ownerKind, classifier, allFunctions, node.src, ext, SinkIR.First)
+            node.isElementOp(NativeOp.LAST) ->
+                buildUnarySinkFused(mr, node.ownerKind, classifier, allFunctions, node.src, ext, SinkIR.Last)
             // Min/Max are NOT fused for a container that owns its ordering.
             //
             // The fused sink compares elements with DirectLessThan, which only
@@ -1558,30 +1596,30 @@ object ChainCanonicalizer {
             // Mezze `reduce` over the element's Ord (see seq.mz), which never
             // reaches here — so this guard costs no fusion that was ever
             // profitable. See known-bugs.md BUG 7; BUG 8 was the same family.
-            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_MIN) &&
-                !ownsItsOrdering(node.name) ->
-                buildUnarySinkFused(mr, node.name, classifier, allFunctions, node.src, ext, SinkIR.Min)
-            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_MAX) &&
-                !ownsItsOrdering(node.name) ->
-                buildUnarySinkFused(mr, node.name, classifier, allFunctions, node.src, ext, SinkIR.Max)
+            node.isElementOp(NativeOp.MIN) &&
+                !ownsItsOrdering(node.ownerKind) ->
+                buildUnarySinkFused(mr, node.ownerKind, classifier, allFunctions, node.src, ext, SinkIR.Min)
+            node.isElementOp(NativeOp.MAX) &&
+                !ownsItsOrdering(node.ownerKind) ->
+                buildUnarySinkFused(mr, node.ownerKind, classifier, allFunctions, node.src, ext, SinkIR.Max)
             // ── Function sinks: MinBy / MaxBy ──
-            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_MIN_BY) ->
-                buildFunctionSinkFused(mr, node.name, classifier, allFunctions, node.src, ext) { SinkIR.MinBy(it) }
-            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_MAX_BY) ->
-                buildFunctionSinkFused(mr, node.name, classifier, allFunctions, node.src, ext) { SinkIR.MaxBy(it) }
+            node.isElementOp(NativeOp.MIN_BY) ->
+                buildFunctionSinkFused(mr, node.ownerKind, classifier, allFunctions, node.src, ext) { SinkIR.MinBy(it) }
+            node.isElementOp(NativeOp.MAX_BY) ->
+                buildFunctionSinkFused(mr, node.ownerKind, classifier, allFunctions, node.src, ext) { SinkIR.MaxBy(it) }
             // ── SumFloat / Product / ProductFloat (unary sinks) ──
-            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_SUM_FLOAT) ->
-                buildUnarySinkFused(mr, node.name, classifier, allFunctions, node.src, ext, SinkIR.SumFloat)
-            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_PRODUCT) ->
-                buildUnarySinkFused(mr, node.name, classifier, allFunctions, node.src, ext, SinkIR.Product)
-            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_PRODUCT_FLOAT) ->
-                buildUnarySinkFused(mr, node.name, classifier, allFunctions, node.src, ext, SinkIR.ProductFloat)
+            node.isElementOp(NativeOp.SUM_FLOAT) ->
+                buildUnarySinkFused(mr, node.ownerKind, classifier, allFunctions, node.src, ext, SinkIR.SumFloat)
+            node.isElementOp(NativeOp.PRODUCT) ->
+                buildUnarySinkFused(mr, node.ownerKind, classifier, allFunctions, node.src, ext, SinkIR.Product)
+            node.isElementOp(NativeOp.PRODUCT_FLOAT) ->
+                buildUnarySinkFused(mr, node.ownerKind, classifier, allFunctions, node.src, ext, SinkIR.ProductFloat)
             // ── FindIndex (predicate sink) ──
-            NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_FIND_INDEX) ->
-                buildPredicateFusedGeneric(mr, node.name, classifier, allFunctions, node.src, ext) { SinkIR.FindIndex(it) }
+            node.isElementOp(NativeOp.FIND_INDEX) ->
+                buildPredicateFusedGeneric(mr, node.ownerKind, classifier, allFunctions, node.src, ext) { SinkIR.FindIndex(it) }
             // ── Scan ── (returns a collection of the source type — only fuse for seq/iter)
-            NativeHofNames.isSeqOrIter(node.name, NativeHofNames.OP_SCAN) -> {
-                val srcField = NativeHofNames.srcFieldFor(node.name)
+            node.isSeqOrIterOp(NativeOp.SCAN) -> {
+                val srcField = NativeHofNames.srcFieldFor(node.ownerKind)
                 var src: NodeIR? = null; var init: NodeIR? = null; var f: NodeIR? = null
                 for (fld in mr.fields) when (fld.name) {
                     srcField -> src = fld.value
@@ -1592,7 +1630,7 @@ object ChainCanonicalizer {
                 val initExpr = init ?: return null
                 val fLambda = asMakeLambda(f) ?: return null
                 val (stages, source) = peelSource(srcInner, classifier, allFunctions, ext)
-                val effectiveSource = promoteOpaqueSource(source, node.name, stages.isNotEmpty()) ?: return null
+                val effectiveSource = promoteOpaqueSource(source, node.ownerKind, stages.isNotEmpty()) ?: return null
                 val candidate = FusedChainIR(effectiveSource, stages, SinkIR.Scan(initExpr, fLambda), node.src)
                 if (isEffectSafe(candidate, allFunctions)) candidate else null
             }
@@ -1607,14 +1645,14 @@ object ChainCanonicalizer {
      *  Uses [promoteOpaqueSource] to handle the collection-specific source promotion. */
     private fun buildPredicateFusedGeneric(
         mr: MakeRecordIR,
-        nativeName: String,
+        owner: CollectionKind?,
         classifier: ChainHofClassifier,
         allFunctions: Map<Hash, FunctionIR>,
         src: SourceInfo,
         ext: FrameExtender?,
         wrap: (MakeLambdaIR) -> SinkIR,
     ): FusedChainIR? {
-        val srcField = NativeHofNames.srcFieldFor(nativeName)
+        val srcField = NativeHofNames.srcFieldFor(owner)
         var srcNode: NodeIR? = null; var p: NodeIR? = null
         for (fld in mr.fields) when (fld.name) {
             srcField -> srcNode = fld.value; NativeHofNames.P -> p = fld.value
@@ -1622,7 +1660,7 @@ object ChainCanonicalizer {
         val srcInner = srcNode ?: return null
         val pLambda = asMakeLambda(p) ?: return null
         val (stages, source) = peelSource(srcInner, classifier, allFunctions, ext)
-        val effectiveSource = promoteOpaqueSource(source, nativeName, stages.isNotEmpty()) ?: return null
+        val effectiveSource = promoteOpaqueSource(source, owner, stages.isNotEmpty()) ?: return null
         val candidate = FusedChainIR(effectiveSource, stages, wrap(pLambda), src)
         return if (isEffectSafe(candidate, allFunctions)) candidate else null
     }
@@ -1631,14 +1669,14 @@ object ChainCanonicalizer {
      *  Legacy: kept for the mono-wrapper peek-through path which passes the native name directly. */
     private fun buildPredicateFused(
         mr: MakeRecordIR,
-        nativeName: String,
+        owner: CollectionKind?,
         classifier: ChainHofClassifier,
         allFunctions: Map<Hash, FunctionIR>,
         src: SourceInfo,
         ext: FrameExtender?,
         wrap: (MakeLambdaIR) -> SinkIR,
     ): FusedChainIR? {
-        val srcField = NativeHofNames.srcFieldFor(nativeName)
+        val srcField = NativeHofNames.srcFieldFor(owner)
         var srcNode: NodeIR? = null; var p: NodeIR? = null
         for (fld in mr.fields) when (fld.name) {
             srcField -> srcNode = fld.value; NativeHofNames.P -> p = fld.value
@@ -1646,7 +1684,7 @@ object ChainCanonicalizer {
         val srcInner = srcNode ?: return null
         val pLambda = asMakeLambda(p) ?: return null
         val (stages, source) = peelSource(srcInner, classifier, allFunctions, ext)
-        val effectiveSource = promoteOpaqueSource(source, nativeName, stages.isNotEmpty()) ?: return null
+        val effectiveSource = promoteOpaqueSource(source, owner, stages.isNotEmpty()) ?: return null
         val candidate = FusedChainIR(effectiveSource, stages, wrap(pLambda), src)
         return if (isEffectSafe(candidate, allFunctions)) candidate else null
     }
@@ -1654,14 +1692,14 @@ object ChainCanonicalizer {
     /** Build a FusedChainIR with a function sink (min_by/max_by) from a native call record. */
     private fun buildFunctionSinkFused(
         mr: MakeRecordIR,
-        nativeName: String,
+        owner: CollectionKind?,
         classifier: ChainHofClassifier,
         allFunctions: Map<Hash, FunctionIR>,
         src: SourceInfo,
         ext: FrameExtender?,
         wrap: (MakeLambdaIR) -> SinkIR,
     ): FusedChainIR? {
-        val srcField = NativeHofNames.srcFieldFor(nativeName)
+        val srcField = NativeHofNames.srcFieldFor(owner)
         var srcNode: NodeIR? = null; var f: NodeIR? = null
         for (fld in mr.fields) when (fld.name) {
             srcField -> srcNode = fld.value; NativeHofNames.F -> f = fld.value
@@ -1669,7 +1707,7 @@ object ChainCanonicalizer {
         val srcInner = srcNode ?: return null
         val fLambda = asMakeLambda(f) ?: return null
         val (stages, source) = peelSource(srcInner, classifier, allFunctions, ext)
-        val effectiveSource = promoteOpaqueSource(source, nativeName, stages.isNotEmpty()) ?: return null
+        val effectiveSource = promoteOpaqueSource(source, owner, stages.isNotEmpty()) ?: return null
         val candidate = FusedChainIR(effectiveSource, stages, wrap(fLambda), src)
         return if (isEffectSafe(candidate, allFunctions)) candidate else null
     }
@@ -1677,19 +1715,19 @@ object ChainCanonicalizer {
     /** Build a FusedChainIR with a unary sink (first/last/min/max) from a native call record. */
     private fun buildUnarySinkFused(
         mr: MakeRecordIR,
-        nativeName: String,
+        owner: CollectionKind?,
         classifier: ChainHofClassifier,
         allFunctions: Map<Hash, FunctionIR>,
         src: SourceInfo,
         ext: FrameExtender?,
         sink: SinkIR,
     ): FusedChainIR? {
-        val srcField = NativeHofNames.srcFieldFor(nativeName)
+        val srcField = NativeHofNames.srcFieldFor(owner)
         var srcNode: NodeIR? = null
         for (fld in mr.fields) { if (fld.name == srcField) srcNode = fld.value }
         val srcInner = srcNode ?: return null
         val (stages, source) = peelSource(srcInner, classifier, allFunctions, ext)
-        val effectiveSource = promoteOpaqueSource(source, nativeName, stages.isNotEmpty()) ?: return null
+        val effectiveSource = promoteOpaqueSource(source, owner, stages.isNotEmpty()) ?: return null
         val candidate = FusedChainIR(effectiveSource, stages, sink, src)
         return if (isEffectSafe(candidate, allFunctions)) candidate else null
     }
@@ -1699,8 +1737,8 @@ object ChainCanonicalizer {
      *  every later query. Any rewrite that reaches such a container's elements
      *  through `to_seq` loses that comparator, so ordering-dependent sinks must
      *  not fuse over one. */
-    private fun ownsItsOrdering(nativeName: String): Boolean =
-        NativeHofNames.isSortedSetNative(nativeName)
+    private fun ownsItsOrdering(owner: CollectionKind?): Boolean =
+        owner == CollectionKind.SORTED_SET
 
     /**
      * Promote an Opaque source based on the native call's collection type.
@@ -1741,12 +1779,12 @@ object ChainCanonicalizer {
      */
     private fun promoteOpaqueSource(
         source: SourceIR,
-        nativeName: String,
+        owner: CollectionKind?,
         hasStages: Boolean,
     ): SourceIR? = when {
         source !is SourceIR.Opaque -> source
-        NativeHofNames.isSeqNative(nativeName) -> SourceIR.RawSeq(source.expr)
-        NativeHofNames.isListNative(nativeName) -> SourceIR.RawList(source.expr)
+        owner == CollectionKind.SEQ -> SourceIR.RawSeq(source.expr)
+        owner == CollectionKind.LIST -> SourceIR.RawList(source.expr)
         // Above the guard, and unlike the three below this synthesises no
         // `to_seq` copy — a byte array is already indexable. The guard asks
         // "is there anything to fuse"; for bytes the answer is yes even with
@@ -1754,14 +1792,17 @@ object ChainCanonicalizer {
         // deletes the guest callback rather than fusing stages into it. The
         // emitter refuses any OTHER bytes shape, so a chain that cannot reach
         // that path falls back to the native fold instead of the generic loop.
-        NativeHofNames.isBytesNative(nativeName) -> SourceIR.RawBytes(source.expr)
+        owner == CollectionKind.BYTES -> SourceIR.RawBytes(source.expr)
         !hasStages -> null  // a copy with nothing to fuse is pure loss
-        NativeHofNames.isSetNative(nativeName) ->
-            wrapAsSeqSource(source.expr, "__native_set_to_seq", NativeHofNames.S)
-        NativeHofNames.isSortedSetNative(nativeName) ->
-            wrapAsSeqSource(source.expr, "__native_sorted_set_to_seq", NativeHofNames.S)
-        NativeHofNames.isDequeNative(nativeName) ->
-            wrapAsSeqSource(source.expr, "__native_deque_to_seq", NativeHofNames.D)
+        owner == CollectionKind.SET ->
+            wrapAsSeqSource(source.expr, NativeHofNames.native(NativeHofNames.SET,
+                NativeHofNames.OP_TO_SEQ), NativeHofNames.S)
+        owner == CollectionKind.SORTED_SET ->
+            wrapAsSeqSource(source.expr, NativeHofNames.native(NativeHofNames.SORTED_SET,
+                NativeHofNames.OP_TO_SEQ), NativeHofNames.S)
+        owner == CollectionKind.DEQUE ->
+            wrapAsSeqSource(source.expr, NativeHofNames.native(NativeHofNames.DEQUE,
+                NativeHofNames.OP_TO_SEQ), NativeHofNames.D)
         else -> {
             // THE REFUSAL THAT MATTERS, and this file's own header says it is
             // silent. An Opaque source is not itself a problem — every
@@ -1778,7 +1819,7 @@ object ChainCanonicalizer {
             if (System.getenv("MEZZE_TRACE_FUSION") != null) {
                 val e = source.expr
                 System.err.println(
-                    "[fusion] refused: native=" + nativeName +
+                    "[fusion] refused: owner=" + owner +
                         " source=" + e::class.simpleName +
                         (if (e is CallNativeIR) ":" + e.name else "") +
                         (if (e is ReadLocalIR) ":slot=" + e.slot else "") +
@@ -2349,8 +2390,41 @@ object ChainCanonicalizer {
         // Only __native_seq_* calls (except range, handled above) produce
         // MezzeSeq values. __native_list_*, __native_deque_*, etc. produce
         // non-Seq types — BuiltinSumLongSeq/SeqSize would crash on them.
-        // Tag only seq-producing natives as RawSeq; everything else is Opaque.
-        if (effective is CallNativeIR && effective.name.startsWith("__native_seq_")) {
+        // A SEQ SOURCE IS ONE THAT RETURNS A SEQ, which the node now says.
+        //
+        // This used to read the native's NAME —
+        // `effective.name.startsWith("__native_seq_")` — and take the module
+        // for the return type. Six natives in the seq module hand back a
+        // DIFFERENT collection (`to_list`, `to_set`, `to_deque`,
+        // `to_sorted_set`, `to_map`, `to_sorted_map`), so a chain whose source
+        // peeled down to one of them was tagged RawSeq and the generic fused
+        // loop then read it with `SeqSize` and an indexed `SeqGet`:
+        //
+        //     seq::size { xs = set::to_seq { s = seq::to_set { xs = xs } } }
+        //
+        // threw `UnsupportedSpecializationException … SeqSize_Node …
+        // [MezzeSet]` on a two-element seq. Binding each step to a `let` was
+        // fine and `MEZZE_CHAIN_CANONICALIZE=0` answered correctly, which is
+        // what placed the fault here rather than in either native.
+        //
+        // BOTH DECISIONS, and the second one is not redundant.
+        //
+        // `producesKind == SEQ` alone is NOT enough, which the suite said
+        // before this did: a native's declared return type being `[a]` does not
+        // make its runtime value a `MezzeSeq`. `__native_nel_to_seq` is typed
+        // `[a]` and hands back a bare `Object[]` — a seq is EITHER
+        // representation and the natives coerce — so tagging it RawSeq fed
+        // `BuiltinSumLongSeq` an `Object[]` and threw. Two
+        // `BytesNelIterableTest` cases caught exactly that.
+        //
+        // So the rule stays what it always was — a native of the SEQ module,
+        // whose values are MezzeSeq — and only stops being wrong about the six
+        // `seq::to_*` conversions, which are owned by seq and produce something
+        // else. Both halves are carried decisions; neither reads the spelling.
+        if (effective is CallNativeIR
+            && effective.ownerKind == CollectionKind.SEQ
+            && effective.producesKind == CollectionKind.SEQ
+        ) {
             return SourceIR.RawSeq(effective)
         }
         return SourceIR.Opaque(expr)
@@ -2369,10 +2443,10 @@ object ChainCanonicalizer {
     ): Pair<MakeLambdaIR, NodeIR>? {
         // Native map stage for any element-based collection — record-ABI only.
         if (node is CallNativeIR
-            && NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_MAP)
+            && node.isElementOp(NativeOp.MAP)
             && !node.isScalarABI) {
             val mr = node.arg as? MakeRecordIR ?: return null
-            val srcField = NativeHofNames.srcFieldFor(node.name)
+            val srcField = NativeHofNames.srcFieldFor(node.ownerKind)
             var src: NodeIR? = null; var f: NodeIR? = null
             for (fld in mr.fields) when (fld.name) {
                 srcField -> src = fld.value
@@ -2400,10 +2474,10 @@ object ChainCanonicalizer {
     ): Pair<MakeLambdaIR, NodeIR>? {
         // Native filter stage for any element-based collection — record-ABI only.
         if (node is CallNativeIR
-            && NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_FILTER)
+            && node.isElementOp(NativeOp.FILTER)
             && !node.isScalarABI) {
             val mr = node.arg as? MakeRecordIR ?: return null
-            val srcField = NativeHofNames.srcFieldFor(node.name)
+            val srcField = NativeHofNames.srcFieldFor(node.ownerKind)
             var src: NodeIR? = null; var p: NodeIR? = null
             for (fld in mr.fields) when (fld.name) {
                 srcField -> src = fld.value
@@ -2440,7 +2514,7 @@ object ChainCanonicalizer {
         classifier: ChainHofClassifier,
     ): NodeIR? {
         if (node is CallNativeIR
-            && NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_ENUMERATE)
+            && node.isElementOp(NativeOp.ENUMERATE)
             && !node.isScalarABI) {
             val mr = node.arg as? MakeRecordIR ?: return null
             if (mr.fields.size != 1) return null
@@ -2466,10 +2540,10 @@ object ChainCanonicalizer {
     ): Pair<NodeIR, NodeIR>? {
         // Native take for any element-based collection — record-ABI only.
         if (node is CallNativeIR
-            && NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_TAKE)
+            && node.isElementOp(NativeOp.TAKE)
             && !node.isScalarABI) {
             val mr = node.arg as? MakeRecordIR ?: return null
-            val srcField = NativeHofNames.srcFieldFor(node.name)
+            val srcField = NativeHofNames.srcFieldFor(node.ownerKind)
             var src: NodeIR? = null; var n: NodeIR? = null
             for (fld in mr.fields) when (fld.name) {
                 srcField -> src = fld.value
@@ -2493,10 +2567,10 @@ object ChainCanonicalizer {
     ): Pair<NodeIR, NodeIR>? {
         // Native drop for any element-based collection — record-ABI only.
         if (node is CallNativeIR
-            && NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_DROP)
+            && node.isElementOp(NativeOp.DROP)
             && !node.isScalarABI) {
             val mr = node.arg as? MakeRecordIR ?: return null
-            val srcField = NativeHofNames.srcFieldFor(node.name)
+            val srcField = NativeHofNames.srcFieldFor(node.ownerKind)
             var src: NodeIR? = null; var n: NodeIR? = null
             for (fld in mr.fields) when (fld.name) {
                 srcField -> src = fld.value
@@ -2519,7 +2593,7 @@ object ChainCanonicalizer {
         classifier: ChainHofClassifier,
     ): Pair<MakeLambdaIR, NodeIR>? {
         if (node is CallNativeIR
-            && NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_TAKE_WHILE)
+            && node.isElementOp(NativeOp.TAKE_WHILE)
             && !node.isScalarABI) {
             val mr = node.arg as? MakeRecordIR ?: return null
             var src: NodeIR? = null; var p: NodeIR? = null
@@ -2545,7 +2619,7 @@ object ChainCanonicalizer {
         classifier: ChainHofClassifier,
     ): Pair<MakeLambdaIR, NodeIR>? {
         if (node is CallNativeIR
-            && NativeHofNames.isAnyElementCollection(node.name, NativeHofNames.OP_DROP_WHILE)
+            && node.isElementOp(NativeOp.DROP_WHILE)
             && !node.isScalarABI) {
             val mr = node.arg as? MakeRecordIR ?: return null
             var src: NodeIR? = null; var p: NodeIR? = null
@@ -2577,7 +2651,10 @@ object ChainCanonicalizer {
         classifier: ChainHofClassifier,
     ): NodeIR? {
         // Native iter::from_seq { xs = ... }
-        if (node is CallNativeIR && node.name == "__native_iter_from_seq" && !node.isScalarABI) {
+        if (node is CallNativeIR
+            && node.ownerKind == CollectionKind.ITER
+            && node.opKind == NativeOp.FROM_SEQ
+            && !node.isScalarABI) {
             val mr = node.arg as? MakeRecordIR ?: return null
             for (fld in mr.fields) {
                 if (fld.name == "xs") return fld.value

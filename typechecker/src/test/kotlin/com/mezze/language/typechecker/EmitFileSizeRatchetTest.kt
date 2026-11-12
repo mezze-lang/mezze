@@ -88,13 +88,36 @@ class EmitFileSizeRatchetTest {
             // top-level `n` used to die with `FrameSlotTypeException … got
             // Illegal`. The edit belongs where the slot is allocated, so the bound
             // moves rather than the code.
+            // +31 for `collectionKindOf`, which decides WHICH COLLECTION a native
+            // call returns from the call's solved type and hands it to the IR.
+            // `ChainCanonicalizer` used to ask the native's NAME instead —
+            // `startsWith("__native_seq_")` taken to mean "produces a Seq" — and
+            // a native's module is not its return type: the six `seq::to_*`
+            // conversions hand back a different collection, so a fused loop read
+            // a MezzeSet with SeqSize and `seq::size { xs = set::to_seq { s =
+            // seq::to_set { xs } } }` CRASHED. It sits directly beside
+            // `ordKindOf`, the function whose pattern it copies — the same
+            // "decision carried from where the type was known" — and moving it
+            // away from its one sibling would cost more than the bound.
             // +7 for running RecordScalarizer in the lowering pipeline: one call
             // plus the comment recording that it only pays with boxing
             // elimination on AND an inlined producer, because it was written,
             // measured flat and reverted twice before that order was known.
             // The pass itself lives in ast/truffleir; what is here is the
             // pipeline, which is this file's subject.
-            C + "TypedASTCompiler.kt" to 4698,   // +9 to run VariantMatchFolder a SECOND time after LetCopyPropagation and propagate its output: the first fold cannot see a variant BOUND TO A NAME, because propagation is what makes the construction adjacent to its match. The ordering decision belongs to this file, which owns the pass sequence, and the measurement (5.9x one field, 10.4x two, allocation gone) lives in LetCopyPropagation. +67 for the per-call-site arrows the dictionary path and mono both read, and for `receiverlessOpRef`: a receiver-less op has no dict slot inside a mono SPEC, where its output is concrete and it resolves outright. That belongs in DictEvidence.kt beside `abilityOpDictSlotOrNull`, and it stays here only because `elementFirst`, `refToDictedOp` and `specTypeArgs` are private to this class — widening three members to move one function is worse coupling than the bound. +69 for referencing a generic function's SPECIALIZATION instead of wrapping it in a dictionary-carrying closure — it belongs beside `tryWrapDictFunction`, whose decision it pre-empts, and reads as its last resort rather than a pass of its own; was 5,580; +151 for devirtualising a local-helper call, inlining a generic body into a concrete caller, and running LetCopyPropagation + ParamScalarizer + VariantMatchFolder; +4 to wire ChainLetInliner (ast/), -4 when eight kill switches went and their comments with them; +7 to wire FoldToSumRewriter (ast/), the pass and its reasoning living there
+            // +4 for carrying `ownerKind` and `opKind` on each native call — two
+            // lines per construction, and there are two constructions. Same
+            // reason as `collectionKindOf` above and the same one line of
+            // history: a `__native_…` name is a LABEL, so it is resolved once,
+            // here, where the binding is in hand. `ChainCanonicalizer` and
+            // `ChainLetInliner` asked the label 44 more times downstream —
+            // `isAnyElementCollection(name, OP_MAP)` builds six native names and
+            // compares all six, so one visit could construct and compare nearly
+            // two hundred strings to learn what this resolution already knew.
+            // They now read these two fields; the spelling predicates in
+            // `NativeHofNames` are private, which is the compiler's proof that
+            // nothing downstream consults the name any more.
+            C + "TypedASTCompiler.kt" to 4733,   // +9 to run VariantMatchFolder a SECOND time after LetCopyPropagation and propagate its output: the first fold cannot see a variant BOUND TO A NAME, because propagation is what makes the construction adjacent to its match. The ordering decision belongs to this file, which owns the pass sequence, and the measurement (5.9x one field, 10.4x two, allocation gone) lives in LetCopyPropagation. +67 for the per-call-site arrows the dictionary path and mono both read, and for `receiverlessOpRef`: a receiver-less op has no dict slot inside a mono SPEC, where its output is concrete and it resolves outright. That belongs in DictEvidence.kt beside `abilityOpDictSlotOrNull`, and it stays here only because `elementFirst`, `refToDictedOp` and `specTypeArgs` are private to this class — widening three members to move one function is worse coupling than the bound. +69 for referencing a generic function's SPECIALIZATION instead of wrapping it in a dictionary-carrying closure — it belongs beside `tryWrapDictFunction`, whose decision it pre-empts, and reads as its last resort rather than a pass of its own; was 5,580; +151 for devirtualising a local-helper call, inlining a generic body into a concrete caller, and running LetCopyPropagation + ParamScalarizer + VariantMatchFolder; +4 to wire ChainLetInliner (ast/), -4 when eight kill switches went and their comments with them; +7 to wire FoldToSumRewriter (ast/), the pass and its reasoning living there
             // +42 for `contextRowWithBodyAssocTypes`: an INLINE lambda was stamped
             // with the row from the pushed CONTEXT, so a callback's associated
             // type was the CALLEE's variable rather than what the body threw, and

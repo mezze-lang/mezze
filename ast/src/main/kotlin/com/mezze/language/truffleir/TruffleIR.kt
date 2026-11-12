@@ -40,6 +40,84 @@ enum class OrdKind {
     INSTANCE,
 }
 
+/**
+ * WHICH COLLECTION A VALUE IS, for the passes that must know how to read it.
+ *
+ * The same kind of decision as [OrdKind], for the same reason and carried the
+ * same way: from where the TYPE was known, never re-derived. [SlotKind] cannot
+ * answer it — a Seq, a Set, a Map and a record are all OBJECT.
+ *
+ * WHAT WENT WRONG WITHOUT IT. `ChainCanonicalizer` had nothing to read, so it
+ * asked the native's NAME instead: `name.startsWith("__native_seq_")` was taken
+ * to mean "this produces a Seq". The module a native lives in is not its return
+ * type — six natives in the seq module hand back a different collection
+ * (`to_list`, `to_set`, `to_deque`, `to_sorted_set`, `to_map`, `to_sorted_map`)
+ * — so a chain whose source peeled down to one of them was read with `SeqSize`
+ * and an indexed `SeqGet`, and
+ *
+ *     seq::size { xs = set::to_seq { s = seq::to_set { xs = xs } } }
+ *
+ * threw `UnsupportedSpecializationException … SeqSize_Node … [MezzeSet]` on a
+ * two-element seq. A label is for dispatching once; it is not a type.
+ *
+ * Absent (null) means the compiler could not decide — an unsolved type variable
+ * — and a caller must treat that exactly like [OTHER]: never fuse on a guess.
+ */
+@Serializable
+enum class CollectionKind {
+    SEQ,
+    ITER,
+    LIST,
+    SET,
+    SORTED_SET,
+    DEQUE,
+    MAP,
+    SORTED_MAP,
+    BYTES,
+
+    /** Not a collection: an Int, a Str, an Option, a record, a function. */
+    OTHER,
+    ;
+
+    /**
+     * The collections whose elements a fused chain walks one at a time.
+     *
+     * Excludes MAP and SORTED_MAP, whose callbacks take an ENTRY rather than an
+     * element, and BYTES, which fuses only into `BuiltinSumBytes`. This is the
+     * question `NativeHofNames.isAnyElementCollection` answered by building six
+     * native names and comparing the spelling of each.
+     */
+    val isElementCollection: Boolean
+        get() = this == SEQ || this == ITER || this == LIST ||
+            this == SET || this == SORTED_SET || this == DEQUE
+}
+
+/**
+ * WHICH CHAIN OPERATION A NATIVE IS — the companion to [CollectionKind].
+ *
+ * Together they say what a `__native_…` label MEANT, so the label itself is
+ * needed only at emit, to bind the Java method.
+ *
+ * `ChainCanonicalizer` used to ask this 32 times per node by spelling:
+ * `isAnyElementCollection(name, OP_MAP)` builds `__native_seq_map`,
+ * `__native_iter_map`, `__native_list_map`, `__native_set_map`,
+ * `__native_sorted_set_map` and `__native_deque_map` and compares all six, so
+ * one visit could construct and compare nearly two hundred strings to learn
+ * what a single resolution already knew.
+ *
+ * Generated from the OP_ constants in `NativeHofNames`, which stay the one
+ * place the spellings live.
+ */
+@Serializable
+enum class NativeOp {
+    FOLD, FOLD_LEFT, MAP, FILTER, FOR_EACH, SUM, SUM_VALUES, COUNT,
+    ANY, ALL, FIND, REDUCE, TAKE, DROP, RANGE, FROM_SEQ,
+    TO_SEQ, TO_LIST, TAKE_WHILE, DROP_WHILE, NONE_MATCH, FIRST, LAST, MIN,
+    MAX, MIN_BY, MAX_BY, PARTITION, SCAN, SUM_FLOAT, PRODUCT, PRODUCT_FLOAT,
+    FIND_INDEX, UNFOLD, FROM_LIST, ONCE, EMPTY, ENUMERATE, CHAIN, ZIP,
+    FLAT_MAP, COUNT_ALL, SIZE,
+}
+
 @Serializable
 data class SourceInfo(
     val fileIndex: Int,
@@ -222,6 +300,26 @@ sealed interface StringPartIR {
     /** When set, `maybeCollapseInlineOp` can convert this node into an
      *  `InlineBinaryOpIR` without querying NativeSignatures. */
     val inlineOp: InlineOp? = null,
+    /**
+     * WHICH COLLECTION THIS CALL RETURNS, decided by the typechecker from the
+     * call's solved type and carried here — see [CollectionKind] for what
+     * reading the native's NAME instead cost. Null when the type was not
+     * solved; a caller must then treat it as [CollectionKind.OTHER] rather than
+     * guess from the spelling.
+     */
+    val producesKind: CollectionKind? = null,
+    /**
+     * WHICH COLLECTION'S MODULE this native belongs to — the collection its
+     * source argument is — resolved once from the label where the label was
+     * resolved. Null for a native that belongs to no collection.
+     */
+    val ownerKind: CollectionKind? = null,
+    /**
+     * WHICH CHAIN OPERATION this native is, or null when it is not one of
+     * them. See [NativeOp]: nothing downstream should ask [name] what this
+     * node does.
+     */
+    val opKind: NativeOp? = null,
 ) : NodeIR {
     val isScalarABI: Boolean get() = argKinds.isNotEmpty()
 }

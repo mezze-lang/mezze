@@ -93,7 +93,7 @@ object FoldToSumRewriter {
         val sumName = FOLD_TO_SUM[node.name] ?: return null
         val mr = node.arg as? MakeRecordIR ?: return null
 
-        val srcField = NativeHofNames.srcFieldFor(node.name)
+        val srcField = NativeHofNames.srcFieldFor(node.ownerKind)
         var src: NodeIR? = null
         var init: NodeIR? = null
         var f: NodeIR? = null

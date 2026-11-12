@@ -916,6 +916,36 @@ class TypedASTCompiler(
         else -> OrdKind.INSTANCE
     }
 
+    /**
+     * WHICH COLLECTION [type] is, as a carried decision rather than something a
+     * later pass re-derives. Same shape as [ordKindOf] and for the same reason:
+     * the type is known HERE and nowhere downstream.
+     *
+     * The alternative, which this replaces, was to ask the native's NAME —
+     * `startsWith("__native_seq_")` taken to mean "produces a Seq". A native's
+     * module is not its return type, and the six `seq::to_*` conversions
+     * disprove it; see [com.mezze.language.truffleir.CollectionKind].
+     */
+    private fun collectionKindOf(type: MezzeType): com.mezze.language.truffleir.CollectionKind? =
+        when (type) {
+            is MezzeType.VarType -> null // unsolved; caller treats null as OTHER
+            is MezzeType.BytesType -> com.mezze.language.truffleir.CollectionKind.BYTES
+            is MezzeType.TypeApplication -> when (type.constructor) {
+                com.mezze.language.ast.BuiltinTypes.SEQ -> com.mezze.language.truffleir.CollectionKind.SEQ
+                com.mezze.language.ast.BuiltinTypes.ITER -> com.mezze.language.truffleir.CollectionKind.ITER
+                com.mezze.language.ast.BuiltinTypes.LIST -> com.mezze.language.truffleir.CollectionKind.LIST
+                com.mezze.language.ast.BuiltinTypes.SET -> com.mezze.language.truffleir.CollectionKind.SET
+                com.mezze.language.ast.BuiltinTypes.SORTED_SET ->
+                    com.mezze.language.truffleir.CollectionKind.SORTED_SET
+                com.mezze.language.ast.BuiltinTypes.DEQUE -> com.mezze.language.truffleir.CollectionKind.DEQUE
+                com.mezze.language.ast.BuiltinTypes.MAP -> com.mezze.language.truffleir.CollectionKind.MAP
+                com.mezze.language.ast.BuiltinTypes.SORTED_MAP ->
+                    com.mezze.language.truffleir.CollectionKind.SORTED_MAP
+                else -> com.mezze.language.truffleir.CollectionKind.OTHER
+            }
+            else -> com.mezze.language.truffleir.CollectionKind.OTHER
+        }
+
     private fun compilePerformerDecl(pd: TypedPerformerDecl) {
         val opHashes = mutableListOf<String>()
         val opNames = mutableListOf<String>()
@@ -2130,6 +2160,9 @@ class TypedASTCompiler(
                                 argKinds = sig.argKinds,
                                 isPure = sig.pure,
                                 inlineOp = sig.inlineOp,
+                                producesKind = collectionKindOf(expr.type),
+                                ownerKind = NativeHofNames.ownerOf(binding.name),
+                                opKind = NativeHofNames.opOf(binding.name),
                             )
                         }
                     }
@@ -2137,6 +2170,9 @@ class TypedASTCompiler(
                     CallNativeIR(binding.name, argIR, src,
                         isPure = nativeSig?.pure == true,
                         inlineOp = nativeSig?.inlineOp,
+                        producesKind = collectionKindOf(expr.type),
+                        ownerKind = NativeHofNames.ownerOf(binding.name),
+                        opKind = NativeHofNames.opOf(binding.name),
                     )
                 }
                 is BindingRef.Local -> {
