@@ -13005,3 +13005,43 @@ what building JS source costs.
 None of this is optimised; it is the baseline that did not exist. And three
 cases needing `.deps` wiring by hand means no automated sweep has ever included
 them.
+
+### The coverage number was wrong: 1 433 operations, not 589 — and 10%, not 21%
+
+The matrix above globbed `stdlib/std/collections/*.mz`. **`str` is not in that
+directory.** Neither is `mutation` with its 123 operations, `datetime` with 66,
+`http` with 69, `async` with 69, or any other effect module. Asked why strings
+were missing, the answer was a hole in the tooling, not a decision — and
+counting the whole stdlib changes the picture by a factor of three:
+
+| group | ops | benched | numbered | cover |
+|---|---|---|---|---|
+| Data structures (collections + `str` + `char`) | 635 | 134 | 48 | 21% |
+| **Effects** | **526** | **0** | **0** | **0%** |
+| Numbers and math | 102 | 4 | 0 | 4% |
+| Core types (`option`, `result`, `datetime`) | 98 | 2 | 0 | 2% |
+| Abilities, meta and tooling | 44 | 0 | 0 | 0% |
+| Codecs | 28 | 0 | 0 | 0% |
+| **TOTAL** | **1 433** | **140** | **48** | **10%** |
+
+Groups are now derived from the module PATH, so a module cannot be missed by
+omission again — a new stdlib file lands in a group by construction.
+
+**`str` has 32 operations, 9 with a bench row, and NONE with a number.** The
+string work on this branch is real (`split` 1.88x, interpolation allocating
+exactly what it needs) but it was measured as ratios in ad-hoc benches, so not
+one `str` operation has a cost recorded against it. `str_bench` prints a single
+`str_size` line. Nothing measures `concat`, `slice`, `index_of`, `replace`,
+`trim`, `pad`, `chars`, `split` itself, or any codec path.
+
+**Effects reads 0% and is not zero**, which the README now says under the table:
+an effect operation is invoked through an ability call (`Console.println {}`) or
+a `perform X in` block, and the scan counts `module::op` only. Install is 2.73x
+better on this branch and `abort` is 86 050 ps. But the 0% is still a real gap
+in the sense that matters: **no row NAMES an effect operation**, which is exactly
+why `iter`-with-effects, the async primitives (`channel`, `agent`, `atom`,
+`semaphore`, `mutex`, `latch`, `waitgroup` — 69 operations between them), STM's
+34 and filesystem's 19 have no numbers at all.
+
+78 module pages now exist under `perf/{datastructures,core,numbers,effects,codecs,meta}/`,
+one per stdlib module, each listing every operation as measured or UNMEASURED.
