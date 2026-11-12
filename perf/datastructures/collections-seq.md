@@ -4,7 +4,7 @@
 
 # seq
 
-`std::collections::seq` · 124 operations · 29 with a bench row · 11 with a number
+`std::collections::seq` · 124 operations · 30 with a bench row · 12 with a number
 
 | op | ps/op | elems | ps/elem | vs floor | bench |
 |---|---|---|---|---|---|
@@ -51,7 +51,7 @@
 | `from_sorted_map` | **UNMEASURED** | | | | |
 | `from_sorted_set` | **UNMEASURED** | | | | |
 | `get` | — | | | | called in allocsurface, asyncsurface, boxing_probe, bytesurface, chain, collfold, coresurface, datetimesurface, defunc, dequeabi, dispatch_probe, dotprobe, ds_matrix, dsmore, effectsurface, floatloop, foldshape, fuseall, fusecross, fusegaps, hofcapture, hofpoly, iter_perf_compare, iterremit, iterstage, jsonsurface, letcost, list_fold_compare, list_ops_compare, listwalk, mandelannot, mapsurface, mutabi, mutvsimmut, qsort_mut, qsort_native, qsort_pure, recfields, recordcost, seq_fold_compare, seqsurface, surface, tailannot, tailonly, wrapalloc, no number |
-| `group_by` | 3 241 829 | 100 | 32 418 | — | seqsurface:7 |
+| `group_by` | 2 119 120 | 100 | 21 191 | — | seqsurface:7 |
 | `group_consecutive` | **UNMEASURED** | | | | |
 | `group_consecutive_by` | **UNMEASURED** | | | | |
 | `head` | **UNMEASURED** | | | | |
@@ -102,7 +102,7 @@
 | `sliding` | **UNMEASURED** | | | | |
 | `sort` | — | | | | called in asyncsurface, bytesurface, datetimesurface, ds_matrix, dsmore, jsonsurface, list_fold_compare, list_ops_compare, mapsurface, qsort_mut, qsort_native, qsort_pure, seq_fold_compare, seqsurface, surface, no number |
 | `sort_by` | 1 274 164 | 100 | 12 741 | — | seqsurface:8 |
-| `sort_by_key` | **UNMEASURED** | | | | |
+| `sort_by_key` | 4 044 011 | 100 | 40 440 | — | seqsurface:13 |
 | `span` | **UNMEASURED** | | | | |
 | `split` | **UNMEASURED** | | | | |
 | `split_at` | **UNMEASURED** | | | | |
@@ -133,6 +133,6 @@
 | `zip_with` | **UNMEASURED** | | | | |
 | `zip_with_index` | **UNMEASURED** | | | | |
 
-## Unmeasured (95 of 124)
+## Unmeasured (94 of 124)
 
-`average`, `binary_search`, `binary_search_by`, `binary_search_insert_point`, `cartesian_product`, `chunks_exact`, `combinations`, `compare`, `contains`, `count_element`, `dedup_by`, `distinct`, `drop`, `drop_while`, `empty`, `ends_with`, `enumerate`, `equal_range`, `equals`, `fill`, `fill_with`, `find_index`, `first`, `flat_map`, `flatten`, `for_each`, `from_deque`, `from_list`, `from_map`, `from_set`, `from_sorted_map`, `from_sorted_set`, `group_consecutive`, `group_consecutive_by`, `head`, `index_of`, `init`, `is_sorted`, `is_sorted_by`, `is_sorted_descending`, `last`, `last_index_of`, `lower_bound`, `max`, `max_by`, `max_float`, `median`, `min`, `min_by`, `min_float`, `none`, `nth`, `of`, `partition`, `permutations`, `product`, `product_float`, `push_front`, `range_step`, `reduce`, `remove`, `remove_at`, `replace`, `replace_all`, `reverse`, `rotate_left`, `rotate_right`, `scan`, `singleton`, `sliding`, `sort_by_key`, `span`, `split`, `split_at`, `starts_with`, `stddev`, `subsequences`, `sum_float`, `swap`, `tail`, `take`, `take_while`, `to_deque`, `to_list`, `to_map`, `to_sorted_map`, `to_sorted_set`, `unzip`, `update`, `upper_bound`, `variance`, `zip3`, `zip4`, `zip_with`, `zip_with_index`
+`average`, `binary_search`, `binary_search_by`, `binary_search_insert_point`, `cartesian_product`, `chunks_exact`, `combinations`, `compare`, `contains`, `count_element`, `dedup_by`, `distinct`, `drop`, `drop_while`, `empty`, `ends_with`, `enumerate`, `equal_range`, `equals`, `fill`, `fill_with`, `find_index`, `first`, `flat_map`, `flatten`, `for_each`, `from_deque`, `from_list`, `from_map`, `from_set`, `from_sorted_map`, `from_sorted_set`, `group_consecutive`, `group_consecutive_by`, `head`, `index_of`, `init`, `is_sorted`, `is_sorted_by`, `is_sorted_descending`, `last`, `last_index_of`, `lower_bound`, `max`, `max_by`, `max_float`, `median`, `min`, `min_by`, `min_float`, `none`, `nth`, `of`, `partition`, `permutations`, `product`, `product_float`, `push_front`, `range_step`, `reduce`, `remove`, `remove_at`, `replace`, `replace_all`, `reverse`, `rotate_left`, `rotate_right`, `scan`, `singleton`, `sliding`, `span`, `split`, `split_at`, `starts_with`, `stddev`, `subsequences`, `sum_float`, `swap`, `tail`, `take`, `take_while`, `to_deque`, `to_list`, `to_map`, `to_sorted_map`, `to_sorted_set`, `unzip`, `update`, `upper_bound`, `variance`, `zip3`, `zip4`, `zip_with`, `zip_with_index`

@@ -14255,3 +14255,64 @@ what nobody benched:
   none of it — but routing the natural order there needs the element's `Ord` to
   be the compiler's own, which is the same evidence question `seq::unique` is
   blocked on, and the same decision.
+
+#### `seq::group_by` had no scalar bypass at all — 1.53x, and `sort_by_key` turns out to be the second-worst seq op
+
+`sortBy` was not alone. Tracing `prepareArgsComparator` found a FAMILY in
+`SeqNatives`: `prepareArgs` has eighteen call sites and `cmpInt` eight, every
+one of them inside a loop, and each allocates twice per call — an
+`Object[] args` plus a `MezzeRecord` wrapper to carry one or two values.
+
+What makes it a gap rather than a style is that the hot path does NOT do this.
+`map`, `fold` and `forEach` each hand-roll `ScalarBypass.tryResolve` and hoist
+the args array out of their loop, so they allocate nothing per element. The rest
+never got either treatment — not the hand-rolled hoist, and not `ScalarCall`,
+which exists to be the shared way to do it.
+
+`group_by` is the one of them with a measurement: the second-worst seq row after
+`unique`. SELF-A/B, two builds from identical source, only that call site
+differing:
+
+| row | `prepareArgs` | `ScalarCall` | |
+|---|---|---|---|
+| `seq::group_by` n=2e4 | 3 247 460 ps | 2 134 854 | **1.52x** |
+| `seq::group_by` n=4e4 | 3 243 504 | 2 119 120 | **1.53x** |
+| `seq::group_by` n=1e4 | 3 645 527 | 2 029 843 | 1.80x — DISCARDED |
+| `seq::sort_by_key` (control) | 4 002 274 | 4 044 011 | 1.00x |
+| `seq::sort_by` (control) | 1 300 058 | 1 275 398 | 1.02x |
+| `seq::dedup` (control) | 2 148 065 | 2 139 309 | 1.00x |
+| `seq::sum` (control) | 52 153 | 51 458 | 1.01x |
+
+**THE 1.80x IS NOT THE NUMBER.** n=1e4 is the under-warmed size — in the
+`prepareArgs` arm it reads 12% slower than its own two larger siblings, which
+agree with each other to 0.1%. The converged pair says 1.53x and that is what
+goes on the record. A third size was added to this row precisely because its two
+previous points had disagreed by 10%; a row that noisy cannot carry a ratio.
+
+`sort_by_key` is the control that makes the attribution tight. It calls
+`prepareArgs` too — once per element, for its key function — but only `groupBy`
+was ported, so it had to stay still, and it did, to within 1%.
+
+AND MEASURING IT AT ALL IS THE OTHER HALF OF THIS. `seq::sort_by_key` appeared
+in NO bench case and had NO row in `perf/coverage.tsv`, so nothing in the
+ranking could have pointed at it; it was found by reading. Measured, it is
+**40 600 ps/element — the worst seq operation except `unique`**, and 3.2x
+`sort_by` for the same sort plus a key extraction. Reading says where that goes, with one correction to what reading first
+suggested. The per-element `prepareArgs` and the per-comparison `cmpInt` are
+real at this size — two allocations each. The `Integer[] indices` array is NOT:
+`indices[i] = i` goes through `Integer.valueOf`, which caches -128..127, so at
+a hundred elements every index is a cached instance and the boxing allocates
+nothing at all. It would start allocating above 127, so it is a cost that grows
+into existence rather than one being paid here. Asserting it from the source
+without checking the cache would have attributed this row's 40 600 ps to the
+wrong thing. CHECKED on this JVM rather than taken from the spec, because the
+bound is configurable through `java.lang.Integer.IntegerCache.high`:
+`Integer.valueOf(99) == Integer.valueOf(99)` and the same at 127 are both true,
+at 128 and 999 both false.
+
+It is not fixed here. It is measured, on the record, and next.
+
+NO TEST FAILS WITHOUT THIS EITHER, for the same reason as `sortBy`: the change
+is pure allocation and the semantics are identical, so a test that appeared to
+discriminate would be measuring something else. `SetMapAdvancedOperationsTest`
+covers `group_by`'s answers and is green.

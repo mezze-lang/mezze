@@ -988,10 +988,16 @@ public final class SeqNatives {
 
     public static MezzeSeq groupBy(MezzeSeq seq, MezzeFunction keyFn,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        // `ScalarCall` resolves the scalar-ABI bypass ONCE and reuses one args
+        // array for the whole walk. This used to call `prepareArgs` per
+        // element, which allocates an `Object[]` AND a `MezzeRecord.wrapX` to
+        // carry a single value — two allocations an element, where `map`,
+        // `fold` and `forEach` all hoist theirs out of the loop.
+        var ctx = ScalarCall.prepare1(keyFn, "x");
         java.util.LinkedHashMap<Object, java.util.ArrayList<Object>> groups = new java.util.LinkedHashMap<>();
         for (int i = 0; i < seq.size(); i++) {
             Object elem = seq.get(i);
-            Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
+            Object key = ctx.call1(callNode, elem);
             groups.computeIfAbsent(key, k -> new java.util.ArrayList<>()).add(elem);
         }
         Object[] result = new Object[groups.size()];

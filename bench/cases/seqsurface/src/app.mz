@@ -165,6 +165,15 @@ let l_unique_set = { i, acc, xs } -> if i <= 0 then acc
   else l_unique_set { i = i - 1, xs = xs,
     acc = acc + seq::size { xs = set::to_seq { s = seq::to_set { xs = xs } } } }
 
+## ── 13. sort_by_key ─ a key per element AND a comparison per pair.
+## In no bench before this: `seq::sort_by_key` had no call site anywhere and no
+## coverage row, so nothing said what it cost. Comparable with row 8 directly —
+## same element count, same shape of work plus the key extraction — so the gap
+## between them is what extracting a key per element costs.
+let l_sort_by_key = { i, acc, xs } -> if i <= 0 then acc
+  else l_sort_by_key { i = i - 1, xs = xs,
+    acc = acc + seq::size { xs = seq::sort_by_key { xs = xs, f = { x } -> 0 - x } } }
+
 pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
   let args = argv {}
   let n = arg_at { args = args, i = 0, def = 2000 }
@@ -204,3 +213,5 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
            label = "seq::sum     CONTROL ", thunk = {} -> l_sum { i = n, acc = 0, xs = xs } }
   report { idx = 12, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "unique via set CEIL  ", thunk = {} -> l_unique_set { i = n, acc = 0, xs = dups } }
+  report { idx = 13, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "seq::sort_by_key     ", thunk = {} -> l_sort_by_key { i = n, acc = 0, xs = xs } }
