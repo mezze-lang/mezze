@@ -1,0 +1,62 @@
+# MEASURED COSTS, one line per operation. The only hand-edited file under perf/:
+# everything else is generated from this plus the stdlib and bench sources by
+# `scripts/perf-status.py`.
+#
+# ps_per_op is what the harness reported, min across its passes. `per` is how
+# many ELEMENTS one op touches: 1 for a point operation like `get`, 1000 for
+# one that walks a 1000-key map. The generated pages divide by it, so a ratio
+# against the structure's own floor compares like with like.
+#
+# Add a line when a row is measured. Do not delete one: a number that moved is a
+# second line with a later date, which is how a regression becomes visible.
+#
+# module	op	ps_per_op	n	per	bench	date
+map	get	9529	1e6	1	mapsurface:1	2026-11-12
+map	get_miss	5794	1e6	1	mapsurface:2	2026-11-12
+map	contains_key	7536	1e6	1	mapsurface:3	2026-11-12
+map	insert	45272	1e6	1	mapsurface:4	2026-11-12
+map	size	427	1e6	1	mapsurface:5	2026-11-12
+map	is_empty	699	1e6	1	mapsurface:14	2026-11-12
+map	get_or	7658	1e6	1	mapsurface:16	2026-11-12
+map	update	56345	1e6	1	mapsurface:17	2026-11-12
+map	remove	61912	1e6	1	mapsurface:15	2026-11-12
+map	keys	6834149	2e3	1000	mapsurface:18	2026-11-12
+map	values	5899587	2e3	1000	mapsurface:19	2026-11-12
+map	to_seq	20872242	2e3	1000	mapsurface:20	2026-11-12
+map	map_values	59438249	2e3	1000	mapsurface:21	2026-11-12
+map	filter	36379254	2e3	1000	mapsurface:22	2026-11-12
+map	count	18292158	2e3	1000	mapsurface:23	2026-11-12
+map	merge	80625560	2e3	1000	mapsurface:24	2026-11-12
+map	contains_value	5841396	2e3	1000	mapsurface:25	2026-11-12
+set	contains	6811	1e6	1	mapsurface:6	2026-11-12
+set	insert	12764	1e6	1	mapsurface:7	2026-11-12
+bytes	size	657	1e6	1	bytesurface:1	2026-11-12
+bytes	is_empty	354	1e6	1	bytesurface:2	2026-11-12
+bytes	get	7674	1e6	1	bytesurface:3	2026-11-12
+bytes	starts_with	5411	1e6	1024	bytesurface:4	2026-11-12
+bytes	index_of	221767	1e6	1024	bytesurface:5	2026-11-12
+bytes	slice	28766	1e6	512	bytesurface:6	2026-11-12
+bytes	concat	78611	1e6	2048	bytesurface:7	2026-11-12
+bytes	fold	151819	1e6	1024	bytesurface:8	2026-11-12
+bytes	map	4591494	1e6	1024	bytesurface:9	2026-11-12
+bytes	to_hex	923145	1e6	1024	bytesurface:10	2026-11-12
+bytes	to_base64	247996	1e6	1024	bytesurface:11	2026-11-12
+bytes	to_seq	376639	1e6	1024	bytesurface:12	2026-11-12
+deque	size	430	1e7	1	dsmore:7	2026-11-12
+deque	first	2496	1e7	1	dsmore:9	2026-11-12
+deque	get	3308	1e7	1	dsmore:10	2026-11-12
+sorted_map	insert	186859	1e7	1000	dsmore:12	2026-11-12
+iter	fold	65	1e7	1	iter_perf_compare:1	2026-11-12
+iter	reduce	89	1e7	1	iter_perf_compare:9	2026-11-12
+iter	count	120	1e7	1	iter_perf_compare:4	2026-11-12
+iter	filter	131	1e7	1	iter_perf_compare:2	2026-11-12
+iter	map	133	1e7	1	iter_perf_compare:22	2026-11-12
+iter	enumerate	654	1e7	1	iter_perf_compare:13	2026-11-12
+iter	find	441	1e7	1	iter_perf_compare:6	2026-11-12
+iter	any	418	1e7	1	iter_perf_compare:7	2026-11-12
+iter	all	442	1e7	1	iter_perf_compare:8	2026-11-12
+iter	to_seq	1719	1e7	1	iter_perf_compare:5	2026-11-12
+iter	chain	554	1e7	1	iter_perf_compare:12	2026-11-12
+iter	flat_map	41713	1e7	1	iter_perf_compare:10	2026-11-12
+iter	zip	73284	1e7	1	iter_perf_compare:11	2026-11-12
+iter	range	65	1e7	1	iter_perf_compare:1	2026-11-12

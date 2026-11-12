@@ -12937,3 +12937,28 @@ it available.
 That is the first pass doing exactly what it was for: twelve rows, four surprises,
 and one named family worth more than the eleven rows around it. Coverage 19% ->
 21%.
+
+### The index lives in `perf/`
+
+This file is the narrative — what was tried, what the cause turned out to be,
+what was reverted. It is the wrong shape for answering "is `map::filter` done".
+`perf/` answers that:
+
+```
+perf/README.md                  the dashboard: coverage + area status
+perf/coverage.tsv               THE ONLY HAND-EDITED FILE: one line per measurement
+perf/datastructures/<mod>.md    every operation, measured or not  [generated]
+perf/areas/<area>.md            calls, dispatch, effects, continuation, loom,
+                                fusion, records, strings, startup  [prose]
+scripts/perf-status.py          regenerates the generated pages
+```
+
+The data-structure pages are generated from the stdlib's `pub let` list and the
+bench sources, so they cannot drift from the code. Costs are stated per ELEMENT
+against the structure's own floor — `map::count` is 42.8x `map::size`, not the
+"42839x" a per-op figure against a point-operation floor would read, which is
+the `asyncsurface` mistake in miniature.
+
+A measurement is added by appending to `coverage.tsv` and re-running the script.
+A number that MOVED is a second line with a later date, never an edit, so a
+regression is visible in the file rather than only in a memory of it.
