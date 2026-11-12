@@ -145,6 +145,24 @@ let bench_rec_fold_bare = {} ->
         f = {acc, x} -> acc + x,
     }
 
+## HOW MUCH IS A MAP LAMBDA THE CLASSIFIER CANNOT READ? `classifyUnaryLiteralLambda`
+## handles `x <op> rhs` — one operation. A two-operation lambda is not that
+## shape, so the stage becomes a `MapCall` and the loop calls it per element.
+## These two rows differ only in the number of operations in the mapper.
+let bench_map_one_op = {} ->
+    iter::fold {
+        it = iter::map { it = iter::range { start = 0, end = n }, f = {x} -> x * 2 },
+        init = 0,
+        f = {acc, x} -> acc + x,
+    }
+
+let bench_map_two_ops = {} ->
+    iter::fold {
+        it = iter::map { it = iter::range { start = 0, end = n }, f = {x} -> x * 2 + 1 },
+        init = 0,
+        f = {acc, x} -> acc + x,
+    }
+
 let bench_reduce = {} ->
     match iter::reduce { it = iter::range { start = 1, end = n }, f = {acc, x} -> acc + x } is
         Some { val } -> val
@@ -243,4 +261,6 @@ let main = {} -> perform Console in perform SystemArgs in perform SystemTime in 
     let _19 = one { i = 19, label = "seq_fold(+)(0..10M)   ", f = bench_seq_fold }
     let _20 = one { i = 20, label = "seq_filter+fold(0..10M)", f = bench_seq_filter_fold }
     let _21 = one { i = 21, label = "seq_map+fold(0..10M)  ", f = bench_seq_map_fold }
+    let _22 = one { i = 22, label = "map 1 op + fold       ", f = bench_map_one_op }
+    let _23 = one { i = 23, label = "map 2 ops + fold      ", f = bench_map_two_ops }
     println { msg = "== done ==" }

@@ -5304,17 +5304,32 @@ public final class BytecodeCompiler {
             }
             if (stage instanceof StageIR.Map mapStage) {
                 var shape = classifyUnaryLiteralLambda(mapStage.getF(), language, elemIsEnumRecord);
-                if (elemIsEnumRecord && shape != null && shape.callHash != null) {
+                // THE TREE IS A FALLBACK AND NOT A PREFERENCE, and measuring it
+                // the other way round is what settled that. A one-operation
+                // mapper classified as `MapInline` reaches a loop the compiler
+                // VECTORISES; emitting the same `{x} -> x * 2` as a tree instead
+                // measured 4 327 913 ns against 1 316 990 — **3.3x worse** — and
+                // took `filter+map+fold` with it. So the tree is tried only
+                // where the alternative is a per-element call, which is the
+                // case it was built for.
+                var treeFirst = (shape != null && shape.callHash == null)
+                        ? null
+                        : classifyMapTree(mapStage.getF(), elemIsEnumRecord);
+                if (treeFirst == null && elemIsEnumRecord
+                        && shape != null && shape.callHash != null) {
                     // A call form would be handed the element where the lambda
                     // expects the record. Never emit that.
                     if (dbg) System.err.println("[chain-canon-emit] reject: call-form map over an enumerate record");
                     return false;
                 }
-                if (shape == null) {
+                if (treeFirst == null && shape == null) {
                     if (dbg) System.err.println("[chain-canon-emit] reject: unclassifiable map lambda");
                     return false;
                 }
-                if (shape.callHash != null) {
+                var mapTree = treeFirst;
+                if (mapTree != null) {
+                    classifiedStages.add(mapTree);
+                } else if (shape.callHash != null) {
                     classifiedStages.add(new ClassifiedStage.MapCall(
                         shape.callHash, shape.callScalarABI, shape.callFieldName));
                 } else {
@@ -6479,6 +6494,28 @@ public final class BytecodeCompiler {
          * resolve to the element and that counter.
          */
         record EnumerateStep() implements ClassifiedStage {}
+
+        /**
+         * A mapper that is a pure arithmetic EXPRESSION over its parameter,
+         * emitted inline into the loop.
+         *
+         * <p>WHY THERE IS A TIER BETWEEN `MapInline` AND `MapCall`.
+         * `classifyUnaryLiteralLambda` reads `x <op> rhs` — ONE operation. A
+         * mapper with two is not that shape, so it became a `MapCall` and the
+         * loop called it per element: `{x} -> x * 2` measured 132 ps an element
+         * and `{x} -> x * 2 + 1` measured 576, **4.4x for one more
+         * arithmetic operation**. The body is a tree the loop can emit as
+         * written, exactly as `AccumulateTree` does for a folder.
+         *
+         * <p>[elemIsEnumRecord] when the element arriving here is an
+         * Enumerate's `{i, val}` record, which is never built: `val` is the
+         * element local and `i` is the index local. A call form cannot be
+         * handed that record at all, so before this tier existed an
+         * `enumerate` followed by any mapper the one-operation matcher could
+         * not read declined the whole chain.
+         */
+        record MapTree(NodeIR body, int paramSlot, boolean elemIsEnumRecord)
+                implements ClassifiedStage {}
     }
 
     // ── Sink mode: the per-element action and post-loop result ──────────
@@ -6595,6 +6632,40 @@ public final class BytecodeCompiler {
                     && foldTreeReadsOnlyEnumFields(bin.getRight(), elemParam);
         }
         return true;
+    }
+
+    /**
+     * A map stage whose lambda is a pure arithmetic expression over its one
+     * parameter — see {@link ClassifiedStage.MapTree} — or null.
+     *
+     * <p>Captures are refused for the reason {@link #isPureArithFoldTree}
+     * refuses them: a `ReadCaptureIR` addresses the lambda's capture array, and
+     * emitting it in the loop's frame needs the capture lifted. The
+     * one-operation shape matcher has machinery for that in its `rhsNode`
+     * path; a tree does not, so a capturing mapper keeps the old path.
+     */
+    private ClassifiedStage classifyMapTree(MakeLambdaIR lambda, boolean elemIsEnumRecord) {
+        if (language == null) return null;
+        if (!lambda.getCaptures().isEmpty()) return null;
+        var ir = language.lookupFunctionIR(lambda.getFunctionHash());
+        if (ir == null || ir.getParamSlots().size() != 1
+                || !ir.getLocalSlots().isEmpty()
+                || !ir.getCaptureSlots().isEmpty()) {
+            return null;
+        }
+        // Frame layout is [captures..., params..., locals...] and captures are
+        // refused above, so the one parameter sits at slot 0 — the same way
+        // `classifyBinaryFolder` derives its two slots from the capture count.
+        int paramSlot = ir.getCaptureSlots().size();
+        var body = ir.getBody();
+        // A single `ReadLocal` is the identity mapper, which the loop already
+        // expresses by doing nothing — leave it to the existing path.
+        if (body instanceof ReadLocalIR) return null;
+        // accParam = -1 so no read can resolve to an accumulator: this is a
+        // one-parameter lambda and every read must be of that parameter.
+        if (!isPureArithFoldTree(body, -1, paramSlot, 0)) return null;
+        if (elemIsEnumRecord && !foldTreeReadsOnlyEnumFields(body, paramSlot)) return null;
+        return new ClassifiedStage.MapTree(body, paramSlot, elemIsEnumRecord);
     }
 
     private FusedSinkMode classifySinkMode(FusedChainIR chain, boolean dbg) {
@@ -7536,7 +7607,8 @@ public final class BytecodeCompiler {
             var st = stages.get(i);
             if (st instanceof ClassifiedStage.EnumerateStep) enumRecordAtSink = true;
             else if (st instanceof ClassifiedStage.MapInline
-                    || st instanceof ClassifiedStage.MapCall) enumRecordAtSink = false;
+                    || st instanceof ClassifiedStage.MapCall
+                    || st instanceof ClassifiedStage.MapTree) enumRecordAtSink = false;
         }
 
         com.oracle.truffle.api.bytecode.BytecodeLocal enumCounter = null;
@@ -7666,6 +7738,15 @@ public final class BytecodeCompiler {
                         emitMapperStep(b, xSlot, mi.op(), mi.rhsLit(), mi.rhsNode(),
                             null, false, null, argCount, localMap);
                     }
+                }
+                // The mapper's own body, with its parameter rewritten to the
+                // loop's element local — and, over an enumerate record, `.val`
+                // and `.i` resolved to the element and index locals.
+                case ClassifiedStage.MapTree mt -> {
+                    b.beginStoreLocal(xSlot);
+                      emitFoldTree(mt.body(), -1, mt.paramSlot(), null, xSlot,
+                                   mt.elemIsEnumRecord(), enumIndex, b);
+                    b.endStoreLocal();
                 }
                 case ClassifiedStage.MapCall mc -> {
                     emitMapperStep(b, xSlot, null, 0L, null,
