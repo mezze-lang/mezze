@@ -312,11 +312,31 @@ public final class MapNatives {
 
     // ==================== Predicate Operations ====================
 
+    /**
+     * THE ENTRY PER STEP IS THE COST, not the callback. `MezzeMap`'s iterator
+     * does `new Entry<>(keys[index], values[index])` for every element, so a
+     * walk over a 1 000-key map allocates a thousand two-field objects before
+     * any predicate runs. `sumValues` already says so in its own comment and
+     * avoids the walk entirely; these five could not, because they take a guest
+     * predicate.
+     *
+     * <p>They do not need an Entry. `MezzeMap.keys()` and `.values()` hand back
+     * the two arrays — one clone each, per CALL rather than per element — and a
+     * `ScalarCall` takes the key and the value positionally anyway, so the
+     * Entry existed only to be taken apart again.
+     *
+     * <p>MEASURED on `bench/cases/mapsurface`, 1 000 keys, `map::count`: 18 292
+     * ps an entry against `iter::count`'s 120 for the same question, which is
+     * 152x and the sharpest statement of this walk's cost. `map::size` is 427
+     * ps, so the walk was 42.8x the structure's own floor.
+     */
     public static boolean any(MezzeMap map, MezzeFunction predicate,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(predicate, "k", "v");
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
-            Object result = ctx.call2(callNode, entry.key(), entry.value());
+        Object[] ks = map.keys();
+        Object[] vs = map.values();
+        for (int i = 0; i < ks.length; i++) {
+            Object result = ctx.call2(callNode, ks[i], vs[i]);
             if (result instanceof Boolean && (Boolean) result) {
                 return true;
             }
@@ -327,8 +347,10 @@ public final class MapNatives {
     public static boolean all(MezzeMap map, MezzeFunction predicate,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(predicate, "k", "v");
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
-            Object result = ctx.call2(callNode, entry.key(), entry.value());
+        Object[] ks = map.keys();
+        Object[] vs = map.values();
+        for (int i = 0; i < ks.length; i++) {
+            Object result = ctx.call2(callNode, ks[i], vs[i]);
             if (!(result instanceof Boolean) || !(Boolean) result) {
                 return false;
             }
@@ -344,12 +366,14 @@ public final class MapNatives {
     public static MezzeVariant find(MezzeMap map, MezzeFunction predicate,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(predicate, "k", "v");
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
-            Object result = ctx.call2(callNode, entry.key(), entry.value());
+        Object[] ks = map.keys();
+        Object[] vs = map.values();
+        for (int i = 0; i < ks.length; i++) {
+            Object result = ctx.call2(callNode, ks[i], vs[i]);
             if (result instanceof Boolean && (Boolean) result) {
                 return MezzeVariant.some(MezzeRecord.fromFields(
                     FIELD_K_V,
-                    new Object[]{entry.key(), entry.value()}
+                    new Object[]{ks[i], vs[i]}
                 ));
             }
         }
@@ -359,9 +383,11 @@ public final class MapNatives {
     public static long count(MezzeMap map, MezzeFunction predicate,
                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(predicate, "k", "v");
+        Object[] ks = map.keys();
+        Object[] vs = map.values();
         long cnt = 0;
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
-            Object result = ctx.call2(callNode, entry.key(), entry.value());
+        for (int i = 0; i < ks.length; i++) {
+            Object result = ctx.call2(callNode, ks[i], vs[i]);
             if (result instanceof Boolean && (Boolean) result) {
                 cnt++;
             }

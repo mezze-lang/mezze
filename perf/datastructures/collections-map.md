@@ -13,7 +13,7 @@
 | `contains_key` | 7 536 |  |  | 17.6x | mapsurface:3 |
 | `contains_key_with_evidence` | **UNMEASURED** | | | | |
 | `contains_value` | 5 841 396 | 1000 | 5 841 | 13.7x | mapsurface:25 |
-| `count` | 18 292 158 | 1000 | 18 292 | 42.8x | mapsurface:23 |
+| `count` | 13 504 864 | 1000 | 13 504 | 31.6x | mapsurface:23 |
 | `diff_maps` | **UNMEASURED** | | | | |
 | `empty` | — | | | | called in allocsurface, http-work-route, mapsurface, mutvsimmut, no number |
 | `equals` | **UNMEASURED** | | | | |

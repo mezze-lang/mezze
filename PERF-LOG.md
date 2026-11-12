@@ -13086,3 +13086,54 @@ not separated; editor latency while typing is not measured at all; and
 `std::syntax`'s 29 operations, `std::codebase`'s 2 and `std::comptime`'s 1 have
 no per-operation rows, though `SyntaxRoundTripTest` covers 86 files and 2 542
 declarations for correctness.
+
+#### The map walk allocated an Entry per element — 1.26x, and the callback is the rest
+
+First pass of the systematic order, which put map/set at the front with 50 and
+44 unmeasured operations. The twelve new map rows had already named a family:
+`map::count` at 18 292 ps an entry against `iter::count`'s 120 for the same
+question, with `filter` 36 379 and `map_values` 59 438 beside it.
+
+`MapNatives` already used `ScalarCall`, so the callback was not the whole story.
+`sumValues` says the rest in its own comment: **`MezzeMap`'s iterator does
+`new Entry<>(keys[index], values[index])` for every element**, so a walk over a
+1 000-key map allocates a thousand two-field objects before any predicate runs.
+`sumValues` avoids the walk entirely; the five operations that take a guest
+predicate could not.
+
+They do not need an Entry. `keys()` and `values()` hand back the two arrays —
+one clone each per CALL rather than per element — and a `ScalarCall` takes the
+key and the value positionally anyway, so the Entry existed only to be taken
+apart again.
+
+| row | base | entry-free | |
+|---|---|---|---|
+| `map::count` | 17 062 551 ps | **13 504 864** | **1.26x** |
+| `map::contains_value` (no callback) | 5 535 475 | 5 646 184 | 0.98x |
+| `map::filter` (walks AND rebuilds) | 36 446 498 | 36 182 173 | 1.01x |
+| `map::keys` (materialises) | 7 177 563 | 7 284 690 | 0.99x |
+
+The three controls are the point: none goes through the five operations that
+changed — `count`, `any`, `all`, `none` and `find` — and all three stayed put.
+
+**The remaining 13.5 ns an entry is the guest call**, and it is where the rest of
+the 152x lives. A fused `iter` chain reaches 120 ps an element because the
+predicate is INLINED into the loop; a map's whole-map operation calls through an
+`IndirectCallNode` per entry. Map is not in the chain vocabulary at all
+(`isAnyElementCollection` is seq, iter, list, set, sorted_set and deque), and it
+cannot simply be added: a map's element is a PAIR and the fused loop carries one
+value. That is the same shape as `zip`, so it is a feature rather than a fix.
+
+COVERAGE. The pairing is now tested, which it was not. Indexing two arrays in
+step is right only while `keys()` and `values()` traverse identically, and they
+are built by SEPARATE walks — `TrieMapStorage.collect(root, out, idx,
+true/false)`, `LongTrieMapStorage.collectKeys`/`collectValues`, and the flat
+storages skipping their EMPTY slots in both. The iterator this replaces read the
+same two arrays the same way, so nothing new is relied on; but nothing tested it
+either, and a slip would hand a predicate one key with another key's value.
+
+Every predicate in `MapWalkPairingTest` couples the key to the value
+(`v == k * 10`), at one entry, three, eight (the flat storage boundary) and a
+hundred. Slipping the value index by one fails three of them with 100, 3 and 8
+all becoming 0 — and the single-entry case correctly still passes, because with
+one element the slip is a no-op, which is why the sizes are there.
