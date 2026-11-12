@@ -12732,3 +12732,65 @@ WHAT IS OPEN, ranked: `zip` 1 120x and `flat_map` 637x (both features),
 `abort/iter` 370x (diffuse), `filter+to_seq` 26x (work, not a cliff), the
 do-block dict call 4.8x, and the HOF-with-two-polymorphic-callbacks cliff at
 11.6x whose cause survived five hypotheses and is module-sensitive.
+
+#### The surfaces nobody had swept: maps are 30-220x, and `bytes::map` is 30x `bytes::fold`
+
+Six cases had never been run in this effort. Two of them hold the biggest
+remaining cliffs in the language, and one does not build.
+
+**mapsurface**, 1 000 keys, against a 207 ps counted loop:
+
+| row | ps/op | vs control |
+|---|---|---|
+| `map::size` | 427 | 2x |
+| `map::get` (miss) | 5 794 | 28x |
+| `set::contains` | 6 811 | 33x |
+| `map::contains_key` | 7 536 | 36x |
+| `map::get` (hit) | 9 529 | 46x |
+| `str map::contains_key` | 10 062 | 49x |
+| `set::ins PRESENT, chain` | 10 652 | 51x |
+| `str map::get` (hit) | 11 825 | 57x |
+| **`set::insert` PRESENT key** | **12 764** | **62x** |
+| `str map::insert chain` | 43 050 | 208x |
+| **`map::insert` (persist)** | **45 272** | **219x** |
+| `map::insert` (chain) | 46 149 | 223x |
+
+A persistent HAMT insert copies a path, so tens of nanoseconds is work rather
+than a cliff. `set::insert` with an ALREADY-PRESENT key is the interesting one:
+it should be a lookup that returns the same set, and it costs 1.9x the
+`set::contains` that is the lookup alone.
+
+**bytesurface**, 1 024-byte buffers, per BYTE:
+
+| row | ps/op | ps/byte |
+|---|---|---|
+| `bytes::fold` | 151 819 | 148 |
+| `bytes::index_of` MISS | 221 767 | 216 |
+| `bytes::to_base64` | 247 996 | 242 |
+| `bytes::to_seq` | 376 639 | 368 |
+| `bytes::to_hex` | 923 145 | 901 |
+| **`bytes::map`** | **4 591 494** | **4 484** |
+
+**`bytes::map` is 30x `bytes::fold` on the same bytes, with a SIMPLER
+callback** — fold's is `{acc, byte} -> acc + byte` and map's is the identity
+`{x} -> x`.
+
+It is not the record path, which is what the comment on `BytesNatives.map` still
+says: a counter in `ScalarCall.prepare1` reports **scalar=30 331, record=0**, so
+the lazy-stub peek fixed that and the comment is out of date. The profile names
+the real cost — `BytesNatives.map` 5 159 samples, `ScalarCall.call1` 4 289, and
+under them `OptimizedIndirectCallNode.call`, `callDirect`, `profiledPERoot`,
+`profileArguments`, `areArgumentTypesValid`. **An uninlined indirect call per
+byte, with argument profiling**, at about 4 ns each.
+
+`bytes::fold` does not pay it because it FUSES: `__native_bytes_fold` is in the
+canonicalizer's fold vocabulary, so the native is never called. The emitter's
+bytes support reaches exactly one shape — its own comment says "the emitter
+refuses any OTHER bytes shape, so a chain that cannot reach that path falls back
+to the native fold" — and `size(map(b))` is not that shape. So the fix is to
+widen the bytes fused shapes, which is a feature rather than a patch, and it is
+recorded here rather than attempted at the end of a long session.
+
+Also found: **`bench/cases/list_ops_compare` does not build** (a type error,
+`T0201`), and `collfold`, `str_bench` and `recordcost` print only their first
+row with no argument — the same all-rows gap `asyncsurface` has.
