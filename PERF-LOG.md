@@ -12821,3 +12821,73 @@ further between runs. So it is REVERTED, on the same rule that reverted the
 solver change earlier today — a change with no measured effect does not ship,
 however tidy. The wrapper allocation was never the cost; what is left of the
 1.47x is the insert itself.
+
+## COVERAGE: 19% of the collection surface has ever been measured
+
+Everything above is a finding. None of it answers "what is left", and after 111
+landed optimisations that question needs an answer that is not a memory of what
+felt done. `scripts/collection-coverage.py` derives one from source:
+
+| module | ops | benched | cover |
+|---|---|---|---|
+| seq | 124 | 18 | 15% |
+| list | 104 | 16 | 15% |
+| deque | 73 | 11 | 15% |
+| map | 58 | 8 | 14% |
+| set | 52 | 8 | 15% |
+| sorted_set | 46 | 7 | 15% |
+| sorted_map | 38 | 12 | 32% |
+| iter | 31 | 16 | 52% |
+| nonemptylist | 29 | 2 | 7% |
+| bytes | 25 | 15 | 60% |
+| buffer | 9 | 0 | 0% |
+| **TOTAL** | **589** | **113** | **19%** |
+
+**The denominator is the stdlib's own `pub let` list and the numerator is every
+`module::op` call site under `bench/cases`.** Both are derived, so the matrix
+cannot drift from the code the way a hand-kept checklist does — which matters,
+because a hand-kept list of what we have optimised is exactly the thing that
+cannot tell us what it is missing. `OP_COUNT_ALL` was declared and referenced by
+nothing, and `iter::count` ran 88x `iter::sum` for doing less, and nothing said
+so because no row asked.
+
+### What "done" means for an operation
+
+1. A bench row NAMES it — not a row that happens to exercise it. The
+   `sum(0..10M)` row calls `iter::fold`, so `iter::sum` is unmeasured and the
+   matrix says so.
+2. Its cost is stated against ITS OWN structure's floor (`seq::size` for seq,
+   `deque::size` for deque), not against a counted loop, which is how
+   `asyncsurface` reported "3 314 172/100 floor" for a thread creation.
+3. It sits in that band, or the gap has a NAMED cause that is work rather than a
+   defect — a persistent HAMT insert copying a path, `filter+to_seq` writing 5M
+   longs.
+
+By that standard the measured 19% is largely done — the surfaces swept in this
+effort now sit between 1.0x and 10x of their floors with six named exceptions —
+and the other 81% is not "probably fine", it is UNKNOWN. Every large win on this
+branch came from the first row anyone wrote for an operation: `to_hex` 56.7x
+"found by the type's first benchmark", `size`-as-a-sink 1503x, `count` 77x.
+
+### The order to close it
+
+By unbenchmarked count, weighted by how ordinary the operation is:
+
+1. **map / set, 50 and 44 unmeasured** — `filter`, `map_values`, `merge`,
+   `remove`, `keys`, `values`, `to_seq`, `is_empty`, `update`, `partition`. Every
+   one of these is everyday code and none has a number.
+2. **seq / list, 106 and 88 unmeasured** — the two biggest surfaces, and the
+   ones most likely to hide another `size`-as-a-sink.
+3. **iter, 15 unmeasured** — `take`, `drop`, `take_while`, `for_each`,
+   `to_list`, and `sum` itself. The smallest list and the one where this
+   session proved cliffs hide, since `zip` and `flat_map` are known 637-1120x
+   from the rows that DO exist.
+4. **deque / sorted_set / sorted_map, 62 / 39 / 26** — the ordered containers
+   were 29-60x the hash ones and got ten commits; the rest of their surface is
+   unmeasured.
+5. **nonemptylist 27, buffer 9** — 7% and 0%, and `buffer` has never been run at
+   all.
+
+A pass over one module means: add a row per operation at a size matched to its
+own cost, run it, and fix what sits outside the band. That is how `count`,
+`to_hex` and `size` were found, and it is repeatable rather than lucky.
