@@ -10,6 +10,7 @@ import com.mezze.language.typechecker.solving.ConstraintSolver
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.WellKnownHashConstants
 import com.mezze.language.typechecker.util.WellKnownTypeApp
+import com.mezze.language.typechecker.validation.HandlerTailPositionValidator
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typedast.Hash
 
@@ -1035,6 +1036,24 @@ internal class ImplValidator(
             }
 
             if (implOp.implementation is ParsedLambda) {
+                // Before typing the body: `resume`/`abort` only in tail position,
+                // and never as a value. Typing cannot see this — `resume`'s type
+                // IS a delimited continuation's type (`{ val: opReturn } ->
+                // performReturn`), so every spelling that assumes continuations
+                // checks clean. The runtime has none: resume is the identity
+                // function, abort throws. Runs first so the author gets the
+                // positional reason rather than whatever type error the misplaced
+                // call happens to produce downstream.
+                //
+                // Only the PERFORMER path, and only real ops — the scope hooks are
+                // skipped by the loop above, and an ability impl op has no
+                // resume/abort to misplace.
+                HandlerTailPositionValidator.validate(
+                    (implOp.implementation as ParsedLambda).body,
+                    implOp.name,
+                    "impl '${impl.performerName}'",
+                )
+
                 val operationBaseContext = if (implOp.name == ScopedEffectConstants.INITIALIZE_SCOPE) {
                     baseContext
                 } else {

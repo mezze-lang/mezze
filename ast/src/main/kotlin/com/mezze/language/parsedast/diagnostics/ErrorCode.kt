@@ -128,6 +128,10 @@ enum class ErrorCode {
     // ─── Validator: effects (V05xx) ──────────────────────────────────────
     V0501_EFFECT_NOT_HANDLED,
     V0502_TOP_LEVEL_PERFORM,
+    // `resume`/`abort` outside tail position, or used as a value. Its own code
+    // rather than V0504's: that one is about an op DECLARING the effect it
+    // implements, a different mistake with different advice.
+    V0503_HANDLER_BINDING_NOT_IN_TAIL_POSITION,
     V0504_HERMETIC_EFFECT_CONFLICT,
     V0505_EFFECT_NOT_DEFINED,
     V0506_SCOPED_EFFECT_INIT_FINALIZE_REQUIRED,
