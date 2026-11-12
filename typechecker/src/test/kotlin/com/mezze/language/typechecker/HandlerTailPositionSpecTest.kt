@@ -261,4 +261,102 @@ class HandlerTailPositionSpecTest : VariantSpecBase() {
                 "one of these, so the check keys on an unqualified identifier only.",
         )
     }
+
+    // ───────────────────────────────── the scope hooks bind neither name
+
+    @Test fun `abort in initialize_scope is refused`() {
+        rejects(
+            """
+            $eff
+            impl A for AbortInit where {
+              initialize_scope = {} -> abort { val = 11 },
+              finalize_scope = {} -> {},
+              a = {} -> resume { val = 7 }
+            }
+            $MAIN
+            """,
+            "V0503",
+            "THE WORST OF THE FOUR. `invokeInitializeScope` runs BEFORE " +
+                "`pushHandlerAndEnterHandle`, so an abort escaping the hook unwinds " +
+                "into a catch that pops a handler never pushed. Measured: " +
+                "`ArrayIndexOutOfBoundsException: Index -1 out of bounds for length " +
+                "16` — `16` is EffectState's INITIAL_CAPACITY and `-1` its depth, so " +
+                "the per-thread handler chain is left CORRUPTED, which is worse than " +
+                "a clean crash.",
+        )
+    }
+
+    @Test fun `abort in finalize_scope is refused`() {
+        rejects(
+            """
+            $eff
+            impl A for AbortFin where {
+              initialize_scope = {} -> { n = 1 },
+              finalize_scope = {} -> abort { val = 22 },
+              a = {} -> resume { val = 7 }
+            }
+            $MAIN
+            """,
+            "V0503",
+            "Measured: SILENTLY SWALLOWED. The block produced 7 and still yielded " +
+                "7 despite `abort { val = 22 }` — the quietest possible way for a " +
+                "written intention to do nothing.",
+        )
+    }
+
+    @Test fun `resume in initialize_scope is refused`() {
+        rejects(
+            """
+            $eff
+            impl A for ResumeInit where {
+              initialize_scope = {} -> resume { val = { n = 1 } },
+              finalize_scope = {} -> {},
+              a = {} -> resume { val = 7 }
+            }
+            $MAIN
+            """,
+            "V0503",
+            "`resume` is the identity function, so this \"worked\" by accident — it " +
+                "returned its argument and the scope was created. Meaningless noise " +
+                "that reads as control flow.",
+        )
+    }
+
+    @Test fun `resume in finalize_scope is refused`() {
+        rejects(
+            """
+            $eff
+            impl A for ResumeFin where {
+              initialize_scope = {} -> { n = 1 },
+              finalize_scope = {} -> resume { val = {} },
+              a = {} -> resume { val = 7 }
+            }
+            $MAIN
+            """,
+            "V0503",
+            "Same as above on the way out. A hook is not an operation: it runs " +
+                "AROUND the block rather than in response to a performed one, so " +
+                "there is no operation call to hand a value back to.",
+        )
+    }
+
+    @Test fun `hooks that return their value directly are accepted`() {
+        accepts(
+            """
+            $eff
+            impl A for Scoped where {
+              initialize_scope = {} -> { n = 1 },
+              finalize_scope = {} -> scope,
+              a = {} -> resume { val = scope.n }
+            }
+            pub let use_it: {} -> Int <A> = {} -> A.a {}
+            pub let run = {} -> perform Scoped in use_it {}
+            $MAIN
+            """,
+            "THE MIRROR CASE, and `std/effects/workflow.mz`'s exact shape including " +
+                "`finalize_scope = {} -> scope`. A hook returns its value directly, " +
+                "and the OP body may still use `resume` normally — the rule is about " +
+                "the hooks, not about scoped performers.",
+        )
+    }
 }

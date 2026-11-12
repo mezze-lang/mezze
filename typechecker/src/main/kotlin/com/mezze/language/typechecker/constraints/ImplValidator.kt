@@ -875,6 +875,14 @@ internal class ImplValidator(
             if (initOp.implementation is ParsedLambda) {
                 val lambda = initOp.implementation as ParsedLambda
 
+                // Neither `resume` nor `abort` means anything in a hook, and an
+                // abort here CORRUPTS the handler chain — measured,
+                // `ArrayIndexOutOfBoundsException: Index -1 out of bounds for
+                // length 16`, because initialize_scope runs before the push.
+                HandlerTailPositionValidator.validateHook(
+                    lambda.body, initOp.name, "impl '${impl.performerName}'",
+                )
+
                 val initContext = baseContext
 
                 val constraintContext = ConstraintContext(
@@ -933,6 +941,14 @@ internal class ImplValidator(
         finalizeScope?.let { finalOp ->
             if (finalOp.implementation is ParsedLambda) {
                 val lambda = finalOp.implementation as ParsedLambda
+
+                // Same rule. An abort here is SILENTLY SWALLOWED — measured, a
+                // block that produced 7 still yields 7 despite
+                // `abort { val = 22 }` — which is the quietest possible way for
+                // a written intention to do nothing.
+                HandlerTailPositionValidator.validateHook(
+                    lambda.body, finalOp.name, "impl '${impl.performerName}'",
+                )
 
                 val finalizeContext = contextWithScope
 

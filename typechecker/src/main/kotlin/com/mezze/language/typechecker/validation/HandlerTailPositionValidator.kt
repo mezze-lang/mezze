@@ -53,7 +53,33 @@ object HandlerTailPositionValidator {
 
     /** Check one performer op body. [implLabel] is e.g. `impl 'StringHandler'`. */
     fun validate(body: ParsedExpr, opName: String, implLabel: String) {
-        walk(body, inTail = true, opName = opName, implLabel = implLabel)
+        walk(body, inTail = true, opName = opName, implLabel = implLabel, inHook = false)
+    }
+
+    /**
+     * Check an `initialize_scope` / `finalize_scope` body, where NEITHER binding
+     * is meaningful — a hook is not an operation. It runs around the block, not
+     * in response to a performed op, so there is no op call to hand a value back
+     * to.
+     *
+     * All four combinations type-checked before this and were wrong in three
+     * different ways, MEASURED:
+     *
+     *   abort in initialize_scope  java.lang.ArrayIndexOutOfBoundsException:
+     *                              Index -1 out of bounds for length 16
+     *   abort in finalize_scope    silently SWALLOWED — `abort { val = 22 }` on a
+     *                              block that produced 7 still yields 7
+     *   resume in either           identity; meaningless noise
+     *
+     * The first is the worst: `invokeInitializeScope` runs BEFORE
+     * `pushHandlerAndEnterHandle`, so an abort escaping the hook unwinds into a
+     * catch that pops a handler never pushed. `length 16` is
+     * `HandlerChainRegistry.EffectState`'s INITIAL_CAPACITY and `-1` is its
+     * `depth` — the per-thread handler chain is left CORRUPTED, which is worse
+     * than a clean crash.
+     */
+    fun validateHook(body: ParsedExpr, hookName: String, implLabel: String) {
+        walk(body, inTail = false, opName = hookName, implLabel = implLabel, inHook = true)
     }
 
     private fun bindingName(e: ParsedExpr): String? {
@@ -85,6 +111,18 @@ object HandlerTailPositionValidator {
             code = ErrorCode.V0503_HANDLER_BINDING_NOT_IN_TAIL_POSITION,
         )
 
+    private fun rejectInHook(name: String, hookName: String, implLabel: String, loc: Loc): Nothing =
+        throw TypeCheckError(
+            "`$name` is not available in '$hookName' in $implLabel.\n" +
+                "A scope hook is not an operation — it runs around the `perform` block, " +
+                "not in response to a performed one, so there is no operation call to " +
+                "hand a value back to. Put `$name` in an operation body; a hook returns " +
+                "its value directly (`initialize_scope` the scope, `finalize_scope` " +
+                "anything).",
+            loc,
+            code = ErrorCode.V0503_HANDLER_BINDING_NOT_IN_TAIL_POSITION,
+        )
+
     private fun rejectAsValue(name: String, opName: String, implLabel: String, loc: Loc): Nothing =
         throw TypeCheckError(
             "`$name` can only be called, not used as a value, in operation '$opName' " +
@@ -104,9 +142,9 @@ object HandlerTailPositionValidator {
      * become a position this check does not look at. That is the failure shape
      * this whole area kept producing — a check that runs and quietly passes.
      */
-    private fun walk(e: ParsedExpr, inTail: Boolean, opName: String, implLabel: String) {
+    private fun walk(e: ParsedExpr, inTail: Boolean, opName: String, implLabel: String, inHook: Boolean) {
         fun sub(x: ParsedExpr?, tail: Boolean = false) {
-            if (x != null) walk(x, tail, opName, implLabel)
+            if (x != null) walk(x, tail, opName, implLabel, inHook)
         }
         when (e) {
             // ---- the tail spine: these pass the position through
@@ -137,6 +175,7 @@ object HandlerTailPositionValidator {
             is ParsedFunctionCall -> {
                 val name = bindingName(e.function)
                 if (name != null) {
+                    if (inHook) rejectInHook(name, opName, implLabel, e.loc)
                     if (!inTail) rejectNonTail(name, opName, implLabel, e.loc)
                     // Arguments are not a tail position: `resume { val = resume
                     // { val = 1 } }` is a nested use, and the inner one is not
@@ -149,8 +188,10 @@ object HandlerTailPositionValidator {
             }
 
             // ---- a bare mention is a capture attempt
-            is ParsedIdentifier ->
-                bindingName(e)?.let { rejectAsValue(it, opName, implLabel, e.loc) }
+            is ParsedIdentifier -> bindingName(e)?.let {
+                if (inHook) rejectInHook(it, opName, implLabel, e.loc)
+                rejectAsValue(it, opName, implLabel, e.loc)
+            }
 
             // ---- everything else: children are never tail positions
             is ParsedLambda -> sub(e.body)
