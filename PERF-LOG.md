@@ -12597,3 +12597,54 @@ stay open with their causes narrowed by one hypothesis each:
 
 Written down because the next person to look at `inst=null` will have the same
 idea, and this is two hours of it already spent.
+
+#### Two operations are two maps — 5.58x, and the tier below it was the wrong answer
+
+The entry above measured a two-operation mapper at 576 ps an element against
+132 for a one-operation one and concluded the difference is VECTORISATION, since
+emitting the body as a tree changed nothing. That conclusion was right and the
+fix it suggested — a wider kernel — was not needed.
+
+**FLP already takes several map stages.** `FLP_MAX_EXTRA_MAPS` is 2, packed into
+an extras table as `(op, literal)` pairs, because a chain of two `map` calls had
+to fuse. So a two-operation mapper does not need a wider kernel; it needs to be
+two stages instead of one. `{x} -> x * 2 + 1` IS `map(x * 2).map(+ 1)`.
+
+No lambda is minted for it — `ClassifiedStage.MapInline` carries an op and a
+literal rather than a function, so the pair is constructed directly. The folder
+path already does the same decomposition for `acc + x * x`, which its own
+comment calls "map(f) + fold(OP)".
+
+| row | base | decomposed | |
+|---|---|---|---|
+| `map 2 ops + fold` | 5 779 843 ns | **1 035 553** | **5.58x** |
+| `map 1 op + fold` | 1 228 408 | 1 249 156 | 0.98x |
+| `enumerate+map+fold` | 4 188 038 | 4 280 117 | 0.98x |
+| `filter+map+fold` | 1 531 355 | 1 184 387 | 1.29x (one low sample) |
+| `count` | 1 234 098 | 769 074 | 1.60x (one low sample) |
+| `sum` | 672 516 | 687 945 | 0.98x |
+
+5.58x on the min and about 3.4x on the typical value: the base is 5.78-5.96 ms
+across four processes and the new arm 1.04-1.76 ms, so no overlap either way.
+**The decomposed two-operation mapper now beats the one-operation row** (1 035
+553 against 1 249 156), which is what being on the same vector kernel with one
+more packed op looks like.
+
+Rows 3 and 4 each read a win from a SINGLE low sample with their other three
+inside the base's range — not results, and listed so the table is not read as
+four wins.
+
+LEFT-LEANING AND LITERAL-ONLY, deliberately: the parameter must be the LEFT
+operand at each level, because `MapInline` means `x <op> lit` and `lit - x` is
+not that, and a dynamic operand cannot ride in the extras table at all since the
+emitter's child list is fixed. Anything else falls through to the tree tier,
+which is correct and merely scalar. An enumerate record is refused outright —
+these stages are arithmetic on a long, and the `{i, val}` resolution lives in
+the tree emitter.
+
+THE TESTS ARE ABOUT INVERSION, because a decomposition can silently reorder and
+most inputs will not show it. `x * 2 + 1` reads the same either way for a lot of
+numbers; `(x - 3) * 2` and `x * 2 - 3` do not. Swapping the two emitted stages
+fails five tests with exactly the inverted values — 14 becomes 17, 18 becomes
+15, 9 becomes 15 — and the commutative cases keep passing, which is why the
+non-commutative ones are there.
