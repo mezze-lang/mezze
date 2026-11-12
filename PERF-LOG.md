@@ -12554,3 +12554,46 @@ carries an undetermined output var is the shape of the fix, and the same
 unresolved-output pattern blocked `LocalLambdaSpecializer` earlier in this
 session (`['o50, 'w50, 's50]`, with only `'s50` left unpinned). Two separate
 cliffs now point at one missing determination.
+
+#### Operands DO determine the output — and neither cliff moved
+
+Two cliffs pointed at one missing determination, so I made it.
+`AbilityChecker`'s improvement phase computes open OPERANDS from a known output,
+and returned before it could do the reverse:
+
+```kotlin
+val open = resolved.indices.filter { resolved[it] is MezzeType.VarType }
+if (open.isEmpty()) return null      // no open operand, no work
+```
+
+That skipped the one case where the operands ARE the evidence —
+`NumAdd Int Int having out = 's50`, both operands concrete, one impl matching
+them, `out` left a variable forever. Everything needed was already in the
+function: it computes what each candidate impl would pin an open output to. The
+fix is to compute the outputs BEFORE the early return and take it only when
+both are empty.
+
+**It fires**: 22 `NumMul Int Int -> Int` and 8 `NumAdd Int Int -> Int` in one
+`defunc` build, outputs that were previously left open. The typechecker suite
+passes with it.
+
+**And neither cliff moved.** `defunc` row 4 reads 9 657 ps against 10 279
+before; `coresurface` row 9 reads 2 999 against 2 995. So the undetermined
+output was NOT what made `MonoDriver` resolve those references with `inst=null`,
+and it was not what made `LocalLambdaSpecializer` decline — I re-applied the
+recursion relaxation on top of it to check, and that moved nothing either.
+
+REVERTED, both of them. A solver change that makes inference strictly more
+determined is defensible on its own terms, but it changes inferred types across
+every program, the risk it carries is the kind that surfaces at RUNTIME rather
+than in the typechecker suite, and it bought nothing measurable. The two cliffs
+stay open with their causes narrowed by one hypothesis each:
+
+  - the HOF cliff is not the undetermined `out`; `inst=null` has another cause,
+    and the cliff is module-sensitive (adding an unrelated declaration took it
+    from ~10 300 ps to 2 102).
+  - `LocalLambdaSpecializer` declines for something other than the unpinned
+    `having out` variable, since pinning it changed nothing.
+
+Written down because the next person to look at `inst=null` will have the same
+idea, and this is two hours of it already spent.
