@@ -13891,3 +13891,112 @@ COVERAGE. Five rows: `to_str`, `to_bytes`, `parse_str`, `parse` and a
 `str::size` control over the same document. The codec group goes from 0 to 18%,
 and the first numbers already name the next target — PARSE is now the expensive
 direction at 12.7 µs against serialize's 4.6.
+
+#### `seq` was 106 operations in no benchmark at all, and one of them is quadratic — 4.17 ms for a thousand elements
+
+`seq` is the surface every program uses and it had **zero rows in
+`perf/coverage.tsv`** — 106 of its 124 operations were mentioned in no benchmark
+anywhere, which made it the largest unmeasured area in the language. Twelve rows
+now cover the shapes where a defect hides: per-element allocation, string
+building, a slice per window, a guest comparator per comparison, and the one
+operation whose own comment admits a quadratic.
+
+**THE EXPONENT, MEASURED RATHER THAN ASSERTED.** Two element counts, because a
+single one cannot tell a quadratic from an expensive constant:
+
+| row | m=100 | m=1000 | growth for 10x | exponent |
+|---|---|---|---|---|
+| `seq::unique` | 40 243 498 ps | **4 169 669 450** | **103.6x** | **2.02** |
+| `seq::dedup` | 2 222 382 | 21 000 059 | 9.45x | 1.0 |
+| `unique` via a set | 2 222 092 | 24 744 362 | 11.1x | 1.05 |
+| `seq::sum` (the control) | 51 057 | 466 263 | 9.13x | 1.0 |
+
+So `seq::unique` is **O(n²)** with a guest call per comparison, and 103.6x for a
+tenfold n is that exponent measured. At a thousand elements one call costs
+**4.17 ms**; at ten thousand it would be about 420 ms. The control growing 9.13x
+is what says the harness itself scales linearly, so the 103.6x belongs to the
+operation and not to the measurement.
+
+TWO INDEPENDENT CROSS-CHECKS that the O(n) number is real. `unique` via a set
+costs 2 222 092 ps and `seq::dedup` costs 2 222 382 — within 0.01% of each
+other, two different one-pass dedupe routes landing on the same number. And the
+gap between `unique` and that route **grows with n**, 18.1x at m=100 to 168.5x
+at m=1000, which is what a quadratic-against-linear comparison must do and what
+a merely-slow constant could not fake.
+
+It is not an oversight. `SeqNatives.distinct` says so:
+
+> *"Keeps the first occurrence of each element; O(n^2) in the worst case because
+> Eq is not required to be hashable (only equatable). The primitive/structural
+> fast path (seq.distinct()) can't be used: it would ignore a custom Eq impl."*
+
+**AND THE FIX IS AN API DECISION, WHICH IS WHY THIS IS A FINDING AND NOT A
+COMMIT.** `unique`'s signature is `{ xs: ['a] } with Eq 'a -> ['a]`: Eq alone,
+and routing through a set needs the element HASHABLE.
+
+I drafted two ways out and then read the gate the second one would need. **It is
+unsound, so there is only one.** `TypedASTCompiler.evidenceNativeCall` demands
+both halves and says why:
+
+> *"Both halves or neither: a container that hashed by the element's instance
+> and compared structurally would put equal values in one bucket and then fail
+> to match them."*
+
+Eq-only evidence is that forbidden half. With a hand-written `Eq` and a DERIVED
+`Hash`, a set buckets by structure and compares by the author's instance: two
+values the author calls equal hash to different buckets and `unique` KEEPS BOTH
+— a wrong answer, not a slow one. So "extend the evidence gate to natives that
+need Eq alone" is not a cheaper version of the fix, it is a correctness bug
+waiting to be written.
+
+That leaves ONE route, and it changes a signature:
+
+- **widen the constraint to `with Eq 'a, Hash 'a`** and route through the
+  element's bucketing, which the existing evidence table already handles
+  correctly for hand-written instances. Every element type with both — every
+  primitive, and everything with a derived `Hash` — gets O(n). Callers with a
+  hand-written `Eq` and no `Hash` stop compiling, which is the honest outcome:
+  that combination is precisely what the quadratic is paying for.
+
+There is a conditional third route — an order-preserving structural dedupe used
+ONLY where the discharged `Eq` is the compiler's own, which is the inverse of
+the evidence gate and sound by the same argument. It is blocked on WHERE the
+decision can be seen, not on whether it is right: the constraint sits on
+`unique`, but the native call sits one function further in, inside
+`unique_with_eq`, whose own signature carries `eq` as a plain parameter and no
+constraint at all. That indirection is not incidental either — the comment above
+it records that it exists for a TYPING reason, that "a top-level `let`
+signature's type var does not flow into body annotations, but a param's declared
+type does unify with the arg". So collapsing the two to put the native under the
+constraint is a typechecker question, not a refactor.
+
+Until a route is chosen, `seq::to_set` is the O(n) dedupe a program can write
+today, and it is NOT a drop-in replacement: a set does not preserve order, so
+`unique`'s "keeps the first occurrence" is lost.
+
+THE REST OF THE FIRST READING, m=100, per element:
+
+| | ps/element |
+|---|---|
+| `seq::sum` (one pass, no callback — the control) | 511 |
+| `seq::chunk` | 1 067 |
+| `seq::insert_at` | 2 849 |
+| `seq::windows` | 3 644 |
+| `seq::intersperse` | 3 904 |
+| `seq::join` | 9 376 |
+| `seq::zip` | 16 198 |
+| `seq::dedup` | 22 224 |
+| `seq::sort_by` | 22 525 |
+| `seq::group_by` | 35 354 |
+| `seq::unique` | **402 435** |
+
+Nothing else here is a cliff: `zip` allocates a record per element, `group_by` a
+seq per group, `sort_by` calls a guest comparator per comparison. They are
+ordinary per-element costs, and they are now on the record, which is the point
+of the rows existing.
+
+A CRASH CAME OUT OF WRITING ROW 12, and it was not in either operation. The
+ceiling row is spelled `seq::size { xs = set::to_seq { s = seq::to_set { xs } } }`
+and that died with `UnsupportedSpecializationException … SeqSize_Node …
+[MezzeSet]` on a two-element seq. `ChainCanonicalizer` was reading a native's
+MODULE as its return type. Fixed separately, with `SeqConversionSourceTest`.

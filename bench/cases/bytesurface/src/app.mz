@@ -128,12 +128,24 @@ let l_concat = { i, acc, b } -> if i <= 0 then acc
   else l_concat { i = i - 1, b = b,
                   acc = acc + bytes::size { b = bytes::concat { b1 = b, b2 = b } } }
 
-## ── 8. fold — a guest callback PER BYTE ────────────────────────────────────
+## ── 8. fold — THE NO-CALLBACK FLOOR, and NOT a callback control. This fold is
+## `init = 0` over a plain `acc + byte`, which is exactly the shape that reaches
+## `BuiltinSumBytes` — the node `BytesSumPrimitiveTest` describes as running
+## "with no guest callback at all", because "it does not call the folder, it
+## recognises it and deletes it". So this row times a bare byte walk. It used to
+## be labelled "a guest callback PER BYTE"; nothing here calls the lambda.
 let l_fold = { i, total, b } -> if i <= 0 then total
   else l_fold { i = i - 1, b = b,
                 total = total + bytes::fold { b = b, init = 0, f = { acc, byte } -> acc + byte } }
 
 ## ── 9. map — a guest callback per byte AND a new buffer, WHICH MUST EXIST.
+## The mapper is `x / 2` and not the identity on purpose. An identity map is the
+## one transform a pass may legitimately DELETE, and `InlineOp` has no IDENTITY
+## member either, so `{ x } -> x` can be neither inlined into a byte loop nor
+## trusted to survive — it would stop measuring anything the moment `map` got
+## faster. `x / 2` is inline-able (DIV is in the arith set `MapInline` takes,
+## with the element on the LEFT where the classifier wants it), not deletable,
+## and always inside 0..127 so `byteValue()` is not what is under test.
 ## This row used to read `bytes::size { b = bytes::map { … } }`, and a `size`
 ## over a transform is the shape a fused pipeline collapses into a count that
 ## builds nothing at all — the same trap two of the set rows fell into, where
@@ -141,7 +153,7 @@ let l_fold = { i, total, b } -> if i <= 0 then total
 ## faster. `bytes::get` is not a chain sink, so the buffer has to be built.
 let l_map = { i, acc, b } -> if i <= 0 then acc
   else do
-    let mapped = bytes::map { b = b, f = { x } -> x }
+    let mapped = bytes::map { b = b, f = { x } -> x / 2 }
     l_map { i = i - 1, b = b,
             acc = acc + option::get_or { opt = bytes::get { b = mapped, i = 7 }, def = 0 } }
 
@@ -169,6 +181,24 @@ let l_to_b64 = { i, acc, b } -> if i <= 0 then acc
 let l_to_seq = { i, acc, b } -> if i <= 0 then acc
   else l_to_seq { i = i - 1, b = b,
                   acc = acc + seq::size { xs = bytes::to_seq { b = b } } }
+
+## ── 14. map VIA A FUSED SEQ — THE CEILING FOR A `map` WHOSE CALLBACK LIVES.
+## Row 13 (`reverse`) bounds a fused map from below but calls no guest code, so
+## it says nothing about a surviving transform. This route does:
+## `bytes::to_seq` → `seq::map` → `bytes::from_seq`, where the seq stage is a
+## shape the fuser handles, so the transform is inlined into a compiled loop —
+## which is what a fused `bytes::map` would emit.
+##
+## CONSERVATIVE on purpose: it also pays for a boxed `[Int]` intermediate that a
+## native byte[] loop would not, so a real fused `bytes::map` should come in
+## UNDER this number rather than merely near it. Same mapper as row 9 and the
+## same `bytes::get` materialisation, so the only difference is the route.
+let l_map_via_seq = { i, acc, b } -> if i <= 0 then acc
+  else do
+    let mapped = bytes::from_seq {
+      arr = seq::map { xs = bytes::to_seq { b = b }, f = { x } -> x / 2 } }
+    l_map_via_seq { i = i - 1, b = b,
+            acc = acc + option::get_or { opt = bytes::get { b = mapped, i = 7 }, def = 0 } }
 
 pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
   let args = argv {}
@@ -218,3 +248,5 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
            label = "bytes::to_seq       ", thunk = {} -> l_to_seq { i = n, acc = 0, b = b } }
   report { idx = 13, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "bytes::reverse CEILING", thunk = {} -> l_reverse { i = n, acc = 0, b = b } }
+  report { idx = 14, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "bytes::map via seq  ", thunk = {} -> l_map_via_seq { i = n, acc = 0, b = b } }

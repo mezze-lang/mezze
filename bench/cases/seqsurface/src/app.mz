@@ -1,0 +1,206 @@
+## WHAT THE REST OF SEQ COSTS.
+##
+## `seq` is 124 operations and 106 of them are mentioned in NO benchmark at all,
+## which makes it the largest unmeasured surface in the language — and it is the
+## one every program uses. The rows below are the shapes where a defect hides:
+## per-element allocation, string building, a slice per window, and the one
+## operation whose own comment admits a quadratic.
+##
+## `unique` IS QUADRATIC AND CALLS GUEST CODE PER COMPARISON. `SeqNatives.distinct`
+## says why — "O(n^2) in the worst case because Eq is not required to be hashable
+## (only equatable)" — so it is a deliberate trade, not an oversight. Rows 1 and
+## 2 run it at two sizes so the shape is on the record as a number: a 10x in n
+## should cost about 100x if the scan dominates.
+##
+## METHOD as elsewhere: one row per process (`seqsurface <n> <row> <m>`), min
+## over k passes after `warm` warmups, every row checksummed, two sizes of n
+## that must converge.
+
+use std::effects::log::{ println, Console }
+use std::effects::args::{ SystemArgs, argv }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::collections::seq
+use std::collections::list
+use std::collections::set
+use std::str
+use std::int
+use std::option
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_one = { thunk } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = thunk {}
+  let t1 = monotonic {}
+  { ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }, sum = r }
+
+let time_k_go = { thunk, k, acc, last } -> if k == 0
+  then { times = acc, sum = last }
+  else do
+    let r = time_one { thunk = thunk }
+    time_k_go { thunk = thunk, k = k - 1, acc = seq::push { xs = acc, x = r.ns }, last = r.sum }
+
+let nth_or_zero = { xs, i } -> match seq::get { xs = xs, i = i } is
+  Some { val } -> val
+  None -> 0
+
+let min_of = { thunk, warm, k } -> do
+  let w = time_k_go { thunk = thunk, k = warm, acc = [], last = 0 }
+  let ws = seq::sort { xs = w.times }
+  let warm_max = nth_or_zero { xs = ws, i = seq::size { xs = ws } - 1 }
+  let run = time_k_go { thunk = thunk, k = k, acc = [], last = 0 }
+  let sorted = seq::sort { xs = run.times }
+  let half = seq::size { xs = sorted } / 2
+  { min = nth_or_zero { xs = sorted, i = 0 },
+    med = nth_or_zero { xs = sorted, i = half },
+    warm_max = warm_max,
+    sum = run.sum }
+
+## THE FLOOR: one loop iteration and one add, no seq at all.
+let control_loop = { i, acc } -> if i <= 0 then acc else control_loop { i = i - 1, acc = acc + i }
+
+let report = { idx, sel, label, thunk, floor_ps, n, warm, k } -> perform Console in perform SystemTime in
+  if sel != 0 && sel != idx then {} else do
+    let t = min_of { thunk = thunk, warm = warm, k = k }
+    let ps_per_op = (t.min * 1000) / n
+    let ratio = if floor_ps == 0 then 0 else (ps_per_op * 100) / floor_ps
+    let warm_ratio = if t.min == 0 then 0 else t.warm_max / t.min
+    let warn = if t.med > (t.min * 2) then "   UNDER-WARMED (raise n or passes)"
+      else if warm_ratio > 10 then "   WARMUP-DOMINATED"
+      else ""
+    println { msg = "  $(label): $(int::to_str { n = ps_per_op }) ps/op  x$(int::to_str { n = ratio })/100 floor  sum=$(int::to_str { n = t.sum })$(warn)" }
+
+
+
+## ── the sequences, built ONCE outside every timed loop ───────────────
+let build = { i, acc } -> if i <= 0 then acc
+  else build { i = i - 1, acc = seq::push { xs = acc, x = i } }
+
+## Half the values repeat, so `unique` and `dedup` have real work to do and the
+## result is half the input rather than all of it.
+let build_dup = { i, acc, m } -> if i <= 0 then acc
+  else build_dup { i = i - 1, m = m, acc = seq::push { xs = acc, x = i % (m / 2) } }
+
+let build_strs = { i, acc } -> if i <= 0 then acc
+  else build_strs { i = i - 1, acc = seq::push { xs = acc, x = "item" } }
+
+## ── 1. unique ─ THE QUADRATIC, with a guest call per comparison ──────
+let l_unique = { i, acc, xs } -> if i <= 0 then acc
+  else l_unique { i = i - 1, xs = xs,
+    acc = acc + seq::size { xs = seq::unique { xs = xs } } }
+
+## ── 2. dedup ─ CONSECUTIVE duplicates only, so linear by construction ──
+## The control for row 1: same equality, same guest callback shape, one pass.
+let l_dedup = { i, acc, xs } -> if i <= 0 then acc
+  else l_dedup { i = i - 1, xs = xs,
+    acc = acc + seq::size { xs = seq::dedup { xs = xs } } }
+
+## ── 3. join ─ string building per element ────────────────────
+let l_join = { i, acc, ss } -> if i <= 0 then acc
+  else l_join { i = i - 1, ss = ss,
+    acc = acc + str::size { s = seq::join { xs = ss, sep = "," } } }
+
+## ── 4. intersperse ─ one element inserted between each pair ─────────
+let l_intersperse = { i, acc, xs } -> if i <= 0 then acc
+  else l_intersperse { i = i - 1, xs = xs,
+    acc = acc + seq::size { xs = seq::intersperse { xs = xs, sep = 0 } } }
+
+## ── 5. windows ─ a SLICE per position ──────────────────────
+let l_windows = { i, acc, xs } -> if i <= 0 then acc
+  else l_windows { i = i - 1, xs = xs,
+    acc = acc + seq::size { xs = seq::windows { xs = xs, size = 4 } } }
+
+## ── 6. chunk ─ a slice per block, so n/size of them ──────────────
+let l_chunk = { i, acc, xs } -> if i <= 0 then acc
+  else l_chunk { i = i - 1, xs = xs,
+    acc = acc + seq::size { xs = seq::chunk { xs = xs, size = 4 } } }
+
+## ── 7. group_by ─ a key per element and a seq per group ────────────
+let l_group_by = { i, acc, xs } -> if i <= 0 then acc
+  else l_group_by { i = i - 1, xs = xs,
+    acc = acc + seq::size { xs = seq::group_by { xs = xs, f = { x } -> x % 8 } } }
+
+## ── 8. sort_by ─ a guest comparator per comparison ──────────────
+let l_sort_by = { i, acc, xs } -> if i <= 0 then acc
+  else l_sort_by { i = i - 1, xs = xs,
+    acc = acc + seq::size { xs = seq::sort_by { xs = xs, cmp = { a, b } -> a < b } } }
+
+## ── 9. zip ─ a {fst, snd} record per element ──────────────────
+let l_zip = { i, acc, xs } -> if i <= 0 then acc
+  else l_zip { i = i - 1, xs = xs,
+    acc = acc + seq::size { xs = seq::zip { xs = xs, ys = xs } } }
+
+## ── 10. insert_at ─ one element into the middle, so a copy ──────────
+let l_insert_at = { i, acc, xs, m } -> if i <= 0 then acc
+  else l_insert_at { i = i - 1, xs = xs, m = m,
+    acc = acc + seq::size { xs = seq::insert_at { xs = xs, i = m / 2, x = 0 } } }
+
+## ── 11. sum ─ THE CONTROL: one pass, no allocation, no callback ──────
+let l_sum = { i, acc, xs } -> if i <= 0 then acc
+  else l_sum { i = i - 1, xs = xs, acc = acc + seq::sum { xs = xs } / 1000000 }
+
+## ── 12. unique VIA A SET ─ THE CEILING for a fixed `unique` ──────────
+## `seq::to_set` buckets by the element's hashing, so this is O(n) rather than
+## O(n^2), and it is what `unique` could cost if its signature asked for
+## `Hash 'a` as well as `Eq 'a`.
+##
+## PRECISELY WHEN it honours a hand-written instance: `TypedASTCompiler.`
+## `evidenceNativeCall` routes `set::from_seq` to its evidence form only when
+## the spec has recorded BOTH a `hash` and an `eq` and at least one of the
+## impls is hand-written — "both halves or neither", because a container that
+## hashed by the author's instance and compared structurally would put equal
+## values in one bucket and then fail to match them. So a type with a written
+## `Eq` and a DERIVED `Hash` buckets structurally here, which is exactly why
+## `unique` cannot simply be rerouted through a set while its constraint says
+## `Eq` alone.
+##
+## And it is NOT a drop-in replacement either way: a set does not preserve
+## order, so `unique`'s "keeps the first occurrence" is lost here.
+let l_unique_set = { i, acc, xs } -> if i <= 0 then acc
+  else l_unique_set { i = i - 1, xs = xs,
+    acc = acc + seq::size { xs = set::to_seq { s = seq::to_set { xs = xs } } } }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let n = arg_at { args = args, i = 0, def = 2000 }
+  let sel = arg_at { args = args, i = 1, def = 0 }
+  let m = arg_at { args = args, i = 2, def = 100 }
+  let floor_n = arg_at { args = args, i = 3, def = 20000000 }
+  let warm = 4
+  let k = 9
+  let xs = build { i = m, acc = [] }
+  let dups = build_dup { i = m, acc = [], m = m }
+  let ss = build_strs { i = m, acc = [] }
+  let floor = min_of { thunk = {} -> control_loop { i = floor_n, acc = 0 }, warm = warm, k = k }
+  let floor_ps = (floor.min * 1000) / floor_n
+  println { msg = "seqsurface (n=$(int::to_str { n = n }) ops, $(int::to_str { n = m }) elements): $(int::to_str { n = warm }) warmup + $(int::to_str { n = k }) measured, MIN per row" }
+  println { msg = "  control (floor)     : $(int::to_str { n = floor_ps }) ps/op" }
+  report { idx = 1, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "seq::unique QUADRATIC", thunk = {} -> l_unique { i = n, acc = 0, xs = dups } }
+  report { idx = 2, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "seq::dedup  one pass ", thunk = {} -> l_dedup { i = n, acc = 0, xs = dups } }
+  report { idx = 3, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "seq::join            ", thunk = {} -> l_join { i = n, acc = 0, ss = ss } }
+  report { idx = 4, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "seq::intersperse     ", thunk = {} -> l_intersperse { i = n, acc = 0, xs = xs } }
+  report { idx = 5, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "seq::windows         ", thunk = {} -> l_windows { i = n, acc = 0, xs = xs } }
+  report { idx = 6, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "seq::chunk           ", thunk = {} -> l_chunk { i = n, acc = 0, xs = xs } }
+  report { idx = 7, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "seq::group_by        ", thunk = {} -> l_group_by { i = n, acc = 0, xs = xs } }
+  report { idx = 8, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "seq::sort_by         ", thunk = {} -> l_sort_by { i = n, acc = 0, xs = xs } }
+  report { idx = 9, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "seq::zip             ", thunk = {} -> l_zip { i = n, acc = 0, xs = xs } }
+  report { idx = 10, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "seq::insert_at       ", thunk = {} -> l_insert_at { i = n, acc = 0, xs = xs, m = m } }
+  report { idx = 11, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "seq::sum     CONTROL ", thunk = {} -> l_sum { i = n, acc = 0, xs = xs } }
+  report { idx = 12, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "unique via set CEIL  ", thunk = {} -> l_unique_set { i = n, acc = 0, xs = dups } }

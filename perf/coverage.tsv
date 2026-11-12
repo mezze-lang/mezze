@@ -99,3 +99,14 @@ json	to_str	4646776	2e3	501	jsonsurface:1	2026-11-12
 json	to_bytes	4614136	2e3	501	jsonsurface:2	2026-11-12
 json	parse_str	12702172	2e3	501	jsonsurface:3	2026-11-12
 json	parse	12635064	2e3	501	jsonsurface:4	2026-11-12
+seq	unique	40243498	2e3	100	seqsurface:1	2026-11-12
+seq	dedup	2222382	2e4	100	seqsurface:2	2026-11-12
+seq	join	937582	5e4	100	seqsurface:3	2026-11-12
+seq	intersperse	390398	1e5	100	seqsurface:4	2026-11-12
+seq	windows	364353	1e5	100	seqsurface:5	2026-11-12
+seq	chunk	106712	3e5	100	seqsurface:6	2026-11-12
+seq	group_by	3535411	1e4	100	seqsurface:7	2026-11-12
+seq	sort_by	2252493	2e4	100	seqsurface:8	2026-11-12
+seq	zip	1619792	3e4	100	seqsurface:9	2026-11-12
+seq	insert_at	284888	1e5	100	seqsurface:10	2026-11-12
+seq	sum	51057	5e5	100	seqsurface:11	2026-11-12
