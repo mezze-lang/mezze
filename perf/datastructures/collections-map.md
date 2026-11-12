@@ -60,7 +60,7 @@
 | `sum_values` | **UNMEASURED** | | | | |
 | `symmetric_diff_maps` | **UNMEASURED** | | | | |
 | `to_list` | **UNMEASURED** | | | | |
-| `to_seq` | 20 872 242 | 1000 | 20 872 | 48.9x | mapsurface:20 |
+| `to_seq` | 15 474 505 | 1000 | 15 474 | 36.2x | mapsurface:20 |
 | `to_sorted_map` | **UNMEASURED** | | | | |
 | `update` | 56 345 |  |  | 132.0x | mapsurface:17 |
 | `values` | 5 899 587 | 1000 | 5 899 | 13.8x | mapsurface:19 |

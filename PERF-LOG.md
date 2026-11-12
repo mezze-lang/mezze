@@ -13595,3 +13595,39 @@ Ignoring the stop signal fails FIVE tests, and two of them are correctness, not
 counting: `any` answers false and `find` answers None, because both now derive
 their answer from whether the walk stopped. The short-circuit is load-bearing
 for the result, not only for the speed.
+
+#### The rest of the Entry walks — 1.14x on map::to_seq, and zero left
+
+The one-walk change converted the nine operations that take a guest predicate.
+Nine more Entry-iterator walks were still there, in the operations that do not:
+`entries`, `to_seq`, `to_list`, `fold`, `equals`, `group_by_value`, `flat_map`,
+`merge_with` and `partition`. Same cause, same fix, and `MapNatives` now has
+NONE.
+
+| row | base | one walk | |
+|---|---|---|---|
+| `map::to_seq` | 17 715 535 ps | **15 474 505** | **1.14x** |
+| `map::count` (converted earlier, in both arms) | 10 359 688 | 10 377 786 | 1.00x |
+| `map::filter` (same) | 22 078 224 | 21 969 138 | 1.00x |
+| `map::keys` | 7 050 134 | 6 869 542 | 1.03x |
+| `map::size` | 433 | 445 | 0.97x |
+
+`to_seq` is the only one of the nine with a bench row, so it is the only one
+with a number; the other eight carry the same change unpriced. It gains less
+than `count`'s 1.33x because it allocates a `{k, v}` record per entry either
+way — the Entry it no longer builds was one of two allocations per element, not
+the only one.
+
+**`equals` now stops at the first unequal pair**, which it did before by
+`return`ing out of a flat loop and now does by the predicate ending the walk.
+
+**`partition` carried BOTH defects** and was missed by the bulk-build sweep
+because it returns a RECORD of two maps rather than a map, so it did not match
+the shape that sweep looked for: it walked the Entry iterator and built both
+results with a persistent put per entry. It now walks once and builds each side
+with `fromEntries`. No row measures it.
+
+`merge_with` keeps its put per entry on purpose, and the comment now says why:
+it starts from an existing `map1` and adds `map2`'s entries, so a bulk rebuild
+would walk the whole base to save however few puts `map2` asks for. The same
+argument as `set::insert_all`.

@@ -23,6 +23,7 @@ map	remove	61912	1e6	1	mapsurface:15	2026-11-12
 map	keys	6834149	2e3	1000	mapsurface:18	2026-11-12
 map	values	5899587	2e3	1000	mapsurface:19	2026-11-12
 map	to_seq	20872242	2e3	1000	mapsurface:20	2026-11-12
+map	to_seq	15474505	2e3	1000	mapsurface:20	2026-11-12
 map	map_values	59438249	2e3	1000	mapsurface:21	2026-11-12
 map	filter	36379254	2e3	1000	mapsurface:22	2026-11-12
 map	count	18292158	2e3	1000	mapsurface:23	2026-11-12
