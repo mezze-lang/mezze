@@ -91,6 +91,11 @@ public final class SingleEntryMapStorage implements MapStorage {
     }
 
     @Override
+    public MapStorage withValues(Object[] newValues) {
+        return new SingleEntryMapStorage(key, newValues[0]);
+    }
+
+    @Override
     public Object[] values() {
         return new Object[]{value};
     }

@@ -211,6 +211,13 @@ public final class LongKeyMapStorage implements MapStorage {
     }
 
     @Override
+    public MapStorage withValues(Object[] newValues) {
+        // The keys are already sorted and stay so: `alreadySorted` skips the
+        // sort as well as the hashing.
+        return new LongKeyMapStorage(keys, newValues, true);
+    }
+
+    @Override
     public Object[] values() {
         return values.clone();
     }

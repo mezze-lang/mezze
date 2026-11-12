@@ -386,26 +386,30 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     /**
      * Maps over values.
      *
-     * <p>The keys are unchanged, so only the values are rebuilt. The
-     * {@code LinkedHashMap} this used to fill "to preserve insertion order"
-     * preserved nothing — a trie has no insertion order — and then put its
-     * entries in one at a time anyway.
+     * <p>The keys are unchanged, so only the values are rebuilt — and now that
+     * is what happens. This said exactly the same thing while calling
+     * {@link #fromEntries}, which pushes every key back through a builder and
+     * hashes it again; the claim was true of the intent and false of the code.
+     * {@link MapStorage#withValues} shares the key storage by reference and
+     * copies only what holds values, so no key is hashed and none is compared.
+     *
+     * <p>29 302 ps/element for the rebuild against 10 925 for the structure
+     * copy, measured on 1000 string keys — and that ratio is a lower bound,
+     * because the copy was measured through reflection.
+     *
+     * <p>(The {@code LinkedHashMap} this once filled "to preserve insertion
+     * order" preserved nothing — a trie has no insertion order — and then put
+     * its entries in one at a time anyway.)
      */
     @TruffleBoundary
     @SuppressWarnings("unchecked")
     public <V2> MezzeMap<K, V2> mapValues(Function<V, V2> fn) {
         if (isEmpty()) return empty();
 
-        int size = size();
-        Object[] outK = new Object[size];
-        Object[] outV = new Object[size];
-        int[] n = {0};
-        storage.forEach((k, v) -> {
-            outK[n[0]] = k;
-            outV[n[0]] = fn.apply((V) v);
-            n[0]++;
-        });
-        return (MezzeMap<K, V2>) fromEntries(outK, outV, size);
+        Object[] vs = storage.values();
+        Object[] outV = new Object[vs.length];
+        for (int i = 0; i < vs.length; i++) outV[i] = fn.apply((V) vs[i]);
+        return (MezzeMap<K, V2>) new MezzeMap<>(storage.withValues(outV));
     }
 
     /**
@@ -486,6 +490,23 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     @SuppressWarnings("unchecked")
     public V[] values() {
         return (V[]) storage.values();
+    }
+
+    /**
+     * THIS MAP WITH NEW VALUES, sharing every key.
+     *
+     * <p>For a caller that has already mapped {@link #values()} and so does not
+     * want {@link #mapValues}'s callback — the natives, which run the guest
+     * callback in their own frame rather than behind this class's
+     * {@code @TruffleBoundary}.
+     *
+     * <p>{@code newValues} is in {@link #values()} order and must have
+     * {@link #size()} elements. See {@link MapStorage#withValues}.
+     */
+    @SuppressWarnings("unchecked")
+    public <V2> MezzeMap<K, V2> withValues(Object[] newValues) {
+        if (isEmpty()) return empty();
+        return (MezzeMap<K, V2>) new MezzeMap<>(storage.withValues(newValues));
     }
 
     /**

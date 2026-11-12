@@ -209,6 +209,12 @@ public final class SmallFlatMapStorage implements MapStorage {
     }
 
     @Override
+    public MapStorage withValues(Object[] newValues) {
+        // `values()` is the array in slot order, so newValues already lines up.
+        return new SmallFlatMapStorage(keys, newValues);
+    }
+
+    @Override
     public Object[] values() {
         return values.clone();
     }

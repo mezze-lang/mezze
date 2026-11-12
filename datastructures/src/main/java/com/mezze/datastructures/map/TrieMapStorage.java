@@ -367,6 +367,37 @@ public final class TrieMapStorage implements MapStorage {
     }
 
     @Override
+    public MapStorage withValues(Object[] newValues) {
+        if (size == 0) return this;
+        return new TrieMapStorage(mapNodeValues(root, newValues, new int[1]), size);
+    }
+
+    /**
+     * Copies the trie with new values, sharing every {@code keys} array and
+     * both bitmaps — so no key is hashed and none is compared.
+     *
+     * <p>Walks in {@link #values()} order, which {@code collect} defines as a
+     * node's own entries followed by its children, so the flat
+     * {@code newValues} lines up as it goes. A {@link Collision} is the same
+     * story with no children.
+     */
+    private static Node mapNodeValues(Node n, Object[] newValues, int[] at) {
+        if (n instanceof Collision c) {
+            Object[] vs = new Object[c.values.length];
+            for (int i = 0; i < vs.length; i++) vs[i] = newValues[at[0]++];
+            return new Collision(c.hash, c.keys, vs);
+        }
+        Bitmap b = (Bitmap) n;
+        Object[] vs = new Object[b.values.length];
+        for (int i = 0; i < vs.length; i++) vs[i] = newValues[at[0]++];
+        Node[] kids = b.nodes.length == 0 ? b.nodes : new Node[b.nodes.length];
+        for (int i = 0; i < b.nodes.length; i++) {
+            kids[i] = mapNodeValues(b.nodes[i], newValues, at);
+        }
+        return new Bitmap(b.dataMap, b.nodeMap, b.keys, vs, kids);
+    }
+
+    @Override
     public Object[] values() {
         Object[] out = new Object[size];
         collect(root, out, new int[1], false);

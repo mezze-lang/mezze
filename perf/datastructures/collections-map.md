@@ -17,7 +17,7 @@
 | `diff_maps` | **UNMEASURED** | | | | |
 | `empty` | — | | | | called in allocsurface, http-work-route, mapsurface, mutvsimmut, no number |
 | `equals` | **UNMEASURED** | | | | |
-| `filter` | 24 772 526 | 1000 | 24 772 | 58.0x | mapsurface:22 |
+| `filter` | 21 291 029 | 1000 | 21 291 | 49.9x | mapsurface:22 |
 | `filter_keys` | **UNMEASURED** | | | | |
 | `filter_values` | **UNMEASURED** | | | | |
 | `find` | **UNMEASURED** | | | | |
@@ -38,10 +38,10 @@
 | `keys` | 6 834 149 | 1000 | 6 834 | 16.0x | mapsurface:18 |
 | `keys_seq` | **UNMEASURED** | | | | |
 | `map_keys` | **UNMEASURED** | | | | |
-| `map_values` | 32 231 186 | 1000 | 32 231 | 75.5x | mapsurface:21 |
+| `map_values` | 12 084 297 | 1000 | 12 084 | 28.3x | mapsurface:21 |
 | `max_key` | **UNMEASURED** | | | | |
 | `max_value` | **UNMEASURED** | | | | |
-| `merge` | 39 819 894 | 1000 | 39 819 | 93.3x | mapsurface:24 |
+| `merge` | 39 097 148 | 1000 | 39 097 | 91.6x | mapsurface:24 |
 | `merge_with` | **UNMEASURED** | | | | |
 | `min_key` | **UNMEASURED** | | | | |
 | `min_value` | **UNMEASURED** | | | | |
@@ -60,10 +60,10 @@
 | `sum_values` | **UNMEASURED** | | | | |
 | `symmetric_diff_maps` | **UNMEASURED** | | | | |
 | `to_list` | **UNMEASURED** | | | | |
-| `to_seq` | 15 474 505 | 1000 | 15 474 | 36.2x | mapsurface:20 |
+| `to_seq` | 17 505 029 | 1000 | 17 505 | 41.0x | mapsurface:20 |
 | `to_sorted_map` | **UNMEASURED** | | | | |
 | `update` | 56 345 |  |  | 132.0x | mapsurface:17 |
-| `values` | 5 899 587 | 1000 | 5 899 | 13.8x | mapsurface:19 |
+| `values` | 5 972 035 | 1000 | 5 972 | 14.0x | mapsurface:19 |
 | `values_seq` | **UNMEASURED** | | | | |
 | `zip_maps` | **UNMEASURED** | | | | |
 

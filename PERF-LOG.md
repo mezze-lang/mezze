@@ -14093,3 +14093,93 @@ operation is never read — and a row no instrument reads is clutter rather than
 measurement. The cost of a `bytes::map` genuinely depends on its mapper, the TSV
 has no column for that, and this entry is where the two numbers can be explained
 rather than averaged.
+
+#### `map::map_values` rebuilt a map whose keys had not changed — 2.58x, and a control that moved 15% for no reason
+
+`MezzeMap.mapValues`'s own doc said it:
+
+> *"The keys are unchanged, so only the values are rebuilt."*
+
+Its code did not. It walked the entries into two arrays — keys included — and
+called `fromEntries`, which pushes every key back through a trie builder and
+hashes it again. `MapNatives.mapValues` did the same thing independently. The
+keys were unchanged and already in the structure's own order, so all of that
+hashing was redundant; the comment described the intent and not the behaviour.
+
+THE CEILING, MEASURED FIRST, on the real structure with 1000 string keys, before
+anything was written:
+
+| | ps/element |
+|---|---|
+| REBUILD — `fromEntries`, what it did | 29 302 |
+| SHARED — node copy, keys shared by reference | **10 925** |
+
+2.68x, and a LOWER bound: the SHARED arm paid reflection per node while REBUILD
+ran compiled. That the rebuild's 29 302 landed beside the in-language
+`map::map_values` at 32 231 is what said the harness was measuring the real
+path rather than something adjacent to it.
+
+THE FIX. `MapStorage.withValues` takes the values in `values()` order and
+returns the same structure around them. Every storage shares its key storage BY
+REFERENCE: the two tries copy each node with a fresh values array and reuse the
+key array and both bitmaps, the flat and long-keyed storages hand their key
+array straight back, and the open-addressed one keeps its `keys` and `hashes`
+and writes values into the same slots. No key is hashed, none is compared, and
+the long-keyed storage does not re-sort either. The interface method has NO
+default — a default that fell back to a rebuild would leave a storage silently
+slow with nothing to notice it, so the compiler names any storage that has not
+answered.
+
+SELF-A/B, two builds from identical source. `withValues` is defined on all seven
+storages in BOTH arms, so the interface, the vtables and the class shapes cannot
+be what moves; only `MezzeMap.mapValues` and `MapNatives.mapValues` change which
+one they call.
+
+| row | rebuild | shared | |
+|---|---|---|---|
+| `map::map_values` | 31 032 553 ps | 12 084 297 | **2.57x** |
+| | 31 277 114 | 12 049 594 | **2.60x** |
+| `map::values` (control) | 6 067 153 | 5 972 035 | 1.6% |
+| `map::to_seq` (control) | 17 549 568 | 17 505 029 | 0.3% |
+| `map::filter` (control) | 21 170 862 | 21 291 029 | 0.6% |
+| `map::merge` (control) | 39 123 580 | 39 097 148 | 0.1% |
+
+`filter` and `merge` are the controls that matter, because both MUST still
+rebuild — a filter changes membership and a merge takes keys from both sides —
+so a change that only shares keys where the keys are unchanged has to leave them
+exactly where they were. They moved 0.6% and 0.1%. And 2.58x lands on the 2.68x
+the Java harness predicted, which is two instruments agreeing rather than one
+being believed.
+
+**AND THE FIRST READING OF THIS WAS CONTAMINATED, WHICH IS THE POINT OF THE
+CONTROLS.** Before doing the A/B I compared the new number against the baselines
+already in `perf/coverage.tsv` and got 2.67x. Those were measured on an earlier
+build. In the same table, `map::filter` read **15% FASTER** and `map::to_seq`
+**13% SLOWER** — and this change touches neither of them. Adding an abstract
+method to `MapStorage` alters all seven classes' shape and can perturb JIT
+inlining anywhere, so a cross-build comparison here cannot be read in either
+direction. Had the controls not been in the probe, "2.67x" and a free 15% on
+`filter` would both have been written down as real.
+
+`perf/coverage.tsv` now carries all five rows measured in one session on one
+build, so the next ranking compares like with like. The stale rows stay above
+them as history.
+
+Tests: `MapWithValuesTest`, 8 cases. They COUNT rather than compare, because the
+transform computes the same answer either way and a value-only test passes with
+the optimisation absent — a key that counts its own `hashCode` and `equals`
+calls observes the thing that actually changed. Two of them fail without the
+fix, which was established by reverting it and reading the output: the trie case
+and the flat-storage case. The others are invariant locks and the file says so
+and says why — a one-entry rebuild puts into the EMPTY storage, which has no
+existing key to hash or compare, so that case cannot discriminate however it is
+written. `MezzeMap.fromEntries` also never produces `LongKeyMapStorage` — small
+maps go to the flat storage and long-keyed ones to the long trie — so its
+`withValues` would have had no test at all; it is reachable through
+`ofLongKeys`, which one case now uses.
+
+A FIRST VERSION OF TWO OF THOSE TESTS WAS VACUOUS, and reverting the fix is what
+exposed it. They asserted `hashes == 0` for the flat and single-entry storages,
+and passed with the optimisation reverted: those storages find their slot by
+`equals`, not by hashing, so a rebuild never hashed anything at that size.
+Counting comparisons fixed the flat case.

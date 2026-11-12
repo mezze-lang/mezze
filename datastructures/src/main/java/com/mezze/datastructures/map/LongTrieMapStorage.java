@@ -314,6 +314,29 @@ public final class LongTrieMapStorage implements MapStorage {
     }
 
     @Override
+    public MapStorage withValues(Object[] newValues) {
+        if (size == 0) return this;
+        return new LongTrieMapStorage(mapNodeValues(root, newValues, new int[1]), size);
+    }
+
+    /**
+     * Copies the trie with new values, sharing every {@code long[] keys} array
+     * and both bitmaps.
+     *
+     * <p>Walks in {@link #values()} order — a node's own entries, then its
+     * children — so the flat {@code newValues} lines up as it goes.
+     */
+    private static Node mapNodeValues(Node n, Object[] newValues, int[] at) {
+        Object[] vs = new Object[n.values.length];
+        for (int i = 0; i < vs.length; i++) vs[i] = newValues[at[0]++];
+        Node[] kids = n.nodes.length == 0 ? n.nodes : new Node[n.nodes.length];
+        for (int i = 0; i < n.nodes.length; i++) {
+            kids[i] = mapNodeValues(n.nodes[i], newValues, at);
+        }
+        return new Node(n.dataMap, n.nodeMap, n.keys, vs, kids);
+    }
+
+    @Override
     public Object[] values() {
         Object[] out = new Object[size];
         collectValues(root, out, new int[1]);

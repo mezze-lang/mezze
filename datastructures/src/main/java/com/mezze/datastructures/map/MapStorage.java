@@ -53,6 +53,23 @@ public sealed interface MapStorage permits
     Object[] keys();
 
     /**
+     * THIS MAP'S STRUCTURE WITH NEW VALUES, sharing every key.
+     *
+     * <p>A value-only transform leaves the keys, the hashes and the shape
+     * untouched, so none of it needs recomputing. The implementations share
+     * their key storage BY REFERENCE and allocate only what holds values.
+     *
+     * <p>{@code newValues} is in the order {@link #values()} returns them, and
+     * must have exactly {@link #size()} elements. Callers get that order for
+     * free by mapping over {@code values()} itself.
+     *
+     * <p>Replaces a {@code fromEntries} rebuild, which pushed every key back
+     * through a builder and hashed it again: 29 302 ps/element against 10 925
+     * for the node copy, measured on 1000 string keys.
+     */
+    MapStorage withValues(Object[] newValues);
+
+    /**
      * Returns all values.
      */
     Object[] values();

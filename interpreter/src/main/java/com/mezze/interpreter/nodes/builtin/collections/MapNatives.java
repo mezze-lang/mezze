@@ -221,17 +221,30 @@ public final class MapNatives {
 
     public static MezzeMap mapValues(MezzeMap map, MezzeFunction mapper,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        // THE KEYS DO NOT CHANGE, so they are not touched: no key is copied
+        // into an array, no key is hashed, and the trie's shape is reused.
+        // This used to walk the entries into two arrays and call
+        // `fromEntries`, which pushes every key back through a builder —
+        // 29 302 ps/element against 10 925 for the structure copy, measured on
+        // 1000 string keys, and that ratio is a lower bound because the copy
+        // was measured through reflection.
+        //
+        // The guest calls stay HERE rather than moving inside a
+        // `MezzeMap.mapValues(fn)`, which is `@TruffleBoundary`: a boundary
+        // around a HOF's loop means the loop never compiles and the callback is
+        // never inlined into it, which is the point `BytesNatives.fold`'s
+        // comment makes. So the mapping runs in this frame and only the
+        // structure copy crosses.
+        //
+        // `withValues` wants the values in `values()` order, which is what
+        // mapping over `values()` itself produces.
         var ctx = ScalarCall.prepare1(mapper, "val");
-        int size = map.size();
-        Object[] outK = new Object[size];
-        Object[] outV = new Object[size];
-        int[] n = {0};
-        map.walkEntries((k, v) -> {
-            outK[n[0]] = k;
-            outV[n[0]] = ctx.call1(callNode, v);
-            n[0]++;
-        });
-        return MezzeMap.fromEntries(outK, outV, size);
+        Object[] vs = map.values();
+        Object[] outV = new Object[vs.length];
+        for (int i = 0; i < vs.length; i++) {
+            outV[i] = ctx.call1(callNode, vs[i]);
+        }
+        return map.withValues(outV);
     }
 
     /**

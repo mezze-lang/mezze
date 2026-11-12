@@ -110,3 +110,8 @@ seq	sort_by	2252493	2e4	100	seqsurface:8	2026-11-12
 seq	zip	1619792	3e4	100	seqsurface:9	2026-11-12
 seq	insert_at	284888	1e5	100	seqsurface:10	2026-11-12
 seq	sum	51057	5e5	100	seqsurface:11	2026-11-12
+map	map_values	12084297	2e4	1000	mapsurface:21	2026-11-13
+map	filter	21291029	2e4	1000	mapsurface:22	2026-11-13
+map	to_seq	17505029	5e4	1000	mapsurface:20	2026-11-13
+map	values	5972035	1e5	1000	mapsurface:19	2026-11-13
+map	merge	39097148	2e4	1000	mapsurface:24	2026-11-13
