@@ -12648,3 +12648,87 @@ numbers; `(x - 3) * 2` and `x * 2 - 3` do not. Swapping the two emitted stages
 fails five tests with exactly the inverted values — 14 becomes 17, 18 becomes
 15, 9 becomes 15 — and the commutative cases keep passing, which is why the
 non-commutative ones are there.
+
+#### Where every swept surface stands at the end of this session
+
+One row per process, min of the reports each row prints, sizes matched to each
+row's own cost. The iter rows are nanoseconds for 1e7 elements; divide by 10 for
+ps per element.
+
+**iter** — `sum` is the floor at 65 ps an element.
+
+| row | ns / 1e7 | ps/elem | vs `sum` | |
+|---|---|---|---|---|
+| `sum` | 654 211 | 65 | 1.0x | |
+| `reduce` | 890 876 | 89 | 1.4x | |
+| `count` | 1 196 277 | 120 | 1.8x | **was 7 430** |
+| `filter+fold` | 1 313 111 | 131 | 2.0x | |
+| `map 1 op` | 1 326 175 | 133 | 2.0x | |
+| `map 2 ops` | 1 641 434 | 164 | 2.5x | **was 578** |
+| `filter+map+fold` | 1 687 217 | 169 | 2.6x | |
+| `enumerate+map` | 4 212 155 | 421 | 6.5x | **was ~50 000** |
+| `record field in FOLDER` | 4 196 105 | 420 | 6.4x | **was 15 170** |
+| `any` / `find` / `all` | ~4 200 000 | ~420 | 6.5x | |
+| `chain+fold` | 5 536 467 | 554 | 8.5x | **was 13 777** |
+| `enumerate+fold` | 6 539 238 | 654 | 10x | **was 75 049** |
+| `filter+to_seq` | 17 193 521 | 1 719 | 26x | materialisation |
+| `flat_map+fold` | 417 133 027 | 41 713 | **637x** | OPEN |
+| `zip+fold` | 732 837 787 | 73 284 | **1 120x** | OPEN |
+
+Everything on this surface is now between 1.0x and 10x of the floor except
+three rows. `filter+to_seq` writes 5M longs into a growing builder, so 1.7 ns an
+element is work rather than a cliff. The other two are features, not fixes:
+
+  - **`zip` needs two cursors in one loop.** A stage sees one element at a time
+    and a zip has two sources. The bench row zips two RANGES, which could be
+    rewritten (zipping a 0-based range with anything IS `enumerate`, which now
+    fuses), but that serves the synthetic row and not the real shape, which is
+    two collections. Left alone deliberately.
+  - **`flat_map` needs a nested loop.** `fold(flat_map(src,f), init, g)` is
+    `fold(src, init, {acc,x} -> fold(f(x), acc, g))`, which is the same trick
+    the chain rewrite used — except it needs a NEW lambda minted and registered
+    rather than existing nodes reshuffled, so it is not a reshuffle.
+
+**coresurface** — a counted loop is 211 ps.
+
+| row | ps/iter | |
+|---|---|---|
+| control / option match / variant match | 211 / 214 / 214 | at the floor |
+| tier control | 416 | |
+| effect op | 541 | |
+| direct call / closure call / ability call | 625 / 630 / 628 | all the same |
+| dict call, top-level loop | 622 | |
+| **dict call, do-block loop** | **3 004** | 4.8x, OPEN — was 25 321 |
+
+The four spellings of a call are within 1% of each other, which is the answer to
+the question `ability_dispatch` was built to ask and got wrong by 5x.
+
+**effectsurface** — a counted loop is 233 ps.
+
+| row | ps/iter | |
+|---|---|---|
+| op, one install | 1 165 | |
+| op AFTER churn | 1 888 | |
+| install/iter | 20 217 | **was 54 044** |
+| install/iter, no params | 20 213 | **was 37 056** |
+| abort/iter | 86 050 | OPEN, diffuse |
+
+`abort` is the largest single number left in the system and it has no cliff in
+it: its profile is spread across the churned perform tier re-resolving per call,
+`ThreadLocal.get`, and the unwind, with the exception itself nowhere — it is
+already stackless.
+
+**dsmore** — `deque::size` is 430 ps.
+
+| row | ps/op | |
+|---|---|---|
+| `deque::first` | 2 496 | was 5 449 |
+| `deque::get by index` | 3 308 | was 8 557 |
+| `sorted_map::insert` | 186 859 | O(log n) over 1 000 keys |
+
+**async** is JDK-bound: Loom's own floor is 5.3 µs a spawn and Mezze is 1.9x it.
+
+WHAT IS OPEN, ranked: `zip` 1 120x and `flat_map` 637x (both features),
+`abort/iter` 370x (diffuse), `filter+to_seq` 26x (work, not a cliff), the
+do-block dict call 4.8x, and the HOF-with-two-polymorphic-callbacks cliff at
+11.6x whose cause survived five hypotheses and is module-sensitive.
