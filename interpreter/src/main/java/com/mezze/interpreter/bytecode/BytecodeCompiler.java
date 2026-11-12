@@ -5326,6 +5326,29 @@ public final class BytecodeCompiler {
                     if (dbg) System.err.println("[chain-canon-emit] reject: unclassifiable map lambda");
                     return false;
                 }
+                // TWO OPERATIONS ARE TWO MAPS, and that is the difference
+                // between vectorised and not. `classifyUnaryLiteralLambda` reads
+                // one operation; `{x} -> x * 2 + 1` is two, so the stage became a
+                // call (or, since the tree tier, an inline tree) and the pipeline
+                // left the vectorised FLP path: 132 ps an element against 576.
+                //
+                // But FLP already takes SEVERAL map stages — `FLP_MAX_EXTRA_MAPS`
+                // is 2, packed into an extras table as (op, literal) pairs — so
+                // the mapper does not need a wider kernel, it needs to be two
+                // stages instead of one. `x * 2 + 1` IS `map(x * 2).map(+ 1)`.
+                //
+                // No lambda is minted: `ClassifiedStage.MapInline` carries an op
+                // and a literal, not a function, so the pair is built directly.
+                // This is the same decomposition the folder path already does for
+                // `acc + x * x`, which its own comment describes as "map(f) +
+                // fold(OP)".
+                var twoOp = (shape != null && shape.callHash == null)
+                        ? null
+                        : classifyMapTwoOp(mapStage.getF(), elemIsEnumRecord);
+                if (twoOp != null) {
+                    classifiedStages.addAll(twoOp);
+                    continue;
+                }
                 var mapTree = treeFirst;
                 if (mapTree != null) {
                     classifiedStages.add(mapTree);
@@ -6644,6 +6667,55 @@ public final class BytecodeCompiler {
      * one-operation shape matcher has machinery for that in its `rhsNode`
      * path; a tree does not, so a capturing mapper keeps the old path.
      */
+    /**
+     * `{x} -> x <op1> lit1 <op2> lit2` as TWO one-operation map stages, outermost
+     * first — or null. See the call site for why two stages beat one tree.
+     *
+     * <p>LEFT-LEANING AND LITERAL-ONLY, deliberately. The parameter must be the
+     * LEFT operand at each level, because `MapInline` means `x <op> lit` and
+     * `lit - x` is not that; a captured or dynamic operand cannot ride in FLP's
+     * extras table at all (the emitter's child list is fixed), so only a literal
+     * qualifies. Anything else falls through to the tree tier below, which is
+     * correct and merely scalar.
+     *
+     * <p>An enumerate record is refused outright: these stages are packed as
+     * arithmetic on a long, and the `{i, val}` resolution lives in the tree
+     * emitter.
+     */
+    private java.util.List<ClassifiedStage> classifyMapTwoOp(
+            MakeLambdaIR lambda, boolean elemIsEnumRecord) {
+        if (language == null || elemIsEnumRecord) return null;
+        if (!lambda.getCaptures().isEmpty()) return null;
+        var ir = language.lookupFunctionIR(lambda.getFunctionHash());
+        if (ir == null || ir.getParamSlots().size() != 1
+                || !ir.getLocalSlots().isEmpty()
+                || !ir.getCaptureSlots().isEmpty()) {
+            return null;
+        }
+        int paramSlot = ir.getCaptureSlots().size();
+        if (!(ir.getBody() instanceof InlineBinaryOpIR outer)) return null;
+        if (!isFlpArithOp(outer.getOp())) return null;
+        if (!(outer.getRight() instanceof LongLitIR outerLit)) return null;
+        if (!(outer.getLeft() instanceof InlineBinaryOpIR inner)) return null;
+        if (!isFlpArithOp(inner.getOp())) return null;
+        if (!(inner.getRight() instanceof LongLitIR innerLit)) return null;
+        if (!(inner.getLeft() instanceof ReadLocalIR rl) || rl.getSlot() != paramSlot) {
+            return null;
+        }
+        // Outer-to-inner, which is the order `classifiedStages` is built in: the
+        // operation applied LAST comes FIRST.
+        return java.util.List.of(
+            new ClassifiedStage.MapInline(outer.getOp(), outerLit.getValue(), null, false, false),
+            new ClassifiedStage.MapInline(inner.getOp(), innerLit.getValue(), null, false, false));
+    }
+
+    private static boolean isFlpArithOp(InlineOp op) {
+        return switch (op) {
+            case ADD, SUB, MUL, DIV, MOD -> true;
+            default -> false;
+        };
+    }
+
     private ClassifiedStage classifyMapTree(MakeLambdaIR lambda, boolean elemIsEnumRecord) {
         if (language == null) return null;
         if (!lambda.getCaptures().isEmpty()) return null;

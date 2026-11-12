@@ -65,6 +65,86 @@ class MapTreeStageFusionTest {
     )
 
     /**
+     * TWO OPERATIONS ARE EMITTED AS TWO MAP STAGES, not as one tree, because
+     * `FLP_MAX_EXTRA_MAPS` is 2 and a pair of one-operation stages reaches the
+     * VECTORISED loop while a tree does not: `{x} -> x * 2 + 1` went from
+     * 5 565 888 ns to 1 813 544, **3.07x**, landing within 30% of the
+     * one-operation row.
+     *
+     * A DECOMPOSITION CAN INVERT, and only a non-commutative operator shows it.
+     * `x * 2 + 1` reads the same whichever way the two stages run for many
+     * inputs, so these cases use SUB and DIV, where applying them in the wrong
+     * order gives a different number: 10 - 3 then * 2 is 14, while * 2 then
+     * - 3 is 17.
+     */
+    @Test
+    fun `a subtract then a multiply keep their order`() = assertEquals(
+        14L,
+        eval(
+            """
+            use std::collections::iter
+            iter::fold {
+              it = iter::map { it = iter::range { start = 10, end = 11 }, f = {x} -> (x - 3) * 2 },
+              init = 0,
+              f = {acc, x} -> acc + x,
+            }
+            """,
+        ),
+    )
+
+    /** The same two operations the other way round: 10 * 2 - 3 is 17. */
+    @Test
+    fun `a multiply then a subtract keep their order`() = assertEquals(
+        17L,
+        eval(
+            """
+            use std::collections::iter
+            iter::fold {
+              it = iter::map { it = iter::range { start = 10, end = 11 }, f = {x} -> x * 2 - 3 },
+              init = 0,
+              f = {acc, x} -> acc + x,
+            }
+            """,
+        ),
+    )
+
+    /** Integer DIVISION is the least forgiving order: (20 / 3) + 1 is 7,
+     *  while 20 / (3 + 1) would be 5 and (20 + 1) / 3 is 7 by accident — so
+     *  the subtract pair above is the one that pins it, and this pins the
+     *  divide's own placement. */
+    @Test
+    fun `a divide then an add keep their order`() = assertEquals(
+        7L,
+        eval(
+            """
+            use std::collections::iter
+            iter::fold {
+              it = iter::map { it = iter::range { start = 20, end = 21 }, f = {x} -> x / 3 + 1 },
+              init = 0,
+              f = {acc, x} -> acc + x,
+            }
+            """,
+        ),
+    )
+
+    /** Over a RANGE OF ELEMENTS, so the decomposed pair runs in the fused loop
+     *  rather than once: (x - 1) * 3 for 1..4 is 0 + 3 + 6 = 9. */
+    @Test
+    fun `a decomposed mapper over many elements`() = assertEquals(
+        9L,
+        eval(
+            """
+            use std::collections::iter
+            iter::fold {
+              it = iter::map { it = iter::range { start = 1, end = 4 }, f = {x} -> (x - 1) * 3 },
+              init = 0,
+              f = {acc, x} -> acc + x,
+            }
+            """,
+        ),
+    )
+
+    /**
      * THE ROW THIS EXISTS FOR: a mapper over an enumerate's record, reading
      * both of its fields. Values 10..14 with indices 0..4, so `val + i` is
      * 10,12,14,16,18 summing to 70. If the two resolutions were swapped the
