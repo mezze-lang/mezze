@@ -12962,3 +12962,46 @@ the `asyncsurface` mistake in miniature.
 A measurement is added by appending to `coverage.tsv` and re-running the script.
 A number that MOVED is a second line with a later date, never an edit, so a
 regression is visible in the file rather than only in a memory of it.
+
+#### Polyglot, measured for the first time on this branch — and a 187 ns gap closed
+
+`bench/cases/polyglot_interop` did not build: its `mezze-js` dependency was
+declared as `github:mezze-lang/mezze-js@0.5.1` and absent. Placing the local
+0.5.1 package at `.deps/mezze/mezze_js-0.5.1/` and running `mez sync` (two
+GraalJS maven coordinates) makes all three polyglot cases run.
+
+ONE CROSSING, 4M iterations, best of 5, against the numbers in the bench's own
+header from 2026-09-22:
+
+| row | then | now |
+|---|---|---|
+| control (no guest) | 252 ns | **16 ns** |
+| read, matched spelling | 424 ns | **165 ns** |
+| read, dot-chain | 509 ns | **161 ns** |
+| **chain − matched** | **+85 ns** | **−4 ns** |
+| index | 544 ns | **173 ns** |
+| invoke | 855 ns | **262 ns** |
+
+**The dot-chain penalty is gone.** It is recorded in memory as "the polyglot
+dot-chain costs 187 ns more than the matched spelling" and it motivated a
+numbered task series; the two spellings now agree to within noise. The second
+step of that chain is an ability method on `Result`, and an ability call now
+costs what a direct call costs — so this was collected by the dispatch and
+monomorphisation work rather than aimed at. A crossing is ~149 ns net of the
+control.
+
+FINE CROSSING IS THE TRAP, and it is the one number here worth acting on:
+
+| `polyglot_array_read`, n=1 000 | per-element | bulk | |
+|---|---|---|---|
+| FOREIGN | 77 us | 12 us | **6.4x** |
+| NUMERIC (`at` + `int`) | 142 us | `to_ints` 22 us | **6.5x** |
+
+Reading a guest array one element at a time is ~6.5x reading it in bulk, at
+every size tested. `polyglot_seq_crossing` pushes a seq INTO the guest via
+source text at 48 us per crossing at n=1 000 — about 48 ns an element, which is
+what building JS source costs.
+
+None of this is optimised; it is the baseline that did not exist. And three
+cases needing `.deps` wiring by hand means no automated sweep has ever included
+them.

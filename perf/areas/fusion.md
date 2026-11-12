@@ -1,10 +1,11 @@
 <!-- Prose, not generated: this surface's work is not a list of
      operations. PERF-LOG.md has the full story of each line. -->
 
-# Fusion and pipelines
+# Fusion — the machinery
 
-The largest category on this branch. Per-operation status for `iter` lives in
-[datastructures/iter.md](../datastructures/iter.md); this page is the machinery.
+Per-operation status for `iter` is in
+[datastructures/iter.md](../datastructures/iter.md); the abstraction itself is
+[iter](iter.md). This page is the canonicalizer and the emitted loop.
 
 **Floor**: a fused `iter::fold` over a range is **65 ps/element**.
 
@@ -34,21 +35,25 @@ The largest category on this branch. Per-operation status for `iter` lives in
 | a dot-chained pipeline fuses; one split across a call fuses | |
 | fusion was making set and deque SEVEN TIMES slower | guarded |
 
+## Two rules this surface produced
+
+- **A tier that is faster than ONE of the paths it sits between is a regression
+  if it is reached before the other.** Preferring the expression tree over
+  `MapInline` cost 3.3x by leaving the vectorised loop.
+- **A hand-written ceiling probe can be a FLOOR.** The sound per-site handler
+  cache beat its own probe, 1.61x against 1.47x, because the probe kept a
+  boundary the real specialization removes.
+
 ## Open
 
-| row | ps/elem | vs floor |
-|---|---|---|
-| `zip+fold` | 73 284 | **1 120x** |
-| `flat_map+fold` | 41 713 | **637x** |
-| `filter+to_seq` | 1 719 | 26x — writing 5M longs, work not a cliff |
-
-`zip` needs two cursors in one loop; a stage sees one element and a zip has two
-sources. `flat_map`'s rewrite (`fold(src, init, {acc,x} -> fold(f(x), acc, g))`)
-is the chain trick again, except it needs a lambda MINTED rather than existing
-nodes reshuffled.
-
-Two rules this surface produced: **a tier that is faster than one of the paths
-it sits between is a regression if it is reached before the other** (preferring
-the tree over `MapInline` cost 3.3x by leaving the vectorised loop), and a
-hand-written ceiling probe can be a FLOOR — the sound per-site handler cache
-beat its own probe 1.61x to 1.47x.
+- `zip` **1 120x** (needs two cursors in one loop) and `flat_map` **637x**
+  (needs a lambda minted, not nodes reshuffled).
+- **Bytes reaches exactly one fused shape.** The emitter's own comment says it
+  "refuses any OTHER bytes shape", which is why `bytes::map` runs natively at
+  4 484 ps a byte against `bytes::fold`'s 148.
+- **`isEffectSafe` is a stub returning `true`** — see
+  [iter-with-effects](iter-with-effects.md).
+- `FUSED_EMITS` records nothing for an `iter` chain, and a typechecker lowering
+  test lowers the stdlib FROM SOURCE where it fuses either way. Neither can tell
+  a fused chain from a native one, so the only honest evidence is a real
+  `mez build` A/B.

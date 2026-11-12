@@ -33,13 +33,43 @@ turned out to be, and what was reverted. These pages are the index.
 |---|---|
 | [function-calls](areas/function-calls.md) | four call spellings at parity, 617-630 ps; one open cliff |
 | [dispatch-abilities](areas/dispatch-abilities.md) | an ability call costs a direct call; dictionaries were the cost |
+| [pattern-matching](areas/pattern-matching.md) | matching is AT the floor; constructing the scrutinee was the cost |
+| [records](areas/records.md) | unboxed at arity 1-4; free when they do not escape |
+| [variants](areas/variants.md) | 64 to 48 bytes; elided unless something stands before the match |
+| [fusion](areas/fusion.md) | the canonicalizer: 1503x down to 5.58x, three rows open |
+| [iter](areas/iter.md) | the lazy abstraction, 65 ps/elem floor; cursors unmeasured |
+| [iter-with-effects](areas/iter-with-effects.md) | **UNMEASURED**, and `isEffectSafe` is a stub returning true |
 | [effects](areas/effects.md) | install 2.73x this branch; `abort` is the largest number left |
-| [continuation](areas/continuation.md) | `resume` costs what its value costs; the abort unwind is open |
+| [continuation](areas/continuation.md) | `resume` costs what its value costs; MezzeSuspend has no row |
 | [loom-async-parallel](areas/loom-async-parallel.md) | JDK-bound: Loom's floor is 5.3 us, Mezze is 1.9x it |
-| [fusion-iter](areas/fusion-iter.md) | the pipeline surface, 1.0-10x of its floor with three exceptions |
-| [records-variants](areas/records-variants.md) | unboxed at arity 1-4; variants 64 to 48 bytes |
+| [polyglot](areas/polyglot.md) | a crossing is ~149 ns; the dot-chain penalty CLOSED; fine crossing 6.5x |
+| [module-loading](areas/module-loading.md) | dynamic, by hash; ~55 ms per performer DEFERRED and unmeasured |
 | [strings](areas/strings.md) | split 1.88x, interpolation exact; case conversion is vectorisation |
 | [startup](areas/startup.md) | 820 ms jar, 78 ms native, 19 ms with -O2; 168 ms located, not landed |
+
+## Not yet a surface
+
+No page, because no measurement exists. Each is a place where a
+first row has historically been worth 50x — `to_hex` was 56.7x and
+was "found by the type's first benchmark".
+
+| | |
+|---|---|
+| comptime / macros | `perform ComptimeEvalCodebase`, macro expansion, codebase queries |
+| codecs | JSON and friends: encode, decode, the walker |
+| failure paths | `Result` propagation, exception cost, `try`/`catch` shapes |
+| mut | 93 ops are on the scalar ABI and 28 past the boundary, with no area page |
+| STM | transactions, retry, contention |
+| IO and filesystem | seven effects, 34 operations, memfs vs real |
+| HTTP and db | Helidon, pooling, JDBC; one locale fix is the only touch |
+| arithmetic | Int is a JVM long and overflow RAISES — the check is unpriced |
+| Char and Str | a `Char` is a one-character `Str` at runtime |
+| datetime | |
+| property / sampling | `std::property` parameterized performers |
+| scopes / cancellation | structured concurrency teardown |
+| typecheck and compile time | no rows on this branch |
+| LSP latency | hover, completion, diagnostics |
+| native build | image build time and binary size |
 
 ## Regenerating
 
