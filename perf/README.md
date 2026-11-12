@@ -165,6 +165,7 @@ is why `iter`-with-effects and the async primitives have no numbers.
 | [loom-async-parallel](areas/loom-async-parallel.md) | JDK-bound: Loom's floor is 5.3 us, Mezze is 1.9x it |
 | [polyglot](areas/polyglot.md) | a crossing is ~149 ns; the dot-chain penalty CLOSED; fine crossing 6.5x |
 | [module-loading](areas/module-loading.md) | dynamic, by hash; ~55 ms per performer DEFERRED and unmeasured |
+| [comptime-macros](areas/comptime-macros.md) | macros are real and now FREE: 2.2 ms a call to 0.01 ms, 5.8 s fixed to nothing |
 | [strings](areas/strings.md) | split 1.88x, interpolation exact; case conversion is vectorisation |
 | [startup](areas/startup.md) | 820 ms jar, 78 ms native, 19 ms with -O2; 168 ms located, not landed |
 
@@ -176,7 +177,6 @@ was "found by the type's first benchmark".
 
 | | |
 |---|---|
-| comptime / macros | `perform ComptimeEvalCodebase`, macro expansion, codebase queries |
 | failure paths | `Result` propagation, exception cost, `try`/`catch` shapes |
 | STM | transactions, retry, contention |
 | IO and filesystem | seven effects, 34 operations, memfs against real |

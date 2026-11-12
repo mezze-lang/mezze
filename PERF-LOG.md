@@ -13045,3 +13045,44 @@ why `iter`-with-effects, the async primitives (`channel`, `agent`, `atom`,
 
 78 module pages now exist under `perf/{datastructures,core,numbers,effects,codecs,meta}/`,
 one per stdlib module, each listing every operation as measured or UNMEASURED.
+
+#### Macros exist, and their compile-time cost collapsed without anyone aiming at it
+
+Asked whether Mezze even has macros: it does, they are on main (`b0a5aa3e9`,
+`9c0f86daf`), `MacroExpansionTest` is 21 tests and passes, and `name!( … )`
+parses through `macroCallAfter` into a `ParsedMacroCall` that `MacroExpander`
+expands from `ModuleResolver.stampGroup` BEFORE identities are taken — so a
+declaration's hash covers its expansion.
+
+`bench/scripts/macros.sh` already existed and measures what `mez check` pays for
+N macro calls against the same code written by hand, as a slope and a fixed cost
+rather than one diluted total. Its first reading is in the commit that added it.
+
+| | 2026-10-22 | now |
+|---|---|---|
+| per call | **2.2 ms** | **0.01 ms** |
+| fixed | **5.8 s** | **−1 ms** |
+
+| calls | with macros | written by hand |
+|---|---|---|
+| 10 | 418 ms | 419 ms |
+| 200 | 425 ms | 464 ms |
+| 1 000 | 449 ms | 445 ms |
+
+**A thousand macro calls are indistinguishable from writing the code out**, and
+the 5.8 s fixed cost — "most of it loading `std::syntax`'s fully expanded types
+and starting the interpreter" — is gone. The −1 ms is the macro column coming
+out faster than the hand column at the smallest N, which is noise and the honest
+way to say there is no measurable fixed cost left.
+
+Nobody aimed at this. It is the second thing on this branch found to have fixed
+itself as a side effect, the first being the polyglot dot-chain penalty closing
+because an ability call now costs a direct call. Both were found by running a
+bench that already existed and had never been re-run.
+
+What is still unpriced: the expansion CACHE is keyed on (macro decl hash, input
+text), so the 0.01 ms slope is a cache HIT and a cold miss per distinct input is
+not separated; editor latency while typing is not measured at all; and
+`std::syntax`'s 29 operations, `std::codebase`'s 2 and `std::comptime`'s 1 have
+no per-operation rows, though `SyntaxRoundTripTest` covers 86 files and 2 542
+declarations for correctness.
