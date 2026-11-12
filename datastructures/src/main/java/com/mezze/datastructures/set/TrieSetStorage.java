@@ -45,26 +45,6 @@ public final class TrieSetStorage implements SetStorage {
         this.size = size;
     }
 
-    /**
-     * Bulk build from a collection — the persistent counterpart of
-     * the deleted table's bulk builder, which the Set's transforms
-     * ({@code map}, {@code filter}, {@code flatMap}) used to call.
-     *
-     * <p>That mattered more than it looks: rerouting only the SmallFlat
-     * promotion left the transforms building an open-addressed table, so a
-     * MAPPED set still carried BUG 38 — its base acquired an element that was
-     * only added to a set derived from it. A test found that rather than an
-     * argument; see SetFromCollectionSoundnessTest.
-     *
-     * <p>O(n log32 n) where the table was O(n). Accepted: it runs once per
-     * transform, and the alternative is a structure that silently changes under
-     * the program.
-     */
-    public static SetStorage fromCollection(java.util.Collection<?> items) {
-        SetStorage out = new TrieSetStorage();
-        for (Object e : items) out = out.add(e);
-        return out;
-    }
     sealed interface Node permits Bitmap, Collision {}
 
     static final class Bitmap implements Node {
@@ -326,5 +306,128 @@ public final class TrieSetStorage implements SetStorage {
         Bitmap b = (Bitmap) n;
         for (Object e : b.elems) out[at[0]++] = e;
         for (Node child : b.nodes) collect(child, out, at);
+    }
+    // ──────────────────────────── bulk build ─────────────────────────
+
+    /**
+     * BUILDS A TRIE IN PLACE, for the paths that rebuild a whole set.
+     *
+     * <p>The long-keyed set's {@code Builder} documents why. This one carries
+     * the two things it does not need: elements are compared with
+     * {@code Objects.equals}, and {@code mix32} is NOT a bijection, so two
+     * distinct elements can agree on all 32 bits and must end up in a
+     * {@link Collision}. When that happens the slot stops being a builder node
+     * and holds an immutable {@code Node}, and later elements reaching it go
+     * through the ordinary persistent {@link #insert}.
+     */
+    public static final class Builder {
+
+        /** A node under construction: slot-indexed, so no slot ever moves. */
+        private static final class Mut {
+            int dataMap;
+            int nodeMap;
+            final Object[] elems = new Object[1 << BITS];
+            /**
+             * A child is either another {@code Mut} or a frozen {@code Node}
+             * standing for a collision subtree. Allocated on the first child.
+             */
+            Object[] kids;
+        }
+
+        private final Mut root = new Mut();
+        private int size;
+
+        /** Adds an element. Already present is a no-op, as the adds were. */
+        public void add(Object elem) {
+            int hash = TrieHash.mix32(elem);
+            Mut n = root;
+            for (int shift = 0; ; shift += BITS) {
+                int slot = (hash >>> shift) & MASK;
+                int bit = 1 << slot;
+
+                if ((n.nodeMap & bit) != 0) {
+                    Object kid = n.kids[slot];
+                    if (kid instanceof Mut mut) {
+                        n = mut;
+                        continue;
+                    }
+                    // A frozen collision subtree: the persistent path owns it.
+                    // The shift passed below is unobservable — a Collision is
+                    // made only once the 32 bits are spent, so every element
+                    // that can arrive here shares its full hash.
+                    int[] grew = new int[1];
+                    n.kids[slot] = insert((Node) kid, elem, hash, shift + BITS, grew);
+                    size += grew[0];
+                    return;
+                }
+
+                if ((n.dataMap & bit) == 0) {
+                    n.dataMap |= bit;
+                    n.elems[slot] = elem;
+                    size++;
+                    return;
+                }
+
+                Object had = n.elems[slot];
+                if (Objects.equals(had, elem)) {
+                    return;
+                }
+
+                int hadHash = TrieHash.mix32(had);
+                int down = shift + BITS;
+
+                if (n.kids == null) {
+                    n.kids = new Object[1 << BITS];
+                }
+                n.dataMap ^= bit;
+                n.nodeMap |= bit;
+                n.elems[slot] = null;
+
+                if (down >= HASH_BITS) {
+                    // The hash is spent and the elements differ: one Collision
+                    // node holds both, exactly as `merge` would build it.
+                    n.kids[slot] = merge(had, hadHash, elem, hash, down);
+                    size++;
+                    return;
+                }
+
+                Mut kid = new Mut();
+                int hs = (hadHash >>> down) & MASK;
+                kid.dataMap = 1 << hs;
+                kid.elems[hs] = had;
+                n.kids[slot] = kid;
+                n = kid;
+
+                // Moving the sitting element down is not a size change: the new
+                // one is counted by whichever branch finally places it.
+            }
+        }
+
+        /** The finished storage. The builder is spent afterwards. */
+        public SetStorage build() {
+            if (size == 0) {
+                return new TrieSetStorage();
+            }
+            return new TrieSetStorage(freeze(root), size);
+        }
+
+        /** Compacts a slot-indexed node into bitmap order, once. */
+        private static Node freeze(Mut m) {
+            int nd = Integer.bitCount(m.dataMap);
+            int nn = Integer.bitCount(m.nodeMap);
+            Object[] elems = nd == 0 ? NOTHING : new Object[nd];
+            Node[] nodes = nn == 0 ? NO_NODES : new Node[nn];
+
+            int j = 0;
+            for (int dm = m.dataMap; dm != 0; dm &= dm - 1) {
+                elems[j++] = m.elems[Integer.numberOfTrailingZeros(dm)];
+            }
+            int k = 0;
+            for (int nm = m.nodeMap; nm != 0; nm &= nm - 1) {
+                Object kid = m.kids[Integer.numberOfTrailingZeros(nm)];
+                nodes[k++] = kid instanceof Mut mut ? freeze(mut) : (Node) kid;
+            }
+            return new Bitmap(m.dataMap, m.nodeMap, elems, nodes);
+        }
     }
 }

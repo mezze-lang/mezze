@@ -273,4 +273,113 @@ public final class LongTrieSetStorage implements SetStorage {
         }
         return out;
     }
+    // ──────────────────────────── bulk build ─────────────────────────
+
+    /**
+     * BUILDS A TRIE IN PLACE, for the paths that rebuild a whole set.
+     *
+     * <p>The map's {@code LongTrieMapStorage.Builder} documents the reasoning
+     * in full; it is the same here with no values to carry. {@link #addLong} is
+     * persistent, so it allocates a node at every level of the path it touches
+     * — right for an update whose base survives, wasted for a rebuild that
+     * discards the base on the next element.
+     *
+     * <p>A builder node indexes its 32 slots DIRECTLY rather than keeping them
+     * compact, so adding an element is one array store and a bitmap OR.
+     * {@link #build()} compacts each node once into the immutable shape the
+     * readers expect.
+     *
+     * <p>Single-threaded and single-use, and for a REBUILD rather than for
+     * {@code add}: the slot arrays make a builder node wider than the node it
+     * becomes, and that width dies with the builder.
+     */
+    public static final class Builder {
+
+        /** A node under construction: slot-indexed, so no slot ever moves. */
+        private static final class Mut {
+            int dataMap;
+            int nodeMap;
+            final long[] elems = new long[1 << BITS];
+            /** Allocated on the first child, because most nodes never get one. */
+            Mut[] kids;
+        }
+
+        private final Mut root = new Mut();
+        private int size;
+
+        /** Adds an element. Already present is a no-op, as the adds were. */
+        public void add(long elem) {
+            long hash = TrieHash.mix64(elem);
+            Mut n = root;
+            for (int shift = 0; ; shift += BITS) {
+                int slot = (int) ((hash >>> shift) & MASK);
+                int bit = 1 << slot;
+
+                if ((n.nodeMap & bit) != 0) {
+                    n = n.kids[slot];
+                    continue;
+                }
+
+                if ((n.dataMap & bit) == 0) {
+                    n.dataMap |= bit;
+                    n.elems[slot] = elem;
+                    size++;
+                    return;
+                }
+
+                long had = n.elems[slot];
+                if (had == elem) {
+                    return;
+                }
+
+                // Two distinct elements want one slot: push the sitting one a
+                // level down and go round again. `mix64` is a bijection, so
+                // they must part within the 64 bits.
+                if (shift + BITS >= 64) {
+                    throw new IllegalStateException(
+                        "two distinct long elements with an identical 64-bit mix — "
+                            + "TrieHash.mix64() is not a bijection");
+                }
+                Mut kid = new Mut();
+                int hs = (int) ((TrieHash.mix64(had) >>> (shift + BITS)) & MASK);
+                kid.dataMap = 1 << hs;
+                kid.elems[hs] = had;
+
+                if (n.kids == null) {
+                    n.kids = new Mut[1 << BITS];
+                }
+                n.dataMap ^= bit;
+                n.nodeMap |= bit;
+                n.kids[slot] = kid;
+                n.elems[slot] = 0L;
+                n = kid;
+            }
+        }
+
+        /** The finished storage. The builder is spent afterwards. */
+        public SetStorage build() {
+            if (size == 0) {
+                return new LongTrieSetStorage();
+            }
+            return new LongTrieSetStorage(freeze(root), size);
+        }
+
+        /** Compacts a slot-indexed node into bitmap order, once. */
+        private static Node freeze(Mut m) {
+            int nd = Integer.bitCount(m.dataMap);
+            int nn = Integer.bitCount(m.nodeMap);
+            long[] elems = nd == 0 ? NO_ELEMS : new long[nd];
+            Node[] nodes = nn == 0 ? NO_NODES : new Node[nn];
+
+            int j = 0;
+            for (int dm = m.dataMap; dm != 0; dm &= dm - 1) {
+                elems[j++] = m.elems[Integer.numberOfTrailingZeros(dm)];
+            }
+            int k = 0;
+            for (int nm = m.nodeMap; nm != 0; nm &= nm - 1) {
+                nodes[k++] = freeze(m.kids[Integer.numberOfTrailingZeros(nm)]);
+            }
+            return new Node(m.dataMap, m.nodeMap, elems, nodes);
+        }
+    }
 }

@@ -34,6 +34,14 @@ map	filter	24772526	2e3	1000	mapsurface:22	2026-11-12
 map	merge	39819894	2e3	1000	mapsurface:24	2026-11-12
 set	contains	6811	1e6	1	mapsurface:6	2026-11-12
 set	insert	12764	1e6	1	mapsurface:7	2026-11-12
+set	filter	16686747	1e4	1000	mapsurface:26	2026-11-12
+set	map	24720299	1e4	1000	mapsurface:27	2026-11-12
+set	union	30464935	1e4	1000	mapsurface:28	2026-11-12
+set	intersection	14066322	1e4	1000	mapsurface:29	2026-11-12
+set	difference	14099220	1e4	1000	mapsurface:30	2026-11-12
+set	symmetric_difference	30165541	1e4	1000	mapsurface:31	2026-11-12
+set	to_seq	4288408	1e4	1000	mapsurface:32	2026-11-12
+set	from_seq	13955363	1e4	1000	mapsurface:33	2026-11-12
 bytes	size	657	1e6	1	bytesurface:1	2026-11-12
 bytes	is_empty	354	1e6	1	bytesurface:2	2026-11-12
 bytes	get	7674	1e6	1	bytesurface:3	2026-11-12

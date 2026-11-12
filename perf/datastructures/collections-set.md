@@ -4,7 +4,7 @@
 
 # set
 
-`std::collections::set` · 52 operations · 8 with a bench row · 2 with a number
+`std::collections::set` · 52 operations · 14 with a bench row · 10 with a number
 
 | op | ps/op | elems | ps/elem | vs floor | bench |
 |---|---|---|---|---|---|
@@ -15,10 +15,10 @@
 | `contains` | 6 811 |  |  | — | mapsurface:6 |
 | `contains_with_evidence` | **UNMEASURED** | | | | |
 | `count` | **UNMEASURED** | | | | |
-| `difference` | **UNMEASURED** | | | | |
+| `difference` | 14 099 220 | 1000 | 14 099 | — | mapsurface:30 |
 | `empty` | — | | | | called in mapsurface, no number |
 | `equals` | **UNMEASURED** | | | | |
-| `filter` | **UNMEASURED** | | | | |
+| `filter` | 16 686 747 | 1000 | 16 686 | — | mapsurface:26 |
 | `filter_map` | **UNMEASURED** | | | | |
 | `find` | **UNMEASURED** | | | | |
 | `flat_map` | **UNMEASURED** | | | | |
@@ -26,19 +26,19 @@
 | `for_each` | **UNMEASURED** | | | | |
 | `from_iter` | **UNMEASURED** | | | | |
 | `from_list` | **UNMEASURED** | | | | |
-| `from_seq` | — | | | | called in allocsurface, collfold, fuseall, seq_reconstruct, no number |
+| `from_seq` | 13 955 363 | 1000 | 13 955 | — | mapsurface:33 |
 | `from_seq_with_evidence` | **UNMEASURED** | | | | |
 | `from_sorted_set` | **UNMEASURED** | | | | |
 | `group_by` | **UNMEASURED** | | | | |
 | `insert` | 12 764 |  |  | — | mapsurface:7 |
 | `insert_all` | **UNMEASURED** | | | | |
 | `insert_with_evidence` | **UNMEASURED** | | | | |
-| `intersection` | **UNMEASURED** | | | | |
+| `intersection` | 14 066 322 | 1000 | 14 066 | — | mapsurface:29 |
 | `is_disjoint` | **UNMEASURED** | | | | |
 | `is_empty` | **UNMEASURED** | | | | |
 | `is_subset` | **UNMEASURED** | | | | |
 | `is_superset` | **UNMEASURED** | | | | |
-| `map` | **UNMEASURED** | | | | |
+| `map` | 24 720 299 | 1000 | 24 720 | — | mapsurface:27 |
 | `max` | **UNMEASURED** | | | | |
 | `max_by` | **UNMEASURED** | | | | |
 | `min` | **UNMEASURED** | | | | |
@@ -55,12 +55,12 @@
 | `size` | — | | | | called in mapsurface, seq_reconstruct, no number |
 | `sum` | — | | | | called in fuseall, no number |
 | `sum_float` | **UNMEASURED** | | | | |
-| `symmetric_difference` | **UNMEASURED** | | | | |
+| `symmetric_difference` | 30 165 541 | 1000 | 30 165 | — | mapsurface:31 |
 | `to_list` | **UNMEASURED** | | | | |
-| `to_seq` | — | | | | called in fuseall, no number |
+| `to_seq` | 4 288 408 | 1000 | 4 288 | — | mapsurface:32 |
 | `to_sorted_set` | **UNMEASURED** | | | | |
-| `union` | **UNMEASURED** | | | | |
+| `union` | 30 464 935 | 1000 | 30 464 | — | mapsurface:28 |
 
-## Unmeasured (44 of 52)
+## Unmeasured (38 of 52)
 
-`all`, `any`, `collect_list`, `collect_seq`, `contains_with_evidence`, `count`, `difference`, `equals`, `filter`, `filter_map`, `find`, `flat_map`, `for_each`, `from_iter`, `from_list`, `from_seq_with_evidence`, `from_sorted_set`, `group_by`, `insert_all`, `insert_with_evidence`, `intersection`, `is_disjoint`, `is_empty`, `is_subset`, `is_superset`, `map`, `max`, `max_by`, `min`, `min_by`, `none`, `partition`, `product`, `product_float`, `reduce`, `remove`, `remove_all`, `remove_with_evidence`, `singleton`, `sum_float`, `symmetric_difference`, `to_list`, `to_sorted_set`, `union`
+`all`, `any`, `collect_list`, `collect_seq`, `contains_with_evidence`, `count`, `equals`, `filter_map`, `find`, `flat_map`, `for_each`, `from_iter`, `from_list`, `from_seq_with_evidence`, `from_sorted_set`, `group_by`, `insert_all`, `insert_with_evidence`, `is_disjoint`, `is_empty`, `is_subset`, `is_superset`, `max`, `max_by`, `min`, `min_by`, `none`, `partition`, `product`, `product_float`, `reduce`, `remove`, `remove_all`, `remove_with_evidence`, `singleton`, `sum_float`, `to_list`, `to_sorted_set`

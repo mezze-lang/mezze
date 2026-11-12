@@ -57,11 +57,79 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
             return of(elements[0]);
         }
 
-        MezzeSet<A> result = empty();
-        for (A elem : elements) {
-            result = result.add(elem);
+        return fromElements(elements, elements.length);
+    }
+
+    /**
+     * BUILDS A SET FROM ELEMENTS ALREADY IN HAND, in one pass.
+     *
+     * <p>WHY. Every path that rebuilds a whole set — `filter`, `map`,
+     * `filter_map`, `insert_all`, `symmetric_difference`, `intersection`,
+     * `difference`, `from_list`, `of` — wrote {@code result = result.add(e)}
+     * per element, and so did {@code TrieSetStorage.fromCollection}, which the
+     * two {@code fromMutableSet} helpers called while their comments claimed a
+     * one-pass build. A persistent add allocates a node at every level of the
+     * path it touches: right for an update whose base survives, wasted for a
+     * rebuild that discards the base on the next element. The map measured the
+     * same change at 3.2x.
+     *
+     * <p>THE STRATEGY LADDER IS PRESERVED, which is why this lives on
+     * `MezzeSet` and not on a storage. A set's storage is chosen by size and
+     * element type — single, then {@link SmallFlatSetStorage} to
+     * {@link SmallFlatSetStorage#MAX_SIZE}, {@link LongSetStorage} to
+     * {@link LongSetStorage#MAX_SIZE} for all-Long elements, then the long
+     * trie or the general one. Below the widest flat tier this adds one at a
+     * time, which IS the ladder's answer and is cheap at that size; above it a
+     * builder takes over and the tier is the one the adds would have reached.
+     *
+     * <p>Repeats are allowed and collapse, exactly as the adds did.
+     * {@code count} says how much of the array to read, so a caller that
+     * filtered may pass an array sized for its input.
+     */
+    @TruffleBoundary
+    @SuppressWarnings("unchecked")
+    public static <A> MezzeSet<A> fromElements(Object[] elems, int count) {
+        if (count <= 0) {
+            return empty();
         }
-        return result;
+        // Above BOTH flat maxima, so the tier below is always the ladder's.
+        if (count <= BULK_FLOOR) {
+            SetStorage out = EmptySetStorage.INSTANCE;
+            for (int i = 0; i < count; i++) {
+                out = out.add(elems[i]);
+            }
+            return new MezzeSet<>(out);
+        }
+        if (allLongElements(elems, count)) {
+            var b = new LongTrieSetStorage.Builder();
+            for (int i = 0; i < count; i++) {
+                b.add((Long) elems[i]);
+            }
+            return new MezzeSet<>(b.build());
+        }
+        var b = new TrieSetStorage.Builder();
+        for (int i = 0; i < count; i++) {
+            b.add(elems[i]);
+        }
+        return new MezzeSet<>(b.build());
+    }
+
+    /**
+     * The size below which adding one at a time IS the ladder's answer. The
+     * flat tiers are the fastest storage at their own sizes and a builder
+     * would only take the set off them, so the floor sits above the wider of
+     * the two — {@link LongSetStorage#MAX_SIZE} for all-Long elements and
+     * {@link SmallFlatSetStorage#MAX_SIZE} otherwise.
+     */
+    private static final int BULK_FLOOR =
+        Math.max(LongSetStorage.MAX_SIZE, SmallFlatSetStorage.MAX_SIZE);
+
+    /** The flat storage's own condition for promoting to the long-keyed trie. */
+    private static boolean allLongElements(Object[] elems, int count) {
+        for (int i = 0; i < count; i++) {
+            if (!(elems[i] instanceof Long)) return false;
+        }
+        return true;
     }
 
     /**
@@ -200,36 +268,18 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
      * Returns a new set with all elements from other set added.
      * Optimized: uses mutable HashSet for batch operations.
      */
+    @SuppressWarnings("unchecked")
     public MezzeSet<A> addAll(MezzeSet<A> other) {
         if (other.isEmpty()) return this;
         if (isEmpty()) return other;
 
-        // Use mutable HashSet for bulk insert
-        java.util.HashSet<A> mutable = new java.util.HashSet<>(size() + other.size());
-
-        for (A elem : this) {
-            mutable.add(elem);
-        }
-        for (A elem : other) {
-            mutable.add(elem);
-        }
-
-        return fromMutableSet(mutable);
-    }
-
-    /**
-     * Creates a MezzeSet from a mutable HashSet (internal use).
-     * Builds the trie in one pass rather than adding one element at a time.
-     */
-    @SuppressWarnings("unchecked")
-    private static <A> MezzeSet<A> fromMutableSet(java.util.HashSet<A> mutable) {
-        if (mutable.isEmpty()) return empty();
-        if (mutable.size() == 1) {
-            return of(mutable.iterator().next());
-        }
-
-        // Build the trie from the collection in one pass
-        return new MezzeSet<>(TrieSetStorage.fromCollection(mutable));
+        Object[] mine = toArray();
+        Object[] theirs = other.toArray();
+        Object[] out = new Object[mine.length + theirs.length];
+        System.arraycopy(mine, 0, out, 0, mine.length);
+        System.arraycopy(theirs, 0, out, mine.length, theirs.length);
+        // Shared elements appear twice and collapse, as the adds collapsed them.
+        return (MezzeSet<A>) fromElements(out, out.length);
     }
 
     /**
@@ -269,16 +319,19 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
             return new MezzeSet<>(result);
         }
 
-        MezzeSet<A> result = empty();
         MezzeSet<A> smaller = size() <= other.size() ? this : other;
         MezzeSet<A> larger = size() > other.size() ? this : other;
 
-        for (A elem : smaller) {
-            if (larger.contains(elem)) {
-                result = result.add(elem);
+        Object[] es = smaller.toArray();
+        Object[] out = new Object[es.length];
+        int n = 0;
+        for (int i = 0; i < es.length; i++) {
+            if (larger.contains((A) es[i])) {
+                out[n++] = es[i];
             }
         }
-        return result;
+        if (n == es.length) return smaller;
+        return (MezzeSet<A>) fromElements(out, n);
     }
 
     /**
@@ -295,13 +348,16 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
             return new MezzeSet<>(result);
         }
 
-        MezzeSet<A> result = empty();
-        for (A elem : this) {
-            if (!other.contains(elem)) {
-                result = result.add(elem);
+        Object[] es = toArray();
+        Object[] out = new Object[es.length];
+        int n = 0;
+        for (int i = 0; i < es.length; i++) {
+            if (!other.contains((A) es[i])) {
+                out[n++] = es[i];
             }
         }
-        return result;
+        if (n == es.length) return this;
+        return (MezzeSet<A>) fromElements(out, n);
     }
 
     /**
@@ -351,33 +407,23 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
 
     /**
      * Maps over elements.
-     * Builds the trie from the collection in one pass.
+     *
+     * <p>The {@code HashSet} this used to fill was not a bulk build: it was an
+     * extra hash table, and the trie behind it was still filled one persistent
+     * add at a time.
      */
     @TruffleBoundary
+    @SuppressWarnings("unchecked")
     public <B> MezzeSet<B> map(Function<A, B> fn) {
         if (isEmpty()) return empty();
 
-        java.util.HashSet<B> mutable = new java.util.HashSet<>(size());
-        for (A elem : this) {
-            mutable.add(fn.apply(elem));
+        Object[] es = toArray();
+        Object[] out = new Object[es.length];
+        for (int i = 0; i < es.length; i++) {
+            out[i] = fn.apply((A) es[i]);
         }
-
-        return fromMutableSetGeneric(mutable);
-    }
-
-    /**
-     * Creates a MezzeSet from a mutable HashSet of any type (internal use).
-     * Builds the trie in one pass rather than adding one element at a time.
-     */
-    @SuppressWarnings("unchecked")
-    private static <B> MezzeSet<B> fromMutableSetGeneric(java.util.HashSet<B> mutable) {
-        if (mutable.isEmpty()) return empty();
-        if (mutable.size() == 1) {
-            return of(mutable.iterator().next());
-        }
-
-        // Build the trie from the collection in one pass
-        return new MezzeSet<>(TrieSetStorage.fromCollection(mutable));
+        // Two elements may map to one: they collapse, as the adds did.
+        return (MezzeSet<B>) fromElements(out, es.length);
     }
 
     /**
@@ -396,27 +442,26 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
 
     /**
      * Filters elements by predicate.
-     * Optimized: uses mutable HashSet for batch operations.
+     *
+     * <p>Keeping everything still returns {@code this}: an immutable set that
+     * would be rebuilt element for element is already the answer.
      */
     @TruffleBoundary
+    @SuppressWarnings("unchecked")
     public MezzeSet<A> filter(Predicate<A> p) {
         if (isEmpty()) return this;
 
-        java.util.HashSet<A> mutable = new java.util.HashSet<>();
-        boolean allMatch = true;
-
-        for (A elem : this) {
-            if (p.test(elem)) {
-                mutable.add(elem);
-            } else {
-                allMatch = false;
+        Object[] es = toArray();
+        Object[] out = new Object[es.length];
+        int n = 0;
+        for (int i = 0; i < es.length; i++) {
+            if (p.test((A) es[i])) {
+                out[n++] = es[i];
             }
         }
+        if (n == es.length) return this;
 
-        // If all elements matched, return this (no change)
-        if (allMatch) return this;
-
-        return fromMutableSet(mutable);
+        return (MezzeSet<A>) fromElements(out, n);
     }
 
     // ===== FOLD =====

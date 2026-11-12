@@ -13347,3 +13347,95 @@ stay green reach the right answer another way and are there to keep it: the bare
 capture, the literal composite, and the fold — whose `classifyBinaryFolder`
 lifts its own element rhs and declines when it cannot, so that path was never
 wrong.
+
+#### The set had the same hole as the map — 2.88x on union, and two rows that measured nothing
+
+`TrieSetStorage.fromCollection` was `for (e : items) out = out.add(e)` — N
+persistent adds — and both `MezzeSet.fromMutableSet` helpers called it while
+their comments said "Builds the trie in one pass rather than adding one element
+at a time". Ten operations wrote the per-element add directly. The map's
+builder, ported with the values dropped.
+
+ONE MORE TIER THAN THE MAP. A set's storage ladder is single, then
+`SmallFlatSetStorage` to 16, then `LongSetStorage` to 32 for all-Long elements,
+then the long trie or the general one. `MezzeSet.fromElements` adds one at a
+time below the WIDER of the two flat maxima — which is the ladder's own answer
+there and cheap at that size — and builds above it.
+`fromElementsPicksTheSameTierAsAdds` pins the storage CLASS at 1, 5, 16, 17, 32,
+33, 50 and 1 000 for both element types rather than trusting that arithmetic.
+
+**THE SET HAD ONLY TWO OF ITS 46 OPERATIONS MEASURED**, so this needed eight new
+`mapsurface` rows before it could be read at all: filter, map, union,
+intersection, difference, symmetric_difference, from_seq, and to_seq as the
+control. n=10 000, where rows 26 and 27 stop reporting WARMUP-DOMINATED and
+agree with n=20 000 to within 2%.
+
+TWO OF THOSE ROWS MEASURED NOTHING, and the first table hid it:
+
+| row | base | bulk build | |
+|---|---|---|---|
+| `set::filter` as first written | 4 342 634 ps | 4 391 501 | **0.99x** |
+| `set::map` as first written | 4 339 175 | 4 384 113 | **0.99x** |
+
+Five rows moved and these two did not, which looked like a property of filter and
+map. It was a property of the ROWS. `set::size { s = set::filter { … } }` is a
+FUSED chain: the predicate runs in a loop that counts and no set is ever built.
+The arithmetic says so without any instrumentation — one `set::insert` is 13.8
+ns, so the 500 persistent adds the base arm was supposed to be doing would be
+6.9 ms on their own, and the whole row read 4.34. Neither arm was building
+anything.
+
+A `set::insert` on the result is not a chain sink, so the set has to exist. The
+rows now read 16.5 and 24.7 ms and the checksum rose from 500 to 501 per
+iteration, which is the insert showing up where it should.
+
+| row | base | bulk build | |
+|---|---|---|---|
+| `set::union` | 87 734 431 ps | **30 464 935** | **2.88x** |
+| `set::from_seq` | 33 233 536 | **13 955 363** | **2.38x** |
+| `set::map` | 46 950 893 | **24 720 299** | **1.90x** |
+| `set::symmetric_difference` | 51 163 684 | **30 165 541** | **1.70x** |
+| `set::filter` | 25 899 302 | **16 686 747** | **1.55x** |
+| `set::difference` | 21 587 559 | **14 099 220** | **1.53x** |
+| `set::intersection` | 21 428 796 | **14 066 322** | **1.52x** |
+| `set::to_seq` (walks, builds nothing) | 4 269 068 | 4 288 408 | 1.00x |
+| `set::contains` | 6 955 | 6 788 | 1.02x |
+| `set::insert` (one persistent add) | 12 861 | 12 841 | 1.00x |
+
+Checksums equal on every row. `union` gains most because it also loses a
+`java.util.HashSet` detour on top of its adds; `filter` and the two
+set-difference rows gain least because they keep or drop only half the elements,
+so half their cost was never the build.
+
+`set::insert` first read **1.14x** in the main table, which is a control moving
+14% and by rule 4 would make everything above it unreadable. Six interleaved
+passes at its own n settle it at 12 861 against 12 841: the base's minimum had
+landed on a slow pass. A control that moves gets re-measured, not explained.
+
+COVERAGE. `SetBulkBuildTest` mirrors the map's — differential against the add
+path across the ladder's boundaries, both element types, repeats flat and in a
+trie, colliders alone and among ordinary elements, and 480 random rounds with
+the long-only rounds kept separate because one String element takes the whole
+set off the unboxed tier. Reversing the long builder's compaction order fails
+three and leaves the String, collider and mixed-type tests green.
+
+**One break exposed a hole in my own tests.** Comparing elements with `==`
+instead of `equals` in the general builder failed only the random rounds — every
+hand-written String case happened to reuse one instance per value, and the
+all-Long cases go to the long builder where elements are compared as primitives.
+`equalButDistinctInstancesCollapse` now holds that case by name: three `new
+String` instances of each of a hundred values, which must collapse to a hundred.
+
+`BulkBuildSoundnessTest` already existed for the Map and Set bulk paths, and it
+asks exactly the question an in-place builder raises — once `build()` has handed
+the structure over, is it immutable like any other? A builder that leaked a node
+or froze one by aliasing its slot arrays would answer no. It passes, and it now
+covers both UNBOXED builders as well, which it did not: a String element would
+have taken every one of its cases off that tier.
+
+DELETED: `TrieSetStorage.fromCollection`, `MezzeSet.fromMutableSet` and
+`fromMutableSetGeneric`, with the two `java.util.HashSet` detours.
+
+NOT CONVERTED, on purpose: `set::insert_all` and `map::merge_with` both start
+from an EXISTING structure and add a handful of elements, so a bulk rebuild
+would walk the whole base to save those few adds.

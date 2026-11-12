@@ -108,6 +108,14 @@ let build_map = { i, m } -> if i <= 0 then m
 let build_set = { i, s } -> if i <= 0 then s
   else build_set { i = i - 1, s = set::insert { s = s, x = i } }
 
+## A second set shifted by half, so the two-set rows have a HALF OVERLAP: a
+## union of `keys * 3 / 2`, an intersection and a difference of `keys / 2`, and
+## a symmetric difference of `keys`. Disjoint or identical sets would each let
+## one of those rows answer without building anything.
+let build_set_off = { i, s, off } -> if i <= 0 then s
+  else build_set_off { i = i - 1, off = off,
+                       s = set::insert { s = s, x = i + off } }
+
 ## ── 1. map::get, key PRESENT ────────────────────────────────────────────────
 let l_get = { i, acc, m, keys } -> if i <= 0 then acc
   else do
@@ -305,6 +313,70 @@ let l_contains_value = { i, acc, m, keys } -> if i <= 0 then acc
                           acc = acc + (if map::contains_value { m = m, v = (i % keys) + 1 }
                                        then 1 else 0) }
 
+## ── 26-32. THE SET'S REBUILD ROWS. Every one of these produced its result by
+## adding one element at a time to a growing set, which is a persistent add per
+## element — a node allocated at every level of the path, discarded on the next
+## element. `set::to_seq` (row 32) is the CONTROL: it walks the same set and
+## materialises it without building a set, so it is the one row here that a
+## bulk builder cannot help.
+
+## ── 26-27. THE RESULT MUST BE USED AS A SET, or these rows measure fusion
+## instead of the rebuild. `set::size { s = set::filter { ... } }` is a FUSED
+## chain: the predicate runs in a loop that counts, and no set is ever built.
+## Both rows read 4.34 ms either side of a change that made the build 2.9x
+## faster, and the arithmetic says why — one `set::insert` is 13.8 ns, so 500
+## persistent adds would be 6.9 ms on their own, more than the whole row.
+## A `set::insert` on the result is not a chain sink, so the set has to exist.
+
+## ── 26. set::filter — a predicate per element, keeping half, and BUILT ─────
+let l_set_filter = { i, acc, s, keys } -> if i <= 0 then acc
+  else do
+    let s2 = set::insert { s = set::filter { s = s, p = { val } -> val > keys / 2 },
+                           x = 0 }
+    l_set_filter { i = i - 1, acc = acc + set::size { s = s2 }, s = s, keys = keys }
+
+## ── 27. set::map — a callback per element, a whole new set, and BUILT ──────
+let l_set_map = { i, acc, s } -> if i <= 0 then acc
+  else do
+    let s2 = set::insert { s = set::map { s = s, f = { val } -> val + 1 }, x = 0 }
+    l_set_map { i = i - 1, acc = acc + set::size { s = s2 }, s = s }
+
+## ── 28. set::union — half overlapping ─────────────────────────────────────
+let l_set_union = { i, acc, s, t } -> if i <= 0 then acc
+  else do
+    let u = set::union { s1 = s, s2 = t }
+    l_set_union { i = i - 1, acc = acc + set::size { s = u }, s = s, t = t }
+
+## ── 29. set::intersection ─────────────────────────────────────────────────
+let l_set_inter = { i, acc, s, t } -> if i <= 0 then acc
+  else do
+    let u = set::intersection { s1 = s, s2 = t }
+    l_set_inter { i = i - 1, acc = acc + set::size { s = u }, s = s, t = t }
+
+## ── 30. set::difference ───────────────────────────────────────────────────
+let l_set_diff = { i, acc, s, t } -> if i <= 0 then acc
+  else do
+    let u = set::difference { s1 = s, s2 = t }
+    l_set_diff { i = i - 1, acc = acc + set::size { s = u }, s = s, t = t }
+
+## ── 31. set::symmetric_difference ─────────────────────────────────────────
+let l_set_symdiff = { i, acc, s, t } -> if i <= 0 then acc
+  else do
+    let u = set::symmetric_difference { s1 = s, s2 = t }
+    l_set_symdiff { i = i - 1, acc = acc + set::size { s = u }, s = s, t = t }
+
+## ── 32. set::to_seq — THE CONTROL: walks and materialises, builds no set ───
+let l_set_to_seq = { i, acc, s } -> if i <= 0 then acc
+  else do
+    let xs = set::to_seq { s = s }
+    l_set_to_seq { i = i - 1, acc = acc + seq::size { xs = xs }, s = s }
+
+## ── 33. set::from_seq — the build with no callback and no walk of a set ────
+let l_set_from_seq = { i, acc, xs } -> if i <= 0 then acc
+  else do
+    let s2 = set::from_seq { xs = xs }
+    l_set_from_seq { i = i - 1, acc = acc + set::size { s = s2 }, xs = xs }
+
 pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
   let args = argv {}
   let n = arg_at { args = args, i = 0, def = 1000000 }
@@ -315,6 +387,8 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
   let k = 9
   let m = build_map { i = keys, m = map::empty {} }
   let s = build_set { i = keys, s = set::empty {} }
+  let t = build_set_off { i = keys, s = set::empty {}, off = keys / 2 }
+  let set_xs = set::to_seq { s = s }
   let ks = build_strkeys { i = keys, acc = [] }
   let sm = build_strmap { i = keys, m = map::empty {}, ks = ks }
   let floor = min_of { thunk = {} -> control_loop { i = floor_n, acc = 0 }, warm = warm, k = k }
@@ -379,3 +453,19 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
            label = "str map::contains_key", thunk = {} -> l_str_contains { i = n, acc = 0, m = sm, ks = ks, keys = keys } }
   report { idx = 13, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "str map::insert chain", thunk = {} -> l_str_insert_chain { i = n, acc = 0, m = sm, ks = ks, keys = keys } }
+  report { idx = 26, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::filter          ", thunk = {} -> l_set_filter { i = n, acc = 0, s = s, keys = keys } }
+  report { idx = 27, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::map             ", thunk = {} -> l_set_map { i = n, acc = 0, s = s } }
+  report { idx = 28, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::union           ", thunk = {} -> l_set_union { i = n, acc = 0, s = s, t = t } }
+  report { idx = 29, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::intersection    ", thunk = {} -> l_set_inter { i = n, acc = 0, s = s, t = t } }
+  report { idx = 30, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::difference      ", thunk = {} -> l_set_diff { i = n, acc = 0, s = s, t = t } }
+  report { idx = 31, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::symmetric_diff  ", thunk = {} -> l_set_symdiff { i = n, acc = 0, s = s, t = t } }
+  report { idx = 32, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::to_seq   CONTROL", thunk = {} -> l_set_to_seq { i = n, acc = 0, s = s } }
+  report { idx = 33, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::from_seq        ", thunk = {} -> l_set_from_seq { i = n, acc = 0, xs = set_xs } }
