@@ -13137,3 +13137,136 @@ Every predicate in `MapWalkPairingTest` couples the key to the value
 hundred. Slipping the value index by one fails three of them with 100, 3 and 8
 all becoming 0 — and the single-entry case correctly still passes, because with
 one element the slip is a no-op, which is why the sizes are there.
+
+#### Nothing bulk-built a map — 2.07x on merge, 1.84x on map_values, 1.49x on filter
+
+The map walk's Entry went last time and the remaining 13.5 ns an entry was the
+guest call. That is true of `count`, which answers a question. The three rows
+that BUILD something were a different number: `map_values` 59 438 ps an entry,
+`merge` 80 626, `filter` 36 379, against `map::insert`'s 45 272 for ONE
+insert. Each of those rows was paying about one insert per entry, and that is
+exactly what they were doing:
+
+```java
+for (MezzeMap.Entry entry : map) {
+    result = result.put(entry.key(), newValue);   // a persistent put, per entry
+}
+```
+
+A persistent put allocates a node at EVERY LEVEL of the path it touches, plus a
+new key/value array pair at the level that gains the entry. That is what
+structural sharing buys and it is the right trade for an update, where the base
+survives. In a rebuild the base is dead on the next iteration, so every node on
+every path is garbage before anything reads it.
+
+**And the "bulk" helpers were not bulk.** `MezzeMap.filter` and `mapValues`
+said *"Optimized: uses mutable builder for batch operations"*, filled a
+`LinkedHashMap` "to preserve insertion order" — a trie has no insertion order —
+and handed it to `TrieMapStorage.fromMap`, whose own comment calls itself a
+one-pass build:
+
+```java
+public static MapStorage fromMap(java.util.Map<?, ?> entries) {
+    MapStorage out = new TrieMapStorage();
+    for (var e : entries.entrySet()) out = out.put(e.getKey(), e.getValue());
+    return out;                                   // N persistent puts
+}
+```
+
+So the detour cost an extra hash table and still paid the per-entry put. Three
+layers of comments claiming a bulk build and no bulk build anywhere.
+
+THE CEILING, measured before writing the builder. Arm A is N persistent puts,
+arm B is `java.util.HashMap` — in-place, no sharing, no per-level nodes, and so
+a bound rather than a target:
+
+| n | persistent put | HashMap | bound |
+|---|---|---|---|
+| 100 | 53.4 ns/entry | 7.0 | 7.6x |
+| 1 000 | 76.3 | 10.4 | 7.3x |
+| 4 000 | 86.0 | 8.1 | 10.6x |
+
+Worth building. A builder node indexes its 32 slots DIRECTLY instead of keeping
+them compact in bitmap order, so adding an entry is two array stores and a
+bitmap OR — nothing shifts, nothing is copied, no node is allocated. `build()`
+then walks the result once and compacts each node into the shape the readers
+expect, so a node is allocated ONCE instead of once per entry that passes
+through it. The width is transient and dies with the builder.
+
+| | put | builder | HashMap | |
+|---|---|---|---|---|
+| n=1 000, Long keys | 103.9 ns/entry | **32.2** | 15.9 | **3.22x** |
+| n=4 000, Long keys | 89.3 | **28.0** | 7.6 | **3.19x** |
+| n=1 000, String keys | 75.2 | **22.1** | 7.2 | **3.40x** |
+
+Both tries needed one. The long-keyed trie cannot collide — `mix64` is a
+bijection — so its builder is the simple shape. The general trie's `mix32` is
+not, so two distinct keys can agree on all 32 bits: when that happens the slot
+stops being a builder node and holds an immutable `Collision` instead, and later
+keys reaching it go through the ordinary persistent insert. A collision subtree
+is small and rare and did not deserve a second mutable shape.
+
+THE LADDER IS WHY THIS LIVES ON `MezzeMap` AND NOT ON A STORAGE. A map's
+storage is chosen by size and by key type — single entry, then flat to eight,
+then the UNBOXED long-keyed trie when every key is a `Long`, the general trie
+otherwise. A builder that always made a general trie would have been faster
+than one path and slower than another, which is the regression shape MapTree
+already demonstrated. `MezzeMap.fromEntries` picks the tier the ladder would
+pick and only uses a builder where the ladder ends in a trie; below nine
+entries it puts one at a time, because there the flat storage is the faster
+answer anyway. A test pins the storage CLASS, not just the contents.
+
+INTERLEAVED A/B, `mapsurface`, 1 000 keys:
+
+| row | base | bulk build | |
+|---|---|---|---|
+| `map::merge` | 82 446 211 ps | **39 819 894** | **2.07x** |
+| `map::map_values` | 59 158 323 | **32 231 186** | **1.84x** |
+| `map::filter` | 37 002 353 | **24 772 526** | **1.49x** |
+| `map::count` (walks, builds nothing) | 13 911 742 | 13 981 719 | 0.99x |
+| `map::keys` (materialises) | 7 093 834 | 7 384 152 | 0.96x |
+| `map::insert` (ONE persistent put) | 46 776 | 46 075 | 1.01x |
+| `map::size` (reads a field) | 460 | 460 | 1.00x |
+
+Checksums equal on every row. `filter` gains least because it keeps half, so
+half its row was never the build; `merge` gains most because the deleted
+`LinkedHashMap` detour was on top of its puts.
+
+**THE LAST TWO CONTROLS ALMOST FAILED THE TABLE.** At the rebuild rows' n=2 000
+they read 0.84x and 0.58x, which by rule 4 makes everything above them
+unreadable. They were undersized, not moved: one field read and one put are
+single-digit and double-digit NANOSECONDS, and a row of 2 000 of them finishes
+before the loop is warm — `map::size` came out at 3 486 ps for the whole row.
+Re-run at 2 000 000 and 200 000 iterations they are 460 vs 460 and 46 776 vs
+46 075. Size each row by its own cost, every time.
+
+SIXTEEN OPERATIONS, ONE CAUSE. `filter`, `map_values`, `map_keys`,
+`filter_keys`, `filter_values`, `invert`, `select_keys`, `group_by_value`,
+`zip`, `diff`, `intersect`, `symmetric_diff`, `from_seq`, `from_list`,
+`from_keys` and `put_all` all wrote the same per-entry put, and all sixteen now
+collect and build once. Three of them are benched; the other thirteen are in
+the unmeasured 50 and will carry the same change when rows reach them.
+
+DELETED, not bypassed: `TrieMapStorage.fromMap`, `MezzeMap.fromMutableMap` and
+`MezzeMap.fromMutableLinkedMap`, with the two `LinkedHashMap` detours that fed
+them.
+
+A DEFECT FELL OUT OF IT. `put_all` went through that `HashMap` and then built a
+GENERAL trie, so merging two long-keyed maps silently gave up the unboxed
+storage — every later lookup on a merged map boxed its key for no reason.
+`putAllKeepsTheLongKeyedStorage` pins it.
+
+COVERAGE. `MapBulkBuildTest` compares the builder against the put path
+differentially — contents, size, keys held, keys NOT held — across the ladder's
+boundaries (1, 8, 9, 32, 1 000), Long and String and mixed keys, duplicates in
+the flat storage and in a trie, colliders alone and among ordinary keys, and 480
+random rounds. Reversing the long builder's compaction order fails five tests
+and leaves the String, collider and mixed-type ones green, which is the right
+discrimination.
+
+**One break said nothing, and that was worth knowing.** Passing the wrong shift
+when handing a key to a frozen collision subtree leaves every test green. The
+branch is not dead — dropping its size bookkeeping instead fails four tests —
+the shift is simply UNOBSERVABLE: a `Collision` is made only once the 32 bits
+are spent, so every key that can reach one shares its full hash, and
+`insertIntoCollision` never reads the shift. The code now says so.

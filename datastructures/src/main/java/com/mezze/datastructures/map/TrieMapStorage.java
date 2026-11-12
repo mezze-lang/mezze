@@ -53,26 +53,6 @@ public final class TrieMapStorage implements MapStorage {
         this.size = size;
     }
 
-    /**
-     * Bulk build from a java Map — the persistent counterpart of
-     * {@code HashMapStorage.fromMap}, which the Map's transforms
-     * ({@code map}, {@code filter}, …) used to call.
-     *
-     * <p>Rerouting only the SmallFlat promotion left those transforms building
-     * an open-addressed table, so a MAPPED map still carried BUG 38 — its base
-     * acquired a key that was only added to a map derived from it. The Set had
-     * the identical hole through {@code fromCollection}; a test found both.
-     *
-     * <p>O(n log32 n) where the table was O(n), which runs once per transform.
-     */
-    public static MapStorage fromMap(java.util.Map<?, ?> entries) {
-        MapStorage out = new TrieMapStorage();
-        for (java.util.Map.Entry<?, ?> e : entries.entrySet()) {
-            out = out.put(e.getKey(), e.getValue());
-        }
-        return out;
-    }
-
     sealed interface Node permits Bitmap, Collision {}
 
     /** One trie level. Entries and children sit compactly in bitmap order. */
@@ -418,5 +398,151 @@ public final class TrieMapStorage implements MapStorage {
         Bitmap b = (Bitmap) n;
         for (int i = 0; i < b.keys.length; i++) consumer.accept(b.keys[i], b.values[i]);
         for (Node child : b.nodes) walk(child, consumer);
+    }
+
+    // ──────────────────────────── bulk build ─────────────────────────
+
+    /**
+     * BUILDS A TRIE IN PLACE, for the paths that rebuild a whole map.
+     *
+     * <p>The long-keyed trie's {@code Builder} documents why: a persistent
+     * {@code put} allocates a node per level of the path it touches, which is
+     * what an update wants and what a rebuild throws away immediately.
+     *
+     * <p>This one carries the two things the long-keyed trie does not need.
+     * Keys are compared with {@code Objects.equals}, and {@code mix32} is NOT
+     * a bijection, so two distinct keys can agree on all 32 bits and must end
+     * up in a {@link Collision}. When that happens the slot stops being a
+     * builder node and holds an immutable {@code Node} instead, and later keys
+     * reaching it go through the ordinary persistent {@link #insert} — a
+     * collision subtree is small and rare, so it is not worth a second
+     * mutable shape.
+     */
+    public static final class Builder {
+
+        /** A node under construction: slot-indexed, so no slot ever moves. */
+        private static final class Mut {
+            int dataMap;
+            int nodeMap;
+            final Object[] keys = new Object[1 << BITS];
+            final Object[] values = new Object[1 << BITS];
+            /**
+             * A child is either another {@code Mut} or a frozen {@code Node}
+             * standing for a collision subtree. Allocated on the first child.
+             */
+            Object[] kids;
+        }
+
+        private final Mut root = new Mut();
+        private int size;
+
+        /**
+         * Adds or replaces an entry. A key already present takes the new value,
+         * so a caller need not know whether its keys are distinct.
+         */
+        public void put(Object key, Object value) {
+            int hash = TrieHash.mix32(key);
+            Mut n = root;
+            for (int shift = 0; ; shift += BITS) {
+                int slot = (hash >>> shift) & MASK;
+                int bit = 1 << slot;
+
+                if ((n.nodeMap & bit) != 0) {
+                    Object kid = n.kids[slot];
+                    if (kid instanceof Mut mut) {
+                        n = mut;
+                        continue;
+                    }
+                    // A frozen collision subtree: the persistent path owns it.
+                    // The shift passed below is UNOBSERVABLE — a Collision is
+                    // made only once the 32 bits are spent, so every key that
+                    // can arrive here shares its full hash and
+                    // `insertIntoCollision` never reads the shift. Passing the
+                    // wrong one leaves every test green; dropping the size
+                    // bookkeeping fails four, which is how this branch was
+                    // confirmed reached rather than dead.
+                    int[] grew = new int[1];
+                    n.kids[slot] = insert((Node) kid, key, value, hash, shift + BITS, grew);
+                    size += grew[0];
+                    return;
+                }
+
+                if ((n.dataMap & bit) == 0) {
+                    n.dataMap |= bit;
+                    n.keys[slot] = key;
+                    n.values[slot] = value;
+                    size++;
+                    return;
+                }
+
+                Object had = n.keys[slot];
+                if (Objects.equals(had, key)) {
+                    n.values[slot] = value;
+                    return;
+                }
+
+                Object hadValue = n.values[slot];
+                int hadHash = TrieHash.mix32(had);
+                int down = shift + BITS;
+
+                if (n.kids == null) {
+                    n.kids = new Object[1 << BITS];
+                }
+                n.dataMap ^= bit;
+                n.nodeMap |= bit;
+                n.keys[slot] = null;
+                n.values[slot] = null;
+
+                if (down >= HASH_BITS) {
+                    // The hash is spent and the keys differ: one Collision node
+                    // holds both, exactly as `merge` would build it.
+                    n.kids[slot] = merge(had, hadValue, hadHash, key, value, hash, down);
+                    size++;
+                    return;
+                }
+
+                Mut kid = new Mut();
+                int hs = (hadHash >>> down) & MASK;
+                kid.dataMap = 1 << hs;
+                kid.keys[hs] = had;
+                kid.values[hs] = hadValue;
+                n.kids[slot] = kid;
+                n = kid;
+
+                // Moving the sitting entry down is not a size change: the new
+                // key is counted by whichever branch finally places it.
+            }
+        }
+
+        /** The finished storage. The builder is spent afterwards. */
+        public MapStorage build() {
+            if (size == 0) {
+                return new TrieMapStorage();
+            }
+            return new TrieMapStorage(freeze(root), size);
+        }
+
+        /** Compacts a slot-indexed node into bitmap order, once. */
+        private static Node freeze(Mut m) {
+            int nd = Integer.bitCount(m.dataMap);
+            int nn = Integer.bitCount(m.nodeMap);
+            Object[] keys = nd == 0 ? NOTHING : new Object[nd];
+            Object[] values = nd == 0 ? NOTHING : new Object[nd];
+            Node[] nodes = nn == 0 ? NO_NODES : new Node[nn];
+
+            int j = 0;
+            for (int dm = m.dataMap; dm != 0; dm &= dm - 1) {
+                int slot = Integer.numberOfTrailingZeros(dm);
+                keys[j] = m.keys[slot];
+                values[j] = m.values[slot];
+                j++;
+            }
+            int k = 0;
+            for (int nm = m.nodeMap; nm != 0; nm &= nm - 1) {
+                Object kid = m.kids[Integer.numberOfTrailingZeros(nm)];
+                nodes[k++] = kid instanceof Mut mut ? freeze(mut) : (Node) kid;
+            }
+            return new Bitmap(m.dataMap, m.nodeMap, keys, values, nodes);
+        }
     }
 }

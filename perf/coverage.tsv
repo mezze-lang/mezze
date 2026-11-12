@@ -29,6 +29,9 @@ map	count	18292158	2e3	1000	mapsurface:23	2026-11-12
 map	count	13504864	2e3	1000	mapsurface:23	2026-11-12
 map	merge	80625560	2e3	1000	mapsurface:24	2026-11-12
 map	contains_value	5841396	2e3	1000	mapsurface:25	2026-11-12
+map	map_values	32231186	2e3	1000	mapsurface:21	2026-11-12
+map	filter	24772526	2e3	1000	mapsurface:22	2026-11-12
+map	merge	39819894	2e3	1000	mapsurface:24	2026-11-12
 set	contains	6811	1e6	1	mapsurface:6	2026-11-12
 set	insert	12764	1e6	1	mapsurface:7	2026-11-12
 bytes	size	657	1e6	1	bytesurface:1	2026-11-12

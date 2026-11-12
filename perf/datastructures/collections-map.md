@@ -17,7 +17,7 @@
 | `diff_maps` | **UNMEASURED** | | | | |
 | `empty` | — | | | | called in allocsurface, http-work-route, mapsurface, mutvsimmut, no number |
 | `equals` | **UNMEASURED** | | | | |
-| `filter` | 36 379 254 | 1000 | 36 379 | 85.2x | mapsurface:22 |
+| `filter` | 24 772 526 | 1000 | 24 772 | 58.0x | mapsurface:22 |
 | `filter_keys` | **UNMEASURED** | | | | |
 | `filter_values` | **UNMEASURED** | | | | |
 | `find` | **UNMEASURED** | | | | |
@@ -38,10 +38,10 @@
 | `keys` | 6 834 149 | 1000 | 6 834 | 16.0x | mapsurface:18 |
 | `keys_seq` | **UNMEASURED** | | | | |
 | `map_keys` | **UNMEASURED** | | | | |
-| `map_values` | 59 438 249 | 1000 | 59 438 | 139.2x | mapsurface:21 |
+| `map_values` | 32 231 186 | 1000 | 32 231 | 75.5x | mapsurface:21 |
 | `max_key` | **UNMEASURED** | | | | |
 | `max_value` | **UNMEASURED** | | | | |
-| `merge` | 80 625 560 | 1000 | 80 625 | 188.8x | mapsurface:24 |
+| `merge` | 39 819 894 | 1000 | 39 819 | 93.3x | mapsurface:24 |
 | `merge_with` | **UNMEASURED** | | | | |
 | `min_key` | **UNMEASURED** | | | | |
 | `min_value` | **UNMEASURED** | | | | |
