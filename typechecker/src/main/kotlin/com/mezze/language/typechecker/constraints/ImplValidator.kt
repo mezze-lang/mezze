@@ -1089,6 +1089,34 @@ internal class ImplValidator(
                             .toSet()
                     },
                     onBodyResult = { bodyResult, _ ->
+                        // This subtraction is NOT hiding a missing check, and the
+                        // reason is worth keeping: an op body performing the effect
+                        // it implements is NORMAL. `std/effects/stm.mz` has
+                        //
+                        //     atomically = { f } -> f {}
+                        //
+                        // where `f: {} -> 'a <STM>` is the transaction body — so
+                        // the body performs STM, and its `read`/`write` are meant
+                        // to reach THIS handler. That is the whole design.
+                        //
+                        // V0504 above is deliberately about the op's ANNOTATION,
+                        // where declaring your own effect in your own row is a
+                        // statement that cannot be true. Extending it to the body
+                        // was tried: the stdlib still compiled (the error surfaces
+                        // only through import resolution) but 7 tests failed, two
+                        // of them named "effect handler call inside same type impl
+                        // SHOULD SUCCEED", and `SequentialSTM` above is the proof.
+                        //
+                        // The case that motivated it — `a = {} -> A.a {}` on a
+                        // one-op effect, which stack-overflows — is an ordinary
+                        // infinite recursion, no more a type error than
+                        // `let f = {} -> f {}`. Op-level self-recursion is not
+                        // statically distinguishable from the legitimate shape
+                        // anyway, since `f {}` may reach the same op indirectly.
+                        //
+                        // `performerAddedEffects` is "what this performer adds
+                        // BESIDES the one it handles", so the handled effect comes
+                        // out here by design.
                         val bodyEffects = bodyResult.effects - effectRef.localName
                         if (bodyEffects.isNotEmpty()) {
                             val existingEffects = performerAddedEffects[impl.performerName] ?: emptySet()

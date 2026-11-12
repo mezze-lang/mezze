@@ -199,6 +199,71 @@ class PerformAbortPayloadSpecTest : VariantSpecBase() {
         )
     }
 
+    // ───────────────────────────────── an op body MAY perform its own effect
+
+    @Test fun `an op body may perform the effect it implements`() {
+        accepts(
+            """
+            effect Txn where {
+              read: {} -> Int <Txn>,
+              atomically: { f: {} -> 'a <Txn> } -> 'a <Txn>
+            }
+            impl Txn for SeqTxn where {
+              read = {} -> 1,
+              atomically = { f } -> f {}
+            }
+            pub let total: {} -> Int <Txn> = {} -> Txn.atomically { f = {} -> Txn.read {} }
+            pub let run = {} -> perform SeqTxn in total {}
+            $MAIN
+            """,
+            "`std/effects/stm.mz`'s shape, and the reason V0504 is about the op's " +
+                "ANNOTATION and not its body. `atomically = { f } -> f {}` performs " +
+                "Txn because `f` IS the transaction body, whose `read` is meant to " +
+                "reach this same handler.\n" +
+                "Extending V0504 to the body was tried and is wrong: 7 tests fell " +
+                "over, two named \"effect handler call inside same type impl should " +
+                "succeed\", and SequentialSTM is the proof. The case that motivated " +
+                "it — `a = {} -> A.a {}` on a one-op effect — is an ordinary " +
+                "infinite recursion, no more a type error than `let f = {} -> f {}`.",
+        )
+    }
+
+    @Test fun `declaring your own effect in your own op row is still refused`() {
+        rejects(
+            """
+            effect A where { a: {} -> Int <A> }
+            impl A for SelfA where {
+              a: {} -> Int <A> = {} -> 1
+            }
+            $MAIN
+            """,
+            "V0504",
+            "The ANNOTATION case V0504 is actually for, kept beside the accepted " +
+                "body case above so the boundary between them is written down " +
+                "rather than rediscovered.",
+        )
+    }
+
+    @Test fun `an op body performing a DIFFERENT effect is accepted when declared`() {
+        accepts(
+            """
+            effect Tick where { tick: {} -> Int <Tick> }
+            effect A where { a: {} -> Int <A> }
+            impl Tick for Ticker where { tick = {} -> 1 }
+            impl A for UsesTick where {
+              a = {} -> Tick.tick {}
+            }
+            pub let use_a: {} -> Int <A> = {} -> A.a {}
+            pub let run: {} -> Int <Tick, *> = {} -> perform UsesTick in use_a {}
+            $MAIN
+            """,
+            "THE MIRROR CASE. A performer that performs something ELSE is fine and " +
+                "common — the row just has to say so, which `<Tick, *>` does. The " +
+                "subtraction the new check sits in front of is what computes that, " +
+                "so the check must not disturb it.",
+        )
+    }
+
     @Test fun `a parameter-less performer needs no record`() {
         accepts(
             """
