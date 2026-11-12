@@ -12443,3 +12443,54 @@ Coverage: eight value tests, with the enumerate cases built so the index and the
 value DIFFER. Passing the wrong record flag into the tree emitter fails two of
 them with "Expected record for field 'val', got: Long" — the field read landing
 on a raw element, which is the one way this is silently wrong.
+
+#### The async surface is JDK-bound: Loom's own floor is 5.3 µs, Mezze is 1.9x it
+
+`asyncsurface` had been built and never swept. Its rows report against a counted
+loop, which makes them look like this:
+
+```
+  spawn + await        : 10 212 547 ps/op   x3314172/100 floor
+```
+
+Three million times the control. That ratio is arithmetically true and tells you
+nothing: it compares creating a thread to adding two numbers. **The question is
+what Loom costs**, and that needed a reference outside Mezze.
+
+Plain Java, same JDK (GraalVM CE 25.0.2), same machine, same shape — create a
+virtual thread, run a trivial body, wait for its result:
+
+| | ps/op |
+|---|---|
+| `Thread.ofVirtual().start()` + `join()` | 5 324 047 - 5 999 554 |
+| `newVirtualThreadPerTaskExecutor().submit()` + `get()` | 3 694 968 - 4 866 857 |
+| **Mezze `Async.spawn` + `await`** | **10 212 547 - 11 165 827** |
+
+So **Loom itself is 5.3 µs and Mezze is 1.9x that** — not a cliff of the kind
+this session has been finding, and the headline ratio against a counted loop was
+hiding a 5.3 µs floor that no amount of work on Mezze can move. The executor
+variant being 30% cheaper than thread-per-task is the one hint of headroom, and
+`Async.spawn` is thread-per-task: `env.newTruffleThreadBuilder(…).virtual(true)
+.build()` then `start()`, once per spawn. A guest thread MUST be registered with
+the polyglot context, which is why it cannot simply be `Thread.ofVirtual()`, and
+amortising that would mean a pool of long-lived pre-registered Truffle threads —
+a design change with consequences for thread locals, handler chains and
+cancellation, not a patch.
+
+Where the remaining ~5 µs goes, from reading the spawn path rather than
+measuring it: the thread registration above, `snapshotHandlerChainEntries` (an
+array copy of the chain per spawn so the task can find the handlers in scope at
+the spawn site), `lookupScopeVar`, and a `MezzePromise` plus semaphore.
+
+TWO THINGS ABOUT THE HARNESS, both of which cost time before any number
+appeared. With no row argument (`sel = 0`) it prints the header and the control
+and **no rows at all** — the five `report` calls produce nothing, and the same
+invocation with an explicit row works, so the all-rows path is broken rather
+than slow. And row 1 at n=2000 did not finish inside 400 s while n=800 finished
+in under a second at 11 µs an op; the per-op cost FALLS with n (36.7 µs at 100,
+12.9 at 200, 10.2 at 400, 11.2 at 800), so that is warmup amortising and not a
+leak, which makes the n=2000 behaviour an anomaly rather than a slope.
+
+Recorded rather than chased: this surface costs minutes a measurement, its floor
+is two thirds JDK, and the iter surface in the same session had cliffs of 37x to
+122x against a floor of its own making.
