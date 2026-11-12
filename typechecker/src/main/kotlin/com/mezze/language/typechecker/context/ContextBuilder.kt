@@ -840,6 +840,40 @@ class ContextBuilder {
                 MezzeType.RecordType(fields)
             }
             is ParsedIdentifier -> associatedTypes[expr.localName] ?: MezzeType.VarType(TypeVar.fresh())
+            // A LITERAL payload has a type that needs no inference, and leaving it
+            // to the `else` below was a silent soundness hole, not a gap in
+            // coverage. The suspension type is unified with the perform block's
+            // type ("perform body must return the same type that handler X
+            // produces"), so a fresh variable there does not mean "unknown" — it
+            // UNIFIES WITH ANYTHING and the comparison succeeds vacuously.
+            // Measured with `throw = { error } -> abort { val = "ABORTED-STRING" }`
+            // against a block declared Int: `run : {} -> Int` checked clean, then
+            // printed the Str and died at `Cannot multiply String and Long`.
+            //
+            // Spelled from ExprLiteralConstraints, which is authoritative for what
+            // each literal's type is. `Nat` is deliberately absent: its type is a
+            // newtype read from `typeDeclarations` (see `natLiteralType`), which is
+            // not what this walker has, and guessing it would be worse than
+            // leaving it to the general case.
+            is ParsedIntLit -> MezzeType.IntType
+            is ParsedFloatLit -> MezzeType.FloatType
+            is ParsedFracLit -> MezzeType.FracType
+            is ParsedStringLit -> MezzeType.StringType
+            is ParsedCharLit -> MezzeType.CharType
+            // STILL A HOLE for a COMPUTED payload (`abort { val = f {} }`): this
+            // walker runs at context-build time over PARSED, un-typechecked
+            // expressions, so it cannot type a call. A fresh variable keeps the
+            // comparison vacuous for those, exactly as above.
+            //
+            // The real fix is not more cases here — it is to stop guessing: the
+            // SOLVED `performReturn` from `ImplValidator`'s per-op solve is the
+            // honest answer, compared against each perform site's block type in a
+            // post-solve pass like `TypeChecker.checkConstructorPayloads` (which
+            // exists for the same reason — a check that deferred and never came
+            // back). Ordering is why it cannot simply be fed forward: that solve
+            // runs during constraint generation, and a perform site may precede
+            // the impl in the file. Pinned as a BREAK in
+            // PerformAbortPayloadSpecTest.
             else -> MezzeType.VarType(TypeVar.fresh())
         }
 

@@ -287,6 +287,33 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
                     )
                 )
             }
+        } else {
+            // OMITTING the record entirely skipped this whole block, so a
+            // performer with required parameters got no check at all — while a
+            // WRONG type and an EXTRA field were both caught. The gate asks
+            // whether the author wrote parameters, not whether the performer needs
+            // them.
+            //
+            // It is not a type confusion: the handler's identity includes its
+            // parameters, so nothing is installed and the program dies with
+            // `Handler not found for: <128 hex characters>` — measured. That is a
+            // program that cannot run, accepted, failing with a message naming
+            // nothing the author wrote.
+            //
+            // `performerFields` is null for a parameter-less performer (see
+            // ContextBuilder), so this fires only where parameters were declared.
+            val required = performerInfo.performerFields
+            if (required is MezzeType.RecordType && required.fields.isNotEmpty()) {
+                throw TypeCheckError(
+                    "Performer '${handler.performer.localName}' needs " +
+                        required.fields.keys.sorted().joinToString(", ") { "'$it'" } +
+                        ", but this `perform` supplies none.\n" +
+                        "Give them at the handler: `perform ${handler.performer.localName} " +
+                        "{ ${required.fields.keys.sorted().joinToString(", ") { "$it = …" }} } in …`",
+                    expr.loc,
+                    code = ErrorCode.T0201_TYPE_MISMATCH,
+                )
+            }
         }
 
         val suspensionType = performerInfo.suspensionType
