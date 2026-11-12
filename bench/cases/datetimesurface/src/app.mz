@@ -155,6 +155,20 @@ let l_offset = { i, acc, t, z } -> if i <= 0 then acc
     acc = acc + datetime::duration_to_seconds {
       d = datetime::zone_offset_at { z = z, at = t } } / 3600 }
 
+## ── 12. hour ─ a TIME field, which needs no calendar at all ──────────────
+## A zone offset is a whole number of seconds, so hour/minute/second are
+## division and remainder on the local second count — no LocalDate, no object.
+let l_hour = { i, acc, t, z } -> if i <= 0 then acc
+  else l_hour { i = i - 1, t = t, z = z,
+    acc = acc + datetime::hour { i = t, z = z } }
+
+## ── 13. nanos ─ the field the ZONE CANNOT CHANGE ─────────────────────────
+## An offset never shifts the nano-of-second, so this reads straight off the
+## Instant and does no zone work whatsoever.
+let l_nanos = { i, acc, t, z } -> if i <= 0 then acc
+  else l_nanos { i = i - 1, t = t, z = z,
+    acc = acc + datetime::nanos { i = t, z = z } }
+
 pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
   let args = argv {}
   let n = arg_at { args = args, i = 0, def = 200000 }
@@ -192,3 +206,7 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
            label = "is_leap_year        ", thunk = {} -> l_leap { i = n, acc = 0 } }
   report { idx = 11, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "zone_offset_at      ", thunk = {} -> l_offset { i = n, acc = 0, t = t, z = z } }
+  report { idx = 12, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "hour                ", thunk = {} -> l_hour { i = n, acc = 0, t = t, z = z } }
+  report { idx = 13, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "nanos               ", thunk = {} -> l_nanos { i = n, acc = 0, t = t, z = z } }

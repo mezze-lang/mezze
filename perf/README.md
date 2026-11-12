@@ -35,10 +35,10 @@ was reverted.
 
 | module | ops | benched | numbered | cover |
 |---|---|---|---|---|
-| [datetime](core/datetime.md) | 66 | 16 | 11 | 24% |
+| [datetime](core/datetime.md) | 66 | 18 | 13 | 27% |
 | [option](core/option.md) | 16 | 1 | 0 | 6% |
 | [result](core/result.md) | 16 | 1 | 0 | 6% |
-| **subtotal** | **98** | **18** | **11** | **18%** |
+| **subtotal** | **98** | **20** | **13** | **20%** |
 
 ## Numbers and math
 
@@ -133,10 +133,10 @@ was reverted.
 | Data structures | 635 | 141 | 56 | 22% |
 | Effects | 526 | 0 | 0 | 0% |
 | Numbers and math | 102 | 4 | 0 | 4% |
-| Core types | 98 | 18 | 11 | 18% |
+| Core types | 98 | 20 | 13 | 20% |
 | Abilities, meta and tooling | 44 | 0 | 0 | 0% |
 | Codecs | 28 | 0 | 0 | 0% |
-| **TOTAL** | **1433** | **163** | **67** | **11%** |
+| **TOTAL** | **1433** | **165** | **69** | **12%** |
 
 **Effects reads 0% and is not zero.** An effect operation is invoked
 through an ability call (`Console.println {}`, `Mut.set {}`) or a

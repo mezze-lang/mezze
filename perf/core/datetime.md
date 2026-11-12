@@ -4,7 +4,7 @@
 
 # datetime
 
-`std::datetime` · 66 operations · 16 with a bench row · 11 with a number
+`std::datetime` · 66 operations · 18 with a bench row · 13 with a number
 
 | op | ps/op | elems | ps/elem | vs floor | bench |
 |---|---|---|---|---|---|
@@ -44,7 +44,7 @@
 | `format_datetime` | **UNMEASURED** | | | | |
 | `format_iso8601` | 109 326 |  |  | — | datetimesurface:9 |
 | `format_time` | **UNMEASURED** | | | | |
-| `hour` | **UNMEASURED** | | | | |
+| `hour` | 27 091 |  |  | — | datetimesurface:12 |
 | `instant_decode` | **UNMEASURED** | | | | |
 | `instant_encode` | **UNMEASURED** | | | | |
 | `instant_from_millis` | 19 318 |  |  | — | datetimesurface:1 |
@@ -56,7 +56,7 @@
 | `is_negative_duration` | **UNMEASURED** | | | | |
 | `minute` | **UNMEASURED** | | | | |
 | `month` | **UNMEASURED** | | | | |
-| `nanos` | **UNMEASURED** | | | | |
+| `nanos` | 12 444 |  |  | — | datetimesurface:13 |
 | `negate_duration` | **UNMEASURED** | | | | |
 | `parse` | 305 791 |  |  | — | datetimesurface:8 |
 | `second` | **UNMEASURED** | | | | |
@@ -68,13 +68,13 @@
 | `test_clock_now` | **UNMEASURED** | | | | |
 | `test_clock_set` | **UNMEASURED** | | | | |
 | `utc` | — | | | | called in datetimesurface, no number |
-| `year` | 41 548 |  |  | — | datetimesurface:6 |
+| `year` | 33 757 |  |  | — | datetimesurface:6 |
 | `zone_decode` | **UNMEASURED** | | | | |
 | `zone_encode` | **UNMEASURED** | | | | |
 | `zone_id` | **UNMEASURED** | | | | |
 | `zone_of` | — | | | | called in datetimesurface, no number |
 | `zone_offset_at` | 32 575 |  |  | — | datetimesurface:11 |
 
-## Unmeasured (50 of 66)
+## Unmeasured (48 of 66)
 
-`abs_duration`, `add_days`, `add_duration`, `add_hours`, `add_millis`, `add_minutes`, `add_seconds`, `after`, `before`, `compose`, `day`, `days_in_month`, `diff_millis`, `diff_nanos`, `diff_seconds`, `duration_days`, `duration_decode`, `duration_encode`, `duration_hours`, `duration_millis`, `duration_minutes`, `duration_nanos`, `duration_to_nanos`, `duration_zero`, `epoch`, `format_date`, `format_datetime`, `format_time`, `hour`, `instant_decode`, `instant_encode`, `instant_from_seconds`, `instant_nano_of_second`, `instant_to_seconds`, `is_negative_duration`, `minute`, `month`, `nanos`, `negate_duration`, `second`, `sub_duration`, `sub_duration_from_instant`, `test_clock_advance`, `test_clock_at`, `test_clock_monotonic`, `test_clock_now`, `test_clock_set`, `zone_decode`, `zone_encode`, `zone_id`
+`abs_duration`, `add_days`, `add_duration`, `add_hours`, `add_millis`, `add_minutes`, `add_seconds`, `after`, `before`, `compose`, `day`, `days_in_month`, `diff_millis`, `diff_nanos`, `diff_seconds`, `duration_days`, `duration_decode`, `duration_encode`, `duration_hours`, `duration_millis`, `duration_minutes`, `duration_nanos`, `duration_to_nanos`, `duration_zero`, `epoch`, `format_date`, `format_datetime`, `format_time`, `instant_decode`, `instant_encode`, `instant_from_seconds`, `instant_nano_of_second`, `instant_to_seconds`, `is_negative_duration`, `minute`, `month`, `negate_duration`, `second`, `sub_duration`, `sub_duration_from_instant`, `test_clock_advance`, `test_clock_at`, `test_clock_monotonic`, `test_clock_now`, `test_clock_set`, `zone_decode`, `zone_encode`, `zone_id`

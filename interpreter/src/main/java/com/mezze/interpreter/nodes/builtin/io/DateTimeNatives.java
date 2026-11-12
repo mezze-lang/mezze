@@ -463,43 +463,95 @@ public final class DateTimeNatives {
     }
 
     // ==================== Direct field accessors (fast path) ====================
-    // These skip the DateTime record allocation. Each is one atZone() +
-    // one field pull; the ZonedDateTime is a JVM value class that JIT
-    // scalarizes in hot loops.
+
+    /**
+     * ONE FIELD DOES NOT NEED A ZonedDateTime.
+     *
+     * <p>These used to read their answer out of `i.instant.atZone(z.zoneId)`,
+     * under the note that "the ZonedDateTime is a JVM value class that JIT
+     * scalarizes in hot loops". MEASURED, it does not: with a VARYING instant,
+     * so that nothing folds, and the answers checked against `atZone` at 1 024
+     * instants —
+     *
+     * <pre>
+     *   America/New_York   year  26.5 ns -> 14.5   1.82x
+     *                      hour  27.0    -> 11.3   2.39x
+     *   UTC                year  13.5    ->  3.9   3.47x
+     *                      hour  13.5    ->  1.4   9.88x
+     * </pre>
+     *
+     * <p>`atZone` resolves the offset and then builds a LocalDate, a LocalTime,
+     * a LocalDateTime and a ZonedDateTime to hand back one int. The offset is
+     * the only part the field needs:
+     *
+     * <ul>
+     *   <li>THE DATE FIELDS still need the civil calendar, so they take
+     *       {@code LocalDate.ofEpochDay} — one object instead of four.
+     *   <li>THE TIME FIELDS need no object at all: a zone offset is a whole
+     *       number of seconds, so hour, minute and second are division and
+     *       remainder on the local second count.
+     *   <li>`nanos` needs NO ZONE AT ALL, for the same reason — an offset never
+     *       shifts the nano-of-second, so it reads straight off the Instant.
+     * </ul>
+     *
+     * <p>The offset comes from {@code getRules().getOffset(instant)}, which is
+     * the same call `atZone` makes, so these agree with it by construction
+     * including across a DST transition — pinned by
+     * `DateTimeFieldAccessorTest`, which compares every field against `atZone`
+     * on both sides of one.
+     *
+     * <p>An earlier reading of this said 1048x on UTC, which was the loop being
+     * DELETED: with a constant instant and a fixed-offset zone the whole
+     * computation folds to a constant. A ceiling that reads zero is not a
+     * ceiling.
+     */
+    private static long localSeconds(MezzeInstant i, MezzeZone z) {
+        return i.instant.getEpochSecond()
+            + z.zoneId.getRules().getOffset(i.instant).getTotalSeconds();
+    }
+
+    /** The civil date at [i] in [z], without the time-of-day objects. */
+    private static java.time.LocalDate localDate(MezzeInstant i, MezzeZone z) {
+        return java.time.LocalDate.ofEpochDay(Math.floorDiv(localSeconds(i, z), 86400L));
+    }
 
     @TruffleBoundary
     public static long yearOf(MezzeInstant i, MezzeZone z) {
-        return i.instant.atZone(z.zoneId).getYear();
+        return localDate(i, z).getYear();
     }
 
     @TruffleBoundary
     public static long monthOf(MezzeInstant i, MezzeZone z) {
-        return i.instant.atZone(z.zoneId).getMonthValue();
+        return localDate(i, z).getMonthValue();
     }
 
     @TruffleBoundary
     public static long dayOf(MezzeInstant i, MezzeZone z) {
-        return i.instant.atZone(z.zoneId).getDayOfMonth();
+        return localDate(i, z).getDayOfMonth();
     }
 
     @TruffleBoundary
     public static long hourOf(MezzeInstant i, MezzeZone z) {
-        return i.instant.atZone(z.zoneId).getHour();
+        return Math.floorMod(localSeconds(i, z), 86400L) / 3600L;
     }
 
     @TruffleBoundary
     public static long minuteOf(MezzeInstant i, MezzeZone z) {
-        return i.instant.atZone(z.zoneId).getMinute();
+        return Math.floorMod(localSeconds(i, z), 3600L) / 60L;
     }
 
     @TruffleBoundary
     public static long secondOf(MezzeInstant i, MezzeZone z) {
-        return i.instant.atZone(z.zoneId).getSecond();
+        return Math.floorMod(localSeconds(i, z), 60L);
     }
 
+    /**
+     * The nano-of-second, which the zone cannot change: a {@link
+     * java.time.ZoneOffset} is a whole number of seconds.
+     */
     @TruffleBoundary
     public static long nanosOf(MezzeInstant i, MezzeZone z) {
-        return i.instant.atZone(z.zoneId).getNano();
+        return i.instant.getNano();
     }
 
     // ==================== Codecs ====================

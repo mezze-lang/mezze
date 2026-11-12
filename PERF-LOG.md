@@ -13757,3 +13757,84 @@ COVERAGE. Eleven rows: `instant_from_millis`, `instant_to_millis`,
 17%, and the first numbers say where to look next: `decompose` is 57 813 ps and
 `year` 41 548 for one field, against `is_leap_year`'s 656 for pure arithmetic —
 so a calendar-field read costs 60 to 90 times an integer one.
+
+#### One calendar field built a whole ZonedDateTime — 3.03x on nanos, 1.44x on hour, and 1.04x on year
+
+The datetime surface's own first reading pointed here: `year` at 41 548 ps and
+`decompose` at 57 813 against `is_leap_year`'s 656 for pure arithmetic. Every
+field accessor read its answer out of a freshly built `ZonedDateTime`:
+
+```java
+public static long yearOf(MezzeInstant i, MezzeZone z) {
+    return i.instant.atZone(z.zoneId).getYear();
+}
+```
+
+under the note that "the ZonedDateTime is a JVM value class that JIT
+scalarizes in hot loops". It is not a value class and it does not fully
+scalarize. `atZone` resolves the offset and then builds a LocalDate, a
+LocalTime, a LocalDateTime and a ZonedDateTime to hand back one int, and the
+offset is the only part the field needs.
+
+IN ISOLATION, with a VARYING instant and every answer checked against `atZone`
+at 1 024 instants:
+
+| | atZone | from the offset | |
+|---|---|---|---|
+| `year`, America/New_York | 26.5 ns | 14.5 | 1.82x |
+| `hour`, America/New_York | 27.0 | 11.3 | 2.39x |
+| `year`, UTC | 13.5 | 3.9 | 3.47x |
+| `hour`, UTC | 13.5 | 1.4 | 9.88x |
+
+IN THE RUNTIME, `datetimesurface` in America/New_York, min of three interleaved
+passes:
+
+| row | base | from the offset | |
+|---|---|---|---|
+| `datetime::nanos` | 37 716 ps | **12 444** | **3.03x** |
+| `datetime::hour` | 39 091 | **27 091** | **1.44x** |
+| `datetime::year` | 35 206 | 33 757 | 1.04x |
+| `decompose` (control, untouched) | 59 788 | 59 140 | 1.01x |
+| `zone_offset_at` (control) | 30 002 | 29 909 | 1.00x |
+| `instant_from_millis` (control) | 18 962 | 19 287 | 0.98x |
+| `add_duration` (control) | 21 848 | 22 542 | 0.97x |
+
+THE THREE KINDS OF FIELD COME OUT DIFFERENTLY, which is the point of measuring
+them separately.
+
+`nanos` gains most because it needs NO ZONE AT ALL: an offset is a whole number
+of seconds, so it cannot shift the nano-of-second, and the accessor now reads
+straight off the Instant.
+
+`hour`, `minute` and `second` need no object either — the local second count,
+divided and remaindered.
+
+`year`, `month` and `day` need the civil calendar, so they still build one
+`LocalDate` where they used to build four objects, and in the runtime that is
+**1.04x — within noise of unchanged**, against 1.82x in isolation. The
+LocalDate stays and the native boundary dilutes what is left. Reported as it
+measured, not as the probe predicted. Computing the year from the epoch day by
+hand would remove that object too, and is not worth re-implementing leap-century
+arithmetic for a tenth.
+
+**AND THE SAME BUILD-SKEW TRAP TWICE.** An intermediate reading had `year` at
+1.35x and a later one at 0.88x, and a third had every row at 1.00x. The 1.00x
+table was the tell: `ab.sh build1` compiles the bench against whatever
+`cli/build/install` currently holds, which is NOT the source in the tree, so an
+arm built without re-running `installRuntime` carries the OTHER arm's runtime.
+It is now a script — `arm.sh <case> <dest> <label>` — that installs the runtime,
+builds, installs again and rebuilds before copying, so neither the skew nor the
+one-build-behind artefact can be forgotten. Vigilance was not working; twice in
+one session is a tooling problem.
+
+The 1.35x and 1.04x readings for `year` are both from correctly built arms, with
+two rows added to the bench in between — so a row's absolute number moves with
+its neighbours, and a tenth either way on that row is not a result.
+
+COVERAGE. `DateTimeFieldAccessorTest` compares all seven fields against
+`atZone` across seven zones chosen for their offsets — whole, +5:30, +8:45,
+-3:30 — at 474 instants each through two years, second by second through BOTH
+of New York's DST transitions, 200 instants a zone BEFORE the epoch where the
+epoch second is negative, and at midnight exactly plus and minus a nanosecond.
+Plain division instead of `floorDiv` fails only the pre-epoch test, with the day
+one too high, which is why that one is there.

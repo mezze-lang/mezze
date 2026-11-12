@@ -92,3 +92,6 @@ datetime	parse	305791	2e5	1	datetimesurface:8	2026-11-12
 datetime	format_iso8601	109326	2e5	1	datetimesurface:9	2026-11-12
 datetime	is_leap_year	656	2e5	1	datetimesurface:10	2026-11-12
 datetime	zone_offset_at	32575	2e5	1	datetimesurface:11	2026-11-12
+datetime	hour	27091	2e5	1	datetimesurface:12	2026-11-12
+datetime	nanos	12444	2e5	1	datetimesurface:13	2026-11-12
+datetime	year	33757	2e5	1	datetimesurface:6	2026-11-12
