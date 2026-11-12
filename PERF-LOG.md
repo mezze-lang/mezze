@@ -13517,3 +13517,81 @@ never changed an answer. The value tests are there anyway: both zip components,
 zip stopping at the shorter side, flat_map's inner elements, a non-commutative
 folder over `chain` where the order IS the answer, `enumerate` threading `.i`
 and `.val`, and a Str accumulator so nothing can quietly sum past it.
+
+#### The Entry was not the cost — the two arrays were. 1.33x on map::count, and a correction
+
+Earlier today the whole-map walk was changed from the `Entry` iterator to
+`keys()` and `values()` indexed in step, worth 1.26x on `map::count`, with the
+reasoning that the Entry allocation per element was the cost. That reasoning was
+right about the direction and wrong about the cause, and the ledger entry
+carries the correction rather than replacing it.
+
+Three ways to walk a 1 000-entry long-keyed map, same checksum:
+
+| | ns/entry |
+|---|---|
+| `keys()` + `values()` indexed in step | 7.16 |
+| the `Entry` iterator it replaced | 7.25 |
+| `storage.forEach` — one walk, no arrays | **1.97** |
+
+**3.63x, and the Entry iterator was within 1% of the arrays that replaced it.**
+Neither shape was the walk. Both were the two n-element arrays and the trie
+being traversed TWICE to fill them — `TrieMapStorage.collect` once per side.
+The Entry was a red herring that happened to sit next to the real cost. 3.54x at
+n=4 000, 2.56x for String keys.
+
+`MapStorage.forEach(BiConsumer)` was already there, already overridden by both
+tries, and its own javadoc already said "more efficient than extracting keys()
+and values() separately". Nothing in `MapNatives` called it.
+
+`any`, `all`, `none` and `find` answer before the end, so they needed a walk
+that STOPS. `MapStorage.forEachUntil(BiPredicate)` is the sibling: false ends
+the walk, and the two tries override it with a recursive walk that returns
+early, while the default pays for the two arrays exactly as before — the
+storages that take it hold at most 32 entries, where the arrays are the cheap
+answer anyway.
+
+Interleaved A/B, `mapsurface`, 1 000 keys:
+
+| row | base | one walk | |
+|---|---|---|---|
+| `map::count` | 13 814 776 ps | **10 354 699** | **1.33x** |
+| `map::filter` | 24 802 174 | **22 292 413** | **1.11x** |
+| `map::map_values` | 31 880 438 | 31 287 624 | 1.02x |
+| `map::contains_value` (walks, not rewired) | 6 555 944 | 6 388 075 | 1.03x |
+| `map::keys` (materialises on purpose) | 6 733 150 | 6 938 833 | 0.97x |
+| `map::values` (same) | 5 932 959 | 6 076 537 | 0.98x |
+| `map::insert` | 46 091 | 46 983 | 0.98x |
+| `map::size` | 212 | 209 | 1.01x |
+
+Checksums equal on every row. `count` gains most because it is the row with no
+build to dilute it: of its 13.8 ns an entry, about 7 was the arrays and 4.5 the
+guest call.
+
+**`map_values` gains almost nothing, and the reason is worth writing down.** It
+needs a key array to hand to `fromEntries`, so where it used to take two input
+arrays and allocate one output, it now walks once and allocates two outputs —
+three arrays down to two. The build still dominates it at ~22.6 ns an entry.
+Removing the last two would mean building INTO the builder during the walk,
+which is sound for `map_values` specifically because it preserves the key set
+and therefore the storage tier; `filter` cannot borrow that argument, since a
+filter down to five entries belongs in the flat storage, not a trie.
+
+`map::size` read **0.83x** at n=2 000 000 and 1.01x at n=4 000 000. That is the
+third time today a control at a few hundred picoseconds has been undersized by
+the row next to it, and the third time the answer was to size it by its own cost
+rather than to explain the number.
+
+COVERAGE. `MapWalkPairingTest` grew rather than being replaced: the pairing
+tests it already had cover the new mechanism unchanged, because a `forEach` that
+pairs a key with another key's value fails them exactly as a slipped array index
+did. Four tests are new, counting predicate CALLS in an atom, because a
+predicate's false now has to stop a RECURSIVE walk where it used to `return` out
+of a flat loop — `any` and `find` over an always-true predicate and `all` over
+an always-false one must call it exactly ONCE on a hundred-entry map, and a
+never-matching `any` must still see all hundred.
+
+Ignoring the stop signal fails FIVE tests, and two of them are correctness, not
+counting: `any` answers false and `find` answers None, because both now derive
+their answer from whether the walk stopped. The short-circuit is load-bearing
+for the result, not only for the speed.

@@ -386,6 +386,29 @@ public final class TrieMapStorage implements MapStorage {
     }
 
     @Override
+    public boolean forEachUntil(java.util.function.BiPredicate<Object, Object> p) {
+        return walkUntil(root, p);
+    }
+
+    /** As {@link #walk}, stopping the moment the predicate says so. */
+    private static boolean walkUntil(Node n, java.util.function.BiPredicate<Object, Object> p) {
+        if (n instanceof Collision c) {
+            for (int i = 0; i < c.keys.length; i++) {
+                if (!p.test(c.keys[i], c.values[i])) return false;
+            }
+            return true;
+        }
+        Bitmap b = (Bitmap) n;
+        for (int i = 0; i < b.keys.length; i++) {
+            if (!p.test(b.keys[i], b.values[i])) return false;
+        }
+        for (Node child : b.nodes) {
+            if (!walkUntil(child, p)) return false;
+        }
+        return true;
+    }
+
+    @Override
     public void forEach(java.util.function.BiConsumer<Object, Object> consumer) {
         walk(root, consumer);
     }

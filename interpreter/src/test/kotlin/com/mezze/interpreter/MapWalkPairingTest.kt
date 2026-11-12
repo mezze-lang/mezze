@@ -4,31 +4,35 @@ import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 
 /**
- * `map::count`, `any`, `all`, `none` and `find` walk the key and value arrays by
- * index instead of building an `Entry` per element.
+ * `map::count`, `any`, `all`, `none` and `find` must hand each predicate a key
+ * together with ITS OWN value, and must stop walking once the answer is known.
  *
- * WHY. `MezzeMap`'s iterator does `new Entry<>(keys[index], values[index])` for
- * every element, so a walk over a 1 000-key map allocated a thousand two-field
- * objects before any predicate ran — and a `ScalarCall` takes the key and the
- * value positionally, so the Entry existed only to be taken apart again.
- * `map::count` went from 17 062 551 ps to 13 504 864 over a 1 000-key map,
- * **1.26x**, with `contains_value` (0.98x), `filter` (1.01x) and `keys` (0.99x)
- * flat beside it — none of those three goes through the five operations that
- * changed.
+ * THE WALK HAS BEEN WRONG TWICE, in opposite directions, which is why the
+ * pairing is tested rather than assumed.
  *
- * WHAT THESE TESTS ARE FOR. Indexing two arrays in step is right only while
- * `keys()` and `values()` traverse the storage identically, and they are built
- * by SEPARATE walks: `TrieMapStorage.collect(root, out, idx, true/false)`,
- * `LongTrieMapStorage.collectKeys`/`collectValues`, and the flat storages skip
- * their EMPTY slots in both. The iterator this replaces read the same two
- * arrays the same way, so nothing new is being relied on — but nothing TESTED
- * the pairing either, and a misalignment would silently hand a predicate one
- * key with another key's value.
+ * FIRST it built an `Entry` per element — `MezzeMap`'s iterator does
+ * `new Entry<>(keys[index], values[index])` every step — so a walk over a
+ * 1 000-key map allocated a thousand two-field objects before any predicate
+ * ran. That became `keys()` and `values()` indexed in step, worth 1.26x on
+ * `map::count`, and those two arrays are built by SEPARATE walks
+ * (`TrieMapStorage.collect` with a flag, `LongTrieMapStorage.collectKeys` and
+ * `collectValues`, and the flat storages skipping their EMPTY slots in both),
+ * so correctness rested on the two traversals agreeing — which nothing checked.
  *
- * So every predicate below couples the key to the value (`v == k * 10`). A
- * pairing that slipped by one answers 0 where the answer is the whole map, and
- * the sizes cross the storage boundaries — one entry, a small flat map, and one
- * large enough to be a trie.
+ * THEN the arrays turned out to be the cost they were meant to avoid. On a
+ * 1 000-entry long-keyed map the two arrays measure 7.16 ns an entry, the Entry
+ * iterator 7.25, and a single `forEach` walk 1.97 — so the Entry was never the
+ * main cost, the two n-element arrays and the doubled traversal were. These
+ * operations now take one `walkEntries` pass with no arrays at all, and the
+ * four that can answer early take `walkEntriesUntil`.
+ *
+ * SO THE TESTS HOLD TWO THINGS. Every predicate couples the key to the value
+ * (`v == k * 10`), at one entry, three, eight (the flat storage boundary) and a
+ * hundred — a pairing that slips answers 0 where the answer is the whole map,
+ * under either mechanism. And the early exits are counted, because a predicate
+ * returning false now has to stop a RECURSIVE trie walk where it used to
+ * `return` out of a flat loop: `any` over an always-true predicate must call it
+ * exactly ONCE however large the map.
  */
 class MapWalkPairingTest {
 
@@ -142,5 +146,57 @@ class MapWalkPairingTest {
             c + (if a then 1 else 0)
             """
         ),
+    )
+
+    // ── EARLY EXIT. The predicate's `false` has to stop a recursive walk. ──
+
+    /** The number of predicate calls, counted in an atom. `swap` answers
+     *  with the NEW value, so `bump {} > 0` both counts and yields True and
+     *  `bump {} < 0` both counts and yields False — no `do` block, which a
+     *  one-line predicate cannot lay out. */
+    private fun callsDuring(op: String) = """
+        use std::collections::map
+        use std::effects::async::atom::{ atom, deref, swap }
+        use std::effects::async::{ Async, LoomAsync }
+        let build = { i, m } ->
+          if i <= 0 then m
+          else build { i = i - 1, m = map::insert { m = m, k = i, v = i * 10 } }
+        let main = {} -> perform LoomAsync in do
+          let m = build { i = 100, m = map::empty {} }
+          let calls = atom { val = 0 }
+          let bump = { } -> swap { atom = calls, f = { current } -> current + 1 }
+          let _ = $op
+          deref { atom = calls }
+        main {}
+    """
+
+    @Test
+    fun `any stops at the first matching entry`() = assertEquals(
+        1L,
+        eval(callsDuring(
+            "map::any { m = m, p = { k, v } -> bump {} > 0 }")),
+    )
+
+    @Test
+    fun `all stops at the first failing entry`() = assertEquals(
+        1L,
+        eval(callsDuring(
+            "map::all { m = m, p = { k, v } -> bump {} < 0 }")),
+    )
+
+    @Test
+    fun `find stops at the first match`() = assertEquals(
+        1L,
+        eval(callsDuring(
+            "map::find { m = m, p = { k, v } -> bump {} > 0 }")),
+    )
+
+    /** And a predicate that never matches must see every entry — the walk must
+     *  not stop EARLY of its own accord. */
+    @Test
+    fun `any with no match visits every entry`() = assertEquals(
+        100L,
+        eval(callsDuring(
+            "map::any { m = m, p = { k, v } -> bump {} < 0 }")),
     )
 }

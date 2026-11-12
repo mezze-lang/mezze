@@ -321,6 +321,22 @@ public final class LongTrieMapStorage implements MapStorage {
     }
 
     @Override
+    public boolean forEachUntil(java.util.function.BiPredicate<Object, Object> p) {
+        return walkUntil(root, p);
+    }
+
+    /** As {@link #walk}, stopping the moment the predicate says so. */
+    private static boolean walkUntil(Node n, java.util.function.BiPredicate<Object, Object> p) {
+        for (int i = 0; i < n.keys.length; i++) {
+            if (!p.test(n.keys[i], n.values[i])) return false;
+        }
+        for (Node child : n.nodes) {
+            if (!walkUntil(child, p)) return false;
+        }
+        return true;
+    }
+
+    @Override
     public void forEach(java.util.function.BiConsumer<Object, Object> consumer) {
         walk(root, consumer);
     }
