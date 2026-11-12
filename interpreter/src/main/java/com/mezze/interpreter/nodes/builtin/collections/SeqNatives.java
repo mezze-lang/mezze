@@ -706,17 +706,37 @@ public final class SeqNatives {
         return MezzeSeq.fromArray(arr);
     }
 
+    /**
+     * Sort by a guest comparator — through {@link ScalarCall}, which is what
+     * every other native HOF here uses and what this one skipped.
+     *
+     * <p>It used to call {@code prepareArgsComparator} per comparison, and that
+     * allocates TWICE every time: a fresh {@code Object[] args} and a
+     * {@code MezzeRecord.wrapAB} to hold the pair. A sort does about
+     * {@code n log n} comparisons, so a thousand elements paid roughly twenty
+     * thousand allocations for argument passing alone.
+     *
+     * <p>{@code ScalarCall} exists for exactly this: it resolves the scalar-ABI
+     * bypass ONCE and then reuses one positional args array for the whole sort,
+     * so the scalar path allocates nothing per comparison. {@link
+     * ScalarCall#callCmp} is even written for this caller — "keeps a sort stable
+     * instead of corrupting it", says its doc — and had every collection's
+     * min/max/compare as users while the sort it names did not use it.
+     *
+     * <p>{@code callCmp} also normalises with {@code Long.signum} where this
+     * read {@code intValue()}, which is strictly safer but is NOT a bug fix
+     * today and should not be sold as one: {@code intValue()} narrows, so a
+     * comparator answering a magnitude could have its sign flipped or zeroed —
+     * but `std::collections::seq` wraps every comparator as
+     * {@code if cmp {...} then 0 - 1 else 1}, so the only values reaching here
+     * are -1 and 1. It matters if a caller ever hands this native a raw
+     * three-way comparator.
+     */
     public static MezzeSeq sortBy(MezzeSeq seq, MezzeFunction cmpFn,
                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare2(cmpFn, "a", "b");
         Object[] arr = seq.toArray();
-        Arrays.sort(arr, (elemA, elemB) -> {
-            Object cmpResult = callNode.call(cmpFn.getCallTarget(),
-                prepareArgsComparator(cmpFn, elemA, elemB));
-            if (cmpResult instanceof Long) {
-                return ((Long) cmpResult).intValue();
-            }
-            return 0;
-        });
+        Arrays.sort(arr, (elemA, elemB) -> ctx.callCmp(callNode, elemA, elemB));
         return MezzeSeq.fromArray(arr);
     }
 

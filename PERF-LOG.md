@@ -14183,3 +14183,75 @@ exposed it. They asserted `hashes == 0` for the flat and single-entry storages,
 and passed with the optimisation reverted: those storages find their slot by
 `equals`, not by hashing, so a rebuild never hashed anything at that size.
 Counting comparisons fixed the flat case.
+
+#### `seq::sort_by` was the one HOF that never used `ScalarCall` — 1.63x, two allocations a comparison
+
+Every native higher-order function here passes its callback's arguments through
+`ScalarCall`, which "resolves the scalar-ABI bypass ONCE, reuses one positional
+args array for the whole loop" — its own words. `SeqNatives.sortBy` hand-rolled
+it instead, calling `prepareArgsComparator` per comparison:
+
+```java
+private static Object[] prepareArgsComparator(MezzeFunction fn, Object a, Object b) {
+    Object[] args = new Object[closureValues.length + 1];   // one
+    args[closureValues.length] = MezzeRecord.wrapAB(a, b);  // two
+```
+
+TWO allocations every comparison. A sort does about `n log n` of them, so a
+thousand elements paid roughly twenty thousand allocations for argument passing
+alone, and a hundred elements about thirteen hundred.
+
+SELF-A/B, two builds from identical source with only that call site differing.
+`prepareArgsComparator` stays in the file in both arms — it has other callers —
+so nothing else about the class changes:
+
+| row | hand-rolled | `ScalarCall` | |
+|---|---|---|---|
+| `seq::sort_by` | 2 163 826 ps | 1 296 326 | **1.67x** |
+| | 2 044 668 | 1 274 164 | **1.60x** |
+| `seq::dedup` (control) | 2 053 122 | 2 005 710 | 2.3% |
+| `seq::group_by` (control) | 3 479 968 | 3 566 502 | 2.5% |
+| `seq::sum` (control) | 50 787 | 51 962 | 2.3% |
+
+`dedup` is the control that carries the argument: it calls guest code PER
+ELEMENT through the same `ScalarCall` machinery and did not move, so this is the
+sort's comparator path and not callbacks in general. `group_by` moved 2.5% the
+wrong way, which is inside its own noise — its two n disagree by 10%.
+
+`ScalarCall.callCmp` is written for this caller — *"normalize it to a Java
+comparator result … keeps a sort stable instead of corrupting it"* — and had a
+dozen users across map, set, deque and sorted_set for min/max/compare while the
+sort it names was not one of them. I first wrote that down as "declared with no
+users", which is the shape that paid 77x on `OP_COUNT_ALL`; it is not that, and
+checking said so.
+
+NOT A BUG FIX, and worth being exact about because the diff looks like one.
+`callCmp` normalises with `Long.signum` where this read `intValue()`, which
+narrows and could flip or zero the sign of a comparator answering a magnitude.
+No such value reaches here: `std::collections::seq` wraps every comparator as
+`if cmp { … } then 0 - 1 else 1`, so the native only ever sees -1 and 1. It
+matters only if a caller later hands this native a raw three-way comparator.
+
+NO TEST FAILS WITHOUT THIS, and none was written to pretend otherwise. The
+change is pure allocation: semantics are identical through the whole stdlib
+surface, so a test that appeared to discriminate would only be measuring
+something else. The A/B is the evidence and the ordering suites —
+`SeqKeyOrdTest`, `SeqEqOrdConsistencyTest`, every `*Sort*` class — are the
+correctness guard.
+
+STILL OPEN HERE, found by reading rather than by the ranking, which is blind to
+what nobody benched:
+
+- **`sortByKey` boxes an `Integer` per element.** `Integer[] indices` with
+  `indices[i] = i` autoboxes all n, and `Arrays.sort` then compares boxed
+  integers. It also calls `prepareArgs` per element for the key function. It is
+  in NO bench and has NO coverage row, so it is unmeasured and gets measured
+  before it gets touched.
+- **`seq::sort` pays TWO guest calls per comparison.** It is defined as
+  `sort_by { cmp = { a, b } -> a <= b }`, and `sort_by` wraps that in a second
+  lambda for the native. There is no primitive sort at all: `seq.toArray()`
+  boxes a `long[]`-backed seq, `Arrays.sort(Object[], cmp)` runs, and
+  `MezzeSeq.fromArray` guesses the storage back. `Arrays.sort(long[])` would do
+  none of it — but routing the natural order there needs the element's `Ord` to
+  be the compiler's own, which is the same evidence question `seq::unique` is
+  blocked on, and the same decision.

@@ -24,7 +24,7 @@
 | `contains` | **UNMEASURED** | | | | |
 | `count` | — | | | | called in ds_matrix, fusegaps, no number |
 | `count_element` | **UNMEASURED** | | | | |
-| `dedup` | 2 222 382 | 100 | 22 223 | — | seqsurface:2 |
+| `dedup` | 2 028 373 | 100 | 20 283 | — | seqsurface:2 |
 | `dedup_by` | **UNMEASURED** | | | | |
 | `distinct` | **UNMEASURED** | | | | |
 | `drop` | **UNMEASURED** | | | | |
@@ -51,7 +51,7 @@
 | `from_sorted_map` | **UNMEASURED** | | | | |
 | `from_sorted_set` | **UNMEASURED** | | | | |
 | `get` | — | | | | called in allocsurface, asyncsurface, boxing_probe, bytesurface, chain, collfold, coresurface, datetimesurface, defunc, dequeabi, dispatch_probe, dotprobe, ds_matrix, dsmore, effectsurface, floatloop, foldshape, fuseall, fusecross, fusegaps, hofcapture, hofpoly, iter_perf_compare, iterremit, iterstage, jsonsurface, letcost, list_fold_compare, list_ops_compare, listwalk, mandelannot, mapsurface, mutabi, mutvsimmut, qsort_mut, qsort_native, qsort_pure, recfields, recordcost, seq_fold_compare, seqsurface, surface, tailannot, tailonly, wrapalloc, no number |
-| `group_by` | 3 535 411 | 100 | 35 354 | — | seqsurface:7 |
+| `group_by` | 3 241 829 | 100 | 32 418 | — | seqsurface:7 |
 | `group_consecutive` | **UNMEASURED** | | | | |
 | `group_consecutive_by` | **UNMEASURED** | | | | |
 | `head` | **UNMEASURED** | | | | |
@@ -101,7 +101,7 @@
 | `slice` | — | | | | called in qsort_mut, qsort_native, qsort_pure, no number |
 | `sliding` | **UNMEASURED** | | | | |
 | `sort` | — | | | | called in asyncsurface, bytesurface, datetimesurface, ds_matrix, dsmore, jsonsurface, list_fold_compare, list_ops_compare, mapsurface, qsort_mut, qsort_native, qsort_pure, seq_fold_compare, seqsurface, surface, no number |
-| `sort_by` | 2 252 493 | 100 | 22 524 | — | seqsurface:8 |
+| `sort_by` | 1 274 164 | 100 | 12 741 | — | seqsurface:8 |
 | `sort_by_key` | **UNMEASURED** | | | | |
 | `span` | **UNMEASURED** | | | | |
 | `split` | **UNMEASURED** | | | | |
@@ -109,7 +109,7 @@
 | `starts_with` | **UNMEASURED** | | | | |
 | `stddev` | **UNMEASURED** | | | | |
 | `subsequences` | **UNMEASURED** | | | | |
-| `sum` | 51 057 | 100 | 510 | — | seqsurface:11 |
+| `sum` | 49 580 | 100 | 495 | — | seqsurface:11 |
 | `sum_float` | **UNMEASURED** | | | | |
 | `swap` | **UNMEASURED** | | | | |
 | `tail` | **UNMEASURED** | | | | |

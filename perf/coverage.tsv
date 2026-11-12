@@ -115,3 +115,7 @@ map	filter	21291029	2e4	1000	mapsurface:22	2026-11-13
 map	to_seq	17505029	5e4	1000	mapsurface:20	2026-11-13
 map	values	5972035	1e5	1000	mapsurface:19	2026-11-13
 map	merge	39097148	2e4	1000	mapsurface:24	2026-11-13
+seq	sort_by	1274164	4e4	100	seqsurface:8	2026-11-13
+seq	dedup	2028373	4e4	100	seqsurface:2	2026-11-13
+seq	group_by	3241829	2e4	100	seqsurface:7	2026-11-13
+seq	sum	49580	1e6	100	seqsurface:11	2026-11-13
