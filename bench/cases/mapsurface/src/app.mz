@@ -46,6 +46,7 @@ use std::datetime::{ duration_to_nanos, sub_duration }
 use std::collections::seq
 use std::collections::map
 use std::collections::set
+use std::collections::list
 use std::str
 use std::int
 
@@ -223,6 +224,87 @@ let l_str_insert_chain = { i, acc, m, ks, keys } -> if i <= 0 then acc
   else l_str_insert_chain { i = i - 1, acc = acc + 1, ks = ks, keys = keys,
                             m = map::insert { m = m, k = key_at_or { ks = ks, i = i % keys }, v = i } }
 
+## ── 14-25. THE REST OF THE MAP SURFACE ─────────────────────────────────────
+##
+## `scripts/collection-coverage.py` says 8 of map's 58 operations had ever been
+## measured. These are the twelve most ordinary of the fifty that had not, and
+## they split into two groups that must NOT be run at the same n:
+##
+##   PER-KEY (rows 14-17) touch one entry, so they belong at the file's default
+##   n of 1e6 beside `map::get`.
+##   WHOLE-MAP (rows 18-25) touch every entry, so at 1 000 keys one op is a
+##   thousand element-operations and n=1e6 would be 1e9 of them. Run these with
+##   `sel` and a small n — 2 000 is a fifth of a second — and read them as
+##   ps per OP, which is what the harness reports; divide by the key count for
+##   ps per element.
+
+## 14. map::is_empty — `size { m } == 0`, so it should cost what size costs.
+let l_is_empty = { i, acc, m } -> if i <= 0 then acc
+  else l_is_empty { i = i - 1, m = m,
+                    acc = acc + (if map::is_empty { m = m } then 1 else 0) }
+
+## 15. map::remove, key PRESENT — the delete twin of insert.
+let l_remove = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let m2 = map::remove { m = m, k = (i % keys) + 1 }
+    l_remove { i = i - 1, acc = acc + map::size { m = m2 }, m = m, keys = keys }
+
+## 16. map::get_or — the shape that replaces a `match get is Some/None`.
+let l_get_or = { i, acc, m, keys } -> if i <= 0 then acc
+  else l_get_or { i = i - 1, m = m, keys = keys,
+                  acc = acc + map::get_or { m = m, k = (i % keys) + 1, def = 0 } }
+
+## 17. map::update — read, transform, write, in one traversal.
+let l_update = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let m2 = map::update { m = m, k = (i % keys) + 1, f = { x } -> match x is
+      Some { val } -> Some { val = val + 1 }
+      None -> Some { val = 1 } }
+    l_update { i = i - 1, acc = acc + map::size { m = m2 }, m = m, keys = keys }
+
+## 18. map::keys — materialises a List of every key.
+let l_keys = { i, acc, m } -> if i <= 0 then acc
+  else l_keys { i = i - 1, m = m, acc = acc + list::size { xs = map::keys { m = m } } }
+
+## 19. map::values — the same for values.
+let l_values = { i, acc, m } -> if i <= 0 then acc
+  else l_values { i = i - 1, m = m, acc = acc + list::size { xs = map::values { m = m } } }
+
+## 20. map::to_seq — a Seq of `{k, v}` records, the shape every iteration over a
+##     map goes through.
+let l_to_seq = { i, acc, m } -> if i <= 0 then acc
+  else l_to_seq { i = i - 1, m = m, acc = acc + seq::size { xs = map::to_seq { m = m } } }
+
+## 21. map::map_values — a callback per entry and a new map.
+let l_map_values = { i, acc, m } -> if i <= 0 then acc
+  else do
+    let m2 = map::map_values { m = m, f = { val } -> val + 1 }
+    l_map_values { i = i - 1, acc = acc + map::size { m = m2 }, m = m }
+
+## 22. map::filter — a predicate per entry, keeping half.
+let l_filter = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let m2 = map::filter { m = m, p = { k, v } -> k > keys / 2 }
+    l_filter { i = i - 1, acc = acc + map::size { m = m2 }, m = m, keys = keys }
+
+## 23. map::count — a predicate per entry, no new map.
+let l_count = { i, acc, m, keys } -> if i <= 0 then acc
+  else l_count { i = i - 1, m = m, keys = keys,
+                 acc = acc + map::count { m = m, p = { k, v } -> k > keys / 2 } }
+
+## 24. map::merge — two maps into one; merging with itself keeps the size.
+let l_merge = { i, acc, m } -> if i <= 0 then acc
+  else do
+    let m2 = map::merge { m1 = m, m2 = m }
+    l_merge { i = i - 1, acc = acc + map::size { m = m2 }, m = m }
+
+## 25. map::contains_value — the only lookup that cannot use the hash, so it is
+##     the control for how much the hashing is worth.
+let l_contains_value = { i, acc, m, keys } -> if i <= 0 then acc
+  else l_contains_value { i = i - 1, m = m, keys = keys,
+                          acc = acc + (if map::contains_value { m = m, v = (i % keys) + 1 }
+                                       then 1 else 0) }
+
 pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
   let args = argv {}
   let n = arg_at { args = args, i = 0, def = 1000000 }
@@ -265,6 +347,30 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
            label = "map::insert (chain)  ", thunk = {} -> l_insert_chain { i = n, acc = 0, m = m, keys = keys } }
   report { idx = 9, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "set::ins PRESENT, chain", thunk = {} -> l_set_insert_chain { i = n, acc = 0, s = s, keys = keys } }
+  report { idx = 14, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::is_empty        ", thunk = {} -> l_is_empty { i = n, acc = 0, m = m } }
+  report { idx = 15, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::remove PRESENT  ", thunk = {} -> l_remove { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 16, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::get_or (hit)    ", thunk = {} -> l_get_or { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 17, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::update          ", thunk = {} -> l_update { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 18, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::keys (whole map)", thunk = {} -> l_keys { i = n, acc = 0, m = m } }
+  report { idx = 19, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::values (whole)  ", thunk = {} -> l_values { i = n, acc = 0, m = m } }
+  report { idx = 20, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::to_seq (whole)  ", thunk = {} -> l_to_seq { i = n, acc = 0, m = m } }
+  report { idx = 21, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::map_values      ", thunk = {} -> l_map_values { i = n, acc = 0, m = m } }
+  report { idx = 22, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::filter          ", thunk = {} -> l_filter { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 23, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::count           ", thunk = {} -> l_count { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 24, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::merge (self)    ", thunk = {} -> l_merge { i = n, acc = 0, m = m } }
+  report { idx = 25, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::contains_value  ", thunk = {} -> l_contains_value { i = n, acc = 0, m = m, keys = keys } }
   report { idx = 10, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "STR key fetch (control)", thunk = {} -> l_str_fetch { i = n, acc = 0, ks = ks, keys = keys } }
   report { idx = 11, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,

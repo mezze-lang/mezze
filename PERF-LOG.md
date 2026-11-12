@@ -12891,3 +12891,49 @@ By unbenchmarked count, weighted by how ordinary the operation is:
 A pass over one module means: add a row per operation at a size matched to its
 own cost, run it, and fix what sits outside the band. That is how `count`,
 `to_hex` and `size` were found, and it is repeatable rather than lucky.
+
+### Pass 1 of closing it: map 8/58 -> 20/58, and the twelve rows found a family
+
+Twelve of map's fifty unmeasured operations, with the two groups kept apart
+because they cannot share an n: per-key rows at 1e6 ops, whole-map rows at
+2 000 ops over 1 000 keys.
+
+PER-KEY, against `map::get` (hit) at 9 529 ps and `map::size` at 427:
+
+| row | ps/op | |
+|---|---|---|
+| `map::is_empty` | 699 | it is `size == 0`, and it costs that |
+| `map::get_or` (hit) | 7 658 | **cheaper than `map::get`**, which allocates the Option |
+| `map::update` | 56 345 | |
+| `map::remove` PRESENT | 61 912 | **more than `map::insert`'s 45 272** |
+
+Two findings in four rows. `get_or` beating `get` is the Option allocation
+showing up from the other side — the same 1.93x this ledger already records for
+eliminating it in the fused `match get is Some/None`, visible here as a plain
+operation that never builds one. And a delete costing 1.4x an insert is worth a
+look: both copy a path, but only remove can have to collapse nodes.
+
+WHOLE-MAP, per ENTRY (the harness reports per op; divide by the 1 000 keys):
+
+| row | ps/entry | against the fused iter floor of 65-170 ps/element |
+|---|---|---|
+| `map::contains_value` | 5 841 | no hash to use, so this is the honest scan cost |
+| `map::values` | 5 900 | |
+| `map::keys` | 6 834 | |
+| `map::to_seq` | 20 872 | builds a `{k, v}` RECORD per entry |
+| **`map::count`** | **18 292** | **152x `iter::count`'s 120 ps for the same question** |
+| `map::filter` | 36 379 | |
+| `map::map_values` | 59 438 | |
+| `map::merge` (self) | 80 626 | 1 000 inserts, so ~80 ps an insert is fine |
+
+**`map::count`, `map::filter` and `map::map_values` are one family**: a guest
+callback per entry through a native, with nothing fusing it. `bytes::map` is the
+same shape at 4 484 ps a byte, and these are 4-13x worse than that — the
+difference being that a map's callback takes `{k, v}`, so there is a RECORD to
+build per entry as well as the uninlined indirect call. `map::count` asking the
+same question as `iter::count` for 152x the price is the sharpest statement of
+it available.
+
+That is the first pass doing exactly what it was for: twelve rows, four surprises,
+and one named family worth more than the eleven rows around it. Coverage 19% ->
+21%.
