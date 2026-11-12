@@ -12794,3 +12794,30 @@ recorded here rather than attempted at the end of a long session.
 Also found: **`bench/cases/list_ops_compare` does not build** (a type error,
 `T0201`), and `collfold`, `str_bench` and `recordcost` print only their first
 row with no argument — the same all-rows gap `asyncsurface` has.
+
+#### Correction: `set::insert` of a present key is not 1.9x a lookup — the rows differ
+
+The entry above read `set::insert` PRESENT-key at 12 764 ps against
+`set::contains` at 6 811 and called it "1.9x for work that amounts to none".
+**That comparison is wrong.** `l_set_insert` does `set::insert` AND `set::size`
+per iteration; `l_set_contains` does the lookup alone. The checksums say so
+plainly — 1 000 000 000 against 1 000 000 — and I read the ratio before the
+kernels.
+
+The comparable row is `set::ins PRESENT, chain`, which inserts and does nothing
+else: 10 274 ps against `set::contains`'s 6 985, so **1.47x** for the insert
+over the lookup, not 1.9x, and part of that is returning a set at all.
+
+I also fixed the thing the wrong reading suggested, because it is true
+independently: `MezzeSet.add` allocated a new wrapper even when the storage
+returned ITSELF, which every storage does for an element it already holds
+(`LongSetStorage.addLong` says "Already present" in as many words). Returning
+`this` saves that allocation and gives callers reference equality as a
+did-anything-change test.
+
+**It measures 3%**: 12 385 against 12 764 on the present-key row and 10 274
+against 10 652 on the chain row, both inside the noise of a row that swings
+further between runs. So it is REVERTED, on the same rule that reverted the
+solver change earlier today — a change with no measured effect does not ship,
+however tidy. The wrapper allocation was never the cost; what is left of the
+1.47x is the insert itself.
