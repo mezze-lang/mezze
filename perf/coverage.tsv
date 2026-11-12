@@ -57,7 +57,7 @@ bytes	index_of	221767	1e6	1024	bytesurface:5	2026-11-12
 bytes	slice	28766	1e6	512	bytesurface:6	2026-11-12
 bytes	concat	78611	1e6	2048	bytesurface:7	2026-11-12
 bytes	fold	151819	1e6	1024	bytesurface:8	2026-11-12
-bytes	map	4591494	1e6	1024	bytesurface:9	2026-11-12
+bytes	map	1479640	5e5	1024	bytesurface:9	2026-11-12
 bytes	to_hex	923145	1e6	1024	bytesurface:10	2026-11-12
 bytes	to_base64	247996	1e6	1024	bytesurface:11	2026-11-12
 bytes	to_seq	376639	1e6	1024	bytesurface:12	2026-11-12

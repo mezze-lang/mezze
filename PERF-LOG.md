@@ -14000,3 +14000,96 @@ ceiling row is spelled `seq::size { xs = set::to_seq { s = seq::to_set { xs } } 
 and that died with `UnsupportedSpecializationException … SeqSize_Node …
 [MezzeSet]` on a two-element seq. `ChainCanonicalizer` was reading a native's
 MODULE as its return type. Fixed separately, with `SeqConversionSourceTest`.
+
+#### `bytes::map` called the guest mapper once per byte — 21.4x, and the leftover is one divide instruction
+
+`bytes::map { b, f = { x } -> x * 2 }` cost 5 540 077 ps for a 1024-byte buffer
+— 5.4 ns a byte — because `BytesNatives.map` calls the guest mapper per element.
+A one-operation mapper against a literal does not need calling; it needs
+recognising. `BytesMapArithRewriter` is that peephole, the sibling of
+`FoldToSumRewriter`, and it sends the call to one of five natives that do the
+arithmetic in the loop.
+
+SELF-A/B, two builds from identical source with the pass hook the only
+difference, 1024 bytes, min of 9 after 4 warmups, every row at two n that agree:
+
+| row | before | after | |
+|---|---|---|---|
+| `map` with `{ x } -> x * 2` | 5 540 077 ps | 259 413 | **21.4x** |
+| `map` with `{ x } -> x / 2` | 5 390 947 | 1 479 640 | **3.64x** |
+| `bytes::fold` (control) | 156 234 | 155 127 | unmoved, 0.7% |
+| `bytes::reverse` (control) | 305 049 | 304 112 | unmoved, 0.3% |
+
+**THE CEILING WAS WRONG IN BOTH DIRECTIONS, WHICH IS WHY IT WAS MEASURED.**
+`bytes::reverse` was taken as the ceiling before building: it is the same shape
+without a callback — a boundary native reading and writing every byte of a fresh
+array — and at 298 ps/byte it predicted 17.2x.
+
+At **252 ps/byte the multiplying map BEATS it**. The rewrite does not approach
+the byte-copy ceiling, it passes it, because this loop indexes `src[i]` directly
+where `reverse` calls `bytes.length()` twice an iteration and `bytes.get(i)`.
+
+And so the dividing row's entire residual is ONE INSTRUCTION. DIV is 1 452
+ps/byte against MUL's 252: **1 200 ps/byte of division, 5.73x**, because the
+literal reaches the native as a runtime `long` and cannot be strength-reduced to
+a shift. `reverse` was the right ceiling for a byte COPY and the wrong one for a
+DIVIDING map, and reading it as the latter would have reported this as "3.64x,
+17.2x available, 4.8x left on the table" — which is false. Row 15 exists to keep
+that distinction. A `@ConstantOperand` would turn the divide into a shift and is
+NOT done here: it needs a Bytecode DSL operation rather than a native, and
+`BytesSumPrimitiveTest` already records that routing bytes through the generic
+fused loop was built, measured and found not worth having.
+
+A ROUTE THAT LOOKS LIKE THE ANSWER AND IS 1.63x WORSE, measured before any of
+this was built. `bytes::to_seq` → `seq::map` → `bytes::from_seq` puts the
+transform in a shape the seq fuser inlines, so it ought to bound a native byte
+loop from above. It costs **8 431 ps/byte against the unfused `map`'s 5 136** —
+the boxed `[Int]` intermediate costs more than the callback it removes. It is
+kept as `bytesurface` row 14, labelled WORSE, so nobody reaches for it.
+
+THREE BENCH ROWS THAT WERE NOT MEASURING WHAT THEY CLAIMED, all found while
+costing this one, and all three would have produced a false number:
+
+- **`bytes::fold` was labelled "a guest callback PER BYTE".** Its folder is
+  `init = 0` over a plain `acc + byte`, which is the one shape reaching
+  `BuiltinSumBytes` — the node whose own test says it runs "with no guest
+  callback at all" because "it does not call the folder, it recognises it and
+  deletes it". Read as a callback control it supported a 30x claim the
+  measurement cannot carry. It is the no-callback byte-walk floor, 151 ps/byte.
+- **The `map` row mapped with the IDENTITY**, the one transform a pass may
+  legitimately delete, and `InlineOp` has no IDENTITY member so it could not be
+  inlined either. It was positioned to measure nothing the moment `map` got
+  faster — the trap two set rows and one bytes row had already fallen into.
+- **A grep that filtered on `bytes::`** silently dropped row 14 after its label
+  was renamed to say WORSE, so the row printed "(no output)" and looked like a
+  regression.
+
+And the emit-debug probe is useless for attributing fusion to a row: all rows
+report `emitted BuiltinSumBytes` once, because emit decisions are made for the
+whole program at compile time, not per executed row.
+
+ONE BUG IN THE GUARD, found by reading `PrimitiveNatives` rather than by a test.
+`intAdd`, `intSubtract` and `intMultiply` all use exact arithmetic and raise the
+guest overflow error, so a literal whose arithmetic could overflow must be
+refused or the native would silently wrap. The first version shared one bound
+between ADD and SUB — but `elem - k` grows as k FALLS, so subtraction's
+dangerous end is the negative one, and the shared guard admitted
+`Long.MIN_VALUE + 255`, for which `255 - k` is `-Long.MIN_VALUE` and does not
+fit. Separated, with three tests pinning it. Negative DIVISORS are conversely
+fine and must not be refused: `intDivide` is plain `l / r` behind a zero guard,
+so Java's truncation toward zero is already the guest's semantics.
+
+Tests: `BytesMapArithLoweringTest` (15) asserts the path — five rewrites and ten
+refusals, each refusal a correctness case — and `BytesMapArithValueTest` (9)
+asserts the bytes, read back through `to_seq` rather than a fold because a sum is
+exactly the shape that hides two compensating errors. With the pass unhooked,
+exactly the five rewrite assertions fail and every refusal still passes.
+
+`perf/coverage.tsv` records the DIVIDING number as `bytes::map`'s cost, which is
+the conservative one of the two. A second row for the multiplying case was
+written and then removed: `perf-status.py` iterates each module's declared `pub
+let`s and looks every one up, so a row named for something that is not an
+operation is never read — and a row no instrument reads is clutter rather than a
+measurement. The cost of a `bytes::map` genuinely depends on its mapper, the TSV
+has no column for that, and this entry is where the two numbers can be explained
+rather than averaged.

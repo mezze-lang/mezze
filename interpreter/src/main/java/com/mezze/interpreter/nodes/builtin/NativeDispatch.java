@@ -2198,6 +2198,20 @@ public final class NativeDispatch extends MezzeNode {
         // HOF operations
         HANDLERS.put("__native_bytes_map", (r, c) ->
             BytesNatives.map(getBytes(r, "b"), getFunction(r, "f"), c));
+        // The mapper RECOGNISED instead of called — see BytesNatives.mapAdd for
+        // the measurements. One name per operation, so the handler lookup is
+        // the only dispatch and nothing re-reads a tag per call.
+        // `BytesMapArithRewriter` emits these; no stdlib surface declares them.
+        HANDLERS.put("__native_bytes_map_add", (r, c) ->
+            BytesNatives.mapAdd(getBytes(r, "b"), getLong(r, "k")));
+        HANDLERS.put("__native_bytes_map_sub", (r, c) ->
+            BytesNatives.mapSub(getBytes(r, "b"), getLong(r, "k")));
+        HANDLERS.put("__native_bytes_map_mul", (r, c) ->
+            BytesNatives.mapMul(getBytes(r, "b"), getLong(r, "k")));
+        HANDLERS.put("__native_bytes_map_div", (r, c) ->
+            BytesNatives.mapDiv(getBytes(r, "b"), getLong(r, "k")));
+        HANDLERS.put("__native_bytes_map_mod", (r, c) ->
+            BytesNatives.mapMod(getBytes(r, "b"), getLong(r, "k")));
         HANDLERS.put("__native_bytes_fold", (r, c) ->
             BytesNatives.fold(getBytes(r, "b"), getField(r, "init"), getFunction(r, "f"), c));
         HANDLERS.put("__native_bytes_equals", (r, c) ->

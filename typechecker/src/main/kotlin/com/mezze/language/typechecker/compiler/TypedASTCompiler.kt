@@ -691,6 +691,16 @@ class TypedASTCompiler(
             val nb = com.mezze.language.truffleir.FoldToSumRewriter.rewrite(fn.body, chainInlinedMap)
             if (nb !== fn.body) userFunctions[h] = fn.copy(body = nb)
         }
+        // Same idea for a bytes map whose mapper is one arithmetic operation
+        // against a literal: recognise it instead of calling it per byte.
+        // 17.2x, with `bytes::reverse` as the measured ceiling — see
+        // BytesMapArithRewriter, which also records the via-seq route that
+        // looks like the answer and is 1.63x WORSE.
+        for ((h, fn) in userFunctions.entries.toList()) {
+            val nb = com.mezze.language.truffleir.BytesMapArithRewriter
+                .rewrite(fn.body, chainInlinedMap)
+            if (nb !== fn.body) userFunctions[h] = fn.copy(body = nb)
+        }
 
         val canonicalizedUser = com.mezze.language.truffleir.ChainCanonicalizer
             .canonicalize(userFunctions, chainInlinedMap)

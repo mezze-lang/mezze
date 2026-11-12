@@ -22,7 +22,7 @@
 | `get` | 7 674 |  |  | 11.7x | bytesurface:3 |
 | `index_of` | 221 767 | 1024 | 216 | 0.3x | bytesurface:5 |
 | `is_empty` | 354 |  |  | 0.5x | bytesurface:2 |
-| `map` | 4 591 494 | 1024 | 4 483 | 6.8x | bytesurface:9 |
+| `map` | 1 479 640 | 1024 | 1 444 | 2.2x | bytesurface:9 |
 | `repeat` | **UNMEASURED** | | | | |
 | `reverse` | — | | | | called in bytesurface, no number |
 | `size` | 657 |  |  | 1.0x | bytesurface:1 |

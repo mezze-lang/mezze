@@ -25,7 +25,7 @@
 | `replace` | **UNMEASURED** | | | | |
 | `replace_all` | **UNMEASURED** | | | | |
 | `reverse` | **UNMEASURED** | | | | |
-| `size` | — | | | | called in allocsurface, bytesurface, codec-encode-walker, codec-vs-handwritten, datetimesurface, jsonsurface, mapsurface, str_bench, surface, no number |
+| `size` | — | | | | called in allocsurface, bytesurface, codec-encode-walker, codec-vs-handwritten, datetimesurface, jsonsurface, mapsurface, seqsurface, str_bench, surface, no number |
 | `split` | — | | | | called in surface, no number |
 | `starts_with` | **UNMEASURED** | | | | |
 | `substring` | — | | | | called in allocsurface, no number |

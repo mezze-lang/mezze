@@ -4,7 +4,7 @@
 
 # seq
 
-`std::collections::seq` · 124 operations · 18 with a bench row · 0 with a number
+`std::collections::seq` · 124 operations · 29 with a bench row · 11 with a number
 
 | op | ps/op | elems | ps/elem | vs floor | bench |
 |---|---|---|---|---|---|
@@ -16,7 +16,7 @@
 | `binary_search_by` | **UNMEASURED** | | | | |
 | `binary_search_insert_point` | **UNMEASURED** | | | | |
 | `cartesian_product` | **UNMEASURED** | | | | |
-| `chunk` | **UNMEASURED** | | | | |
+| `chunk` | 106 712 | 100 | 1 067 | — | seqsurface:6 |
 | `chunks_exact` | **UNMEASURED** | | | | |
 | `combinations` | **UNMEASURED** | | | | |
 | `compare` | **UNMEASURED** | | | | |
@@ -24,7 +24,7 @@
 | `contains` | **UNMEASURED** | | | | |
 | `count` | — | | | | called in ds_matrix, fusegaps, no number |
 | `count_element` | **UNMEASURED** | | | | |
-| `dedup` | **UNMEASURED** | | | | |
+| `dedup` | 2 222 382 | 100 | 22 223 | — | seqsurface:2 |
 | `dedup_by` | **UNMEASURED** | | | | |
 | `distinct` | **UNMEASURED** | | | | |
 | `drop` | **UNMEASURED** | | | | |
@@ -50,24 +50,24 @@
 | `from_set` | **UNMEASURED** | | | | |
 | `from_sorted_map` | **UNMEASURED** | | | | |
 | `from_sorted_set` | **UNMEASURED** | | | | |
-| `get` | — | | | | called in allocsurface, asyncsurface, boxing_probe, bytesurface, chain, collfold, coresurface, datetimesurface, defunc, dequeabi, dispatch_probe, dotprobe, ds_matrix, dsmore, effectsurface, floatloop, foldshape, fuseall, fusecross, fusegaps, hofcapture, hofpoly, iter_perf_compare, iterremit, iterstage, jsonsurface, letcost, list_fold_compare, list_ops_compare, listwalk, mandelannot, mapsurface, mutabi, mutvsimmut, qsort_mut, qsort_native, qsort_pure, recfields, recordcost, seq_fold_compare, surface, tailannot, tailonly, wrapalloc, no number |
-| `group_by` | **UNMEASURED** | | | | |
+| `get` | — | | | | called in allocsurface, asyncsurface, boxing_probe, bytesurface, chain, collfold, coresurface, datetimesurface, defunc, dequeabi, dispatch_probe, dotprobe, ds_matrix, dsmore, effectsurface, floatloop, foldshape, fuseall, fusecross, fusegaps, hofcapture, hofpoly, iter_perf_compare, iterremit, iterstage, jsonsurface, letcost, list_fold_compare, list_ops_compare, listwalk, mandelannot, mapsurface, mutabi, mutvsimmut, qsort_mut, qsort_native, qsort_pure, recfields, recordcost, seq_fold_compare, seqsurface, surface, tailannot, tailonly, wrapalloc, no number |
+| `group_by` | 3 535 411 | 100 | 35 354 | — | seqsurface:7 |
 | `group_consecutive` | **UNMEASURED** | | | | |
 | `group_consecutive_by` | **UNMEASURED** | | | | |
 | `head` | **UNMEASURED** | | | | |
 | `index_of` | **UNMEASURED** | | | | |
 | `init` | **UNMEASURED** | | | | |
-| `insert_at` | **UNMEASURED** | | | | |
-| `intersperse` | **UNMEASURED** | | | | |
+| `insert_at` | 284 888 | 100 | 2 848 | — | seqsurface:10 |
+| `intersperse` | 390 398 | 100 | 3 903 | — | seqsurface:4 |
 | `is_empty` | — | | | | called in allocsurface, no number |
 | `is_sorted` | **UNMEASURED** | | | | |
 | `is_sorted_by` | **UNMEASURED** | | | | |
 | `is_sorted_descending` | **UNMEASURED** | | | | |
-| `join` | **UNMEASURED** | | | | |
+| `join` | 937 582 | 100 | 9 375 | — | seqsurface:3 |
 | `last` | **UNMEASURED** | | | | |
 | `last_index_of` | **UNMEASURED** | | | | |
 | `lower_bound` | **UNMEASURED** | | | | |
-| `map` | — | | | | called in capthresh, codec-decode, codec-encode-walker, codec-vs-handwritten, collfold, concurrent_map_compare, ds_matrix, fuseall, fusegaps, http-work-route, iter_perf_compare, iterremit, list_ops_compare, listwalk, polyglot_seq_crossing, seq_fold_compare, seq_fusion, no number |
+| `map` | — | | | | called in bytesurface, capthresh, codec-decode, codec-encode-walker, codec-vs-handwritten, collfold, concurrent_map_compare, ds_matrix, fuseall, fusegaps, http-work-route, iter_perf_compare, iterremit, list_ops_compare, listwalk, polyglot_seq_crossing, seq_fold_compare, seq_fusion, no number |
 | `max` | **UNMEASURED** | | | | |
 | `max_by` | **UNMEASURED** | | | | |
 | `max_float` | **UNMEASURED** | | | | |
@@ -82,7 +82,7 @@
 | `permutations` | **UNMEASURED** | | | | |
 | `product` | **UNMEASURED** | | | | |
 | `product_float` | **UNMEASURED** | | | | |
-| `push` | — | | | | called in asyncsurface, bytesurface, datetimesurface, ds_matrix, dsmore, jsonsurface, list_fold_compare, list_ops_compare, mapsurface, polyglot_seq_crossing, qsort_pure, seq_fold_compare, surface, no number |
+| `push` | — | | | | called in asyncsurface, bytesurface, datetimesurface, ds_matrix, dsmore, jsonsurface, list_fold_compare, list_ops_compare, mapsurface, polyglot_seq_crossing, qsort_pure, seq_fold_compare, seqsurface, surface, no number |
 | `push_front` | **UNMEASURED** | | | | |
 | `range` | — | | | | called in allocsurface, capchain, capthresh, codec-decode, codec-encode-walker, codec-vs-handwritten, collfold, concurrent_map_compare, count_positive, defunc, ds_matrix, filter_map_fold, fuseall, fusegaps, http-work-route, iter_perf_compare, iterremit, list_fusion, list_ops_compare, list_perf, listwalk, map_only, range_alloc_probe, seq_fold_compare, seq_fusion, seq_reconstruct, steady_state_probe, sum_fold, sum_native, sum_only, no number |
 | `range_step` | **UNMEASURED** | | | | |
@@ -97,11 +97,11 @@
 | `scan` | **UNMEASURED** | | | | |
 | `set` | — | | | | called in mutvsimmut, no number |
 | `singleton` | **UNMEASURED** | | | | |
-| `size` | — | | | | called in allocsurface, asyncsurface, bytesurface, datetimesurface, ds_matrix, dsmore, fusegaps, iter_perf_compare, jsonsurface, list_fold_compare, list_ops_compare, mapsurface, mutvsimmut, polyglot_array_read, qsort_pure, range_alloc_probe, seq_fold_compare, seq_fusion, surface, no number |
+| `size` | — | | | | called in allocsurface, asyncsurface, bytesurface, datetimesurface, ds_matrix, dsmore, fusegaps, iter_perf_compare, jsonsurface, list_fold_compare, list_ops_compare, mapsurface, mutvsimmut, polyglot_array_read, qsort_pure, range_alloc_probe, seq_fold_compare, seq_fusion, seqsurface, surface, no number |
 | `slice` | — | | | | called in qsort_mut, qsort_native, qsort_pure, no number |
 | `sliding` | **UNMEASURED** | | | | |
-| `sort` | — | | | | called in asyncsurface, bytesurface, datetimesurface, ds_matrix, dsmore, jsonsurface, list_fold_compare, list_ops_compare, mapsurface, qsort_mut, qsort_native, qsort_pure, seq_fold_compare, surface, no number |
-| `sort_by` | **UNMEASURED** | | | | |
+| `sort` | — | | | | called in asyncsurface, bytesurface, datetimesurface, ds_matrix, dsmore, jsonsurface, list_fold_compare, list_ops_compare, mapsurface, qsort_mut, qsort_native, qsort_pure, seq_fold_compare, seqsurface, surface, no number |
+| `sort_by` | 2 252 493 | 100 | 22 524 | — | seqsurface:8 |
 | `sort_by_key` | **UNMEASURED** | | | | |
 | `span` | **UNMEASURED** | | | | |
 | `split` | **UNMEASURED** | | | | |
@@ -109,7 +109,7 @@
 | `starts_with` | **UNMEASURED** | | | | |
 | `stddev` | **UNMEASURED** | | | | |
 | `subsequences` | **UNMEASURED** | | | | |
-| `sum` | — | | | | called in ds_matrix, iter_perf_compare, seq_reconstruct, sum_native, no number |
+| `sum` | 51 057 | 100 | 510 | — | seqsurface:11 |
 | `sum_float` | **UNMEASURED** | | | | |
 | `swap` | **UNMEASURED** | | | | |
 | `tail` | **UNMEASURED** | | | | |
@@ -118,21 +118,21 @@
 | `to_deque` | **UNMEASURED** | | | | |
 | `to_list` | **UNMEASURED** | | | | |
 | `to_map` | **UNMEASURED** | | | | |
-| `to_set` | **UNMEASURED** | | | | |
+| `to_set` | — | | | | called in seqsurface, no number |
 | `to_sorted_map` | **UNMEASURED** | | | | |
 | `to_sorted_set` | **UNMEASURED** | | | | |
-| `unique` | **UNMEASURED** | | | | |
+| `unique` | 40 243 498 | 100 | 402 434 | — | seqsurface:1 |
 | `unzip` | **UNMEASURED** | | | | |
 | `update` | **UNMEASURED** | | | | |
 | `upper_bound` | **UNMEASURED** | | | | |
 | `variance` | **UNMEASURED** | | | | |
-| `windows` | **UNMEASURED** | | | | |
-| `zip` | **UNMEASURED** | | | | |
+| `windows` | 364 353 | 100 | 3 643 | — | seqsurface:5 |
+| `zip` | 1 619 792 | 100 | 16 197 | — | seqsurface:9 |
 | `zip3` | **UNMEASURED** | | | | |
 | `zip4` | **UNMEASURED** | | | | |
 | `zip_with` | **UNMEASURED** | | | | |
 | `zip_with_index` | **UNMEASURED** | | | | |
 
-## Unmeasured (106 of 124)
+## Unmeasured (95 of 124)
 
-`average`, `binary_search`, `binary_search_by`, `binary_search_insert_point`, `cartesian_product`, `chunk`, `chunks_exact`, `combinations`, `compare`, `contains`, `count_element`, `dedup`, `dedup_by`, `distinct`, `drop`, `drop_while`, `empty`, `ends_with`, `enumerate`, `equal_range`, `equals`, `fill`, `fill_with`, `find_index`, `first`, `flat_map`, `flatten`, `for_each`, `from_deque`, `from_list`, `from_map`, `from_set`, `from_sorted_map`, `from_sorted_set`, `group_by`, `group_consecutive`, `group_consecutive_by`, `head`, `index_of`, `init`, `insert_at`, `intersperse`, `is_sorted`, `is_sorted_by`, `is_sorted_descending`, `join`, `last`, `last_index_of`, `lower_bound`, `max`, `max_by`, `max_float`, `median`, `min`, `min_by`, `min_float`, `none`, `nth`, `of`, `partition`, `permutations`, `product`, `product_float`, `push_front`, `range_step`, `reduce`, `remove`, `remove_at`, `replace`, `replace_all`, `reverse`, `rotate_left`, `rotate_right`, `scan`, `singleton`, `sliding`, `sort_by`, `sort_by_key`, `span`, `split`, `split_at`, `starts_with`, `stddev`, `subsequences`, `sum_float`, `swap`, `tail`, `take`, `take_while`, `to_deque`, `to_list`, `to_map`, `to_set`, `to_sorted_map`, `to_sorted_set`, `unique`, `unzip`, `update`, `upper_bound`, `variance`, `windows`, `zip`, `zip3`, `zip4`, `zip_with`, `zip_with_index`
+`average`, `binary_search`, `binary_search_by`, `binary_search_insert_point`, `cartesian_product`, `chunks_exact`, `combinations`, `compare`, `contains`, `count_element`, `dedup_by`, `distinct`, `drop`, `drop_while`, `empty`, `ends_with`, `enumerate`, `equal_range`, `equals`, `fill`, `fill_with`, `find_index`, `first`, `flat_map`, `flatten`, `for_each`, `from_deque`, `from_list`, `from_map`, `from_set`, `from_sorted_map`, `from_sorted_set`, `group_consecutive`, `group_consecutive_by`, `head`, `index_of`, `init`, `is_sorted`, `is_sorted_by`, `is_sorted_descending`, `last`, `last_index_of`, `lower_bound`, `max`, `max_by`, `max_float`, `median`, `min`, `min_by`, `min_float`, `none`, `nth`, `of`, `partition`, `permutations`, `product`, `product_float`, `push_front`, `range_step`, `reduce`, `remove`, `remove_at`, `replace`, `replace_all`, `reverse`, `rotate_left`, `rotate_right`, `scan`, `singleton`, `sliding`, `sort_by_key`, `span`, `split`, `split_at`, `starts_with`, `stddev`, `subsequences`, `sum_float`, `swap`, `tail`, `take`, `take_while`, `to_deque`, `to_list`, `to_map`, `to_sorted_map`, `to_sorted_set`, `unzip`, `update`, `upper_bound`, `variance`, `zip3`, `zip4`, `zip_with`, `zip_with_index`

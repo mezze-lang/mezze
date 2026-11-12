@@ -182,22 +182,48 @@ let l_to_seq = { i, acc, b } -> if i <= 0 then acc
   else l_to_seq { i = i - 1, b = b,
                   acc = acc + seq::size { xs = bytes::to_seq { b = b } } }
 
-## ── 14. map VIA A FUSED SEQ — THE CEILING FOR A `map` WHOSE CALLBACK LIVES.
-## Row 13 (`reverse`) bounds a fused map from below but calls no guest code, so
-## it says nothing about a surviving transform. This route does:
-## `bytes::to_seq` → `seq::map` → `bytes::from_seq`, where the seq stage is a
-## shape the fuser handles, so the transform is inlined into a compiled loop —
-## which is what a fused `bytes::map` would emit.
+## ── 14. map VIA A SEQ — A NEGATIVE RESULT, KEPT because it is the route a
+## program would reach for and it is WORSE.
 ##
-## CONSERVATIVE on purpose: it also pays for a boxed `[Int]` intermediate that a
-## native byte[] loop would not, so a real fused `bytes::map` should come in
-## UNDER this number rather than merely near it. Same mapper as row 9 and the
-## same `bytes::get` materialisation, so the only difference is the route.
+## It was added as a conservative ceiling: `bytes::to_seq` → `seq::map` →
+## `bytes::from_seq` should be a byte-sourced map whose transform the seq fuser
+## inlines, so a native byte loop ought to beat it comfortably. MEASURED, it is
+## 8 375 ps/byte against row 9's 5 136 — **1.63x SLOWER than the unfused
+## `bytes::map` it was supposed to bound**. The boxed `[Int]` intermediate costs
+## more than the guest callback it removes, so this route establishes no headroom
+## whatsoever and nobody should reach for it as a workaround.
+##
+## THE CEILING IS ROW 13, and it always was. `bytes::reverse` is already the
+## shape a rewritten `map` emits — a boundary native, byte[] in, byte[] out, no
+## guest call, every byte read and written once — differing only in doing
+## arithmetic where it does an index reversal. 298 ps/byte against row 9's
+## 5 136 is the real headroom: 17.2x.
+##
+## Same mapper as row 9 and the same `bytes::get` materialisation, so the only
+## difference between the two rows is the route.
 let l_map_via_seq = { i, acc, b } -> if i <= 0 then acc
   else do
     let mapped = bytes::from_seq {
       arr = seq::map { xs = bytes::to_seq { b = b }, f = { x } -> x / 2 } }
     l_map_via_seq { i = i - 1, b = b,
+            acc = acc + option::get_or { opt = bytes::get { b = mapped, i = 7 }, def = 0 } }
+
+## ── 15. map by MULTIPLYING — how much of row 9's residual is the DIVISION?
+## Row 9 divides, and once `BytesMapArithRewriter` has recognised the mapper the
+## literal still arrives as a runtime `long`, so `x / 2` is a hardware 64-bit
+## divide per byte and cannot be strength-reduced to a shift. Row 13
+## (`reverse`) does no arithmetic at all, so it bounds a byte COPY and was never
+## the ceiling for a DIVIDING map — reading it as one overstates what row 9
+## leaves on the table.
+##
+## This row is row 9 with `*` in place of `/` and nothing else changed. A
+## multiply is a few cycles where a divide is tens, so the distance between the
+## two rows is the division, and the distance from THIS row to `reverse` is what
+## the rewrite still leaves behind.
+let l_map_mul = { i, acc, b } -> if i <= 0 then acc
+  else do
+    let mapped = bytes::map { b = b, f = { x } -> x * 2 }
+    l_map_mul { i = i - 1, b = b,
             acc = acc + option::get_or { opt = bytes::get { b = mapped, i = 7 }, def = 0 } }
 
 pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
@@ -249,4 +275,6 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
   report { idx = 13, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "bytes::reverse CEILING", thunk = {} -> l_reverse { i = n, acc = 0, b = b } }
   report { idx = 14, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
-           label = "bytes::map via seq  ", thunk = {} -> l_map_via_seq { i = n, acc = 0, b = b } }
+           label = "map via seq  WORSE ", thunk = {} -> l_map_via_seq { i = n, acc = 0, b = b } }
+  report { idx = 15, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "bytes::map MUL      ", thunk = {} -> l_map_mul { i = n, acc = 0, b = b } }

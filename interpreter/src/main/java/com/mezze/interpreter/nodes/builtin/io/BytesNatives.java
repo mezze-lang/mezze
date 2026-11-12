@@ -302,6 +302,101 @@ public final class BytesNatives {
         return new MezzeBytes(result);
     }
 
+    // ============ map with the mapper RECOGNISED instead of called ============
+    //
+    // `bytes::map { b, f = { x } -> x * 2 }` does not need a guest call per
+    // byte: the mapper is one arithmetic operation against a literal, and
+    // `BytesMapArithRewriter` recognises that shape at lowering time and sends
+    // the call here instead. SELF-A/B, two builds from identical source with
+    // the pass hook the only difference, 1024 bytes, min of 9 at two n:
+    //
+    //   map `x * 2`   5 540 077 -> 259 413 ps    21.4x    (252 ps/byte)
+    //   map `x / 2`   5 390 947 -> 1 479 640      3.64x   (1 452 ps/byte)
+    //   bytes::fold / bytes::reverse (controls)   unmoved
+    //
+    // AT 252 ps/BYTE THE MULTIPLYING MAP BEATS `bytes::reverse`'s 298 — the
+    // same shape without a callback, which was taken as the ceiling before this
+    // was built. This loop indexes `src[i]` directly where `reverse` calls
+    // `bytes.length()` twice per iteration and `bytes.get(i)`.
+    //
+    // So the whole of the dividing row's residual is ONE INSTRUCTION: 1 200
+    // ps/byte, DIV 5.73x MUL, because `k` arrives as a runtime long and cannot
+    // be strength-reduced to a shift. A `@ConstantOperand` would fix it and
+    // would need a Bytecode DSL operation instead of a native — and
+    // BytesSumPrimitiveTest records that routing bytes through the generic
+    // fused loop was built, measured, and not worth having.
+    //
+    // A ROUTE THAT LOOKS LIKE THE ANSWER AND IS NOT: going through a seq
+    // (`bytes::to_seq` → `seq::map` → `bytes::from_seq`) so the seq fuser
+    // inlines the transform measures 8 431 ps/byte — 1.63x SLOWER than the
+    // unfused `map` it was meant to beat, because the boxed `[Int]`
+    // intermediate costs more than the callback it removes. bytesurface row 14
+    // keeps that measurement.
+    //
+    // FIVE ENTRY POINTS, NOT ONE WITH AN OP CODE. Each native name resolves to
+    // exactly one method, so the operation is dispatched once by the handler
+    // lookup and there is no tag to re-interpret per call and no magic number
+    // shared across the Kotlin/Java boundary.
+    //
+    // SEMANTICS ARE THE CALLBACK'S, EXACTLY. `map` hands the mapper
+    // `(long) (b & 0xFF)` — the element is the Int in 0..255, not a signed Java
+    // byte — and truncates the result with `byteValue()`. Both are reproduced
+    // here; the `& 0xFF` and the `(byte)` cast are the whole of it.
+    //
+    // The rewriter, not these methods, rejects the literals that would behave
+    // differently: a zero divisor (the guest `/` raises, this would throw a
+    // Java ArithmeticException) and any literal whose arithmetic could overflow
+    // a long for an input of 0..255 (Mezze Int overflow RAISES, this would
+    // silently wrap). Declining to rewrite leaves the ordinary callback path,
+    // which already behaves correctly — there is no fallback inside these.
+
+    @TruffleBoundary
+    public static MezzeBytes mapAdd(MezzeBytes bytes, long k) {
+        byte[] src = bytes.getData();
+        int n = src.length;
+        byte[] out = new byte[n];
+        for (int i = 0; i < n; i++) out[i] = (byte) ((src[i] & 0xFF) + k);
+        return new MezzeBytes(out);
+    }
+
+    @TruffleBoundary
+    public static MezzeBytes mapSub(MezzeBytes bytes, long k) {
+        byte[] src = bytes.getData();
+        int n = src.length;
+        byte[] out = new byte[n];
+        for (int i = 0; i < n; i++) out[i] = (byte) ((src[i] & 0xFF) - k);
+        return new MezzeBytes(out);
+    }
+
+    @TruffleBoundary
+    public static MezzeBytes mapMul(MezzeBytes bytes, long k) {
+        byte[] src = bytes.getData();
+        int n = src.length;
+        byte[] out = new byte[n];
+        for (int i = 0; i < n; i++) out[i] = (byte) ((src[i] & 0xFF) * k);
+        return new MezzeBytes(out);
+    }
+
+    /** The rewriter guarantees {@code k != 0}. */
+    @TruffleBoundary
+    public static MezzeBytes mapDiv(MezzeBytes bytes, long k) {
+        byte[] src = bytes.getData();
+        int n = src.length;
+        byte[] out = new byte[n];
+        for (int i = 0; i < n; i++) out[i] = (byte) ((src[i] & 0xFF) / k);
+        return new MezzeBytes(out);
+    }
+
+    /** The rewriter guarantees {@code k != 0}. */
+    @TruffleBoundary
+    public static MezzeBytes mapMod(MezzeBytes bytes, long k) {
+        byte[] src = bytes.getData();
+        int n = src.length;
+        byte[] out = new byte[n];
+        for (int i = 0; i < n; i++) out[i] = (byte) ((src[i] & 0xFF) % k);
+        return new MezzeBytes(out);
+    }
+
     /**
      * Fold the bytes, calling the guest folder per element.
      *
