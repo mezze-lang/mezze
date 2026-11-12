@@ -12388,3 +12388,58 @@ fusion gate can only be slow. A commutative folder cannot tell the halves apart
 Swapping the halves fails four of eight: 1234 becomes 3412, 12345 becomes 45312,
 and the four sum-shaped tests pass throughout, which is exactly why they are not
 enough on their own.
+
+#### A map stage that is an EXPRESSION — 121.60x, and the 4.4x next to it is SIMD
+
+`classifyUnaryLiteralLambda` reads one shape: `x <op> rhs`. A mapper with two
+operations is not that shape, so the stage became a `MapCall` and the loop
+called the lambda per element. Two rows, differing only in the number of
+operations in the mapper:
+
+| row | ps/elem |
+|---|---|
+| `map { f = {x} -> x * 2 }` | 132 |
+| `map { f = {x} -> x * 2 + 1 }` | 576 |
+
+4.4x for one more arithmetic operation. A body that is a pure arithmetic tree is
+something the loop can emit as written — exactly what `AccumulateTree` does for
+a folder — so `ClassifiedStage.MapTree` does that, reusing the folder tree's
+emitter and its `.i`/`.val` resolution.
+
+| row | base | tree | n=1e7, 4 processes |
+|---|---|---|---|
+| `enumerate+map+fold` | 500 105 932 ns | **4 112 778** | **121.60x** |
+| `map 1 op + fold` | 1 220 532 | 1 253 413 | 0.97x |
+| `map 2 ops + fold` | 5 565 888 | 5 719 776 | 0.97x |
+| `filter+map+fold` | 1 535 520 | 1 447 921 | 1.06x |
+| `enumerate+fold` / `sum` / `chain+fold` | | | 0.99x / 0.97x / 1.03x |
+
+**THE ROW IT WAS BUILT FOR IS NOT THE ROW THAT MOTIVATED IT, and that is the
+finding.** `enumerate+map+fold` could not fuse AT ALL — a call form must never
+be handed the `{i, val}` record, which is never built, so the chain declined
+outright: 121.60x. The two-operation mapper over a range, which is what sent me
+looking, **did not move at all**: 0.97x.
+
+So the 4.4x between a one- and a two-operation mapper is NOT the per-element
+call. A tree emit measures the same as the call. It is VECTORISATION — a
+one-operation `MapInline` reaches a loop the compiler vectorises and everything
+else runs scalar, which this ledger already records for FLP (75 ps with SIMD,
+292 without).
+
+**AND MEASURING IT THE WRONG WAY ROUND PROVED IT FROM THE OTHER SIDE.** The first
+version tried the tree FIRST, which took `{x} -> x * 2` off the inline path:
+4 327 913 ns against 1 316 990, **3.3x worse**, and `filter+map+fold` went with
+it at 5 682 232 against 1 664 343. So the tree is tried only where the
+alternative is a call — a fallback, not a preference — and a one-operation
+mapper keeps the vectorised path. A new tier that is better than ONE of the
+paths it sits between is a regression if it is reached before the other.
+
+Captures are refused, for the reason `isPureArithFoldTree` refuses them: a
+`ReadCaptureIR` addresses the lambda's capture array and emitting it in the
+loop's frame needs the capture lifted, which the one-operation matcher has
+machinery for and a tree does not. A capturing mapper keeps the path it had.
+
+Coverage: eight value tests, with the enumerate cases built so the index and the
+value DIFFER. Passing the wrong record flag into the tree emitter fails two of
+them with "Expected record for field 'val', got: Long" — the field read landing
+on a raw element, which is the one way this is silently wrong.
