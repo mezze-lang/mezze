@@ -13675,3 +13675,85 @@ show 1.08x.
 The four that paid are the ones that walk ONE side and probe the other, where
 the input array is pure overhead: difference, intersection, symmetric_difference
 and filter.
+
+#### datetime was 66 operations at zero coverage, and compiled its pattern on every call — 2.12x
+
+`std::datetime` had NO benchmark rows at all, which is the shape that hid
+`bytes::to_hex` calling `String.format` once per byte (56.7x). Formatting is
+where that kind of defect lives, and the first reading of the module found one.
+
+`DateTimeNatives.format` and `.parse` both called
+`DateTimeFormatter.ofPattern(pattern)` on EVERY invocation. That call PARSES the
+pattern string and builds a formatter, and a formatter is immutable and
+thread-safe, so the only reason to build one per call was that nobody kept it.
+
+MEASURED IN JAVA first, on `yyyy-MM-dd HH:mm:ss`: 211 ns a call against 75 with
+one formatter reused — the pattern parse was two thirds of the cost of
+formatting a date. Parse 380 against 221.
+
+THE CACHE'S SHAPE WAS ALSO MEASURED, because a hashmap lookup in a hot path can
+cost more than it saves:
+
+| | ns/call | |
+|---|---|---|
+| `ofPattern` per call | 211 | |
+| keyed by pattern, `withZone` per call | **81** | **2.61x** |
+| keyed by pattern AND zone | 110 | 1.92x |
+| one formatter, no lookup at all (the bound) | 75 | 2.82x |
+
+Keying on both avoids the `withZone` copy but needs a composite key built every
+call, and the key costs more than the copy. Keyed by pattern alone lands within
+8% of having no lookup at all.
+
+`datetimesurface`, n=200 000, min of three interleaved passes:
+
+| row | base | cached | |
+|---|---|---|---|
+| `datetime::format` | 245 515 ps | **115 062** | **2.13x** |
+| `datetime::format_iso8601` | 257 908 | **109 326** | **2.36x** |
+| `datetime::parse` | 458 005 | **305 791** | **1.50x** |
+| `datetime::decompose` (control) | 60 479 | 57 813 | 1.05x |
+
+Repeated: 2.11x, 2.41x, 1.42x, 1.01x.
+
+**THE "CONTROL" WAS NOT ONE, AND IT TOOK THREE EXPERIMENTS TO SEE IT.**
+`format_iso8601` was written into the bench as the control for `format` — an ISO
+formatter is a constant in java.time, and `DateTimeNatives` does hold a
+`DateTimeFormatter.ISO_INSTANT`. It moved 2.36x, MORE than the row being
+changed, which by rule 4 makes the table unreadable.
+
+What it took to resolve:
+
+1. A SELF-A/B, two builds from identical source: 1.00x, 1.00x, 1.02x. The
+   harness and the build are stable.
+2. A FORCED-RECOMPILE self-A/B, in case the stdlib precompile varies between
+   runs — touching the interpreter so Gradle re-ran it, twice: 0.99x, 0.99x,
+   1.01x. The build is deterministic even then.
+3. The signature table, in case my edit had changed how the module lowers. It
+   holds no datetime natives at all.
+
+So the difference was real and the control was wrong: the stdlib defines
+`format_iso8601` as `format { p = "yyyy-MM-dd'T'HH:mm:ss'Z'", z = utc {} }`.
+It goes through the pattern path like every other formatter in the module, and
+the constant `ISO_INSTANT` belongs to `instant_encode` on the codec path. The
+row's 2.36x is a second win, not an artefact.
+
+A ROW'S CONTROL STATUS HAS TO BE READ IN THE STDLIB, not inferred from a
+native's name. The real control is `decompose`, its own native with no pattern
+in it, and it held at 1.01–1.05x. The bench now says so where the row is.
+
+That also widens the fix: `format_date`, `format_time` and `format_datetime` are
+all defined as `format` with a literal pattern, so every formatter in the module
+was paying the parse.
+
+AND ONE BUILD-SKEW TRAP CAUGHT ITSELF. The first A/B read 1.00x and 1.04x,
+because I had restored the fixed source but not re-run `installRuntime` before
+building the "new" arm — so both arms were cache-free. The 1.00x IS the tell,
+exactly as the note on this says.
+
+COVERAGE. Eleven rows: `instant_from_millis`, `instant_to_millis`,
+`add_duration`, `diff`, `decompose`, `year`, `format`, `parse`,
+`format_iso8601`, `is_leap_year`, `zone_offset_at`. The module goes from 0 to
+17%, and the first numbers say where to look next: `decompose` is 57 813 ps and
+`year` 41 548 for one field, against `is_leap_year`'s 656 for pure arithmetic —
+so a calendar-field read costs 60 to 90 times an integer one.

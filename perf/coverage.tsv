@@ -81,3 +81,14 @@ iter	zip	73284	1e7	1	iter_perf_compare:11	2026-11-12
 iter	flat_map	13902	1e7	1	iter_perf_compare:10	2026-11-12
 iter	zip	23691	1e7	1	iter_perf_compare:11	2026-11-12
 iter	range	65	1e7	1	iter_perf_compare:1	2026-11-12
+datetime	instant_from_millis	19318	2e5	1	datetimesurface:1	2026-11-12
+datetime	instant_to_millis	9415	2e5	1	datetimesurface:2	2026-11-12
+datetime	add	20826	2e5	1	datetimesurface:3	2026-11-12
+datetime	diff	22606	2e5	1	datetimesurface:4	2026-11-12
+datetime	decompose	57813	2e5	1	datetimesurface:5	2026-11-12
+datetime	year	41548	2e5	1	datetimesurface:6	2026-11-12
+datetime	format	115062	2e5	1	datetimesurface:7	2026-11-12
+datetime	parse	305791	2e5	1	datetimesurface:8	2026-11-12
+datetime	format_iso8601	109326	2e5	1	datetimesurface:9	2026-11-12
+datetime	is_leap_year	656	2e5	1	datetimesurface:10	2026-11-12
+datetime	zone_offset_at	32575	2e5	1	datetimesurface:11	2026-11-12
