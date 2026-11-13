@@ -325,6 +325,8 @@ class ComptimeIr(private val comptimeHash: Hash? = null) {
                     // is rewritten through the same mapper.
                     is StageIR.Zip -> st.copy(
                         second = com.mezze.language.truffleir.mapSourceIR(st.second, f))
+                    is StageIR.FlatMap -> st.copy(
+                        inner = com.mezze.language.truffleir.mapSourceIR(st.inner, f))
                     is StageIR.Map, is StageIR.Filter,
                     is StageIR.TakeWhile, is StageIR.DropWhile -> st
                 }

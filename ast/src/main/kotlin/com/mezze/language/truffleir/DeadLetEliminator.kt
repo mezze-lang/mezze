@@ -472,6 +472,10 @@ object DeadLetEliminator {
                         // THE SECOND SOURCE IS A REFERENCE TOO. A `let` used
                         // only here would look dead and be eliminated, leaving
                         // the chain reading a slot nothing binds.
+                        is StageIR.FlatMap -> {
+                            val nIn = mapSourceIR(stage.inner, f)
+                            if (nIn !== stage.inner) { stagesChanged = true; StageIR.FlatMap(stage.f, nIn) } else stage
+                        }
                         is StageIR.Zip -> {
                             val nSec = walkSource(stage.second)
                             if (nSec !== stage.second) { stagesChanged = true; StageIR.Zip(nSec) } else stage

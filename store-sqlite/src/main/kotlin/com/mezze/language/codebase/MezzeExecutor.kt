@@ -246,6 +246,15 @@ class MezzeExecutor(
                             com.mezze.language.truffleir.forEachSourceNode(stage.second) { n ->
                                 collectDirectCallTargets(n, ownHashes, visited, resolves, out)
                             }
+                        // Both halves name code: the lambda the emitter
+                        // reads its inner bounds from, and the inner
+                        // source's own expressions.
+                        is com.mezze.language.truffleir.StageIR.FlatMap -> {
+                            check(stage.f.functionHash)
+                            com.mezze.language.truffleir.forEachSourceNode(stage.inner) { n ->
+                                collectDirectCallTargets(n, ownHashes, visited, resolves, out)
+                            }
+                        }
                         is com.mezze.language.truffleir.StageIR.TakeWhile -> check(stage.p.functionHash)
                         is com.mezze.language.truffleir.StageIR.DropWhile -> check(stage.p.functionHash)
                         // No lambda and no expression: no edge to record.
@@ -448,6 +457,15 @@ class MezzeExecutor(
                             com.mezze.language.truffleir.forEachSourceNode(stage.second) { n ->
                                 collectReferencedHashes(n, queue)
                             }
+                        // Both halves name code: the lambda the emitter
+                        // reads its inner bounds from, and the inner
+                        // source's own expressions.
+                        is com.mezze.language.truffleir.StageIR.FlatMap -> {
+                            queue.add(stage.f.functionHash.hex)
+                            com.mezze.language.truffleir.forEachSourceNode(stage.inner) { n ->
+                                collectReferencedHashes(n, queue)
+                            }
+                        }
                         is com.mezze.language.truffleir.StageIR.TakeWhile -> queue.add(stage.p.functionHash.hex)
                         is com.mezze.language.truffleir.StageIR.DropWhile -> queue.add(stage.p.functionHash.hex)
                         // No lambda and no expression: no edge to record.

@@ -5399,6 +5399,47 @@ public final class BytecodeCompiler {
                         shape.op, shape.rhsLit, shape.rhsNode, shape.selfOp,
                         shape.leftIsIndex));
                 }
+            } else if (stage instanceof StageIR.FlatMap fmStage) {
+                // ONE flat_map per chain, and no zip or enumerate beside it.
+                // Both of those keep a per-element counter that the inner loop
+                // would advance at the wrong rate, and the record neither of
+                // them builds would have to mean the INNER element here. The
+                // combination is refusable because refusing declines the chain
+                // to exactly the path it took before this stage existed.
+                if (classifiedStages.stream().anyMatch(s ->
+                        s instanceof ClassifiedStage.FlatMapStep
+                     || s instanceof ClassifiedStage.ZipStep
+                     || s instanceof ClassifiedStage.EnumerateStep)
+                        || elemSynth != SynthRec.NONE) {
+                    if (dbg) System.err.println("[chain-canon-emit] reject: flat_map beside zip/enumerate or a second flat_map");
+                    return false;
+                }
+                // Only a RANGE inner is emitted as a counted loop. A seq inner
+                // would need its own indexed read and is left to fall back.
+                if (!(fmStage.getInner() instanceof SourceIR.RangeSeq innerRange)) {
+                    if (dbg) System.err.println("[chain-canon-emit] reject: flat_map inner is not a range");
+                    return false;
+                }
+                if (language == null) return false;
+                var fnIr = language.lookupFunctionIR(fmStage.getF().getFunctionHash());
+                if (fnIr == null || fnIr.getParamSlots().size() != 1
+                        || !fnIr.getCaptureSlots().isEmpty()) {
+                    if (dbg) System.err.println("[chain-canon-emit] reject: flat_map lambda shape");
+                    return false;
+                }
+                // Frame layout is [captures..., params..., locals...] and
+                // captures are refused, so the parameter is at slot 0 — the
+                // same derivation `classifyMapTree` makes.
+                int fmParamSlot = fnIr.getCaptureSlots().size();
+                // The bounds are emitted inline, so they must be trees the
+                // loop can write out, reading nothing but that parameter.
+                if (!isPureArithFoldTree(innerRange.getStart(), -1, fmParamSlot, 0)
+                        || !isPureArithFoldTree(innerRange.getEnd(), -1, fmParamSlot, 0)) {
+                    if (dbg) System.err.println("[chain-canon-emit] reject: flat_map inner bounds not a pure tree");
+                    return false;
+                }
+                classifiedStages.add(new ClassifiedStage.FlatMapStep(
+                    innerRange.getStart(), innerRange.getEnd(), fmParamSlot));
             } else if (stage instanceof StageIR.Filter filterStage) {
                 var predShape = classifyUnaryPredicateLambda(filterStage.getP(), language);
                 if (predShape == null) {
@@ -6540,6 +6581,9 @@ public final class BytecodeCompiler {
      * Phase 4c — classified pipeline stage, either a map transform or a
      * filter predicate. Built from the canonicalizer's StageIR list.
      */
+    /** What a stage opened, so the unwind closes it with the right end. */
+    private enum FusedScope { FILTER, FLAT_MAP }
+
     private sealed interface ClassifiedStage {
         /** [leftIsIndex] when the mapped expression reads `x.i` rather than the
          *  element — the left operand is then the enumerate counter. */
@@ -6618,6 +6662,29 @@ public final class BytecodeCompiler {
          * @param endExpr        the range's end; null for a seq, whose length
          *                       is read at run time
          */
+        /**
+         * Replace each element with the elements of an inner source derived
+         * from it — `iter::flat_map`.
+         *
+         * <p>THE ONLY STAGE THAT OPENS A LOOP. Every other stage keeps, drops
+         * or replaces one element; this one produces many, so the stages after
+         * it and the SINK run inside the inner loop, and the element local is
+         * REBOUND to the inner value. The outer loop's advance sits outside,
+         * which falls out of closing scopes before it.
+         *
+         * <p>[startBody] and [endBody] are the inner range's bounds as written
+         * in the lambda, emitted inline with [paramSlot] bound to the element
+         * local — the same binding {@link MapTree} uses. They are evaluated
+         * INSIDE the outer loop, once per outer element, because that is what
+         * they depend on; a zip's second source is a value and is hoisted, and
+         * this deliberately is not.
+         *
+         * <p>Measured before building: 14 703 ps/elem against 1 258 for the
+         * same computation as nested folds — 11.7x.
+         */
+        record FlatMapStep(NodeIR startBody, NodeIR endBody, int paramSlot)
+                implements ClassifiedStage {}
+
         record ZipStep(boolean secondIsRange, NodeIR baseExpr, NodeIR endExpr)
                 implements ClassifiedStage {}
     }
@@ -7809,6 +7876,15 @@ public final class BytecodeCompiler {
         // `.snd` is read out of. Evaluated here and not per iteration: the
         // source expression is a value, and re-evaluating it would both cost
         // and risk running a side effect n times.
+        // The inner loop's index and bound. ALLOCATED here but STORED inside
+        // the loop, because unlike a zip's second source the bounds depend on
+        // the outer element and have to be recomputed for each one.
+        com.oracle.truffle.api.bytecode.BytecodeLocal flatIdx = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal flatEnd = null;
+        if (stages.stream().anyMatch(s -> s instanceof ClassifiedStage.FlatMapStep)) {
+            flatIdx = b.createLocal();
+            flatEnd = b.createLocal();
+        }
         com.oracle.truffle.api.bytecode.BytecodeLocal zipBase = null;
         com.oracle.truffle.api.bytecode.BytecodeLocal zipLen = null;
         com.oracle.truffle.api.bytecode.BytecodeLocal zipCounter = null;
@@ -7918,6 +7994,13 @@ public final class BytecodeCompiler {
         b.endStoreLocal();
 
         // ── Pipeline stages (shared across all modes) ──
+        // SCOPES ARE UNWOUND IN REVERSE OPEN ORDER, which is why this is a list
+        // and not the count it used to be. A filter opens an `IfThen`; a
+        // flat_map opens a `While`, and the two nest EITHER WAY ROUND —
+        // `flat_map(...).filter(...)` opens while-then-if, and
+        // `filter(...).flat_map(...)` opens if-then-while. Closing all the
+        // filters first, as a count must, is right for only one of those.
+        var openScopes = new java.util.ArrayList<FusedScope>();
         int filterDepth = 0;
         int takeDropIdx = 0;
         var takeCounterPostIncrement = new java.util.ArrayList<com.oracle.truffle.api.bytecode.BytecodeLocal>();
@@ -7927,7 +8010,7 @@ public final class BytecodeCompiler {
                     b.beginIfThen();
                       emitPredicateCheck(b, xSlot, fs.peel(), argCount, localMap);
                       b.beginBlock();
-                    filterDepth++;
+                    filterDepth++; openScopes.add(FusedScope.FILTER);
                 }
                 // The index of the element now passing, then the counter moves
                 // on. Placed at the stage's own position, so it counts exactly
@@ -8004,6 +8087,30 @@ public final class BytecodeCompiler {
                 // The mapper's own body, with its parameter rewritten to the
                 // loop's element local — and, over an enumerate record, `.val`
                 // and `.i` resolved to the element and index locals.
+                // THE INNER LOOP OPENS HERE and closes in the unwind, so
+                // every stage after it and the sink run per INNER element.
+                // The element local is rebound, which is what lets the rest of
+                // the pipeline stay exactly as it is written for a flat chain.
+                case ClassifiedStage.FlatMapStep fm -> {
+                    b.beginStoreLocal(flatIdx);
+                      emitFoldTree(fm.startBody(), -1, fm.paramSlot(), null, xSlot,
+                                   SynthRec.NONE, null, b);
+                    b.endStoreLocal();
+                    b.beginStoreLocal(flatEnd);
+                      emitFoldTree(fm.endBody(), -1, fm.paramSlot(), null, xSlot,
+                                   SynthRec.NONE, null, b);
+                    b.endStoreLocal();
+                    b.beginWhile();
+                      b.beginDirectLessThan();
+                        b.emitLoadLocal(flatIdx); b.emitLoadLocal(flatEnd);
+                      b.endDirectLessThan();
+                      b.beginBlock();
+                        // REBIND: from here down, the element IS the inner one.
+                        b.beginStoreLocal(xSlot);
+                          b.emitLoadLocal(flatIdx);
+                        b.endStoreLocal();
+                    openScopes.add(FusedScope.FLAT_MAP);
+                }
                 case ClassifiedStage.MapTree mt -> {
                     b.beginStoreLocal(xSlot);
                       emitFoldTree(mt.body(), -1, mt.paramSlot(), null, xSlot,
@@ -8028,7 +8135,7 @@ public final class BytecodeCompiler {
                         emitNode(ds.n(), b, argCount, localMap); b.emitLoadLocal(ctr);
                       b.endDirectLessThan();
                       b.beginBlock();
-                    filterDepth++;
+                    filterDepth++; openScopes.add(FusedScope.FILTER);
                 }
                 case ClassifiedStage.TakeStep ts -> {
                     var ctr = takeDropCounters.get(takeDropIdx++);
@@ -8037,7 +8144,7 @@ public final class BytecodeCompiler {
                         b.emitLoadLocal(ctr); emitNode(ts.n(), b, argCount, localMap);
                       b.endDirectLessThan();
                       b.beginBlock();
-                    filterDepth++;
+                    filterDepth++; openScopes.add(FusedScope.FILTER);
                     takeCounterPostIncrement.add(ctr);
                 }
                 case ClassifiedStage.TakeWhileStep tw -> {
@@ -8093,7 +8200,7 @@ public final class BytecodeCompiler {
                         b.emitLoadLocal(shouldSkip);
                       b.endDirectNot();
                       b.beginBlock();
-                    filterDepth++;
+                    filterDepth++; openScopes.add(FusedScope.FILTER);
                 }
             }
         }
@@ -8395,9 +8502,22 @@ public final class BytecodeCompiler {
               b.endDirectAdd();
             b.endStoreLocal();
         }
-        for (int j = 0; j < filterDepth; j++) {
-              b.endBlock();
-            b.endIfThen();
+        for (int j = openScopes.size() - 1; j >= 0; j--) {
+            if (openScopes.get(j) == FusedScope.FILTER) {
+                  b.endBlock();
+                b.endIfThen();
+            } else {
+                // The inner index advances at the END of the inner body, so
+                // every stage after the flat_map and the sink itself have
+                // already run for this inner element.
+                b.beginStoreLocal(flatIdx);
+                  b.beginDirectAdd();
+                    b.emitLoadLocal(flatIdx); b.emitLoadLongConstant(1L);
+                  b.endDirectAdd();
+                b.endStoreLocal();
+                  b.endBlock();
+                b.endWhile();
+            }
         }
         // Advance: cursor = ListTail(cursor) for lists;
         //          i += step for step ranges; i++ otherwise.

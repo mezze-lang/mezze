@@ -62,6 +62,10 @@ class FusedChainCaptureFrameTest {
                 is StageIR.TakeWhile -> out.add(st.p)
                 is StageIR.DropWhile -> out.add(st.p)
                 is StageIR.Take, is StageIR.Drop -> {}
+                // The lambda IS checked: its body supplies the inner source's
+                // bounds, which the emitter writes inline into the loop, so a
+                // capture in it addresses a frame that is not there.
+                is StageIR.FlatMap -> out.add(st.f)
                 // No lambda, so no capture to check.
                 StageIR.Enumerate -> {}
                 // Carries a SOURCE, not a lambda — its captures, if any, live

@@ -4,13 +4,13 @@
 
 # list
 
-`std::collections::list` · 104 operations · 16 with a bench row · 2 with a number
+`std::collections::list` · 104 operations · 16 with a bench row · 14 with a number
 
 | op | ps/op | elems | ps/elem | vs floor | bench |
 |---|---|---|---|---|---|
 | `all` | — | | | | called in list_fusion, list_perf, no number |
 | `any` | — | | | | called in ds_matrix, list_fusion, list_ops_compare, list_perf, no number |
-| `append` | **UNMEASURED** | | | | |
+| `append` | 13 154 | 400 | 32 | — | listsurface |
 | `average` | **UNMEASURED** | | | | |
 | `binary_search` | **UNMEASURED** | | | | |
 | `binary_search_by` | **UNMEASURED** | | | | |
@@ -19,7 +19,7 @@
 | `chunks_exact` | **UNMEASURED** | | | | |
 | `compare` | **UNMEASURED** | | | | |
 | `concat` | **UNMEASURED** | | | | |
-| `cons` | — | | | | called in ds_matrix, list_fold_1m, list_fold_compare, list_fold_init_1m, list_ops_compare, no number |
+| `cons` | 10 028 |  |  | — | listsurface |
 | `contains` | — | | | | called in list_perf, no number |
 | `count` | — | | | | called in ds_matrix, list_ops_compare, no number |
 | `dedup` | **UNMEASURED** | | | | |
@@ -28,7 +28,7 @@
 | `drop` | **UNMEASURED** | | | | |
 | `drop_while` | **UNMEASURED** | | | | |
 | `empty` | — | | | | called in ds_matrix, list_fold_1m, list_fold_compare, list_fold_init_1m, list_ops_compare, no number |
-| `enumerate` | **UNMEASURED** | | | | |
+| `enumerate` | 19 386 | 400 | 48 | — | listsurface |
 | `equal_range` | **UNMEASURED** | | | | |
 | `equals` | **UNMEASURED** | | | | |
 | `fill` | **UNMEASURED** | | | | |
@@ -36,7 +36,7 @@
 | `filter` | — | | | | called in ds_matrix, list_fusion, list_ops_compare, list_perf, no number |
 | `find` | — | | | | called in list_fusion, list_perf, no number |
 | `find_index` | **UNMEASURED** | | | | |
-| `flat_map` | **UNMEASURED** | | | | |
+| `flat_map` | 36 484 | 400 | 91 | — | listsurface |
 | `flatten` | **UNMEASURED** | | | | |
 | `fold_left` | — | | | | called in collfold, ds_matrix, fuseall, list_fold_1m, list_fold_init_1m, list_fusion, list_ops_compare, list_perf, listwalk, no number |
 | `fold_right` | **UNMEASURED** | | | | |
@@ -53,11 +53,11 @@
 | `group_consecutive_by` | **UNMEASURED** | | | | |
 | `head` | **UNMEASURED** | | | | |
 | `index_of` | **UNMEASURED** | | | | |
-| `init` | **UNMEASURED** | | | | |
-| `intersperse` | **UNMEASURED** | | | | |
+| `init` | 6 491 | 400 | 16 | — | listsurface |
+| `intersperse` | 8 795 | 400 | 21 | — | listsurface |
 | `is_empty` | **UNMEASURED** | | | | |
 | `is_sorted` | **UNMEASURED** | | | | |
-| `is_sorted_by` | **UNMEASURED** | | | | |
+| `is_sorted_by` | 263 636 | 400 | 659 | — | listsurface |
 | `is_sorted_descending` | **UNMEASURED** | | | | |
 | `last` | **UNMEASURED** | | | | |
 | `last_index_of` | **UNMEASURED** | | | | |
@@ -78,12 +78,12 @@
 | `push` | **UNMEASURED** | | | | |
 | `range` | **UNMEASURED** | | | | |
 | `reduce` | **UNMEASURED** | | | | |
-| `repeat` | **UNMEASURED** | | | | |
-| `reverse` | — | | | | called in list_perf, no number |
+| `repeat` | 5 006 | 400 | 12 | — | listsurface |
+| `reverse` | 6 417 | 400 | 16 | — | listsurface |
 | `rotate_left` | **UNMEASURED** | | | | |
 | `rotate_right` | **UNMEASURED** | | | | |
 | `scan` | **UNMEASURED** | | | | |
-| `singleton` | **UNMEASURED** | | | | |
+| `singleton` | 12 166 |  |  | — | listsurface |
 | `size` | — | | | | called in ds_matrix, list_fusion, list_ops_compare, list_perf, mapsurface, seq_reconstruct, no number |
 | `slice` | **UNMEASURED** | | | | |
 | `sliding` | **UNMEASURED** | | | | |
@@ -106,11 +106,11 @@
 | `to_sorted_set` | **UNMEASURED** | | | | |
 | `uncons` | — | | | | called in list_fold_compare, no number |
 | `unique` | **UNMEASURED** | | | | |
-| `unzip` | **UNMEASURED** | | | | |
+| `unzip` | 14 994 | 400 | 37 | — | listsurface |
 | `upper_bound` | **UNMEASURED** | | | | |
 | `variance` | **UNMEASURED** | | | | |
 | `windows` | **UNMEASURED** | | | | |
-| `zip` | **UNMEASURED** | | | | |
+| `zip` | 21 164 | 400 | 52 | — | listsurface |
 | `zip_with_index` | **UNMEASURED** | | | | |
 
 ## Unmeasured (88 of 104)

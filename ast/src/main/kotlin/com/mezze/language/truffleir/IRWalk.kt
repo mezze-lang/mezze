@@ -76,6 +76,10 @@ fun NodeIR.transformChildren(f: (NodeIR) -> NodeIR): NodeIR = when (this) {
                 // `DeadLetEliminator` walks through here — a `let` referenced
                 // only by the second source would look dead.
                 is StageIR.Zip -> StageIR.Zip(mapSourceIR(st.second, f))
+                // The INNER source is rewritten for the same reason the
+                // zip's second one is: it holds NodeIRs no other walk
+                // reaches. The lambda is a hash, like Map's and Filter's.
+                is StageIR.FlatMap -> StageIR.FlatMap(st.f, mapSourceIR(st.inner, f))
                 is StageIR.Map, is StageIR.Filter, is StageIR.TakeWhile, is StageIR.DropWhile -> st
                 StageIR.Enumerate -> st
             }

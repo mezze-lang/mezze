@@ -66,6 +66,67 @@ applies · raw array-write cost where materialising is unavoidable · otherwise
 nice-to-have: a pass that emits `SlotKind.OBJECT` without looking up the type is
 a defect, not a conservative default.
 
+### `iter::flat_map` fuses — 27.4x, the largest measured gap in the iter table
+
+The last of the four stages `NativeHofNames` declared and `ChainCanonicalizer`
+never referenced. `zip`, `chain` and `enumerate` landed earlier; this one was
+left because it is the only stage that is NOT one-element-in-one-out, and the
+emitter is built around that.
+
+**THE SHAPE.** `flat_map` opens an INNER LOOP at its own position and REBINDS
+the element local, so every stage after it and the SINK run per inner element.
+The outer loop's advance sits outside, which falls out of closing scopes before
+it. That forced the scope unwind from a count to an ORDERED STACK: a filter
+opens an `IfThen` and a flat_map opens a `While`, and the two nest either way
+round — `flat_map(...).filter(...)` opens while-then-if while
+`filter(...).flat_map(...)` opens if-then-while. Closing every filter first, as
+a count must, is right for only one of them. There is a test for each
+direction.
+
+**ELEVEN TRAVERSAL SITES**, every one surfaced by the exhaustive `when` rather
+than by remembering: five walkers, the comptime IR mapper, three store/codebase
+collectors, and two test helpers. The sharp one is
+`FunctionIRReachability` — the flat_map lambda is where the emitter reads the
+inner bounds from, and a hash not collected there is a FunctionIR pruned from
+the dep graph while the chain still calls it.
+
+**MEASURED AS A SELF-A/B**, two builds from identical source bar this change,
+because a control moved and an older baseline could not settle it. Min of
+several runs each:
+
+| row | HEAD | fused | |
+|---|---|---|---|
+| `flat_map+fold` (1M x 10) | 135 405 802 ns | **4 940 896** | **27.4x** |
+| `filter+map+fold` | 878 654 | 914 049 | 1.04x |
+| `filter+fold` | 1 363 344 | 1 314 946 | 0.96x |
+
+**IT BEATS ITS OWN CEILING, and that is not a measurement error.** The ceiling
+was established by RUNNING the shape a fused flat_map emits — a fold whose
+folder is a fold — at 1 258 ps/elem against the subject's 14 703, so ~11.7x was
+the predicted prize. Fused measures **836 ps/elem**, faster than the hand-written
+nested version, because that version still pays an `iter::fold` CALL per outer
+element and the fused loop pays none. The flat floor is 57 and is unreachable
+by this shape: a nested loop costs 22x a flat one, which is why the table's
+"213.9x vs floor" headline overstated the prize by 21x.
+
+**TWO FALSE ALARMS, both settled by the A/B rather than by argument.**
+`filter+map+fold` looked 2.2x regressed — the SAME BINARY then gave 884 855 and
+1 812 328 on consecutive runs, and the two arms agree at ~0.9M. `filter+fold`
+looked 35% worse than this morning — HEAD itself now measures 1 363 344 where
+it measured 992 775 this morning, so that is the machine, not the change. A
+control that moves is a reason to build the second arm, not to explain.
+
+**REFUSALS**, each declining the chain to exactly the path it took before the
+stage existed: a lambda with CAPTURES (the inner bounds are emitted inline,
+where a capture has no frame), an inner pipeline with STAGES of its own, a
+non-range inner, and a flat_map beside a `zip` or `enumerate` — both of those
+keep a per-element counter the inner loop would advance at the wrong rate.
+
+**WHAT PROVES IT FUSES.** The value tests pass either way, because both paths
+compute the same sum — so the guard is a LOWERING assertion that the chain
+contains a `flat_map` stage at all. Before the peel existed the call classified
+Opaque and the whole chain declined.
+
 ### `list` — five operations moved to natives that were already there
 
 14 `list` natives were registered in `NativeDispatch` and referenced NOWHERE.

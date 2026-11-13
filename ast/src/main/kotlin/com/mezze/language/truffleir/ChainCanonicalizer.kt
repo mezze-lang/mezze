@@ -1356,6 +1356,15 @@ object ChainCanonicalizer {
                     if (ns != stage.second) changed = true
                     StageIR.Zip(ns)
                 }
+                // THE INNER SOURCE ADDRESSES THE LAMBDA'S FRAME, NOT THIS
+                // ONE, so it is left alone: its `ReadLocalIR(0)` is the
+                // flat_map lambda's own parameter and substituting it against
+                // the enclosing frame's slots would repoint it at an unrelated
+                // local. Sound only because the peel REFUSES a lambda with
+                // captures — with none, the body can read nothing but that
+                // parameter, so there is nothing here that belongs to this
+                // frame. If captures are ever admitted, this becomes wrong.
+                is StageIR.FlatMap -> stage
             }
         }
         return if (changed) result else stages
@@ -2320,6 +2329,12 @@ object ChainCanonicalizer {
                 current = zipPeeled.first
                 continue
             }
+            val flatMapPeeled = tryPeelIterFlatMap(current, classifier, allFunctions, ext)
+            if (flatMapPeeled != null) {
+                stages.add(StageIR.FlatMap(flatMapPeeled.second, flatMapPeeled.third))
+                current = flatMapPeeled.first
+                continue
+            }
             val takePeeled = tryPeelIterTake(current, classifier)
             if (takePeeled != null) {
                 stages.add(StageIR.Take(takePeeled.first))
@@ -2604,6 +2619,56 @@ object ChainCanonicalizer {
         if (secondStages.isNotEmpty()) return null
         if (secondSource is SourceIR.Opaque) return null
         return first to secondSource
+    }
+
+    /**
+     * `flat_map { it, f }` — the outer source, the lambda, and the lambda's
+     * body classified AS A SOURCE.
+     *
+     * The body is looked up rather than read off the call because `f` arrives
+     * as a [MakeLambdaIR], a hash into [allFunctions]; its body is what has to
+     * classify. `{ x } -> iter::range { start = x, end = x + 10 }` becomes
+     * `RangeSeq(ReadLocal(x), x + 10)`, whose expressions READ THE LAMBDA'S
+     * PARAMETER — the outer element — which the emitter binds before evaluating
+     * them.
+     *
+     * REFUSALS, each because the emitter cannot express it:
+     *  - a lambda with CAPTURES, since the inner bounds are emitted inline into
+     *    the loop and a capture has no frame there;
+     *  - an inner pipeline with STAGES of its own, as `tryPeelIterZip` refuses
+     *    for the same reason: `flat_map(xs, map(f, range))` would need a second
+     *    stage list threaded through the inner loop;
+     *  - an Opaque inner, which is a value typed `Iter` that the pass cannot
+     *    see into.
+     * A refusal declines the whole chain, which is the behaviour before this
+     * peel existed, so nothing it rejects gets worse.
+     */
+    private fun tryPeelIterFlatMap(
+        node: NodeIR,
+        classifier: ChainHofClassifier,
+        allFunctions: Map<Hash, FunctionIR>,
+        ext: FrameExtender?,
+    ): Triple<NodeIR, MakeLambdaIR, SourceIR>? {
+        if (node !is CallNativeIR) return null
+        if (!node.isElementOp(NativeOp.FLAT_MAP) || node.isScalarABI) return null
+        val mr = node.arg as? MakeRecordIR ?: return null
+        var outer: NodeIR? = null
+        var f: NodeIR? = null
+        for (fld in mr.fields) when (fld.name) {
+            "it" -> outer = fld.value
+            "f" -> f = fld.value
+            // An unexpected field means this is not the shape being priced.
+            else -> return null
+        }
+        val outerExpr = outer ?: return null
+        val lambda = f as? MakeLambdaIR ?: return null
+        if (lambda.captures.isNotEmpty()) return null
+        val fnIr = allFunctions[lambda.functionHash] ?: return null
+        if (fnIr.paramSlots.size != 1 || fnIr.captureSlots.isNotEmpty()) return null
+        val (innerStages, innerSource) = peelSource(fnIr.body, classifier, allFunctions, ext)
+        if (innerStages.isNotEmpty()) return null
+        if (innerSource is SourceIR.Opaque) return null
+        return Triple(outerExpr, lambda, innerSource)
     }
 
     private fun tryPeelIterTake(
@@ -2904,6 +2969,10 @@ object ChainCanonicalizer {
                         is StageIR.Zip -> {
                             val ns = mapSourceIR(stage.second, f)
                             if (ns != stage.second) { stagesChanged = true; StageIR.Zip(ns) } else stage
+                        }
+                        is StageIR.FlatMap -> {
+                            val ns = mapSourceIR(stage.inner, f)
+                            if (ns != stage.inner) { stagesChanged = true; StageIR.FlatMap(stage.f, ns) } else stage
                         }
                     }
                 }

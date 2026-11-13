@@ -253,6 +253,17 @@ object FunctionIRReachability {
                             com.mezze.language.truffleir.forEachSourceNode(stage.second) { n ->
                                 collectHashesFromNode(n, queue)
                             }
+                        // BOTH halves are live: the LAMBDA, whose FunctionIR
+                        // the emitter reads the inner bounds out of, and the
+                        // INNER SOURCE's expressions, which can name functions
+                        // of their own. Dropping either prunes something the
+                        // chain still calls.
+                        is com.mezze.language.truffleir.StageIR.FlatMap -> {
+                            queue.add(stage.f.functionHash)
+                            com.mezze.language.truffleir.forEachSourceNode(stage.inner) { n ->
+                                collectHashesFromNode(n, queue)
+                            }
+                        }
                     }
                 }
                 when (val sk = node.sink) {

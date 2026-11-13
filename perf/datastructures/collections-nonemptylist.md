@@ -4,7 +4,7 @@
 
 # nonemptylist
 
-`std::collections::nonemptylist` · 29 operations · 2 with a bench row · 0 with a number
+`std::collections::nonemptylist` · 29 operations · 2 with a bench row · 3 with a number · floor `nonemptylist::size` = 11 827 ps
 
 | op | ps/op | elems | ps/elem | vs floor | bench |
 |---|---|---|---|---|---|
@@ -29,9 +29,9 @@
 | `reduce` | **UNMEASURED** | | | | |
 | `reverse` | **UNMEASURED** | | | | |
 | `singleton` | **UNMEASURED** | | | | |
-| `size` | **UNMEASURED** | | | | |
-| `sort` | **UNMEASURED** | | | | |
-| `sort_by` | **UNMEASURED** | | | | |
+| `size` | 11 827 | 100 | 118 | 0.0x | nelsort |
+| `sort` | 875 225 | 400 | 2 188 | 0.2x | nelsort |
+| `sort_by` | 4 254 247 | 400 | 10 635 | 0.9x | nelsort |
 | `sum` | **UNMEASURED** | | | | |
 | `tail` | **UNMEASURED** | | | | |
 | `to_list` | **UNMEASURED** | | | | |

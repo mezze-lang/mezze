@@ -946,6 +946,10 @@ object TrivialWrapperInliner {
                             val ns = mapSourceIR(stage.second, f)
                             if (ns != stage.second) { stagesChanged = true; StageIR.Zip(ns) } else stage
                         }
+                        is StageIR.FlatMap -> {
+                            val ns = mapSourceIR(stage.inner, f)
+                            if (ns != stage.inner) { stagesChanged = true; StageIR.FlatMap(stage.f, ns) } else stage
+                        }
                     }
                 }
                 val newSink: SinkIR = when (val sk = node.sink) {

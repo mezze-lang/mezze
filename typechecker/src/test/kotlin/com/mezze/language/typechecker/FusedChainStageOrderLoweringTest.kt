@@ -85,6 +85,7 @@ class FusedChainStageOrderLoweringTest {
                         is StageIR.DropWhile -> "drop_while"
                         StageIR.Enumerate -> "enumerate"
                         is StageIR.Zip -> "zip"
+                        is StageIR.FlatMap -> "flat_map"
                     }
                 }
             }
@@ -109,6 +110,39 @@ class FusedChainStageOrderLoweringTest {
         assertEquals(
             listOf(listOf("filter", "map")), chains,
             "the sink's predicate runs last, so it must come first",
+        )
+    }
+
+    /**
+     * `flat_map` REACHES THE CHAIN AT ALL. Before the stage existed the peel
+     * had no case for it, so the call classified Opaque and the whole chain
+     * declined: `fold(flat_map(range))` ran element-at-a-time at 135 405 802 ns
+     * against 4 940 896 fused, measured as a self-A/B on two builds from
+     * identical source. 27.4x.
+     *
+     * This is the assertion that fails without the peel. The VALUE tests pass
+     * either way — both paths compute the same sum, which is the point — so
+     * nothing but the lowering can tell the fused path from the fallback.
+     */
+    @Test
+    fun `flat_map lowers to a stage rather than declining the chain`() {
+        val chains = stageKinds(
+            """
+            use std::collections::iter
+            let go = { lo, hi } ->
+              iter::fold {
+                it = iter::flat_map {
+                  it = iter::range { start = lo, end = hi },
+                  f = { x } -> iter::range { start = x, end = x + 10 },
+                },
+                init = 0,
+                f = { acc, x } -> acc + x,
+              }
+            """,
+        )
+        assertEquals(
+            listOf(listOf("flat_map")), chains,
+            "an empty list means the chain declined and nothing fused",
         )
     }
 

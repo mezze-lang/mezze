@@ -610,6 +610,34 @@ sealed interface StageIR {
      * loop, which the peel declines so the chain falls back.
      */
     @Serializable data class Zip(val second: SourceIR) : StageIR
+
+    /**
+     * Replace each element with the elements of a SECOND source derived from
+     * it, as `iter::flat_map` does.
+     *
+     * THE ONLY STAGE THAT IS NOT ONE-IN-ONE-OUT. Every other stage either keeps
+     * an element, drops it, or replaces it; this one produces MANY, so the
+     * stages after it and the sink run inside an INNER LOOP. That is why it was
+     * never built beside the others, and it is why [inner] is a whole
+     * [SourceIR] rather than an expression: the emitter drives it with the same
+     * counted loop it would drive a top-level source with.
+     *
+     * [inner]'s expressions READ THE LAMBDA'S PARAMETER, which is the outer
+     * element — `{ x } -> iter::range { start = x, end = x + 10 }` classifies as
+     * `RangeSeq(ReadLocal(x), x + 10)`. The emitter binds that parameter's slot
+     * to the loop's element local before evaluating the bounds, the same way
+     * [Map]'s tree tier binds its own.
+     *
+     * MEASURED BEFORE BUILDING: 14 703 ps/elem unfused against 1 258 for the
+     * same computation written as a fold whose folder is a fold — the shape a
+     * fused flat_map emits, so that is the ceiling RUNNING and not an estimate.
+     * 11.7x. Both arms return 5 000 040 000 000, which is what says the ceiling
+     * arm does the subject's work rather than less of it. The flat floor is 57,
+     * and it is UNREACHABLE here: a nested shape costs 22x a flat loop because
+     * a million outer elements each set up an inner one. The table's headline
+     * "213.9x vs floor" overstated the prize by that factor.
+     */
+    @Serializable data class FlatMap(val f: MakeLambdaIR, val inner: SourceIR) : StageIR
 }
 
 /** How elements are combined. */
