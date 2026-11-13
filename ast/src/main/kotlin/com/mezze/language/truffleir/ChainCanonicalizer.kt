@@ -1834,10 +1834,18 @@ object ChainCanonicalizer {
      *  producing a RawSeq source. Used for Set/SortedSet/Deque whose
      *  elements are the same as Seq but need a to_seq conversion step. */
     private fun wrapAsSeqSource(expr: NodeIR, toSeqNative: String, srcField: String): SourceIR.RawSeq {
+        // Carries its kinds for the same reason the fold rewrite does: a
+        // constructed native that omits them is a node every carried-decision
+        // predicate silently declines. This one reaches `RawSeq` directly so
+        // nothing re-interrogates it today, which is exactly why it would be
+        // the one to rot.
         val call = CallNativeIR(
             name = toSeqNative,
             arg = MakeRecordIR(listOf(FieldIR(srcField, expr)), expr.src),
             src = expr.src,
+            producesKind = CollectionKind.SEQ,
+            ownerKind = NativeHofNames.ownerOf(toSeqNative),
+            opKind = NativeHofNames.opOf(toSeqNative),
         )
         return SourceIR.RawSeq(call)
     }
@@ -1916,6 +1924,13 @@ object ChainCanonicalizer {
         val bExpr = b ?: return null
         if (!isLaterEvaluationSafe(aExpr) || !isLaterEvaluationSafe(bExpr)) return null
 
+        // THE CARRIED DECISIONS COME ACROSS. Each rewritten half is the SAME
+        // operation as `node` over a different source, so it carries `node`'s
+        // own kinds verbatim. Omitting them is not cosmetic: `isFoldOp` reads
+        // `opKind`/`ownerKind`, so a half without them is not recognised as a
+        // fold and does not fuse — which is this rewrite undoing the 46.72x it
+        // exists to produce. Measured as 15.6x lost on `chain+fold` before this
+        // line carried them.
         fun foldOver(source: NodeIR, seed: NodeIR) = CallNativeIR(
             name = node.name,
             arg = MakeRecordIR(
@@ -1928,6 +1943,9 @@ object ChainCanonicalizer {
             ),
             src = node.src,
             isPure = node.isPure,
+            producesKind = node.producesKind,
+            ownerKind = node.ownerKind,
+            opKind = node.opKind,
         )
         return foldOver(bExpr, foldOver(aExpr, initExpr))
     }

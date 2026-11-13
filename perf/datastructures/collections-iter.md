@@ -10,7 +10,7 @@
 |---|---|---|---|---|---|
 | `all` | 442 |  |  | 6.8x | iter_perf_compare:8 |
 | `any` | 418 |  |  | 6.4x | iter_perf_compare:7 |
-| `chain` | 554 |  |  | 8.5x | iter_perf_compare:12 |
+| `chain` | 540 |  |  | 8.3x | iter_perf_compare:12 |
 | `count` | 120 |  |  | 1.8x | iter_perf_compare:4 |
 | `cursor` | **UNMEASURED** | | | | |
 | `cursor_next` | **UNMEASURED** | | | | |

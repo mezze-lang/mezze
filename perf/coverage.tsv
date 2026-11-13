@@ -76,6 +76,8 @@ iter	any	418	1e7	1	iter_perf_compare:7	2026-11-12
 iter	all	442	1e7	1	iter_perf_compare:8	2026-11-12
 iter	to_seq	1719	1e7	1	iter_perf_compare:5	2026-11-12
 iter	chain	554	1e7	1	iter_perf_compare:12	2026-11-12
+iter	chain	8600	1e7	1	iter_perf_compare:12	2026-11-13
+iter	chain	540	1e7	1	iter_perf_compare:12	2026-11-13
 iter	flat_map	41713	1e7	1	iter_perf_compare:10	2026-11-12
 iter	zip	73284	1e7	1	iter_perf_compare:11	2026-11-12
 iter	flat_map	13902	1e7	1	iter_perf_compare:10	2026-11-12

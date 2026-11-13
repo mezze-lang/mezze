@@ -15144,3 +15144,51 @@ record is what the old `return 0` answered wrongly — so it writes the impl.
 
 Row 20 of `seqsurface` is new: `seq::sort` had no bench row anywhere, in a
 module where it is also the harness's own median helper.
+
+
+## A rewrite dropped the carried decisions and undid its own 46.72x — chain, 16x recovered
+
+`fold(chain(a, b))` is rewritten into `fold(b, fold(a))` so both halves fuse by
+the ordinary machinery. The rewrite rebuilt them with `CallNativeIR(name =
+node.name, ...)` and nothing else, which was sufficient while `isFoldOp` asked
+the NAME — the name is copied. The name-to-decision refactor made `isFoldOp`
+read `opKind`/`ownerKind`, and a rebuilt node carried neither, so each half
+answered `opKind == null`, failed `isFoldOp`, and did not fuse.
+
+| | ps/elem |
+|---|---|
+| recorded before the refactor | 554 |
+| measured after it | **~8 600** |
+| after carrying the kinds | **540** |
+
+16x, and the restored figure landing on the recorded one is what confirms the
+diagnosis rather than merely improving the number.
+
+**HOW IT WAS FOUND, which is the transferable part.** Not by suspicion — by
+re-measuring the whole `iter` group before starting unrelated work on `zip`.
+Four rows matched their recorded numbers within noise (`sum` 74 against 65,
+`enumerate` ~800 against 654, `zip` 26 800 against 23 691, `flat_map` 14 300
+against 13 902) and ONE disagreed by 16x. Four agreeing and one not is a
+regression; had I measured only the row I came to work on, nothing would have
+looked wrong.
+
+**THE EXISTING TESTS COULD NOT SEE IT.** `ChainFoldSequenceTest` checks the
+rewrite's order, seed and emptiness, and passed throughout — because the
+rewrite stayed CORRECT and merely stopped fusing. A correctness test cannot
+distinguish a fused loop from an interpreted walk computing the same number.
+The new `ChainFoldSequenceFusionLoweringTest` asserts the lowering instead: the
+outer half is a fused range, the inner half — which sits in the outer fold's
+`init` — is a `FusedChainIR` and not a leftover native call, and no rebuilt
+fold carries a null `opKind`. All three fail with the kinds dropped, including
+the outer, because both halves are rebuilt.
+
+**THE GENERAL LESSON.** Replacing a name check with a carried decision makes
+every CONSTRUCTOR responsible for carrying it. A constructor that forgets builds
+a node that every carried-decision predicate silently declines — no crash, no
+wrong answer, just a refusal. The name survived copying precisely because it was
+redundant, and removing the redundancy removed the thing that was accidentally
+holding this together.
+
+`wrapAsSeqSource` had the same omission and is fixed in the same pass. Its
+synthetic `to_seq` reaches `SourceIR.RawSeq` directly so nothing re-interrogates
+it today, which is exactly why it would have been the one to rot quietly.
