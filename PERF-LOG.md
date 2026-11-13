@@ -14723,3 +14723,77 @@ disagreeing with the contents is the signature of a mis-pruned node.
 
 AND THE DUPLICATE IS DELETED, not documented — `SetNatives.symmetricDifference`
 delegates now, so the second implementation is gone.
+
+#### `json::parse` built a MezzeRecord per node — 1.44x, and the ceiling rescued a target my own estimate had closed
+
+Every node came out of the parser as
+
+```java
+MezzeRecord payload = MezzeRecord.fromFields(VAL_FIELD, new Object[]{val});
+MezzeVariant.singlePayload(getTagRegistry(), tag, payload);
+```
+
+— a MezzeRecord, an `Object[]` to hold its one field, and a box for the value.
+`MezzeVariant` has FUSED single-field constructors that allocate none of the
+three, and their own comment says they exist for exactly this: *"the compiler
+skips MakeRecord for 1-field variant payloads and stores the raw value directly
+... these factories record the original field name so getPayloadValue() can
+lazily materialize the MezzeRecord wrapper for cold paths"*. The parser was the
+one builder of single-field variants not using them.
+
+**THE ESTIMATE SAID DON'T BOTHER AND THE MEASUREMENT SAID OTHERWISE.** Reading
+the code, the saving looked like 600-800 allocations in a 12 microsecond parse —
+single digit percent, not worth the change, and this was nearly recorded as
+"examined, not pursued". Measured against DSL-JSON parsing the SAME document
+into its own Java Maps and Lists:
+
+| | ps/op | ps/node |
+|---|---|---|
+| DSL-JSON to java Maps/Lists | 5 582 975 | 11 143 |
+| Mezze `parseBytes` to MezzeVariant | 11 877 094 | 23 706 |
+
+The Mezze-side construction is **53% of its own parse**. The estimate was wrong
+because `MezzeRecord.fromFields` is not merely an `Object[]` — there is shape
+handling behind it. This is the mirror of the `unfold` lesson: there the
+estimate was 700x and the ceiling 6.5x, here the estimate was 1.08x and the
+ceiling 2.13x. Both directions argue for measuring.
+
+SELF-A/B, three matched sizes because this row will not hold still:
+
+| n | record | fused | |
+|---|---|---|---|
+| 8 000 | 13 114 061 ps | 8 872 057 | 1.48x |
+| 16 000 | 12 884 561 | 8 792 346 | 1.47x |
+| 32 000 | 11 828 617 | 8 556 031 | 1.38x |
+| `parse_str`, n=16 000 | 13 160 049 | 8 140 157 | **1.62x** |
+| the floor (machine control) | 219 | 216 | 1.4% |
+
+**~1.44x, and quoted as a range on purpose.** The record arm gave 11.8M/14.0M in
+one invocation and 13.1M/12.9M/11.8M in the next — the same build, ±10% between
+runs. Any single pair from that supports a ratio between 1.3x and 1.5x, and all
+of them look publishable alone. Three matched sizes and the spread stated is the
+true claim; "1.48x" would be picking.
+
+THE FUSED ARM IS ALSO THE TIGHTER ONE — 3.7% across its three sizes against the
+record arm's 11% — which is evidence for the mechanism rather than a curiosity:
+three fewer allocations a node is less GC variability to disagree about.
+
+AND A PREDICTION THAT FAILED. `json::to_str` was expected to improve too, since
+`getPayloadFieldByName` returns the payload DIRECTLY for a fused variant instead
+of drilling into a record, which is why the serializer already reads `ok()` and
+`some()` cheaply. It did not move: 1.003x in one pair, 0.935x in another,
+bouncing ±7% with no direction. That read was evidently never the serializer's
+cost. Recorded rather than dropped.
+
+THE DEAD CONSTANTS ARE DELETED. The three single-field `String[]` arrays existed
+only to feed `MezzeRecord.fromFields` and nothing builds those records now.
+`KEY_VALUE_FIELDS` stays: an object entry genuinely has two fields, so it cannot
+be fused and keeps its record — an allocation per entry inherent to the shape
+rather than redundant, and the next thing to look at here.
+
+A NOTE ON THE 2.13x CEILING AND THE 1.44x RESULT. The ceiling compared Mezze's
+parse to DSL-JSON building ITS OWN Maps and Lists — different work, and never a
+bound this change could reach. What it correctly said was "the construction is
+half the parse, look there". Two thirds of what it pointed at is now gone; the
+remainder is the per-entry record above and whatever DSL-JSON does more cheaply
+than Mezze's variant allocation.

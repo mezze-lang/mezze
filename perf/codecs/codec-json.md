@@ -13,11 +13,11 @@
 | `json_strict` | **UNMEASURED** | | | | |
 | `json_utf8_camel` | **UNMEASURED** | | | | |
 | `json_utf8_default` | **UNMEASURED** | | | | |
-| `parse` | 12 635 064 | 501 | 25 219 | — | jsonsurface:4 |
-| `parse_str` | 12 702 172 | 501 | 25 353 | — | jsonsurface:3 |
+| `parse` | 8 556 031 | 501 | 17 077 | — | jsonsurface:4 |
+| `parse_str` | 8 140 157 | 501 | 16 247 | — | jsonsurface:3 |
 | `serialize_to_str` | **UNMEASURED** | | | | |
 | `to_bytes` | 4 614 136 | 501 | 9 209 | — | jsonsurface:2 |
-| `to_str` | 4 646 776 | 501 | 9 275 | — | jsonsurface:1 |
+| `to_str` | 4 619 765 | 501 | 9 221 | — | jsonsurface:1 |
 
 ## Unmeasured (6 of 10)
 
