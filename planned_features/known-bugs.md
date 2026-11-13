@@ -4811,6 +4811,41 @@ dictionary.
     so what varies is the dictionary the CALLER passes at the call site. That is
     where to look next.
 
+**FOUR MECHANISMS ELIMINATED, each by instrumenting the suspect and watching it
+not fire.** Recorded because each looked right from the source:
+
+  1. **The D-1 collapse** — a top-level `let` collapsing the variable onto the
+     one type with a hand-written impl. Adding a SECOND type with its own
+     hand-written `Ord` leaves the top-level case correct, so it genuinely
+     resolves the target there.
+  2. **`abilityOpDictSlot`'s `VAR_SEP` prefix scan**, which returns the first
+     slot matching `lt$…` regardless of type variable. Instrumented: never
+     fires for `lt`/`le`/`gt`/`ge` here.
+  3. **`injectDictFields`' concrete-type fallback.** Its own comment says
+     element types are collected BEFORE container types and
+     `resolveOpHashFromConcreteTypes` returns the first match — which for
+     `map { s = <SortedSet R>, … }` would be `R`, the source. Instrumented: of
+     1759 resolutions for `lt`, EVERY one is stdlib compilation with generic
+     types, `constraintTypes=[]` and `varBindings={}`. The user's call site does
+     not pass through here at all.
+  4. **`specEvidenceOpHash`'s ordering**, which returns the first recorded impl
+     matching the op name and would pick between `Ord R` and `Ord Q` by
+     position. Never called for `lt`.
+
+**THE STRUCTURAL FINDING, and the best lead.** The per-var dictionary path —
+the branch that exists precisely to tell `Ord 'a` from `Ord 'b` — is DEAD for
+this shape: `keyVar` is null for every `lt` resolution observed. A per-var key
+is minted only for a RECEIVER-LESS ability op called BY NAME
+(`BindingRef.AbilityOp`, via `MagicParams.dictKey(op, typeVar, ability)`), and
+the comparator is written `a < b`, an OPERATOR. So an operator-derived
+constraint never carries its type variable, and two `Ord` constraints in one
+scope have nothing to tell them apart.
+
+Whoever takes this next should NOT start by reading more resolution sites —
+four plausible ones are eliminated above. Start by tracing where the `lt` the
+comparator actually calls is bound for ONE failing call, since none of the
+usual suppliers serve it.
+
 `Bug46TargetOrderTest` pins all of this, asserting the broken behaviour on
 purpose in both directions. The older `SortedSetOrderOperandTest` case that
 reads "a let-bound map keeps the target order" is TRUE ONLY AT TOP LEVEL and
