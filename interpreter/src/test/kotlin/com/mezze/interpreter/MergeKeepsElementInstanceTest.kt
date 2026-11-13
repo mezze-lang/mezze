@@ -1,0 +1,183 @@
+package com.mezze.interpreter
+
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import kotlin.test.assertEquals
+
+/**
+ * `set::union` and `map::merge` collapsed by STRUCTURAL equality, not the
+ * author's.
+ *
+ * A hash set stores no equivalence of its own — it is a CHAMP trie keyed on
+ * the compiler's hashing — EXCEPT when built through the evidence route, which
+ * gives it an `EvidenceSetStorage`, whose own comment says a set with evidence
+ * keeps it. Both merges reached that storage and threw it away: they copy both
+ * sides into arrays and rebuild through the STRUCTURAL `fromElements` /
+ * `fromEntries`. `MezzeSet.storage()` exists to be asked this exact question
+ * before a rebuild — its javadoc says so — and neither merge asked.
+ *
+ * WHY IT SURVIVED, and why these tests assert SIZE. `contains` and `get` take
+ * their evidence from the CALL SITE, not from the collection, so the merged
+ * result still answered correctly for a differently-spelled member. Every
+ * probe of the RESULT looked right. Only the count of what the merge collapsed
+ * gave it away.
+ *
+ * FOUND BY SWEEP, not by a report: a mechanical probe that gives a newtype an
+ * `Eq` deliberately coarser than its representation, then asks every operation
+ * on the container a question whose answer differs under the two equalities.
+ * Nine of the ten set operations with no `_with_evidence` form were already
+ * correct — `intersection`, `difference`, `is_subset`, `equals`,
+ * `symmetric_difference` and the rest — because they return a subset of one
+ * side and never have to collapse ACROSS sides. Union is the one that does.
+ *
+ * `P` is equal BY TENS: 10, 11 and 19 are one element, 20 and 29 another. The
+ * hash agrees with the Eq, so the pair is lawful. Parity was tried first and
+ * is too coarse — two classes cannot make a partial result.
+ */
+class MergeKeepsElementInstanceTest {
+
+    @BeforeEach
+    fun setUp() {
+        com.mezze.language.typechecker.ModuleResolver.clearCache()
+    }
+
+    private fun eval(source: String): Any = MezzeTestHelper.run(source.trimIndent())
+
+    private val byTens = """
+        use std::collections::set
+        use std::collections::map
+        use std::abilities::compare::{ Eq, Hash }
+        newtype P = Int
+        let un: { v: P } -> Int = { v } -> match v is
+          P.(n) -> n
+        let cls: { v: P } -> Int = { v } -> un { v = v } / 10
+        impl Eq for P where {
+          eq = { it, r } -> cls { v = it } == cls { v = r },
+          neq = { it, r } -> if cls { v = it } == cls { v = r } then False else True,
+        }
+        impl Hash for P where {
+          hash = { it } -> cls { v = it }
+        }
+    """
+
+    /** THE BASELINE. If the evidence route itself is broken, nothing below
+     *  means anything: 10 and 11 are one element. */
+    @Test
+    fun `the evidence route collapses equal elements on construction`() = assertEquals(
+        1L,
+        eval("$byTens\nset::size { s = set::from_seq { xs = [P.(10), P.(11)] } }"),
+    )
+
+    /**
+     * {class 1, class 2} union {class 1, class 3} is THREE elements. It was
+     * four: `P.(10)` and `P.(11)` are one element under this `Eq` and the
+     * structural rebuild kept both.
+     */
+    @Test
+    fun `set union collapses across sides by the written Eq`() = assertEquals(
+        3L,
+        eval(
+            """
+            $byTens
+            set::size { s = set::union {
+              s1 = set::from_seq { xs = [P.(10), P.(20)] },
+              s2 = set::from_seq { xs = [P.(11), P.(30)] },
+            } }
+            """,
+        ),
+        "4 means the union collapsed by representation and ignored the author's Eq",
+    )
+
+    /** The merged set must still bucket by that instance afterwards, or the
+     *  next operation on it inherits the wrong equality. */
+    @Test
+    fun `the union result still buckets by the written Eq`() = assertEquals(
+        2L,
+        eval(
+            """
+            $byTens
+            set::size { s = set::insert {
+              s = set::union {
+                s1 = set::from_seq { xs = [P.(10), P.(20)] },
+                s2 = set::from_seq { xs = [P.(11)] },
+              },
+              x = P.(19),
+            } }
+            """,
+        ),
+        "inserting another member of class 1 must not grow the set",
+    )
+
+    /** The twin, in the sibling container: `MezzeMap.putAll` is the same four
+     *  arrays and the same structural rebuild. */
+    @Test
+    fun `map merge collapses across sides by the written Eq`() = assertEquals(
+        3L,
+        eval(
+            """
+            $byTens
+            map::size { m = map::merge {
+              m1 = map::of { of = [{ k = P.(10), v = 1 }, { k = P.(20), v = 2 }] },
+              m2 = map::of { of = [{ k = P.(11), v = 3 }, { k = P.(30), v = 4 }] },
+            } }
+            """,
+        ),
+        "4 means the merge bucketed by representation",
+    )
+
+    /**
+     * AND THE VALUE SEMANTICS ARE UNCHANGED BY THE FIX: `other` goes in
+     * second, so a shared key keeps ITS value. Class 1 is written 1 by `m1`
+     * and 3 by `m2`, and 3 must survive — a fix that collapsed correctly but
+     * kept the wrong value would pass the size test above.
+     */
+    @Test
+    fun `a shared key keeps the second map's value`() = assertEquals(
+        3L,
+        eval(
+            """
+            $byTens
+            match map::get {
+              m = map::merge {
+                m1 = map::of { of = [{ k = P.(10), v = 1 }, { k = P.(20), v = 2 }] },
+                m2 = map::of { of = [{ k = P.(11), v = 3 }, { k = P.(30), v = 4 }] },
+              },
+              k = P.(19),
+            } is
+              Some { val } -> val
+              None -> 0 - 1
+            """,
+        ),
+    )
+
+    /** Plain Int keys and elements are untouched: with no hand-written
+     *  instance there is no evidence storage and the structural rebuild is
+     *  exactly right. */
+    @Test
+    fun `plain Int merges are unaffected`() {
+        assertEquals(
+            3L,
+            eval(
+                """
+                use std::collections::set
+                set::size { s = set::union {
+                  s1 = set::from_seq { xs = [1, 2] },
+                  s2 = set::from_seq { xs = [1, 3] },
+                } }
+                """,
+            ),
+        )
+        assertEquals(
+            3L,
+            eval(
+                """
+                use std::collections::map
+                map::size { m = map::merge {
+                  m1 = map::of { of = [{ k = 1, v = 1 }, { k = 2, v = 2 }] },
+                  m2 = map::of { of = [{ k = 1, v = 3 }, { k = 3, v = 4 }] },
+                } }
+                """,
+            ),
+        )
+    }
+}

@@ -331,7 +331,29 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
         System.arraycopy(theirs, 0, outK, mine.length, theirs.length);
         System.arraycopy(theirsV, 0, outV, mine.length, theirs.length);
 
+        // BUCKETED BY WHOSE EQUALITY. `fromEntries` buckets STRUCTURALLY, so
+        // two keys a hand-written `Eq` calls one key stayed apart and
+        // `map::merge` answered 4 where 3 was right — the same defect, in the
+        // same shape, as the set's `addAll`, which this method's comment
+        // already pointed at for its measurement.
+        //
+        // It hid the same way too: `get` takes its evidence from the CALL
+        // SITE, so the merged map still answered correctly for a
+        // differently-spelled key and only the SIZE gave it away.
+        com.mezze.datastructures.set.ElementHashing hashing = hashingOf(this);
+        if (hashing == null) hashing = hashingOf(other);
+        if (hashing != null) {
+            // `other` is still second in the arrays, so a shared key keeps ITS
+            // value exactly as it does structurally.
+            return fromStorage(EvidenceMapStorage.fromEntries(outK, outV, hashing));
+        }
         return (MezzeMap<K, V>) fromEntries(outK, outV, outK.length);
+    }
+
+    /** The key instance this map buckets by, or null when it buckets
+     *  structurally. */
+    private static com.mezze.datastructures.set.ElementHashing hashingOf(MezzeMap<?, ?> m) {
+        return m.storage instanceof EvidenceMapStorage es ? es.hashing() : null;
     }
 
     /**

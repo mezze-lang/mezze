@@ -4817,3 +4817,51 @@ invisible — BUG 44's shape, reached through `map`.
 `... still loses the target order — BUG 46`, so whoever fixes the dictionary
 arrival is told by a failing test that this improved and the two map cases
 should be folded together.
+
+## BUG 47 — `set::union` and `map::merge` collapsed by representation, not by the author's `Eq`
+
+**FIXED** 2026-11-13, found by sweep rather than by a report.
+
+A hash set or map stores no equivalence of its own — it is a trie keyed on the
+compiler's hashing — EXCEPT when built through the evidence route, which gives
+it an `EvidenceSetStorage` / `EvidenceMapStorage`. That storage's own comment
+says a collection with evidence KEEPS it.
+
+Both merges reached that storage and threw it away. `MezzeSet.addAll` and
+`MezzeMap.putAll` copy both sides into arrays and rebuild through the
+STRUCTURAL `fromElements` / `fromEntries`, so two elements a hand-written `Eq`
+calls equal stayed apart:
+
+    {class 1, class 2} union {class 1, class 3}   ->  4 elements, want 3
+
+`MezzeSet.storage()` exists to be asked this exact question before a rebuild —
+its javadoc says so in as many words — and neither merge asked.
+
+**WHY IT SURVIVED.** `contains` and `get` take their evidence from the CALL
+SITE, not from the collection. So the merged result still answered correctly
+for a differently-spelled member, every probe OF THE RESULT looked right, and
+only the SIZE of what the merge collapsed gave it away. Any test written
+against `contains` would have passed.
+
+**WHY ONLY THESE TWO.** Ten set operations declare `with Eq 'a` and thread
+nothing to their natives, and NINE of them are correct: `intersection`,
+`difference`, `is_subset`, `is_superset`, `is_disjoint`, `equals`,
+`insert_all`, `remove_all` and `symmetric_difference` each return a subset of
+ONE side, and never have to collapse two elements that came from different
+sides. Union and merge are the operations that do. A reading of the signatures
+cannot separate those cases; the probe could.
+
+**THE METHOD**, which is the reusable part: give a newtype an `Eq` and `Hash`
+deliberately COARSER than its representation — here equal by tens, so 10, 11
+and 19 are one element — and ask every operation a question whose answer
+differs under the two equalities. Parity was tried first and is too coarse:
+two classes cannot produce a PARTIAL result, and a partial result is what
+reaches the rebuild path in `intersect` and `difference`.
+
+A first reading blamed the result for losing its evidence. The probe disproved
+that — the union result still recognised a differently-spelled member — and
+localised it to the merge itself.
+
+Related: BUG 44 (a type-based fast path overriding the element's own `Ord`) and
+BUG 45 (a constraint declared and never threaded). Same family, third form:
+a REBUILD that drops the instance the collection was carrying.

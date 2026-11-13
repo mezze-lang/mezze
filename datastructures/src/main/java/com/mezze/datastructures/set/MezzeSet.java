@@ -295,7 +295,30 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
         System.arraycopy(mine, 0, out, 0, mine.length);
         System.arraycopy(theirs, 0, out, mine.length, theirs.length);
         // Shared elements appear twice and collapse, as the adds collapsed them.
+        //
+        // COLLAPSE BY WHOSE EQUALITY, THOUGH. The static `fromElements` buckets
+        // STRUCTURALLY, so two elements a hand-written `Eq` calls equal stayed
+        // apart and `set::union` answered 4 where every other operation agreed
+        // the answer was 3. The element instance lives on the storage — see
+        // `EvidenceSetStorage`, whose own comment says a set with evidence keeps
+        // it — and `storage()` exists to be asked this exact question before a
+        // rebuild. It was not being asked here.
+        //
+        // The defect was invisible from the result, because `contains` takes its
+        // evidence from the CALL SITE: the union result still recognised a
+        // differently-spelled member, so only the SIZE gave it away.
+        ElementHashing hashing = hashingOf(this);
+        if (hashing == null) hashing = hashingOf(other);
+        if (hashing != null) {
+            return fromStorage(EvidenceSetStorage.fromElements(out, hashing));
+        }
         return (MezzeSet<A>) fromElements(out, out.length);
+    }
+
+    /** The element instance this set buckets by, or null when it buckets
+     *  structurally. */
+    private static ElementHashing hashingOf(MezzeSet<?> s) {
+        return s.storage instanceof EvidenceSetStorage es ? es.hashing() : null;
     }
 
     /**
