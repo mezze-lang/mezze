@@ -991,6 +991,102 @@ internal class ImplValidator(
             val expectedParamType = substituteTypeParams(declParamType, fullSubstitution)
             val expectedReturnType = substituteTypeParams(declReturnType, fullSubstitution)
 
+            // An op's annotated type must have the DECLARED constructor set, not
+            // merely one that unifies with it.
+            //
+            // The checks below solve a `Constraint.Equality`, and unification
+            // MERGES variant rows rather than requiring they agree — so
+            // `| A, B |` and `| A, B, C |` unify happily while `Int` and `Str`
+            // do not. Measured: `op: {} -> | A, B |` implemented as
+            // `op: {} -> | A, B, C | = {} -> C` checked clean, and a caller
+            // matching exactly the two DECLARED constructors died with
+            // `Non-exhaustive match: no variant tag matched`.
+            //
+            // Only CLOSED rows are compared. An open row legitimately means "at
+            // least these", so demanding an exact set there would refuse the
+            // row-polymorphic shapes the effect system is built on.
+            fun closedVariantSetsDisagree(a: MezzeType, b: MezzeType): Pair<Set<String>, Set<String>>? {
+                if (a is MezzeType.VariantType && b is MezzeType.VariantType) {
+                    if (a.rowVar == null && b.rowVar == null &&
+                        a.constructors.keys != b.constructors.keys
+                    ) {
+                        return a.constructors.keys to b.constructors.keys
+                    }
+                }
+                if (a is MezzeType.RecordType && b is MezzeType.RecordType) {
+                    for ((name, aField) in a.fields) {
+                        val bField = b.fields[name] ?: continue
+                        closedVariantSetsDisagree(aField, bField)?.let { return it }
+                    }
+                }
+                return null
+            }
+
+            fun rejectVariantSetMismatch(implType: MezzeType, expected: MezzeType, what: String) {
+                val disagreement = closedVariantSetsDisagree(implType, expected) ?: return
+                val (implCtors, declCtors) = disagreement
+                throw TypeCheckError(
+                    "Effect impl '${impl.performerName}' operation '${implOp.name}' declares a " +
+                        "$what with a different constructor set than the operation: " +
+                        "impl has " + implCtors.sorted().joinToString(", ") { "`$it`" } +
+                        ", the operation declares " +
+                        declCtors.sorted().joinToString(", ") { "`$it`" } +
+                        " (from effect '${effectRef.localName}').\n" +
+                        "An operation's data types must match exactly — a caller only ever " +
+                        "sees the operation's declaration.",
+                    implOp.implementation.loc,
+                    code = ErrorCode.T0201_TYPE_MISMATCH,
+                )
+            }
+
+            // BUG 37: the names the impl DESTRUCTURES must be the names the
+            // operation declares.
+            //
+            // The type check below says "Parameter names and types must match
+            // exactly", and that was the intent, but it could not deliver it:
+            // it runs only when the impl ANNOTATES its param type, and
+            // `op = { y, x } -> x` carries no annotation, so nothing ran.
+            // Measured before this: `op: { a: Int, b: Int } -> Int` implemented
+            // as `{ y, x } -> x` type-checked, and `run` — declared `-> Int` —
+            // returned a FUNCTION, dying at the first arithmetic with
+            // `error[I0004]: cannot multiply a function and an Int`. The
+            // one-parameter form returned the whole argument record instead.
+            //
+            // An ability impl was never exposed to this: `ImplValidator`
+            // compares an ability method's parameter RECORD, so a rename there
+            // is already T0201.
+            //
+            // An OPEN destructure (`{ x, ... }`) is deliberately a subset and is
+            // left alone.
+            val declaredParamFields = (expectedParamType as? MezzeType.RecordType)?.fields?.keys
+            val implLambdaParams = (implOp.implementation as? ParsedLambda)?.params
+            if (declaredParamFields != null && implLambdaParams != null) {
+                val destructured: List<String>? = when (implLambdaParams) {
+                    is ParsedLambdaParams.Untyped ->
+                        if (implLambdaParams.isOpen) null else implLambdaParams.names
+                    is ParsedLambdaParams.Typed ->
+                        implLambdaParams.fields.map { it.name }
+                }
+                if (destructured != null && destructured.toSet() != declaredParamFields.toSet()) {
+                    val missing = (declaredParamFields - destructured.toSet()).sorted()
+                    val unexpected = (destructured.toSet() - declaredParamFields).sorted()
+                    val detail = buildList {
+                        if (missing.isNotEmpty()) add("does not bind " + missing.joinToString(", ") { "`$it`" })
+                        if (unexpected.isNotEmpty()) add("binds " + unexpected.joinToString(", ") { "`$it`" } + ", which the operation does not declare")
+                    }.joinToString("; ")
+                    throw TypeCheckError(
+                        "Effect impl '${impl.performerName}' operation '${implOp.name}' " +
+                            "destructures the wrong parameters: it $detail.\n" +
+                            "The operation declares " +
+                            declaredParamFields.sorted().joinToString(", ") { "`$it`" } +
+                            " (from effect '${effectRef.localName}'). " +
+                            "Parameter names and types must match exactly.",
+                        implOp.implementation.loc,
+                        code = ErrorCode.T0201_TYPE_MISMATCH,
+                    )
+                }
+            }
+
             val implParamTypeAnnotation = implOp.paramType
             val isPlaceholderParamType = implParamTypeAnnotation is ParsedRecordType &&
                 implParamTypeAnnotation.entries.isEmpty() && !implParamTypeAnnotation.isOpen
@@ -1001,6 +1097,7 @@ internal class ImplValidator(
                 val unificationResult = unificationSolver.solve(
                     listOf(Constraint.Equality(implParamType, expectedParamType, "Effect param type validation", loc = implOp.loc))
                 )
+                rejectVariantSetMismatch(implParamType, expectedParamType, "parameter type")
                 if (unificationResult is ConstraintSolver.SolveResult.Failure) {
                     val implTypeStr = prettyPrintType(implParamType)
                     val expectedTypeStr = prettyPrintType(expectedParamType)
@@ -1025,6 +1122,7 @@ internal class ImplValidator(
                 val unificationResult = unificationSolver.solve(
                     listOf(Constraint.Equality(implReturnType, expectedReturnType, "Effect return type validation", loc = implOp.loc))
                 )
+                rejectVariantSetMismatch(implReturnType, expectedReturnType, "return type")
                 if (unificationResult is ConstraintSolver.SolveResult.Failure) {
                     val implTypeStr = prettyPrintType(implReturnType)
                     val expectedTypeStr = prettyPrintType(expectedReturnType)

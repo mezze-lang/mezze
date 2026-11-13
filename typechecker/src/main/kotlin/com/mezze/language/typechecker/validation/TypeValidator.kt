@@ -157,6 +157,27 @@ class TypeValidator(
                 is ParsedPerformerDecl -> {
                     val effectDecl = effectDeclarations[decl.effect.localName]
                     if (effectDecl != null) errors.addAll(effectValidator.validateEffectImpl(decl, effectDecl))
+                    // The same omission the ability branch above records, left on
+                    // the performer side: a performer's op body is a body like any
+                    // other, and was not walked, so a `match` inside one was never
+                    // checked for coverage. The symptom is the one that comment
+                    // names — measured here as, verbatim,
+                    //
+                    //   error[I0004]: Non-exhaustive match: no variant tag matched
+                    //                 — typechecker exhaustiveness guarantee violated
+                    //
+                    // for `op: { n: Three } -> Int` implemented with two of three
+                    // arms, while the IDENTICAL body in a plain `pub let` is
+                    // V0601. The op's params are already bound at the declared
+                    // types by `ImplValidator.validateImplOperationBody`, so the
+                    // walk has the scrutinee type it needs.
+                    for (op in decl.operations) {
+                        errors.addAll(
+                            validatePatternsInExpression(
+                                op.implementation, substitution, decidedScrutineeTypes,
+                            ),
+                        )
+                    }
                 }
                 else -> {}
             }

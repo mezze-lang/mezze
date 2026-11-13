@@ -223,21 +223,23 @@ class ImplSignatureRulesSpecTest : VariantSpecBase() {
         )
     }
 
-    @Test fun `BREAK - a performer may rename an op's params`() {
-        accepts(
+    @Test fun `a performer may not rename an op's params`() {
+        rejects(
             """
             effect E where { op: { a: Int, b: Int } -> Int <E> }
             impl E for H where { op = { y, x } -> x }
             pub let run: {} -> Int <*> = {} -> perform H in E.op { a = 10, b = 20 }
             $MAIN
             """,
-            "BREAK — known-bugs BUG 37. The op declares `{ a, b }` and the " +
-                "performer destructures `{ y, x }`. MEASURED: `Check passed`, " +
-                "`pub run : {} -> Int <*>`, then at the first arithmetic " +
-                "`error[I0004]: cannot multiply a function and an Int`. Declared " +
-                "Int, produced a FUNCTION. The one-parameter form yields the whole " +
-                "argument record instead. The ability test above shows the same " +
-                "rename IS checked for an ability impl.",
+            "T0201",
+            "FIXED. Before: `Check passed`, `pub run : {} -> Int <*>`, then " +
+                "`error[I0004]: cannot multiply a function and an Int` — declared " +
+                "Int, produced a FUNCTION. The cause was `expectedParamType." +
+                "fields[name] ?: VarType(fresh())` in `validateImplOperationBody`: " +
+                "a destructured name the declaration lacks got a FRESH VARIABLE, " +
+                "which means \"any type is fine\". The check now compares the " +
+                "destructured names against the declaration and names both halves " +
+                "— what is unbound and what is unexpected.",
         )
     }
 
@@ -333,8 +335,8 @@ class ImplSignatureRulesSpecTest : VariantSpecBase() {
         )
     }
 
-    @Test fun `BREAK - a performer narrowing an op param is accepted`() {
-        accepts(
+    @Test fun `a performer's op body must be exhaustive over the declared type`() {
+        rejects(
             """
             effect E where { op: { n: | A, B, C | } -> Int <E> }
             impl E for H where {
@@ -345,17 +347,41 @@ class ImplSignatureRulesSpecTest : VariantSpecBase() {
             pub let run: {} -> Int <*> = {} -> perform H in E.op { n = C }
             $MAIN
             """,
-            "BREAK — known-bugs BUG 37. The same shape the ability test above " +
-                "refuses with V0601. MEASURED: check passes, then " +
-                "`error[I0004]: Non-exhaustive match: no variant tag matched — " +
-                "typechecker exhaustiveness guarantee violated`. The runtime says " +
-                "the quiet part out loud: a guarantee was violated, not a program " +
-                "was wrong.",
+            "T0201",
+            "FIXED. This form ANNOTATES the narrower param, so the " +
+                "constructor-set comparison catches it before the body is " +
+                "reached. The unannotated form below is the other mechanism.",
         )
     }
 
-    @Test fun `BREAK - a performer widening an op return is accepted`() {
-        accepts(
+    @Test fun `an UNANNOTATED performer op body must still be exhaustive`() {
+        rejects(
+            """
+            type Three = | A, B, C |
+            effect E where { op: { n: Three } -> Int <E> }
+            impl E for H where {
+              op = { n } -> match n is
+                A -> 1
+                B -> 2
+            }
+            pub let run: {} -> Int <*> = {} -> perform H in E.op { n = C }
+            $MAIN
+            """,
+            "V0601",
+            "NO annotation, so the param name matches and nothing type-level " +
+                "objects — the body walk is what catches it. FIXED, and the fix " +
+                "was already written for the OTHER kind of impl: `TypeValidator` " +
+                "walks an ability impl's op bodies for pattern coverage, with a " +
+                "comment recording the symptom (\"a missing one reached the " +
+                "interpreter as `no variant tag matched`\"), and the performer " +
+                "branch beside it never got the same walk. Measured before: check " +
+                "passed, then exactly that message as I0004. The IDENTICAL body in " +
+                "a plain `pub let` was always V0601.",
+        )
+    }
+
+    @Test fun `a performer may not widen an op return`() {
+        rejects(
             """
             effect E where { op: {} -> | A, B | <E> }
             impl E for H where { op: {} -> | A, B, C | = {} -> C }
@@ -366,17 +392,21 @@ class ImplSignatureRulesSpecTest : VariantSpecBase() {
                 B -> 2
             $MAIN
             """,
-            "BREAK — the other direction, same cause. The op promises " +
-                "`| A, B |`, the performer returns `C`, and a caller matching " +
-                "exactly the two declared constructors gets the same I0004 " +
-                "exhaustiveness violation. The ABILITY return IS checked (see the " +
-                "wider-return test above, T0201), because an ability impl's type " +
-                "is compared by `ImplValidator` rather than left to unification.",
+            "T0201",
+            "FIXED. The op promises `| A, B |`, the performer returned `C`, and a " +
+                "caller matching exactly the declared constructors got the I0004 " +
+                "exhaustiveness violation. Accepted because the check solved a " +
+                "`Constraint.Equality` and unification MERGES variant rows — " +
+                "`Int` against `Str` fails to unify, `| A, B |` against " +
+                "`| A, B, C |` does not. Now compared as constructor SETS, and " +
+                "only for CLOSED rows: an open row means \"at least these\", and " +
+                "demanding an exact set there would refuse the row-polymorphic " +
+                "shapes the effect system is built on.",
         )
     }
 
-    @Test fun `a performer widening an op param is fine`() {
-        accepts(
+    @Test fun `a performer may not widen an op param either`() {
+        rejects(
             """
             effect E where { op: { n: | A, B | } -> Int <E> }
             impl E for H where {
@@ -388,10 +418,15 @@ class ImplSignatureRulesSpecTest : VariantSpecBase() {
             pub let run: {} -> Int <*> = {} -> perform H in E.op { n = A }
             $MAIN
             """,
-            "THE SOUND DIRECTION, and the reason a fix cannot simply demand " +
-                "equality: accepting MORE than the declaration promises is " +
-                "contravariance, and is safe. Only the narrowing direction is the " +
-                "hole.",
+            "T0201",
+            "A DELIBERATE CHOICE OF STRICTNESS, not a soundness requirement. " +
+                "Accepting more than the declaration promises is contravariant and " +
+                "would be safe — ability impls allow the analogous narrower RETURN. " +
+                "The rule chosen for performers is uniform instead: an op's data " +
+                "signature must match exactly, so there is one structural " +
+                "comparison and no variance reasoning anywhere in the effect path. " +
+                "If that ever feels too strict, this is the test to revisit, and " +
+                "relaxing it is sound.",
         )
     }
 }
