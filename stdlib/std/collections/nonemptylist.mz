@@ -159,9 +159,31 @@ pub let to_seq: { xs: NonEmptyList 'a } -> ['a] = { xs } -> __native_nel_to_seq 
 ## Creates a NonEmptyList from a Seq. Returns None if the seq is empty.
 pub let from_seq: { xs: ['a] } -> Option (NonEmptyList 'a) = { xs } -> __native_nel_from_seq { xs = xs }
 
+## Threads the element's own `Ord` to the native as a `le` callback, so the
+## compiler can see an `Ord` it may discharge directly. For an element it proves
+## directly comparable the whole operand is dropped and this becomes
+## `__native_nel_sort`, which sorts with no callback at all; for anything else —
+## notably a `newtype` whose `Ord` disagrees with the type it wraps — the
+## callback stays and the author's order is what runs.
+##
+## A typed intermediary rather than an inline lambda because a `'a` written
+## inside a lambda is FRESH, so the constraint has to arrive through a
+## signature. Same shape as `seq::sort` and `list::sort`.
+let sort_by_ord
+  : { xs: NonEmptyList 'a, le: { it: 'a, r: 'a } -> Bool } with Ord 'a
+  -> NonEmptyList 'a
+  = { xs, le } -> __native_nel_sort_by_ord { xs = xs, le = le }
+
 ## Sorts elements in ascending order.
+##
+## WAS `sort_by { cmp = { l, r } -> l <= r }`, which ran a guest lambda for each
+## of roughly n log n comparisons — the same defect `seq::sort` and `list::sort`
+## carried. MEASURED against `seq::sort` on the same elements: 4409 ps against
+## 430 at four hundred elements. The Bool->Int wrapper `sort_by` adds is NOT the
+## cost and never was; an unwarmed first pass said 1.82x for it and a warm one
+## said none. The comparator call is the cost.
 pub let sort: { xs: NonEmptyList 'a } with Ord 'a -> NonEmptyList 'a = { xs } ->
-  sort_by { xs = xs, cmp = { l, r } -> l <= r }
+  sort_by_ord { xs = xs, le = { it, r } -> it <= r }
 
 ## Sorts using a `less-or-equal` comparator: `cmp { l, r }` returns True when `l`
 ## should come before `r` (matches `Ord`'s `lt`/`le` and the `<`/`<=` operators).

@@ -335,22 +335,59 @@ public final class NonEmptyListNatives {
 
     // ==================== Sort Operations ====================
 
+    /**
+     * NATURAL ORDER, no comparator — the form {@code TypedASTCompiler} rewrites
+     * {@code __native_nel_sort_by_ord} to when the element is DIRECTLY
+     * comparable. Reached only through that rewrite.
+     *
+     * <p>THIS NATIVE WAS DEAD AND WRONG, the third in that family after
+     * {@code __native_seq_sort} and {@code __native_list_sort}. It was
+     * registered in {@code NativeDispatch}, referenced from nowhere, and its
+     * comparator was an instanceof chain ending {@code return 0} — so a
+     * NonEmptyList of records would have come back in its original order,
+     * reported as sorted. Nothing called it, so nothing was broken; it was a
+     * trap for whoever wired it up, which is a thing that nearly happened while
+     * triaging the dead natives for speed.
+     *
+     * <p>A {@code MezzeNonEmptyList} holds {@code Object[]} of BOXED elements,
+     * so unlike {@code seq::sort} there is no primitive tier to drop to and the
+     * best available is {@code Arrays.sort(Object[])} through {@code
+     * Comparable}. The elements are CHECKED rather than assumed, so a type the
+     * rewrite should have declined fails by naming the broken promise instead
+     * of answering 0 for every pair or throwing from inside TimSort.
+     */
     @TruffleBoundary
-    @SuppressWarnings("unchecked")
     public static MezzeNonEmptyList sort(MezzeNonEmptyList list) {
         Object[] arr = list.getElements().clone();
-        java.util.Arrays.sort(arr, (a, b) -> {
-            if (a instanceof Long && b instanceof Long) {
-                return Long.compare((Long) a, (Long) b);
+        if (arr.length <= 1) return list;
+        for (Object elem : arr) {
+            if (!(elem instanceof Long || elem instanceof Double || elem instanceof String)) {
+                throw new IllegalStateException(
+                    "__native_nel_sort reached a " + (elem == null ? "null" : elem.getClass().getName())
+                    + " element: this native sorts only the directly comparable elements"
+                    + " (Int, Float, Str). Anything else must have been rewritten to"
+                    + " __native_nel_sort_by_ord by TypedASTCompiler, so this is a"
+                    + " compiler bug, not a program error.");
             }
-            if (a instanceof Double && b instanceof Double) {
-                return Double.compare((Double) a, (Double) b);
-            }
-            if (a instanceof String && b instanceof String) {
-                return ((String) a).compareTo((String) b);
-            }
-            return 0;
-        });
+        }
+        java.util.Arrays.sort(arr);
+        return new MezzeNonEmptyList(arr);
+    }
+
+    /**
+     * Sorts by the element's own {@code Ord}, handed in as a `le` callback.
+     *
+     * <p>`le` answers True when `it` should come before `r`. One guest call per
+     * comparison, which is what this path has always cost — the point of the
+     * pair is that {@link #sort} replaces it when the element is proved
+     * directly comparable, and this remains the route for everything else.
+     */
+    public static MezzeNonEmptyList sortByOrd(MezzeNonEmptyList list, MezzeFunction leFn,
+                                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        Object[] arr = list.getElements().clone();
+        if (arr.length <= 1) return list;
+        var ctx = ScalarCall.prepare2(leFn, "it", "r");
+        java.util.Arrays.sort(arr, (a, b) -> ctx.callBool(callNode, a, b) ? -1 : 1);
         return new MezzeNonEmptyList(arr);
     }
 
@@ -362,13 +399,14 @@ public final class NonEmptyListNatives {
                                                                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(cmpFn, "l", "r");
         Object[] arr = list.getElements().clone();
-        java.util.Arrays.sort(arr, (a, b) -> {
-            Object result = ctx.call2(callNode, a, b);
-            if (result instanceof Long) {
-                return ((Long) result).intValue();
-            }
-            return 0;
-        });
+        // Through `callCmp`, as `SeqNatives.sortBy` does. The hand-rolled unbox
+        // this replaces ended `return 0` for a non-Long and, worse, narrowed
+        // with `intValue()`: a comparator returning 2^31 TRUNCATED to -2^31 and
+        // ordered the pair backwards. Latent rather than live — every stdlib
+        // `sort_by` wraps a Bool comparator to exactly -1 or 1, and guest code
+        // cannot name a `__native_*` directly (checked: V0702) — so this is the
+        // trap removed, not a user-visible bug fixed. `callCmp` takes signum.
+        java.util.Arrays.sort(arr, (a, b) -> ctx.callCmp(callNode, a, b));
         return new MezzeNonEmptyList(arr);
     }
 

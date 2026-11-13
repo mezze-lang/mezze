@@ -358,26 +358,12 @@ public final class NativeDispatch extends MezzeNode {
             Double.toString(getDouble(r, "n")));
         HANDLERS.put("__native_float_from_int", (r, c) ->
             (double) getLong(r, "n"));
-        HANDLERS.put("__native_float_from_string", (r, c) ->
-            floatFromString(getString(r, "s")));
         HANDLERS.put("__native_float_abs", (r, c) ->
             PrimitiveNatives.floatAbs(getDouble(r, "n")));
         HANDLERS.put("__native_float_min", (r, c) ->
             PrimitiveNatives.floatMin(getDouble(r, "l"), getDouble(r, "r")));
         HANDLERS.put("__native_float_max", (r, c) ->
             PrimitiveNatives.floatMax(getDouble(r, "l"), getDouble(r, "r")));
-        HANDLERS.put("__native_float_clamp", (r, c) ->
-            PrimitiveNatives.floatClamp(getDouble(r, "n"), getDouble(r, "min"), getDouble(r, "max")));
-        HANDLERS.put("__native_float_sign", (r, c) ->
-            PrimitiveNatives.floatSignum(getDouble(r, "n")));
-        HANDLERS.put("__native_float_to_int", (r, c) ->
-            PrimitiveNatives.floatToInt(getDouble(r, "n")));
-        HANDLERS.put("__native_float_is_nan", (r, c) ->
-            PrimitiveNatives.floatIsNaN(getDouble(r, "n")));
-        HANDLERS.put("__native_float_is_infinite", (r, c) ->
-            PrimitiveNatives.floatIsInfinite(getDouble(r, "n")));
-        HANDLERS.put("__native_float_is_finite", (r, c) ->
-            PrimitiveNatives.floatIsFinite(getDouble(r, "n")));
         HANDLERS.put("__native_float_floor", (r, c) ->
             PrimitiveNatives.floatFloor(getDouble(r, "n")));
         HANDLERS.put("__native_float_ceil", (r, c) ->
@@ -388,12 +374,6 @@ public final class NativeDispatch extends MezzeNode {
             PrimitiveNatives.floatSqrt(getDouble(r, "n")));
         HANDLERS.put("__native_float_pow", (r, c) ->
             PrimitiveNatives.floatPow(getDouble(r, "base"), getDouble(r, "exp")));
-        HANDLERS.put("__native_float_ln", (r, c) ->
-            PrimitiveNatives.floatLog(getDouble(r, "n")));
-        HANDLERS.put("__native_float_log10", (r, c) ->
-            PrimitiveNatives.floatLog10(getDouble(r, "n")));
-        HANDLERS.put("__native_float_exp", (r, c) ->
-            PrimitiveNatives.floatExp(getDouble(r, "n")));
         // Trig operations - use PrimitiveNatives for consistency
         HANDLERS.put("__native_float_sin", (r, c) ->
             PrimitiveNatives.floatSin(getDouble(r, "n")));
@@ -401,14 +381,6 @@ public final class NativeDispatch extends MezzeNode {
             PrimitiveNatives.floatCos(getDouble(r, "n")));
         HANDLERS.put("__native_float_tan", (r, c) ->
             PrimitiveNatives.floatTan(getDouble(r, "n")));
-        HANDLERS.put("__native_float_asin", (r, c) ->
-            PrimitiveNatives.floatAsin(getDouble(r, "n")));
-        HANDLERS.put("__native_float_acos", (r, c) ->
-            PrimitiveNatives.floatAcos(getDouble(r, "n")));
-        HANDLERS.put("__native_float_atan", (r, c) ->
-            PrimitiveNatives.floatAtan(getDouble(r, "n")));
-        HANDLERS.put("__native_float_atan2", (r, c) ->
-            PrimitiveNatives.floatAtan2(getDouble(r, "y"), getDouble(r, "x")));
         // Float arithmetic
         HANDLERS.put("__native_float_add", (r, c) ->
             PrimitiveNatives.floatAdd(getDouble(r, "l"), getDouble(r, "r")));
@@ -1113,8 +1085,6 @@ public final class NativeDispatch extends MezzeNode {
             ListNatives.repeat(getField(r, "x"), getLong(r, "n")));
         HANDLERS.put("__native_list_intersperse", (r, c) ->
             ListNatives.intersperse(getList(r, "xs"), getField(r, "sep")));
-        HANDLERS.put("__native_list_to_seq", (r, c) ->
-            ListNatives.toSeq(getList(r, "xs")));
         HANDLERS.put("__native_list_zip", (r, c) ->
             ListNatives.zip(getList(r, "xs"), getList(r, "ys")));
         HANDLERS.put("__native_list_unzip", (r, c) ->
@@ -1155,12 +1125,8 @@ public final class NativeDispatch extends MezzeNode {
             ListNatives.maxBy(getList(r, "xs"), getFunction(r, "f"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_list_sum", (r, c) ->
             ListNatives.sum(getList(r, "xs")));
-        HANDLERS.put("__native_list_sum_float", (r, c) ->
-            ListNatives.sumFloat(getList(r, "xs")));
         HANDLERS.put("__native_list_product", (r, c) ->
             ListNatives.product(getList(r, "xs")));
-        HANDLERS.put("__native_list_product_float", (r, c) ->
-            ListNatives.productFloat(getList(r, "xs")));
 
         // Group By
         HANDLERS.put("__native_list_group_by", (r, c) ->
@@ -1367,8 +1333,6 @@ public final class NativeDispatch extends MezzeNode {
             SetNatives.equals(getSet(r, "s1"), getSet(r, "s2")));
         HANDLERS.put("__native_set_for_each", (r, c) ->
             SetNatives.forEach(getSet(r, "s"), getFunction(r, "f"), c));
-        HANDLERS.put("__native_set_to_seq", (r, c) ->
-            SetNatives.toArray(getSet(r, "s")));
         HANDLERS.put("__native_set_to_list", (r, c) ->
             SetNatives.toList(getSet(r, "s")));
         HANDLERS.put("__native_set_from_seq", (r, c) ->
@@ -1864,8 +1828,6 @@ public final class NativeDispatch extends MezzeNode {
             DequeNatives.compare(getDeque(r, "d1"), getDeque(r, "d2"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_deque_to_list", (r, c) ->
             DequeNatives.toList(getDeque(r, "d")));
-        HANDLERS.put("__native_deque_to_seq", (r, c) ->
-            DequeNatives.toArray(getDeque(r, "d")));
         HANDLERS.put("__native_deque_from_list", (r, c) ->
             DequeNatives.fromList(getList(r, "xs")));
 
@@ -2051,6 +2013,8 @@ public final class NativeDispatch extends MezzeNode {
             NonEmptyListNatives.all(getNonEmptyList(r, "xs"), getFunction(r, "p"), c));
         HANDLERS.put("__native_nel_sort_by", (r, c) ->
             NonEmptyListNatives.sortBy(getNonEmptyList(r, "xs"), getFunction(r, "cmp"), c));
+        HANDLERS.put("__native_nel_sort_by_ord", (r, c) ->
+            NonEmptyListNatives.sortByOrd(getNonEmptyList(r, "xs"), getFunction(r, "le"), c));
         HANDLERS.put("__native_nel_equals", (r, c) ->
             NonEmptyListNatives.equals(getNonEmptyList(r, "xs"), getNonEmptyList(r, "ys"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_nel_compare", (r, c) ->

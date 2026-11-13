@@ -541,13 +541,10 @@ public final class ListNatives {
         if (list.size() <= 1) return list;
         var ctx = ScalarCall.prepare2(cmpFn, "a", "b");
         Object[] arr = list.toArray();
-        java.util.Arrays.sort(arr, (elemA, elemB) -> {
-            Object cmpResult = ctx.call2(callNode, elemA, elemB);
-            if (cmpResult instanceof Long) {
-                return ((Long) cmpResult).intValue();
-            }
-            return 0;
-        });
+        // See the note on NonEmptyListNatives.sortBy: `callCmp` takes signum,
+        // where the hand-rolled unbox this replaces narrowed with `intValue()`
+        // and fell back to `return 0`.
+        java.util.Arrays.sort(arr, (elemA, elemB) -> ctx.callCmp(callNode, elemA, elemB));
         return MezzeList.of(arr);
     }
 

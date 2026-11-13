@@ -160,3 +160,8 @@ seq	dedup	2049522	2e4	100	seqsurface:2	2026-11-13
 list	sort	1713883	2e4	100	lsprobe	2026-11-13
 list	sort	730000	2e4	100	lsprobe	2026-11-13
 list	sort_by	1530512	2e4	100	lsprobe	2026-11-13
+nonemptylist	sort	200761	2e4	100	nelsort	2026-11-13
+nonemptylist	sort	875225	5e3	400	nelsort	2026-11-13
+nonemptylist	sort_by	1122897	2e4	100	nelsort	2026-11-13
+nonemptylist	sort_by	4254247	5e3	400	nelsort	2026-11-13
+nonemptylist	size	11827	2e4	100	nelsort	2026-11-13

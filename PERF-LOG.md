@@ -66,6 +66,62 @@ applies · raw array-write cost where materialising is unavoidable · otherwise
 nice-to-have: a pass that emits `SlotKind.OBJECT` without looking up the type is
 a defect, not a conservative default.
 
+### `nonemptylist::sort` — 5.04x, the third collection with `seq::sort`'s defect
+
+`sort` routed through `sort_by`, so each of ~n log n comparisons ran a guest
+lambda. Threading the element's `Ord` through a typed intermediary lets the
+compiler drop the operand entirely where the element is directly comparable,
+which is what `seq::sort` (10.2x) and `list::sort` (2.35x) already do.
+
+Min of warm passes, descending input, two sizes:
+
+| n   | before    | after   | ratio | `seq::sort` (ceiling) |
+|-----|-----------|---------|-------|-----------------------|
+| 100 | 1 255 457 |  200 761 | 6.25x | 83 300                |
+| 400 | 4 408 713 |  875 225 | 5.04x | 303 323               |
+
+It now sits 2.89x above `seq::sort` and that gap is the BOXING, not a callback:
+a `MezzeNonEmptyList` holds `Object[]`, so the upgrade buys
+`Arrays.sort(Object[])` through `Comparable`, not seq's primitive `long[]`
+tier. It beats `list`'s 2.35x because a NonEmptyList has no cons walk at either
+end — which is also why the pre-measurement estimate of ~1.7 us (list's "3.9x
+the primitive path" applied to seq's 430) came out pessimistic at 875.
+
+**TWO THINGS THE FIRST MEASUREMENT GOT WRONG.** Both were warmup, and both
+would have been reported as findings if the pass had not been repeated:
+
+- `sort_by`'s Bool->Int wrapper lambda looked like **1.82x** of the cost
+  (9 945 546 against 5 452 622). Warm, it is **free** — 1255 against 1360, the
+  wrapper slightly *ahead*. It inlines. The comparator CALL is the cost, not
+  the conversion around it.
+- An O(1) `size` read **2 608 701 ps**. Warm: **11 827**. The first row timed
+  in a process pays for the rows after it.
+
+Two passes were not enough either: the second pass at n=100 still had
+`seq::sort` at 1.52 us against 0.35 at n=400, which is backwards in n and so
+can only be warmup. Four passes per size, read the min.
+
+`sort_by` is no longer a pure control — it improved 1.09x at n=400 and 1.21x at
+n=100 — but that is explained rather than noise: its hand-rolled unbox was
+replaced with the existing `ScalarCall.callCmp`, which removes a boxing step.
+
+**THE BREAK, VERIFIED.** The two paths disagree about NaN, which is the only
+behavioural signal that distinguishes them: `Arrays.sort(Object[])` reaches
+`Double.compareTo` and places NaN last, while `it <= r` is false for every
+comparison involving NaN — including `NaN <= NaN` — so the guest comparator
+answers "after" for every pair and contradicts itself. Confirmed by running the
+pre-fix spelling side by side, no rebuild needed, since the old `sort` was
+literally `sort_by { cmp = { l, r } -> l <= r }`:
+
+    sort (fixed) : 1.0, 3.0, NaN
+    sort_by le   : 3.0, NaN, 1.0   <- the input order
+
+**AND `seqElementType` KNEW ONLY SEQ/LIST/SORTED_SET.** Without adding
+`NON_EMPTY_LIST` the rewrite declines, silently — the fix would have looked
+applied, the gates would have passed, and the measurement would have come back
+unchanged with nothing to point at. Worth remembering as a shape: an upgrade
+table keyed on a name, gated by a second table that has to agree.
+
 ### LEDGER UPDATE 2026-11-06 — what moved, and the honest shape of what is left
 
 Nine commits of dictionary and fusion work. Rows that changed STATE, each with

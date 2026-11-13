@@ -3373,6 +3373,13 @@ class TypedASTCompiler(
         // identical dead `__native_list_sort` whose comparator ended
         // `return 0`. Same rewrite, same gate.
         "__native_list_sort_by_ord" to "__native_list_sort",
+        // THIRD in the family, found by sweeping for the dead-and-wrong shape
+        // rather than by a report: `__native_nel_sort` was registered, called
+        // from nowhere, and ended `return 0`. A NonEmptyList is `Object[]` of
+        // boxed elements, so this upgrade buys `Arrays.sort(Object[])` through
+        // `Comparable` and not seq's primitive tier — list's ceiling, without
+        // list's cons walk at either end.
+        "__native_nel_sort_by_ord" to "__native_nel_sort",
         // SAME NATIVE, ONE FIELD FEWER. A `SortedSet` whose element is DIRECT
         // needs no comparator: the one `from_seq` passes IS natural order,
         // written as a guest closure. Dropping it lets the set be built
@@ -3426,6 +3433,7 @@ class TypedASTCompiler(
         val c = app.constructor
         if (c != com.mezze.language.ast.BuiltinTypes.SEQ &&
             c != com.mezze.language.ast.BuiltinTypes.LIST &&
+            c != com.mezze.language.ast.BuiltinTypes.NON_EMPTY_LIST &&
             c != com.mezze.language.ast.BuiltinTypes.SORTED_SET) return null
         return app.args.firstOrNull()
     }
