@@ -4,7 +4,7 @@
 
 # str
 
-`std::str` · 32 operations · 9 with a bench row · 0 with a number
+`std::str` · 32 operations · 10 with a bench row · 0 with a number
 
 | op | ps/op | elems | ps/elem | vs floor | bench |
 |---|---|---|---|---|---|
@@ -21,7 +21,7 @@
 | `lines` | **UNMEASURED** | | | | |
 | `pad_left` | **UNMEASURED** | | | | |
 | `pad_right` | **UNMEASURED** | | | | |
-| `repeat` | **UNMEASURED** | | | | |
+| `repeat` | — | | | | called in buffersurface, no number |
 | `replace` | **UNMEASURED** | | | | |
 | `replace_all` | **UNMEASURED** | | | | |
 | `reverse` | **UNMEASURED** | | | | |
@@ -41,6 +41,6 @@
 | `trim_start` | **UNMEASURED** | | | | |
 | `words` | **UNMEASURED** | | | | |
 
-## Unmeasured (23 of 32)
+## Unmeasured (22 of 32)
 
-`chars`, `ends_with`, `glob_match`, `is_empty`, `last_index_of`, `lines`, `pad_left`, `pad_right`, `repeat`, `replace`, `replace_all`, `reverse`, `starts_with`, `to_camel_case`, `to_kebab_case`, `to_lower`, `to_screaming_snake_case`, `to_snake_case`, `to_str`, `trim`, `trim_end`, `trim_start`, `words`
+`chars`, `ends_with`, `glob_match`, `is_empty`, `last_index_of`, `lines`, `pad_left`, `pad_right`, `replace`, `replace_all`, `reverse`, `starts_with`, `to_camel_case`, `to_kebab_case`, `to_lower`, `to_screaming_snake_case`, `to_snake_case`, `to_str`, `trim`, `trim_end`, `trim_start`, `words`

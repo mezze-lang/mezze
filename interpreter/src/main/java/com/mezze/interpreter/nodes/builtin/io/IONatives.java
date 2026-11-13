@@ -235,9 +235,37 @@ public final class IONatives {
     }
 
     @TruffleBoundary
+    /**
+     * Reset the buffer to empty. O(1), and it used to be O(capacity).
+     *
+     * <p>This called {@code Arrays.fill(buf.getData(), (byte) 0)} — zeroing the
+     * ENTIRE backing array — before setting the position to zero. MEASURED on
+     * `bench/cases/buffersurface` with a 2048-byte capacity: 237 643 ps, where
+     * `write_byte` is ~12 000 and `size` 6 900. Clearing cost twenty times a
+     * write, and it scaled with the CAPACITY rather than with anything written:
+     * a megabyte buffer would have spent ~110 microseconds being "reset".
+     *
+     * <p>THE FILL WAS UNOBSERVABLE. `std::collections::buffer` exposes nine
+     * operations, and none of them can see a byte at or beyond the position:
+     * `size` and `is_empty` read the position, `to_bytes` copies only the
+     * prefix below it, and `write`/`write_byte`/`write_str` append at it. So
+     * zeroing the tail achieved exactly what {@code setPosition(0)} already
+     * achieved.
+     *
+     * <p>WHAT THE FILL WOULD HAVE MATTERED FOR, and why it still does not. The
+     * read side of this class — {@code bufferReadByte}, {@code bufferReadBytes},
+     * {@code bufferToString} — is bounded by {@code data.length} rather than by
+     * the position, so those CAN see the tail, and after this change they see
+     * stale bytes where they used to see zeros. None of them is reachable:
+     * `__native_buffer_to_str`, `_read_byte`, `_read_bytes`, `_position` and
+     * `_length` have no `pub let` in the stdlib. They also disagree with the
+     * write side about what `position` means — a write cursor for a builder, a
+     * read cursor for a reader — which is why {@code bufferFromBytes} produces
+     * a buffer whose `to_bytes` is empty. That wants resolving before any of
+     * them is exposed, and it is not resolved here.
+     */
     public static MezzeBuffer bufferClear(MezzeRecord args) {
         MezzeBuffer buf = getBuffer(args, "buf");
-        Arrays.fill(buf.getData(), (byte) 0);
         buf.setPosition(0);
         return buf;  // Return the buffer for functional API
     }

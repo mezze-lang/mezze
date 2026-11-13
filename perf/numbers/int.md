@@ -13,7 +13,7 @@
 | `clamp` | **UNMEASURED** | | | | |
 | `divide` | **UNMEASURED** | | | | |
 | `from_nat` | **UNMEASURED** | | | | |
-| `from_str` | — | | | | called in allocsurface, asyncsurface, boxing_probe, bytesurface, chain, collfold, coresurface, datetimesurface, defunc, dequeabi, dispatch_probe, dotprobe, ds_matrix, dsmore, effectsurface, floatloop, foldshape, fuseall, fusecross, fusegaps, hofcapture, hofpoly, http-work-route, iter_perf_compare, iterremit, iterstage, jsonsurface, letcost, listwalk, mandelannot, mapsurface, mutabi, mutvsimmut, recfields, recordcost, seqsurface, surface, tailannot, tailonly, wrapalloc, no number |
+| `from_str` | — | | | | called in allocsurface, asyncsurface, boxing_probe, buffersurface, bytesurface, chain, collfold, coresurface, datetimesurface, defunc, dequeabi, dispatch_probe, dotprobe, ds_matrix, dsmore, effectsurface, floatloop, foldshape, fuseall, fusecross, fusegaps, hofcapture, hofpoly, http-work-route, iter_perf_compare, iterremit, iterstage, jsonsurface, letcost, listwalk, mandelannot, mapsurface, mutabi, mutvsimmut, recfields, recordcost, seqsurface, surface, tailannot, tailonly, wrapalloc, no number |
 | `gcd` | **UNMEASURED** | | | | |
 | `is_even` | **UNMEASURED** | | | | |
 | `is_odd` | **UNMEASURED** | | | | |
@@ -26,7 +26,7 @@
 | `sign` | **UNMEASURED** | | | | |
 | `subtract` | **UNMEASURED** | | | | |
 | `to_nat` | **UNMEASURED** | | | | |
-| `to_str` | — | | | | called in ability_dispatch, allocsurface, asyncsurface, boxing_probe, bytesurface, capchain, capthresh, chain, codec-decode, codec-encode-walker, codec-vs-handwritten, collfold, concurrent_map_compare, coresurface, datetimesurface, defunc, dequeabi, dispatch_probe, dotprobe, dsmore, effectsurface, fieldorder, floatloop, foldshape, fuseall, fusecross, fusegaps, hofcapture, hofpoly, http-work-route, iterremit, iterstage, jsonsurface, letcost, listwalk, mandelannot, mapsurface, mutabi, mutvsimmut, p3, polyglot_array_read, polyglot_interop, polyglot_seq_crossing, recfields, recordcost, seqsurface, str_bench, surface, tailannot, tailonly, wrapalloc, no number |
+| `to_str` | — | | | | called in ability_dispatch, allocsurface, asyncsurface, boxing_probe, buffersurface, bytesurface, capchain, capthresh, chain, codec-decode, codec-encode-walker, codec-vs-handwritten, collfold, concurrent_map_compare, coresurface, datetimesurface, defunc, dequeabi, dispatch_probe, dotprobe, dsmore, effectsurface, fieldorder, floatloop, foldshape, fuseall, fusecross, fusegaps, hofcapture, hofpoly, http-work-route, iterremit, iterstage, jsonsurface, letcost, listwalk, mandelannot, mapsurface, mutabi, mutvsimmut, p3, polyglot_array_read, polyglot_interop, polyglot_seq_crossing, recfields, recordcost, seqsurface, str_bench, surface, tailannot, tailonly, wrapalloc, no number |
 
 ## Unmeasured (17 of 19)
 

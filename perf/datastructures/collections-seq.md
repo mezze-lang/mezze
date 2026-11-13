@@ -50,7 +50,7 @@
 | `from_set` | **UNMEASURED** | | | | |
 | `from_sorted_map` | **UNMEASURED** | | | | |
 | `from_sorted_set` | **UNMEASURED** | | | | |
-| `get` | — | | | | called in allocsurface, asyncsurface, boxing_probe, bytesurface, chain, collfold, coresurface, datetimesurface, defunc, dequeabi, dispatch_probe, dotprobe, ds_matrix, dsmore, effectsurface, floatloop, foldshape, fuseall, fusecross, fusegaps, hofcapture, hofpoly, iter_perf_compare, iterremit, iterstage, jsonsurface, letcost, list_fold_compare, list_ops_compare, listwalk, mandelannot, mapsurface, mutabi, mutvsimmut, qsort_mut, qsort_native, qsort_pure, recfields, recordcost, seq_fold_compare, seqsurface, surface, tailannot, tailonly, wrapalloc, no number |
+| `get` | — | | | | called in allocsurface, asyncsurface, boxing_probe, buffersurface, bytesurface, chain, collfold, coresurface, datetimesurface, defunc, dequeabi, dispatch_probe, dotprobe, ds_matrix, dsmore, effectsurface, floatloop, foldshape, fuseall, fusecross, fusegaps, hofcapture, hofpoly, iter_perf_compare, iterremit, iterstage, jsonsurface, letcost, list_fold_compare, list_ops_compare, listwalk, mandelannot, mapsurface, mutabi, mutvsimmut, qsort_mut, qsort_native, qsort_pure, recfields, recordcost, seq_fold_compare, seqsurface, surface, tailannot, tailonly, wrapalloc, no number |
 | `group_by` | 2 119 120 | 100 | 21 191 | — | seqsurface:7 |
 | `group_consecutive` | **UNMEASURED** | | | | |
 | `group_consecutive_by` | **UNMEASURED** | | | | |
@@ -82,7 +82,7 @@
 | `permutations` | **UNMEASURED** | | | | |
 | `product` | **UNMEASURED** | | | | |
 | `product_float` | **UNMEASURED** | | | | |
-| `push` | — | | | | called in asyncsurface, bytesurface, datetimesurface, ds_matrix, dsmore, jsonsurface, list_fold_compare, list_ops_compare, mapsurface, polyglot_seq_crossing, qsort_pure, seq_fold_compare, seqsurface, surface, no number |
+| `push` | — | | | | called in asyncsurface, buffersurface, bytesurface, datetimesurface, ds_matrix, dsmore, jsonsurface, list_fold_compare, list_ops_compare, mapsurface, polyglot_seq_crossing, qsort_pure, seq_fold_compare, seqsurface, surface, no number |
 | `push_front` | **UNMEASURED** | | | | |
 | `range` | — | | | | called in allocsurface, capchain, capthresh, codec-decode, codec-encode-walker, codec-vs-handwritten, collfold, concurrent_map_compare, count_positive, defunc, ds_matrix, filter_map_fold, fuseall, fusegaps, http-work-route, iter_perf_compare, iterremit, list_fusion, list_ops_compare, list_perf, listwalk, map_only, range_alloc_probe, seq_fold_compare, seq_fusion, seq_reconstruct, steady_state_probe, sum_fold, sum_native, sum_only, no number |
 | `range_step` | **UNMEASURED** | | | | |
@@ -97,10 +97,10 @@
 | `scan` | **UNMEASURED** | | | | |
 | `set` | — | | | | called in mutvsimmut, no number |
 | `singleton` | **UNMEASURED** | | | | |
-| `size` | — | | | | called in allocsurface, asyncsurface, bytesurface, datetimesurface, ds_matrix, dsmore, fusegaps, iter_perf_compare, jsonsurface, list_fold_compare, list_ops_compare, mapsurface, mutvsimmut, polyglot_array_read, qsort_pure, range_alloc_probe, seq_fold_compare, seq_fusion, seqsurface, surface, no number |
+| `size` | — | | | | called in allocsurface, asyncsurface, buffersurface, bytesurface, datetimesurface, ds_matrix, dsmore, fusegaps, iter_perf_compare, jsonsurface, list_fold_compare, list_ops_compare, mapsurface, mutvsimmut, polyglot_array_read, qsort_pure, range_alloc_probe, seq_fold_compare, seq_fusion, seqsurface, surface, no number |
 | `slice` | — | | | | called in qsort_mut, qsort_native, qsort_pure, no number |
 | `sliding` | **UNMEASURED** | | | | |
-| `sort` | — | | | | called in asyncsurface, bytesurface, datetimesurface, ds_matrix, dsmore, jsonsurface, list_fold_compare, list_ops_compare, mapsurface, qsort_mut, qsort_native, qsort_pure, seq_fold_compare, seqsurface, surface, no number |
+| `sort` | — | | | | called in asyncsurface, buffersurface, bytesurface, datetimesurface, ds_matrix, dsmore, jsonsurface, list_fold_compare, list_ops_compare, mapsurface, qsort_mut, qsort_native, qsort_pure, seq_fold_compare, seqsurface, surface, no number |
 | `sort_by` | 1 274 164 | 100 | 12 741 | — | seqsurface:8 |
 | `sort_by_key` | 1 987 264 | 100 | 19 872 | — | seqsurface:13 |
 | `span` | **UNMEASURED** | | | | |

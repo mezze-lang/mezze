@@ -5,6 +5,7 @@ import com.mezze.datastructures.map.MezzeMap;
 import com.mezze.datastructures.list.MezzeList;
 import com.mezze.datastructures.seq.*;
 import com.mezze.datastructures.set.MezzeSet;
+import com.mezze.datastructures.set.ElementHashing;
 import com.mezze.datastructures.sorted.MezzeSortedMap;
 import com.mezze.datastructures.sorted.MezzeSortedSet;
 import com.mezze.datastructures.nodes.*;
@@ -747,31 +748,102 @@ public final class SeqNatives {
     }
 
     // ==================== Unique/Flatten Operations ====================
+    //
+    // `seq::unique` WAS O(n^2), and its own comment said why: "Eq is not
+    // required to be hashable (only equatable)", so every element was compared
+    // against every survivor through a guest call. MEASURED at two element
+    // counts, which is what distinguishes a quadratic from an expensive
+    // constant: 40 243 498 ps at a hundred elements and 4 169 669 450 at a
+    // thousand — 103.6x for a tenfold n, an exponent of 2.02, where
+    // `seq::dedup` over the same input grew 9.45x.
+    //
+    // The signature is now `with Eq 'a, Hash 'a`. That is a user-facing
+    // decision and not a performance one: a caller whose element has a
+    // hand-written `Eq` and no `Hash` stops compiling, which is the honest
+    // outcome, because that combination is precisely what the quadratic paid
+    // for.
 
-    public static MezzeSeq unique(MezzeSeq seq, MezzeFunction eqFn,
-                                  com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        return distinct(seq, eqFn, callNode);
+    /**
+     * First occurrence of each element, bucketing STRUCTURALLY — O(n).
+     *
+     * <p>`LinkedHashSet` is not an approximation of the structural set here, it
+     * is the same semantics: a structurally-bucketed `MezzeSet` hashes with
+     * `hashCode()` through `TrieHash.mix32` and compares with
+     * `Objects.equals`, which is what `HashSet` does, and `LinkedHashSet` adds
+     * exactly the insertion order that "keeps the first occurrence" requires.
+     *
+     * <p>Correct only when the element's `Eq` and `Hash` are the compiler's
+     * own. When the author wrote them, `TypedASTCompiler.evidenceNativeForm`
+     * routes to {@link #uniqueHashedWithEvidence} instead, under the rule it
+     * already applies to `set::from_seq`.
+     */
+    @TruffleBoundary
+    public static MezzeSeq uniqueHashed(MezzeSeq seq) {
+        int n = seq.size();
+        if (n <= 1) return seq;
+        java.util.LinkedHashSet<Object> seen = new java.util.LinkedHashSet<>(n * 2);
+        for (int i = 0; i < n; i++) {
+            seen.add(seq.get(i));
+        }
+        if (seen.size() == n) return seq;      // nothing to remove
+        return MezzeSeq.fromArray(seen.toArray());
     }
 
-    // Keeps the first occurrence of each element; O(n^2) in the worst case because
-    // Eq is not required to be hashable (only equatable). The primitive/structural
-    // fast path (seq.distinct()) can't be used: it would ignore a custom Eq impl.
-    public static MezzeSeq distinct(MezzeSeq seq, MezzeFunction eqFn,
-                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        if (seq.isEmpty()) return seq;
-        java.util.ArrayList<Object> result = new java.util.ArrayList<>();
-        for (int i = 0; i < seq.size(); i++) {
+    /**
+     * The same, bucketing by the element's OWN `hash` and `eq` — O(n).
+     *
+     * <p>{@link ClosureHashing} supplies the pair or nothing: it returns null
+     * unless both closures are present, because "a container that hashed by the
+     * element's instance but compared structurally would be worse than either
+     * alone" — equal values would land in one bucket and fail the comparison, or
+     * land apart and never be compared. Null means the instances are derived
+     * and the structural walk above is the right answer.
+     *
+     * <p>An open-addressed table of indices rather than a wrapper object per
+     * element: the author's `hash` is then called once per element and the
+     * author's `eq` only when two elements land in the same slot.
+     */
+    @TruffleBoundary
+    public static MezzeSeq uniqueHashedWithEvidence(MezzeSeq seq, MezzeFunction hashFn,
+                                                    MezzeFunction eqFn) {
+        ElementHashing hashing = ClosureHashing.of(hashFn, eqFn);
+        if (hashing == null) return uniqueHashed(seq);
+
+        int n = seq.size();
+        if (n <= 1) return seq;
+
+        int cap = Integer.highestOneBit(Math.max(4, n)) << 2;   // load factor <= 0.5
+        int mask = cap - 1;
+        int[] slots = new int[cap];          // 0 = empty, else 1 + index into out
+        int[] hashes = new int[n];
+        Object[] out = new Object[n];
+        int kept = 0;
+
+        for (int i = 0; i < n; i++) {
             Object elem = seq.get(i);
-            boolean seen = false;
-            for (int j = 0; j < result.size(); j++) {
-                if (eqCall(eqFn, result.get(j), elem, callNode)) {
-                    seen = true;
+            int h = hashing.hashOf(elem);
+            int slot = (h ^ (h >>> 16)) & mask;
+            boolean duplicate = false;
+            while (slots[slot] != 0) {
+                int at = slots[slot] - 1;
+                // The stored hash is checked first so the author's `eq` is only
+                // called for a genuine collision, not for every probe.
+                if (hashes[at] == h && hashing.eq(out[at], elem)) {
+                    duplicate = true;
                     break;
                 }
+                slot = (slot + 1) & mask;
             }
-            if (!seen) result.add(elem);
+            if (!duplicate) {
+                hashes[kept] = h;
+                out[kept] = elem;
+                slots[slot] = kept + 1;
+                kept++;
+            }
         }
-        return MezzeSeq.fromArray(result.toArray());
+
+        if (kept == n) return seq;
+        return MezzeSeq.fromArray(java.util.Arrays.copyOf(out, kept));
     }
 
     @TruffleBoundary

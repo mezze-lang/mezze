@@ -17,7 +17,7 @@
 | `fold` | 151 819 | 1024 | 148 | 0.2x | bytesurface:8 |
 | `from_base64` | **UNMEASURED** | | | | |
 | `from_hex` | **UNMEASURED** | | | | |
-| `from_seq` | — | | | | called in allocsurface, bytesurface, fuseall, mutabi, no number |
+| `from_seq` | — | | | | called in allocsurface, buffersurface, bytesurface, fuseall, mutabi, no number |
 | `from_str` | — | | | | called in http-work-route, no number |
 | `get` | 7 674 |  |  | 11.7x | bytesurface:3 |
 | `index_of` | 221 767 | 1024 | 216 | 0.3x | bytesurface:5 |

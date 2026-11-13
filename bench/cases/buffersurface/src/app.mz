@@ -1,0 +1,203 @@
+## WHAT A BYTE BUFFER COSTS — the first measurement of `std::collections::buffer`.
+##
+## `buffer` was the ONLY module in the collection coverage table at 0%: nine
+## operations, no bench row anywhere, no number in `perf/coverage.tsv`. That is
+## the blind spot that hid `seq::sort_by_key`, which turned out to be the
+## second-worst seq operation once someone wrote a row for it.
+##
+## It is also a BUILDER, which makes a per-call cost worse than it looks: the
+## whole point of the type is to be called once per byte or once per fragment,
+## so anything paid per call multiplies by the length of what you are building.
+## It sits under anything constructing binary data or strings.
+##
+## WHAT IS SUSPECTED, written before the numbers so the rows can refute it.
+## Every method in `IONatives` carries `@TruffleBoundary`, including
+## `bufferWriteByte`, whose whole body is `ensureCapacity(position + 1)` and one
+## array store. `BytesNatives.fold` documents the opposite choice in as many
+## words — "NOT @TruffleBoundary, and that is the point" — because a boundary
+## stops the handler inlining. If the boundary is the cost, then:
+##
+##   - `write_byte` per byte lands far above `write` of the same total length,
+##     since one `write` crosses once where n `write_byte`s cross n times;
+##   - and `size`, an O(1) field read, lands near `write_byte` rather than near
+##     the control, because both are paying for the crossing and not the work.
+##
+## If instead the rows come out proportional to the bytes moved, the boundary is
+## not what matters here and the suspicion was wrong.
+##
+## MEASURED, THE SUSPICION WAS WRONG AND SOMETHING WORSE WAS THERE. `write_byte`
+## is ~12 ns, not the dominant cost; `size` is 6.9 ns, so the boundary is not
+## what these rows pay. What dominated was `clear` at ~230 ns, because it called
+## `Arrays.fill` over the WHOLE capacity to achieve what setting the position to
+## zero already achieves — none of the nine reachable operations can observe a
+## byte beyond the position. Aiming at the wrong operation and being corrected
+## by the numbers is the reason the suspicion is written down before them.
+##
+## METHOD, as in bytesurface and mapsurface:
+##   - ONE ROW PER PROCESS (`buffersurface <n> <row> <len>`).
+##   - a ratio to a CONTROL timed in the SAME process — a counted loop with no
+##     buffer in it.
+##   - min over k measured passes after `warm` warmup passes.
+##   - EVERY ROW CHECKSUMS, so a row that gets fast by not doing the work reads
+##     as a different number rather than a better one.
+##   - each row sized by ITS OWN cost: the O(1) rows and the per-length rows are
+##     not comparable at one n.
+use std::effects::log::{ println, Console }
+use std::effects::args::{ SystemArgs, argv }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::collections::seq
+use std::collections::buffer
+use std::collections::bytes
+use std::str
+use std::int
+use std::option
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_one = { thunk } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = thunk {}
+  let t1 = monotonic {}
+  { ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }, sum = r }
+
+let time_k_go = { thunk, k, acc, last } -> if k == 0
+  then { times = acc, sum = last }
+  else do
+    let r = time_one { thunk = thunk }
+    time_k_go { thunk = thunk, k = k - 1, acc = seq::push { xs = acc, x = r.ns }, last = r.sum }
+
+let nth_or_zero = { xs, i } -> match seq::get { xs = xs, i = i } is
+  Some { val } -> val
+  None -> 0
+
+let min_of = { thunk, warm, k } -> do
+  let w = time_k_go { thunk = thunk, k = warm, acc = [], last = 0 }
+  let ws = seq::sort { xs = w.times }
+  let warm_max = nth_or_zero { xs = ws, i = seq::size { xs = ws } - 1 }
+  let run = time_k_go { thunk = thunk, k = k, acc = [], last = 0 }
+  let sorted = seq::sort { xs = run.times }
+  let half = seq::size { xs = sorted } / 2
+  { min = nth_or_zero { xs = sorted, i = 0 },
+    med = nth_or_zero { xs = sorted, i = half },
+    warm_max = warm_max,
+    sum = run.sum }
+
+## THE FLOOR: one loop iteration and one add, no buffer at all.
+let control_loop = { i, acc } -> if i <= 0 then acc else control_loop { i = i - 1, acc = acc + i }
+
+let report = { idx, sel, label, thunk, floor_ps, n, warm, k } -> perform Console in perform SystemTime in
+  if sel != 0 && sel != idx then {} else do
+    let t = min_of { thunk = thunk, warm = warm, k = k }
+    let ps_per_op = (t.min * 1000) / n
+    let ratio = if floor_ps == 0 then 0 else (ps_per_op * 100) / floor_ps
+    let warm_ratio = if t.min == 0 then 0 else t.warm_max / t.min
+    let warn = if t.med > (t.min * 2) then "   UNDER-WARMED (raise n or passes)"
+      else if warm_ratio > 10 then "   WARMUP-DOMINATED"
+      else ""
+    println { msg = "  $(label): $(int::to_str { n = ps_per_op }) ps/op  x$(int::to_str { n = ratio })/100 floor  sum=$(int::to_str { n = t.sum })$(warn)" }
+
+## ── the inputs, built ONCE outside every timed loop ─────────────────────────
+let build_bytes = { i, acc } -> if i <= 0 then bytes::from_seq { arr = acc }
+  else build_bytes { i = i - 1, acc = seq::push { xs = acc, x = (i * 7) % 251 } }
+
+## ── 1. size ─ an O(1) field read, and the reference for the per-call floor.
+## If the boundary is what these rows pay, this one is not much cheaper than
+## the rows that actually move bytes.
+let l_size = { i, acc, buf } -> if i <= 0 then acc
+  else l_size { i = i - 1, buf = buf, acc = acc + buffer::size { buf = buf } }
+
+## ── 2. is_empty ─ the other O(1) read, for the same reason. ─────────────────
+let l_is_empty = { i, acc, buf } -> if i <= 0 then acc
+  else l_is_empty { i = i - 1, buf = buf,
+                    acc = acc + (if buffer::is_empty { buf = buf } then 1 else 0) }
+
+## ── 3-5. clear + write_X ─ AND THE CLEAR IS THE SUBJECT, not the write.
+##
+## These rows call `clear` to stop the buffer growing across the timed loop, on
+## the assumption that a clear is a position reset and therefore nearly free.
+## It is not: measured, `clear` is ~230 ns against `write_byte`'s ~12, so these
+## rows were timing the clear with a write attached. The labels say `clear+` for
+## that reason. Row 6 prices the clear alone and row 8 prices writing WITHOUT
+## one, which is the honest per-write number.
+let l_write_byte = { i, acc, buf } -> if i <= 0 then acc
+  else do
+    let b2 = buffer::write_byte { buf = buffer::clear { buf = buf }, b = i % 256 }
+    l_write_byte { i = i - 1, buf = buf, acc = acc + buffer::size { buf = b2 } }
+
+## ── 4. write ─ a whole Bytes per call. Compare against row 3 at the same total
+## length: one crossing against `len` crossings for the same bytes moved.
+let l_write = { i, acc, buf, b } -> if i <= 0 then acc
+  else do
+    let b2 = buffer::write { buf = buffer::clear { buf = buf }, bytes = b }
+    l_write { i = i - 1, buf = buf, b = b, acc = acc + buffer::size { buf = b2 } }
+
+## ── 5. write_str ─ the same, plus a UTF-8 encode of the string. ─────────────
+let l_write_str = { i, acc, buf, s } -> if i <= 0 then acc
+  else do
+    let b2 = buffer::write_str { buf = buffer::clear { buf = buf }, s = s }
+    l_write_str { i = i - 1, buf = buf, s = s, acc = acc + buffer::size { buf = b2 } }
+
+## ── 6. clear ─ a position reset, priced on its own so rows 3-5 can be read
+## net of it rather than guessed at. ────────────────────────────────────────
+let l_clear = { i, acc, buf } -> if i <= 0 then acc
+  else l_clear { i = i - 1, buf = buf,
+                 acc = acc + buffer::size { buf = buffer::clear { buf = buf } } }
+
+## ── 7. to_bytes ─ copies the written prefix out. Proportional to the content,
+## so it is the row that should scale with length if anything does. ─────────
+let l_to_bytes = { i, acc, buf } -> if i <= 0 then acc
+  else l_to_bytes { i = i - 1, buf = buf,
+                    acc = acc + bytes::size { b = buffer::to_bytes { buf = buf } } }
+
+## ── 8. the builder as used ─ `len` single-byte writes to build one buffer,
+## which is what a serializer does. Row 3 prices one call; this prices the
+## PATTERN, where the per-call cost multiplies by the length.
+let write_n = { i, buf } -> if i <= 0 then buf
+  else write_n { i = i - 1, buf = buffer::write_byte { buf = buf, b = i % 256 } }
+
+let l_build = { i, acc, len } -> if i <= 0 then acc
+  else do
+    let built = write_n { i = len, buf = buffer::new { capacity = len } }
+    l_build { i = i - 1, len = len, acc = acc + buffer::size { buf = built } }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let n = arg_at { args = args, i = 0, def = 100000 }
+  let sel = arg_at { args = args, i = 1, def = 0 }
+  let len = arg_at { args = args, i = 2, def = 1024 }
+  let floor_n = arg_at { args = args, i = 3, def = 40000000 }
+  let warm = 4
+  let k = 9
+  let b = build_bytes { i = len, acc = [] }
+  let s = str::repeat { s = "x", n = len }
+  ## Capacity is `len * 2` so rows 3-5 never grow mid-measurement: a row that
+  ## sometimes reallocates and sometimes does not is two rows wearing one label.
+  let buf = buffer::write { buf = buffer::new { capacity = len * 2 }, bytes = b }
+  let floor = min_of { thunk = {} -> control_loop { i = floor_n, acc = 0 }, warm = warm, k = k }
+  let floor_ps = (floor.min * 1000) / floor_n
+  let n_s = int::to_str { n = n }
+  let len_s = int::to_str { n = len }
+  let floor_s = int::to_str { n = floor_ps }
+  println { msg = "buffersurface (n=$(n_s) ops, len=$(len_s) bytes): $(int::to_str { n = warm }) warmup + $(int::to_str { n = k }) measured, MIN per row" }
+  println { msg = "  control (floor)     : $(floor_s) ps/op" }
+  report { idx = 1, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "buffer::size        ", thunk = {} -> l_size { i = n, acc = 0, buf = buf } }
+  report { idx = 2, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "buffer::is_empty    ", thunk = {} -> l_is_empty { i = n, acc = 0, buf = buf } }
+  report { idx = 3, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "clear+write_byte    ", thunk = {} -> l_write_byte { i = n, acc = 0, buf = buf } }
+  report { idx = 4, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "clear+write bytes   ", thunk = {} -> l_write { i = n, acc = 0, buf = buf, b = b } }
+  report { idx = 5, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "clear+write_str     ", thunk = {} -> l_write_str { i = n, acc = 0, buf = buf, s = s } }
+  report { idx = 6, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "buffer::clear       ", thunk = {} -> l_clear { i = n, acc = 0, buf = buf } }
+  report { idx = 7, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "buffer::to_bytes    ", thunk = {} -> l_to_bytes { i = n, acc = 0, buf = buf } }
+  report { idx = 8, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "build via write_byte", thunk = {} -> l_build { i = n, acc = 0, len = len } }

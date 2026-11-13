@@ -14797,3 +14797,86 @@ bound this change could reach. What it correctly said was "the construction is
 half the parse, look there". Two thirds of what it pointed at is now gone; the
 remainder is the per-entry record above and whatever DSL-JSON does more cheaply
 than Mezze's variant allocation.
+
+#### `buffer::clear` zeroed the whole capacity to reset a position — 15.2x, found by benching the one module at 0%
+
+`buffer` was the only module in the collection coverage table with NO rows at
+all: nine operations, no bench anywhere, no number in `perf/coverage.tsv`. It is
+also a BUILDER, which makes a per-call cost worse than it looks — the type
+exists to be called once per byte or once per fragment, so anything paid per
+call multiplies by the length of what is being built — and it sits under
+anything constructing binary data or strings.
+
+**THE SUSPICION WRITTEN DOWN BEFORE THE NUMBERS WAS WRONG.** Every method in
+`IONatives` carries `@TruffleBoundary`, including `bufferWriteByte`, whose whole
+body is `ensureCapacity(position + 1)` and one array store — and
+`BytesNatives.fold` documents the opposite choice in as many words ("NOT
+`@TruffleBoundary`, and that is the point"). So the bench predicted `write_byte`
+would dominate and that `size`, an O(1) field read, would land near it.
+
+Measured: `write_byte` ~12 ns, `size` 6.9 ns. The boundary is not what these
+rows pay. What dominated was `clear` at **237 643 ps**:
+
+```java
+public static MezzeBuffer bufferClear(MezzeRecord args) {
+    MezzeBuffer buf = getBuffer(args, "buf");
+    Arrays.fill(buf.getData(), (byte) 0);   // the ENTIRE capacity
+    buf.setPosition(0);
+```
+
+An O(capacity) fill behind a contract that is O(1) — twenty times the cost of a
+write, and scaling with the CAPACITY rather than with anything written: a
+megabyte buffer would spend ~110 microseconds being "reset".
+
+**AND THE FILL WAS UNOBSERVABLE.** Of the nine operations
+`std::collections::buffer` exposes, none can see a byte at or beyond the
+position: `size` and `is_empty` read the position, `to_bytes` copies only the
+prefix below it, and `write`/`write_byte`/`write_str` append at it. Zeroing the
+tail achieved exactly what `setPosition(0)` already achieved.
+
+SELF-A/B, one statement differing:
+
+| row | fill | reset | |
+|---|---|---|---|
+| `buffer::clear` | 237 643 ps | 15 670 | **15.2x** |
+| `clear` + `write_byte` | 253 627 / 252 949 | 31 698 / 28 946 | 8.0-8.7x |
+| `clear` + `write` (1024B) | 257 328 | 37 111 | 6.9x |
+| `clear` + `write_str` (1024) | 293 579 | 82 060 | 3.6x |
+| build 1024 bytes, NO clear (control) | 12 512 860 | 12 743 124 | 0.98x |
+| `buffer::size` (control) | 6 890 | 7 052 | 1.00x |
+| `buffer::is_empty` (control) | 6 202 | 6 093 | 1.02x |
+| `buffer::to_bytes` (control) | 68 910 | 64 455 | 1.07x |
+| the floor | 209 | 210 | — |
+
+**ROW 8 IS THE CONTROL THAT PROVES THE ATTRIBUTION.** It writes 1024 bytes one
+at a time with NO clear, and it did not move — 0.98x. So `write_byte` was never
+the cost, which is precisely what the written prediction got wrong, and the gain
+belongs to the fill. The rows that improve beyond `clear` itself do so because
+each of them calls it; they are labelled `clear+` for that reason, since a row
+that times a clear with a write attached should not be read as a write.
+
+A BENCH FLAW OWNED RATHER THAN HIDDEN: rows 3-5 call `clear` to stop the buffer
+growing across the timed loop, on the assumption that a clear is nearly free.
+That assumption was the thing under test, so those rows were measuring the clear
+with their subject attached. Relabelled; row 6 prices the clear alone and row 8
+prices writing without one.
+
+NO TEST FAILS WITHOUT THIS — the reachable behaviour is identical.
+`BufferClearInvariantTest` (7 cases) LOCKS the invariant instead: a long value,
+a clear, a shorter value, and `to_bytes` must hand back exactly the short one,
+so any surviving tail shows as extra bytes whether it survives as zeros or as
+stale data. Those tests would fail if a reader were later made to reach past the
+position, which is the mistake the fill was masking.
+
+WHAT THE FILL WOULD HAVE MATTERED FOR, and why it still does not. The read side
+— `bufferReadByte`, `bufferReadBytes`, `bufferToString` — is bounded by
+`data.length` rather than by the position, so it CAN see the tail and now sees
+stale bytes where it saw zeros. None of it is reachable: `__native_buffer_to_str`,
+`_read_byte`, `_read_bytes`, `_position` and `_length` have no `pub let`. They
+also disagree with the write side about what `position` means — a write cursor
+for a builder, a read cursor for a reader — which is why `bufferFromBytes`
+produces a buffer whose `to_bytes` is empty, and why `bufferToString` decodes
+the unwritten capacity as trailing NULs. That tangle wants resolving before any
+of them is exposed; it is NOT resolved here and no fix is claimed for it.
+
+`buffer` goes from 0% to 89% covered, and the collection table from 25% to 27%.
