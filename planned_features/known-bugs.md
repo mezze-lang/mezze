@@ -4160,3 +4160,89 @@ of them in `std/effects/` today — surveyed, not guessed:
 Every one of them binds to a VARIABLE, not a concrete type. A comparison that
 demands syntactic equality refuses all of them; it has to unify, which is why
 `areAssociatedTypesCompatible` is the right tool rather than a new predicate.
+
+---
+
+## BUG 36 — OPEN: same-named effects in two modules merge, and V0404 never sees the merged op set
+
+Found 2026-11-13 finishing the effect-system soundness sweep. **Soundness hole:
+a performer is type-checked against an operation it does not implement.** Pinned
+by `EffectNameMergeSpecTest`, whose BREAK test asserts the broken behaviour.
+
+Effects have no visibility modifier, and the parser states why:
+
+> `'pub' is not allowed on effect declarations. Effects are always public
+> because they must be usable in type signatures across modules.`
+
+So nothing scopes an effect to its module, and identity is keyed by name
+([[project_ability_identity_is_name_keyed]]). Two modules may each declare
+`effect Tick`, and they merge.
+
+```mezze
+# fx.mz
+effect Tick where { tick: {} -> Int <Tick> }
+impl Tick for Ticker where { tick = {} -> 111 }
+
+# fx2.mz   — same name, one op MORE
+effect Tick where { tick: {} -> Int <Tick>, tock: {} -> Int <Tick> }
+impl Tick for Tocker where { tick = {} -> 1, tock = {} -> 222 }
+
+# app.mz
+use fx::{ Tick, Ticker }
+use fx2::{ Tick, Tocker }
+pub let run: {} -> Int <*> = {} -> perform Ticker in Tick.tock {}
+```
+
+MEASURED — `mez check` then the dev runtime:
+
+```
+check passes
+error[I0004]: Path D dispatch: handler for f79402fc….tock field is not a
+              MezzeFunction (got null)
+```
+
+**Cause.** V0404 — "Implementation 'Ticker' for effect 'Tick' is missing
+required operation: tock" — is checked **per module, against that module's own
+declaration**. When `fx` is checked, its `Tick` has only `tick`, so `Ticker` is
+complete and the check passes. The operation `fx2` contributes is never compared
+against `fx`'s performers.
+
+Not a missing rule — **a rule that runs where it cannot see the problem**, which
+is the shape of every hole this sweep has found.
+
+**The mirror proves the check is good.** One module declaring both ops with an
+impl that omits `tock` IS refused, V0404, naming the operation and offering the
+line to add. The merge is the only thing standing between that message and this
+crash.
+
+**What bounds it.** Both modules must be in the import graph: without
+`use fx`, `Ticker` is V0702 "Unknown performer". So an unrelated dependency
+declaring a same-named effect cannot reach this on its own.
+
+**What is NOT broken, and what a fix must not break:**
+- A disagreeing op **signature** is caught — `tick: {} -> Int` against
+  `tick: {} -> Str` is a T0210 at the use site. Only the op SET is unchecked.
+- Two same-named effects that AGREE dispatch correctly to their own performers,
+  measured at runtime as `Ticker=111`, `Tocker=222`. One name-keyed effect with
+  two performers is what the design says, so refusing the merge outright would
+  take this with it.
+
+**Fix.** Run V0404 against the MERGED operation set, which means after imports
+are resolved rather than during the declaring module's own check. The
+alternative — refusing two same-named effect declarations outright — is a
+bigger language change and would break the agreeing case above.
+
+### Sub-finding: duplicate effect impls across modules are accepted, load order wins
+
+```mezze
+# fx.mz    impl Tick for Ticker where { tick = {} -> 111 }
+# fx2.mz   use fx::{ Tick }
+#          impl Tick for Ticker where { tick = {} -> 222 }
+```
+
+Accepted with both modules loaded; measured, fx's won (111). Abilities are
+protected here — a duplicate is V0407, and implementing an imported ability for
+an imported type is V0406 "Orphan impl". Effects have neither. Whether effects
+should adopt the orphan rule is a design question, not just a missing check:
+`impl Tick for MyTicker` on an imported effect is legitimate and common, so only
+the DUPLICATE (same effect, same performer name) is clearly wrong.
