@@ -38,7 +38,7 @@
 | `to_list` | **UNMEASURED** | | | | |
 | `to_seq` | 1 719 |  |  | 26.4x | iter_perf_compare:5 |
 | `unfold` | — | | | | called in iterremit, recfields, no number |
-| `zip` | 23 691 |  |  | 364.5x | iter_perf_compare:11 |
+| `zip` | 754 |  |  | 11.6x | iter_perf_compare:11 |
 
 ## Unmeasured (15 of 31)
 

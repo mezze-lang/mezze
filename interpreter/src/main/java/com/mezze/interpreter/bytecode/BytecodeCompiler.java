@@ -6,6 +6,7 @@ import com.mezze.interpreter.nodes.builtin.dsl.TypedNativeHandlers;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.language.truffleir.BlockIR;
 import com.mezze.language.truffleir.OrdKind;
+import com.mezze.language.truffleir.NativeHofNames;
 import com.mezze.language.truffleir.BoolLitIR;
 import com.mezze.language.truffleir.CallDirectIR;
 import com.mezze.language.truffleir.CallIndirectIR;
@@ -5253,13 +5254,17 @@ public final class BytecodeCompiler {
         // and produces a plain value; a filter or a take passes it through
         // unchanged, so it stays live across those.
         var stageList = chain.getStages();
-        boolean[] recordLiveAt = new boolean[stageList.size()];
-        boolean recordLive = false;
+        SynthRec[] recordLiveAt = new SynthRec[stageList.size()];
+        SynthRec recordLive = SynthRec.NONE;
         for (int i = stageList.size() - 1; i >= 0; i--) {
             recordLiveAt[i] = recordLive;
             var st = stageList.get(i);
-            if (st instanceof StageIR.Enumerate) recordLive = true;
-            else if (st instanceof StageIR.Map) recordLive = false;
+            // A Zip's `{fst, snd}` is live from the zip exactly as an
+            // Enumerate's `{i, val}` is from the enumerate, and a Map consumes
+            // either by producing a plain value.
+            if (st instanceof StageIR.Enumerate) recordLive = SynthRec.ENUM;
+            else if (st instanceof StageIR.Zip) recordLive = SynthRec.ZIP;
+            else if (st instanceof StageIR.Map) recordLive = SynthRec.NONE;
         }
         // WHATEVER IS STILL LIVE AFTER THE OUTERMOST STAGE REACHES THE SINK.
         // Most sinks cannot read the `{i, val}` record and must decline rather
@@ -5280,23 +5285,46 @@ public final class BytecodeCompiler {
         // off a Long. It must also read NOTHING but `i` and `val` off the
         // element — any other field name means the shape is not what this
         // analysis thinks it is, so it declines.
-        if (recordLive) {
+        if (recordLive != SynthRec.NONE) {
             boolean foldCanRead = sinkMode instanceof FusedSinkMode.AccumulateTree t
-                    && foldTreeReadsOnlyEnumFields(t.body(), t.elemParamSlot());
+                    && foldTreeReadsOnlyEnumFields(t.body(), t.elemParamSlot(), recordLive);
             if (!foldCanRead) {
-                if (dbg) System.err.println("[chain-canon-emit] reject: enumerate record reaches the sink");
+                if (dbg) System.err.println("[chain-canon-emit] reject: "
+                        + recordLive + " record reaches a sink that cannot read it");
                 return false;
             }
         }
         var classifiedStages = new java.util.ArrayList<ClassifiedStage>();
         for (int si = 0; si < stageList.size(); si++) {
             var stage = stageList.get(si);
-            boolean elemIsEnumRecord = recordLiveAt[si];
+            SynthRec elemSynth = recordLiveAt[si];
             if (stage instanceof StageIR.Enumerate) {
                 classifiedStages.add(new ClassifiedStage.EnumerateStep());
                 continue;
             }
-            if (elemIsEnumRecord
+            if (stage instanceof StageIR.Zip zipStage) {
+                // ONE ZIP PER CHAIN. `SynthRec` names ONE live record and
+                // cannot express a zip whose `.fst` is itself a zip, so a
+                // second one declines rather than resolving the wrong local.
+                if (classifiedStages.stream().anyMatch(s -> s instanceof ClassifiedStage.ZipStep)) {
+                    if (dbg) System.err.println("[chain-canon-emit] reject: more than one zip in a chain");
+                    return false;
+                }
+                var second = zipStage.getSecond();
+                if (second instanceof SourceIR.RangeSeq r) {
+                    classifiedStages.add(new ClassifiedStage.ZipStep(true, r.getStart(), r.getEnd()));
+                } else if (second instanceof SourceIR.RawSeq rs) {
+                    classifiedStages.add(new ClassifiedStage.ZipStep(false, rs.getXs(), null));
+                } else {
+                    // A list, bytes, a step range or an opaque value: the loop
+                    // reads `.snd` by index and none of those answer that here.
+                    if (dbg) System.err.println("[chain-canon-emit] reject: zip second source "
+                            + second.getClass().getSimpleName());
+                    return false;
+                }
+                continue;
+            }
+            if (elemSynth != SynthRec.NONE
                     && !(stage instanceof StageIR.Map)
                     && !(stage instanceof StageIR.Take)
                     && !(stage instanceof StageIR.Drop)) {
@@ -5307,7 +5335,7 @@ public final class BytecodeCompiler {
                 return false;
             }
             if (stage instanceof StageIR.Map mapStage) {
-                var shape = classifyUnaryLiteralLambda(mapStage.getF(), language, elemIsEnumRecord);
+                var shape = classifyUnaryLiteralLambda(mapStage.getF(), language, elemSynth);
                 // THE TREE IS A FALLBACK AND NOT A PREFERENCE, and measuring it
                 // the other way round is what settled that. A one-operation
                 // mapper classified as `MapInline` reaches a loop the compiler
@@ -5318,8 +5346,8 @@ public final class BytecodeCompiler {
                 // case it was built for.
                 var treeFirst = (shape != null && shape.callHash == null)
                         ? null
-                        : classifyMapTree(mapStage.getF(), elemIsEnumRecord);
-                if (treeFirst == null && elemIsEnumRecord
+                        : classifyMapTree(mapStage.getF(), elemSynth);
+                if (treeFirst == null && elemSynth != SynthRec.NONE
                         && shape != null && shape.callHash != null) {
                     // A call form would be handed the element where the lambda
                     // expects the record. Never emit that.
@@ -5348,7 +5376,7 @@ public final class BytecodeCompiler {
                 // fold(OP)".
                 var twoOp = (shape != null && shape.callHash == null)
                         ? null
-                        : classifyMapTwoOp(mapStage.getF(), elemIsEnumRecord);
+                        : classifyMapTwoOp(mapStage.getF(), elemSynth);
                 if (twoOp != null) {
                     classifiedStages.addAll(twoOp);
                     continue;
@@ -6556,8 +6584,60 @@ public final class BytecodeCompiler {
          * `enumerate` followed by any mapper the one-operation matcher could
          * not read declined the whole chain.
          */
-        record MapTree(NodeIR body, int paramSlot, boolean elemIsEnumRecord)
+        record MapTree(NodeIR body, int paramSlot, SynthRec elemSynth)
                 implements ClassifiedStage {}
+
+        /**
+         * Advance a SECOND source in lockstep, as `iter::zip` does.
+         *
+         * <p>Like {@link EnumerateStep} this produces a two-field record that
+         * is never built — `.fst` is the loop's element local, `.snd` is the
+         * second source's element, loaded into a local beside it.
+         *
+         * <p>WHY A COUNTER RATHER THAN A PRECOMPUTED `min` BOUND. Setting the
+         * loop bound to `min(lenA, lenB)` up front is wrong the moment a stage
+         * precedes the zip: `zip(filter(a), b)` must advance `b` only for
+         * elements that SURVIVE the filter, and how many that is cannot be
+         * known before the loop runs. The counter is incremented at this
+         * stage's own position, so it counts exactly the elements that reach
+         * it — the same reasoning {@link EnumerateStep}'s index rests on.
+         *
+         * <p>"Stops at the shorter" is therefore an early exit when the
+         * counter reaches [lenLocal], using the forward branch
+         * {@link TakeWhileStep} already established.
+         *
+         * <p>Carries the second source's EXPRESSIONS, not locals: classification
+         * runs before the loop exists, so the emitter creates the base, length,
+         * counter and `.snd` locals itself — the way Take/Drop counters are
+         * made.
+         *
+         * @param secondIsRange  true when the second source is a counted
+         *                       range, so `.snd` is `base + counter` rather
+         *                       than an indexed read
+         * @param baseExpr       the range's start, or the seq to materialise
+         * @param endExpr        the range's end; null for a seq, whose length
+         *                       is read at run time
+         */
+        record ZipStep(boolean secondIsRange, NodeIR baseExpr, NodeIR endExpr)
+                implements ClassifiedStage {}
+    }
+
+    /**
+     * The local a synthetic record's SECOND field resolves to.
+     *
+     * One place, because the two record shapes differ only in which local
+     * plays the companion: an enumerate's `.i` is the loop counter, a zip's
+     * `.snd` is the second source's element.
+     */
+    private static com.oracle.truffle.api.bytecode.BytecodeLocal companionLocalFor(
+            SynthRec kind,
+            com.oracle.truffle.api.bytecode.BytecodeLocal enumIndexLocal,
+            com.oracle.truffle.api.bytecode.BytecodeLocal zipSndLocal) {
+        return switch (kind) {
+            case ENUM -> enumIndexLocal;
+            case ZIP -> zipSndLocal;
+            case NONE -> null;
+        };
     }
 
     // ── Sink mode: the per-element action and post-loop result ──────────
@@ -6661,17 +6741,16 @@ public final class BytecodeCompiler {
      * <p>Fields of the ACCUMULATOR are not restricted: the accumulator is
      * whatever the fold's `init` made it, never the enumerate record.
      */
-    private static boolean foldTreeReadsOnlyEnumFields(NodeIR node, int elemParam) {
+    private static boolean foldTreeReadsOnlyEnumFields(NodeIR node, int elemParam, SynthRec kind) {
         if (node instanceof ReadFieldIR rf) {
             if (rf.getRecord() instanceof ReadLocalIR rl && rl.getSlot() == elemParam) {
-                String n = rf.getFieldName();
-                return "i".equals(n) || "val".equals(n);
+                return synthFieldIndex(kind, rf.getFieldName()) >= 0;
             }
-            return foldTreeReadsOnlyEnumFields(rf.getRecord(), elemParam);
+            return foldTreeReadsOnlyEnumFields(rf.getRecord(), elemParam, kind);
         }
         if (node instanceof InlineBinaryOpIR bin) {
-            return foldTreeReadsOnlyEnumFields(bin.getLeft(), elemParam)
-                    && foldTreeReadsOnlyEnumFields(bin.getRight(), elemParam);
+            return foldTreeReadsOnlyEnumFields(bin.getLeft(), elemParam, kind)
+                    && foldTreeReadsOnlyEnumFields(bin.getRight(), elemParam, kind);
         }
         return true;
     }
@@ -6702,8 +6781,8 @@ public final class BytecodeCompiler {
      * emitter.
      */
     private java.util.List<ClassifiedStage> classifyMapTwoOp(
-            MakeLambdaIR lambda, boolean elemIsEnumRecord) {
-        if (language == null || elemIsEnumRecord) return null;
+            MakeLambdaIR lambda, SynthRec elemSynth) {
+        if (language == null || elemSynth != SynthRec.NONE) return null;
         if (!lambda.getCaptures().isEmpty()) return null;
         var ir = language.lookupFunctionIR(lambda.getFunctionHash());
         if (ir == null || ir.getParamSlots().size() != 1
@@ -6735,7 +6814,7 @@ public final class BytecodeCompiler {
         };
     }
 
-    private ClassifiedStage classifyMapTree(MakeLambdaIR lambda, boolean elemIsEnumRecord) {
+    private ClassifiedStage classifyMapTree(MakeLambdaIR lambda, SynthRec elemSynth) {
         if (language == null) return null;
         if (!lambda.getCaptures().isEmpty()) return null;
         var ir = language.lookupFunctionIR(lambda.getFunctionHash());
@@ -6755,8 +6834,9 @@ public final class BytecodeCompiler {
         // accParam = -1 so no read can resolve to an accumulator: this is a
         // one-parameter lambda and every read must be of that parameter.
         if (!isPureArithFoldTree(body, -1, paramSlot, 0)) return null;
-        if (elemIsEnumRecord && !foldTreeReadsOnlyEnumFields(body, paramSlot)) return null;
-        return new ClassifiedStage.MapTree(body, paramSlot, elemIsEnumRecord);
+        if (elemSynth != SynthRec.NONE
+                && !foldTreeReadsOnlyEnumFields(body, paramSlot, elemSynth)) return null;
+        return new ClassifiedStage.MapTree(body, paramSlot, elemSynth);
     }
 
     private FusedSinkMode classifySinkMode(FusedChainIR chain, boolean dbg) {
@@ -7060,7 +7140,7 @@ public final class BytecodeCompiler {
                               com.oracle.truffle.api.bytecode.BytecodeLocal accLocal,
                               com.oracle.truffle.api.bytecode.BytecodeLocal xLocal,
                               MezzeBytecodeRootNodeGen.Builder b) {
-        emitFoldTree(node, accParam, elemParam, accLocal, xLocal, false, null, b);
+        emitFoldTree(node, accParam, elemParam, accLocal, xLocal, SynthRec.NONE, null, b);
     }
 
     /**
@@ -7072,31 +7152,32 @@ public final class BytecodeCompiler {
     private void emitFoldTree(NodeIR node, int accParam, int elemParam,
                               com.oracle.truffle.api.bytecode.BytecodeLocal accLocal,
                               com.oracle.truffle.api.bytecode.BytecodeLocal xLocal,
-                              boolean elemIsEnumRecord,
-                              com.oracle.truffle.api.bytecode.BytecodeLocal enumIndexLocal,
+                              SynthRec elemSynth,
+                              com.oracle.truffle.api.bytecode.BytecodeLocal companionLocal,
                               MezzeBytecodeRootNodeGen.Builder b) {
         if (node instanceof InlineBinaryOpIR bin) {
             beginInlineArithOp(bin.getOp(), b);
               emitFoldTree(bin.getLeft(), accParam, elemParam, accLocal, xLocal,
-                           elemIsEnumRecord, enumIndexLocal, b);
+                           elemSynth, companionLocal, b);
               emitFoldTree(bin.getRight(), accParam, elemParam, accLocal, xLocal,
-                           elemIsEnumRecord, enumIndexLocal, b);
+                           elemSynth, companionLocal, b);
             endInlineArithOp(bin.getOp(), b);
             return;
         }
         // The enumerate record's two fields, resolved to the loop's locals
         // rather than read off a record that was never built.
-        if (elemIsEnumRecord
+        if (elemSynth != SynthRec.NONE
                 && node instanceof ReadFieldIR erf
                 && erf.getRecord() instanceof ReadLocalIR erl
                 && erl.getSlot() == elemParam) {
-            if ("i".equals(erf.getFieldName())) {
-                b.emitLoadLocal(enumIndexLocal);
-            } else if ("val".equals(erf.getFieldName())) {
+            int which = synthFieldIndex(elemSynth, erf.getFieldName());
+            if (which == 0) {
                 b.emitLoadLocal(xLocal);
+            } else if (which == 1) {
+                b.emitLoadLocal(companionLocal);
             } else {
                 throw new IllegalStateException(
-                    "emitFoldTree: enumerate record has no field " + erf.getFieldName());
+                    "emitFoldTree: " + elemSynth + " record has no field " + erf.getFieldName());
             }
             return;
         }
@@ -7316,7 +7397,12 @@ public final class BytecodeCompiler {
         boolean useShortCircuitBranch = mode instanceof FusedSinkMode.ShortCircuit;
         boolean hasTakeWhile = stages.stream()
                 .anyMatch(s -> s instanceof ClassifiedStage.TakeWhileStep);
-        boolean needsEarlyExit = useShortCircuitBranch || hasTakeWhile
+        boolean hasZip = stages.stream()
+                .anyMatch(s -> s instanceof ClassifiedStage.ZipStep);
+        // A zip leaves the loop when its second source runs out, so it needs
+        // the same forward-branch exit TakeWhile uses. Without this the label
+        // is never created and the branch has nowhere to go.
+        boolean needsEarlyExit = useShortCircuitBranch || hasTakeWhile || hasZip
                 || (mode instanceof FusedSinkMode.ElementCapture ec
                     && ec.kind() == FusedSinkMode.ElementCaptureKind.FIRST);
 
@@ -7693,14 +7779,16 @@ public final class BytecodeCompiler {
         // whether to accept the chain at all: the record is live from an
         // Enumerate until a map consumes it. Recomputed here rather than
         // threaded, because this is where the locals it resolves to live.
-        boolean enumRecordAtSink = false;
+        SynthRec synthAtSink = SynthRec.NONE;
         for (int i = stages.size() - 1; i >= 0; i--) {
             var st = stages.get(i);
-            if (st instanceof ClassifiedStage.EnumerateStep) enumRecordAtSink = true;
+            if (st instanceof ClassifiedStage.EnumerateStep) synthAtSink = SynthRec.ENUM;
+            else if (st instanceof ClassifiedStage.ZipStep) synthAtSink = SynthRec.ZIP;
             else if (st instanceof ClassifiedStage.MapInline
                     || st instanceof ClassifiedStage.MapCall
-                    || st instanceof ClassifiedStage.MapTree) enumRecordAtSink = false;
+                    || st instanceof ClassifiedStage.MapTree) synthAtSink = SynthRec.NONE;
         }
+        boolean enumRecordAtSink = synthAtSink != SynthRec.NONE;
 
         com.oracle.truffle.api.bytecode.BytecodeLocal enumCounter = null;
         com.oracle.truffle.api.bytecode.BytecodeLocal enumIndex = null;
@@ -7711,6 +7799,51 @@ public final class BytecodeCompiler {
             b.endStoreLocal();
             enumIndex = b.createLocal();
             b.beginStoreLocal(enumIndex);
+              b.emitLoadLongConstant(0L);
+            b.endStoreLocal();
+        }
+
+        // ── The zip's second source, evaluated ONCE before the loop ──
+        // Its base (a range's start, or the seq itself), its length, the
+        // counter of elements that have reached the stage, and the local
+        // `.snd` is read out of. Evaluated here and not per iteration: the
+        // source expression is a value, and re-evaluating it would both cost
+        // and risk running a side effect n times.
+        com.oracle.truffle.api.bytecode.BytecodeLocal zipBase = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal zipLen = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal zipCounter = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal zipSndLocal = null;
+        ClassifiedStage.ZipStep zipStep = null;
+        for (var st : stages) {
+            if (st instanceof ClassifiedStage.ZipStep zs) { zipStep = zs; break; }
+        }
+        if (zipStep != null) {
+            zipBase = b.createLocal();
+            b.beginStoreLocal(zipBase);
+              emitNode(zipStep.baseExpr(), b, argCount, localMap);
+            b.endStoreLocal();
+            zipLen = b.createLocal();
+            b.beginStoreLocal(zipLen);
+            if (zipStep.secondIsRange()) {
+                // A range's length is end - start, floored at zero so an
+                // inverted range contributes nothing rather than a negative
+                // bound the comparison would read as "always exhausted".
+                b.beginDirectSubtract();
+                  emitNode(zipStep.endExpr(), b, argCount, localMap);
+                  b.emitLoadLocal(zipBase);
+                b.endDirectSubtract();
+            } else {
+                b.beginSeqSize();
+                  b.emitLoadLocal(zipBase);
+                b.endSeqSize();
+            }
+            b.endStoreLocal();
+            zipCounter = b.createLocal();
+            b.beginStoreLocal(zipCounter);
+              b.emitLoadLongConstant(0L);
+            b.endStoreLocal();
+            zipSndLocal = b.createLocal();
+            b.beginStoreLocal(zipSndLocal);
               b.emitLoadLongConstant(0L);
             b.endStoreLocal();
         }
@@ -7811,6 +7944,44 @@ public final class BytecodeCompiler {
                       b.endDirectAdd();
                     b.endStoreLocal();
                 }
+                // The second source, advanced in lockstep. Same placement
+                // rationale as the enumerate above: the counter moves once per
+                // element that REACHES the zip, so a filter between the source
+                // and the zip cannot desynchronise it — which is why the
+                // "stops at the shorter" bound is this running check and not a
+                // `min` computed before the loop.
+                case ClassifiedStage.ZipStep zs -> {
+                    // EXHAUSTION FIRST, before `.snd` is read: reading past the
+                    // end is what "stops at the shorter" forbids, and for a seq
+                    // it would be out of bounds rather than merely wrong.
+                    b.beginIfThen();
+                      b.beginDirectNot();
+                        b.beginDirectLessThan();
+                          b.emitLoadLocal(zipCounter); b.emitLoadLocal(zipLen);
+                        b.endDirectLessThan();
+                      b.endDirectNot();
+                      b.beginBlock();
+                        b.emitBranch(exitLabel);
+                      b.endBlock();
+                    b.endIfThen();
+                    b.beginStoreLocal(zipSndLocal);
+                    if (zs.secondIsRange()) {
+                        // A counted range: the element IS base + counter.
+                        b.beginDirectAdd();
+                          b.emitLoadLocal(zipBase); b.emitLoadLocal(zipCounter);
+                        b.endDirectAdd();
+                    } else {
+                        b.beginSeqGet();
+                          b.emitLoadLocal(zipBase); b.emitLoadLocal(zipCounter);
+                        b.endSeqGet();
+                    }
+                    b.endStoreLocal();
+                    b.beginStoreLocal(zipCounter);
+                      b.beginDirectAdd();
+                        b.emitLoadLocal(zipCounter); b.emitLoadLongConstant(1L);
+                      b.endDirectAdd();
+                    b.endStoreLocal();
+                }
                 case ClassifiedStage.MapInline mi -> {
                     if (mi.leftIsIndex()) {
                         // `x.i <op> rhs` — the record's index field, which is
@@ -7836,7 +8007,8 @@ public final class BytecodeCompiler {
                 case ClassifiedStage.MapTree mt -> {
                     b.beginStoreLocal(xSlot);
                       emitFoldTree(mt.body(), -1, mt.paramSlot(), null, xSlot,
-                                   mt.elemIsEnumRecord(), enumIndex, b);
+                                   mt.elemSynth(),
+                                   companionLocalFor(mt.elemSynth(), enumIndex, zipSndLocal), b);
                     b.endStoreLocal();
                 }
                 case ClassifiedStage.MapCall mc -> {
@@ -7951,7 +8123,8 @@ public final class BytecodeCompiler {
                 // folder reads nothing else off the element.
                 b.beginStoreLocal(accSlot);
                   emitFoldTree(t.body(), t.accParamSlot(), t.elemParamSlot(),
-                               accSlot, xSlot, enumRecordAtSink, enumIndex, b);
+                               accSlot, xSlot, synthAtSink,
+                               companionLocalFor(synthAtSink, enumIndex, zipSndLocal), b);
                 b.endStoreLocal();
             }
             case FusedSinkMode.AccumulateCall ac -> {
@@ -8871,6 +9044,45 @@ public final class BytecodeCompiler {
     }
 
     /**
+     * WHICH never-built record the element arriving at a stage is.
+     *
+     * `Enumerate` and `Zip` both nominally produce a two-field record that is
+     * never allocated, and both resolve to the same two loop locals — the
+     * element, and one companion. Only the field names differ, so this is the
+     * one thing that has to be carried.
+     */
+    enum SynthRec {
+        /** A plain element: field reads on it are not this machinery's. */
+        NONE,
+        /** `{i, val}` — companion is the enumerate counter. */
+        ENUM,
+        /** `{fst, snd}` — companion is the second source's element. */
+        ZIP
+    }
+
+    /**
+     * Which loop local a synthetic record's field denotes: 0 for the ELEMENT,
+     * 1 for the COMPANION, -1 for anything that is not a field of this record.
+     *
+     * THE ONLY PLACE THESE NAMES ARE CONSULTED. Three sites used to spell
+     * them independently — the lambda classifier, the fold-tree check, and
+     * the emitter — and a name added to one and not the others is a record
+     * that resolves in some positions and not others. The names themselves
+     * live in {@link com.mezze.language.truffleir.NativeHofNames} beside the
+     * stdlib signatures that produce them, so a rename reaches both the
+     * record's author and its reader.
+     */
+    private static int synthFieldIndex(SynthRec kind, String field) {
+        return switch (kind) {
+            case NONE -> -1;
+            case ENUM -> NativeHofNames.ITER_ENUM_VAL.equals(field) ? 0
+                       : NativeHofNames.ITER_ENUM_INDEX.equals(field) ? 1 : -1;
+            case ZIP -> NativeHofNames.PAIR_FST.equals(field) ? 0
+                      : NativeHofNames.PAIR_SND.equals(field) ? 1 : -1;
+        };
+    }
+
+    /**
      * How [node] reads the `{i, val}` record a preceding Enumerate stage
      * nominally produced: 0 for `.val` (the element), 1 for `.i` (the counter),
      * -1 for anything else.
@@ -8879,22 +9091,20 @@ public final class BytecodeCompiler {
      * so there is nothing for a bare read to denote — the chain must decline
      * rather than hand out the raw element in its place.
      */
-    private static int enumFieldRead(NodeIR node, int paramSlot) {
+    private static int enumFieldRead(NodeIR node, int paramSlot, SynthRec kind) {
         if (!(node instanceof ReadFieldIR rf)) return -1;
         if (!(rf.getRecord() instanceof ReadLocalIR rl) || rl.getSlot() != paramSlot) return -1;
-        if ("val".equals(rf.getFieldName())) return 0;
-        if ("i".equals(rf.getFieldName())) return 1;
-        return -1;
+        return synthFieldIndex(kind, rf.getFieldName());
     }
 
     private UnaryLitShape classifyUnaryLiteralLambda(MakeLambdaIR ml,
                                                      MezzeLanguage language) {
-        return classifyUnaryLiteralLambda(ml, language, false);
+        return classifyUnaryLiteralLambda(ml, language, SynthRec.NONE);
     }
 
     private UnaryLitShape classifyUnaryLiteralLambda(MakeLambdaIR ml,
                                                      MezzeLanguage language,
-                                                     boolean elemIsEnumRecord) {
+                                                     SynthRec elemSynth) {
         // #515 — accept captures for Shape A/B/C only. Call-form (Shape D)
         // still refuses captures — a captured user_fn callee isn't safe
         // to inline as a mapper without further work.
@@ -8908,14 +9118,14 @@ public final class BytecodeCompiler {
         // param sits at slot equal to captures.size().
         int paramSlot = caps.size();
         NodeIR body = normalizeNativeArith(fnIR.getBody());
-        if (elemIsEnumRecord) {
+        if (elemSynth != SynthRec.NONE) {
             // The parameter is the enumerate record, which is never built, so
             // only a field read can be honoured — `x.val` is the element and
             // `x.i` is the counter. Restricted to the left operand of an inline
             // arithmetic shape; anything else declines and the chain falls back
             // to the real, record-building pipeline.
             if (!(body instanceof InlineBinaryOpIR bin)) return null;
-            int which = enumFieldRead(bin.getLeft(), paramSlot);
+            int which = enumFieldRead(bin.getLeft(), paramSlot, elemSynth);
             if (which < 0) return null;
             NodeIR right = bin.getRight();
             UnaryLitShape shape;

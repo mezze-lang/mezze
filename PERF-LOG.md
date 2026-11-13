@@ -15192,3 +15192,98 @@ holding this together.
 `wrapAsSeqSource` had the same omission and is fixed in the same pass. Its
 synthetic `to_seq` reaches `SourceIR.RawSeq` directly so nothing re-interrogates
 it today, which is exactly why it would have been the one to rot quietly.
+
+
+## `iter::zip` was outside the fusion vocabulary — 33.9x
+
+`ChainCanonicalizer` had no mention of zip at all, so a fold over one fused
+nothing and ran the whole pipeline interpreted. It now peels into a
+`StageIR.Zip` carrying the second source, which the loop advances in lockstep.
+
+**SELF-A/B**, identical source but for one `false &&` disabling the
+classification, min of five at n=1e7:
+
+| | not classified | fused | |
+|---|---|---|---|
+| `zip+fold` | 25 525 ps/elem | **754** | **33.9x** |
+| `enumerate+fold` (control) | 6 754 us | 6 442 | 4.6%, flat |
+
+Second size, n=2e6: 944 ps/elem fused — the same band, so the cost is per
+element and not an artifact of one n.
+
+**THE CEILING METHOD HELD.** Before writing anything I predicted 26-34x, from
+`enumerate` — the closest analogue, also a two-field never-built record over a
+range — sitting at 10.1x its floor AFTER its own fusion. Measured 33.9x, and
+754 ps/elem puts zip essentially AT enumerate's cost, which is where the
+estimate said it would land. The raw gap against the floor was 364x; quoting
+that would have been quoting a ceiling nothing could reach, since the fused
+loop still pays a read, a bound check and a counter per element.
+
+**A PRECOMPUTED `min(lenA, lenB)` BOUND WOULD HAVE BEEN WRONG**, and this is
+the part worth remembering. It is the obvious implementation, it is simpler,
+and it passes the benchmark. But `zip(filter(a), b)` runs the filter BEFORE the
+zip, so the second source must advance only for elements that SURVIVE it, and
+how many that is cannot be known before the loop runs. `ZipStep` therefore
+carries a counter incremented at its own position — the same reasoning
+`EnumerateStep`'s index already rested on — and "stops at the shorter" is a
+running check with an early exit, reusing `TakeWhile`'s forward branch.
+
+The test that catches it: `zip(filter(0..10, even), 100..103)` folded on `.fst`
+is 6 with the counter and 2 with a `min` bound. Every other zip test, and the
+entire benchmark, passes either way, because none of them puts a stage between
+the source and the zip.
+
+**ONE ZIP PER CHAIN.** `SynthRec` names ONE live synthetic record and cannot
+express a zip whose `.fst` is itself a zip, so a second declines and the chain
+falls back. Tested.
+
+The second source must be a range or a seq; a list, bytes or an opaque value
+declines, because the loop reads `.snd` by index.
+
+**WHAT MADE IT TRACTABLE** was generalising `elemIsEnumRecord` rather than
+adding a parallel zip flag beside it. `Enumerate` and `Zip` both produce a
+two-field record that is never built, and both resolve to the same two things —
+the element local and ONE companion. Only the names differ, so a `SynthRec`
+kind plus a single `synthFieldIndex` table replaced a boolean threaded through
+25 sites and three independent spellings of the field names.
+
+
+## `iter::flat_map`'s 213.9x is really ~10x — a nested operation measured against a flat floor
+
+NOT A FIX. A ceiling measured before building anything, which changed the
+target's value by 21x and is recorded so the next reader does not re-derive it.
+
+`flat_map` sits at 213.9x `iter::fold`'s 74 ps, the largest ratio in the whole
+table. But `vs floor` compares every operation against ONE flat fused loop, and
+`flat_map` is not a flat loop — fusing it means a NESTED loop, an inner walk per
+outer element. The right question is what that nested shape costs, not what a
+flat one costs.
+
+THE NESTED LOOP A FUSED `flat_map` WOULD EMIT CAN BE WRITTEN TODAY: a fold whose
+folder is itself a fold. Both halves already fuse individually, so it is not an
+estimate of the ceiling, it IS the ceiling, running. At the bench's shape
+(1e6 outer elements, a 10-element inner range each), stable over four runs:
+
+| | ps/elem |
+|---|---|
+| `flat_map+fold`, unfused | ~18 400 |
+| **the same computation as nested folds** | **~1 840** |
+| one flat fused loop over 1e7 | ~73 |
+
+Both arms return `5000040000000`, which is the check that the ceiling arm does
+the subject's work and not less of it.
+
+So fusing `flat_map` is worth about **10x**, and the flat floor is UNREACHABLE
+by this shape: the nested loop alone costs 25x the flat floor, because a million
+outer iterations each set up a ten-element inner loop. The headline overstated
+the prize by 21x.
+
+WHY THIS MATTERS BEYOND `flat_map`. The `vs floor` column is the right first
+question and the wrong last one: it overstates every operation whose SHAPE
+inherently costs more than a flat loop. The same suspicion applies to the map
+point operations ranked just below — `remove` 145x, `update` 132x, `insert`
+106x — which are persistent-trie writes measured against a point READ. A CHAMP
+insert at 45 ns is in the normal band for a HAMT; that ratio is probably mostly
+inherent, and anyone taking it as a 106x opportunity should measure its real
+ceiling the same way first. `unfold` has the same story already in this log:
+it looked 700x and the ceiling was 6.5x.

@@ -82,6 +82,8 @@ iter	flat_map	41713	1e7	1	iter_perf_compare:10	2026-11-12
 iter	zip	73284	1e7	1	iter_perf_compare:11	2026-11-12
 iter	flat_map	13902	1e7	1	iter_perf_compare:10	2026-11-12
 iter	zip	23691	1e7	1	iter_perf_compare:11	2026-11-12
+iter	zip	25525	1e7	1	iter_perf_compare:11	2026-11-13
+iter	zip	754	1e7	1	iter_perf_compare:11	2026-11-13
 iter	range	65	1e7	1	iter_perf_compare:1	2026-11-12
 datetime	instant_from_millis	19318	2e5	1	datetimesurface:1	2026-11-12
 datetime	instant_to_millis	9415	2e5	1	datetimesurface:2	2026-11-12

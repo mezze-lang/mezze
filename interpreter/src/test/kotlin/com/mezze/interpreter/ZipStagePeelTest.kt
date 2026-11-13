@@ -175,6 +175,93 @@ class ZipStagePeelTest {
         ),
     )
 
+    /**
+     * THE CASE THAT A PRECOMPUTED BOUND GETS WRONG, and the reason `ZipStep`
+     * carries a counter instead.
+     *
+     * `zip(filter(a), b)` runs the filter BEFORE the zip, so the second source
+     * must advance only for elements that SURVIVE it. `a` is 0..10 filtered to
+     * evens — 0, 2, 4, 6, 8 — and `b` has three elements, so the pairs are
+     * (0,100), (2,101), (4,102) and `.fst` sums to 6.
+     *
+     * Setting the loop bound to `min(lenA, lenB)` = 3 up front instead would
+     * run the loop over a's first THREE elements, 0, 1, 2, of which only 0 and
+     * 2 survive the filter — giving 2. That implementation passes every other
+     * test here and the whole benchmark, because none of them put a stage
+     * between the source and the zip.
+     */
+    @Test
+    fun `a filter before the zip does not desynchronise the second source`() = assertEquals(
+        6L,
+        eval(
+            """
+            $prelude
+            iter::fold {
+              it = iter::zip {
+                a = iter::filter {
+                  it = iter::range { start = 0, end = 10 },
+                  p = { x } -> x % 2 == 0,
+                },
+                b = iter::range { start = 100, end = 103 },
+              },
+              init = 0,
+              f = { acc, x } -> acc + x.fst,
+            }
+            """,
+        ),
+        "2 means the bound was computed as min(lenA, lenB) before the loop, so the " +
+            "filter and the second source disagree about which elements count",
+    )
+
+    /** The same shape read through `.snd`, so the second source's own elements
+     *  are checked and not only how many of them were taken. */
+    @Test
+    fun `a filter before the zip still pairs the right second elements`() = assertEquals(
+        303L,
+        eval(
+            """
+            $prelude
+            iter::fold {
+              it = iter::zip {
+                a = iter::filter {
+                  it = iter::range { start = 0, end = 10 },
+                  p = { x } -> x % 2 == 0,
+                },
+                b = iter::range { start = 100, end = 103 },
+              },
+              init = 0,
+              f = { acc, x } -> acc + x.snd,
+            }
+            """,
+        ),
+    )
+
+    /**
+     * TWO ZIPS IN ONE CHAIN DECLINE. `SynthRec` names ONE live record and
+     * cannot express a zip whose `.fst` is itself a zip, so the second one
+     * refuses and the chain falls back — correct, merely slower.
+     */
+    @Test
+    fun `a nested zip declines and still answers`() = assertEquals(
+        3L,
+        eval(
+            """
+            $prelude
+            iter::fold {
+              it = iter::zip {
+                a = iter::zip {
+                  a = iter::range { start = 0, end = 3 },
+                  b = iter::range { start = 10, end = 13 },
+                },
+                b = iter::range { start = 20, end = 23 },
+              },
+              init = 0,
+              f = { acc, x } -> acc + x.fst.fst,
+            }
+            """,
+        ),
+    )
+
     /** An empty second source contributes nothing and must not fold `a`. */
     @Test
     fun `an empty second source yields the init`() = assertEquals(
