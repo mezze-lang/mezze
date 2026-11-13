@@ -492,8 +492,16 @@ public final class SortedMapNatives {
     public static MezzeRecord partition(MezzeSortedMap map, MezzeFunction predicate,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(predicate, "k", "v");
-        MezzeSortedMap passMap = MezzeSortedMap.empty();
-        MezzeSortedMap failMap = MezzeSortedMap.empty();
+        // BOTH HALVES INHERIT THE SOURCE'S ORDER. The key type is unchanged, so
+        // rebuilding through a bare `empty()` dropped the ordering the map was
+        // partitioned from — the failure `SortedSetNatives.slice`'s doc names
+        // for `take`/`drop`. See known-bugs.md BUG 45.
+        // `comparator()`, the EFFECTIVE one, is right here where it was wrong
+        // for the set: `MezzeSortedMap` has no instanceof fast paths, so there
+        // is no natural-order flag to preserve and nothing to forfeit.
+        var order = map.comparator();
+        MezzeSortedMap passMap = MezzeSortedMap.empty(order);
+        MezzeSortedMap failMap = MezzeSortedMap.empty(order);
         for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
             Object result = ctx.call2(callNode, entry.key(), entry.value());
             if (result instanceof Boolean && (Boolean) result) {

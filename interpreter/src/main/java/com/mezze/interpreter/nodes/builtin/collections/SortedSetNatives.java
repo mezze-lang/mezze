@@ -579,7 +579,10 @@ public final class SortedSetNatives {
                                            MezzeFunction cmpFn,
                                            com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");
-        MezzeSortedSet result = MezzeSortedSet.empty();
+        // USES the order it is given. This took `cmpFn` and ignored it for one
+        // commit — the signature read as handled while the body still built a
+        // naturally-ordered set.
+        MezzeSortedSet result = MezzeSortedSet.empty(ElementComparator.of(cmpFn));
         for (Object elem : set) {
             Object mapped = ctx.call1(callNode, elem);
             if (mapped instanceof MezzeVariant v && v.isSome()) {

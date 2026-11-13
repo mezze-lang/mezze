@@ -4717,6 +4717,26 @@ has four. A `sorted_map` built by `empty {}` + `insert` is therefore CORRECT,
 which was predicted to be broken and measured not to be; that case is now a
 test, recorded so the prediction is not made again.
 
+TWO FOUND BY GREPPING FOR THE TELL, after the nine:
+
+  - `SortedSetNatives.filterMap` TOOK a comparator and IGNORED it. Its stdlib
+    signature carried `Ord 'b` and threaded one correctly; the native body still
+    built the result through a bare `empty()`. Introduced in the `map` pass and
+    caught one commit later by grepping, not by a test — nothing exercised
+    `filter_map` with a custom `Ord`. A signature that accepts the order and
+    discards it is worse than one that never asked: it reads as handled.
+  - `SortedMapNatives.partition` rebuilt BOTH halves order-less. The key type is
+    unchanged, so it inherits the source's. Note it inherits `comparator()`, the
+    EFFECTIVE one, where `sorted_set` had to inherit the one AS SUPPLIED — the
+    map has no instanceof fast paths, so there is no natural-order flag to
+    preserve. Same-looking fix, opposite choice, for a container-specific reason.
+
+STILL OPEN, four of the same shape in the conversions INTO a sorted container,
+each needing a public constraint it does not have: `seq::to_sorted_set`,
+`seq::to_sorted_map`, `deque::to_sorted_set`, `deque::to_sorted_map`. All four
+build through a bare `empty()` and none declares an `Ord`, which is
+`set::to_sorted_set`'s defect in four more places.
+
 THE RUNNING COUNT OF THIS ONE MISTAKE, in a single session: `seq::sort`,
 `list::sort`, `sorted_set`'s fast path (BUG 44), its six comparator-less
 rebuilds, `from_set`, `set::to_sorted_set`, and `sorted_map`'s `map_keys` and `invert`.

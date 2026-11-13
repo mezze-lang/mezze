@@ -302,6 +302,31 @@ class SortedSetOrderOperandTest {
         assertEquals(1L, out.getField("ts"), "to_sorted_set")
     }
 
+    /**
+     * `filter_map` USES the order it is given.
+     *
+     * Its stdlib signature carried `Ord 'b` and threaded a comparator while the
+     * NATIVE still built the result through a bare `empty()` and ignored the
+     * parameter — for one commit, mine. A signature that accepts the order and
+     * discards it reads as handled, which is worse than never asking, and no
+     * test exercised `filter_map` with a custom `Ord` to say otherwise.
+     */
+    @Test
+    fun `filter_map orders its result by the target's Ord`() = assertEquals(
+        listOf(5L, 3L),
+        elemsOf(
+            """
+            $desc
+            use std::option
+            ints { s = sorted_set::filter_map {
+              set = sorted_set::from_seq { xs = [1, 5, 3] },
+              f = { val } -> if val > 1 then Some { val = R.(val) } else None,
+            } }
+            """,
+        ),
+        "3, 5 means the native ignored the comparator it was handed",
+    )
+
     /** Plain Int keeps working, and keeps the fast path — the operand is
      *  dropped where the element's `Ord` is the compiler's own. */
     @Test

@@ -154,6 +154,32 @@ class SortedMapTargetOrderTest {
         assertEquals(3L, r.getField("found"))
     }
 
+    /**
+     * `sorted_map::partition` keeps the source's order in BOTH halves.
+     *
+     * The key type is unchanged, so it inherits — rebuilding through a bare
+     * `empty()` dropped the ordering it was partitioned from. It inherits
+     * `comparator()`, the EFFECTIVE one, which is right here and was wrong for
+     * `sorted_set`: this map has no instanceof fast paths, so there is no
+     * natural-order flag to preserve and nothing to forfeit.
+     */
+    @Test
+    fun `partition keeps the source order in both halves`() {
+        val r = eval(
+            """
+            $desc
+            do
+              let m = sorted_map::from_list { xs = list::from_seq {
+                xs = [{ k = K.(1), v = 10 }, { k = K.(5), v = 50 }, { k = K.(3), v = 30 }],
+              } }
+              let p = sorted_map::partition { m = m, p = { k, v } -> v > 15 }
+              { pass = ks { m = p.pass }, fail = ks { m = p.fail } }
+            """,
+        ) as com.mezze.interpreter.values.MezzeRecord
+        assertEquals(listOf(5L, 3L), (r.getField("pass") as Iterable<*>).toList())
+        assertEquals(listOf(1L), (r.getField("fail") as Iterable<*>).toList())
+    }
+
     /** Plain Int keys keep working — the operand is dropped for them, which is
      *  what holds the cost of all this to nothing on the common case. */
 
