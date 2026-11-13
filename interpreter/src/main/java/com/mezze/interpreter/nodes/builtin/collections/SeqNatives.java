@@ -1695,8 +1695,12 @@ public final class SeqNatives {
     // Threads the caller's element comparator so a custom Ord is honoured.
     public static boolean isSorted(MezzeSeq seq, MezzeFunction cmpFn,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        // `ScalarCall` hoists the args array out of the walk; `cmpInt`
+        // allocated an `Object[]` and a `MezzeRecord` per PAIR. 16 086
+        // ps/element before, against a 496 ps/element one-pass control.
+        var cmp = ScalarCall.prepare2(cmpFn, "a", "b");
         for (int i = 1; i < seq.size(); i++) {
-            if (cmpInt(cmpFn, seq.get(i - 1), seq.get(i), callNode) > 0) {
+            if (cmp.callCmp(callNode, seq.get(i - 1), seq.get(i)) > 0) {
                 return false;
             }
         }
@@ -1715,10 +1719,17 @@ public final class SeqNatives {
     public static boolean isSortedBy(MezzeSeq seq, MezzeFunction keyFn, MezzeFunction cmpFn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (seq.size() <= 1) return true;
-        Object prevKey = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, seq.get(0)));
+        // FOUR allocations an element before this: `prepareArgs` for the key
+        // and `cmpInt` for the comparison, each allocating an `Object[]` and a
+        // `MezzeRecord`. At 34 109 ps/element it was the most expensive of the
+        // five family members measured, and 2.12x `isSorted` — which is the
+        // 4-against-2 allocation ratio showing up in the number.
+        var keyCall = ScalarCall.prepare1(keyFn, "x");
+        var cmp = ScalarCall.prepare2(cmpFn, "a", "b");
+        Object prevKey = keyCall.call1(callNode, seq.get(0));
         for (int i = 1; i < seq.size(); i++) {
-            Object currKey = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, seq.get(i)));
-            if (cmpInt(cmpFn, prevKey, currKey, callNode) > 0) {
+            Object currKey = keyCall.call1(callNode, seq.get(i));
+            if (cmp.callCmp(callNode, prevKey, currKey) > 0) {
                 return false;
             }
             prevKey = currKey;
@@ -1728,8 +1739,13 @@ public final class SeqNatives {
 
     public static boolean isSortedDescending(MezzeSeq seq, MezzeFunction cmpFn,
                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        // The twin of `isSorted`, and it gets the same treatment for the
+        // same reason — it is unbenched, so no number is claimed for it, but
+        // leaving one of an identical pair on the slow path is how the two
+        // drift apart.
+        var cmp = ScalarCall.prepare2(cmpFn, "a", "b");
         for (int i = 1; i < seq.size(); i++) {
-            if (cmpInt(cmpFn, seq.get(i - 1), seq.get(i), callNode) < 0) {
+            if (cmp.callCmp(callNode, seq.get(i - 1), seq.get(i)) < 0) {
                 return false;
             }
         }

@@ -174,6 +174,49 @@ let l_sort_by_key = { i, acc, xs } -> if i <= 0 then acc
   else l_sort_by_key { i = i - 1, xs = xs,
     acc = acc + seq::size { xs = seq::sort_by_key { xs = xs, f = { x } -> 0 - x } } }
 
+## ── 14-18. THE REST OF THE prepareArgs/cmpInt FAMILY, none of it benched
+## before. `prepareArgs` has eighteen call sites in `SeqNatives` and `cmpInt`
+## eight, every one inside a loop, each allocating twice per call — an
+## `Object[]` and a `MezzeRecord` wrapper. `map`, `fold` and `forEach` hoist
+## theirs; these did not. Rows 7, 8 and 13 were fixed on that basis for 1.53x,
+## 1.63x and 1.95x.
+##
+## Row 18 is `binary_search` and it is here to show NOTHING: it calls `cmpInt`
+## per PROBE, about seven times for a hundred elements rather than a hundred.
+## If the family's shape is right, this is the row it predicts will not move,
+## and a prediction that correctly says "not here" is worth more than four rows
+## that all improve.
+##
+## 16 and 18 read `asc`, NOT `xs`. `xs` is descending, so `is_sorted` would
+## short-circuit on the first pair and time one comparison, and a binary search
+## would be probing input its contract does not fit. 17's key is `x * 2`, which
+## preserves order, for the same reason.
+let l_min_by = { i, acc, xs } -> if i <= 0 then acc
+  else l_min_by { i = i - 1, xs = xs,
+    acc = acc + match seq::min_by { xs = xs, f = { x } -> 0 - x } is
+      Some { val } -> val
+      None -> 0 }
+
+let l_max_by = { i, acc, xs } -> if i <= 0 then acc
+  else l_max_by { i = i - 1, xs = xs,
+    acc = acc + match seq::max_by { xs = xs, f = { x } -> 0 - x } is
+      Some { val } -> val
+      None -> 0 }
+
+let l_is_sorted = { i, acc, xs } -> if i <= 0 then acc
+  else l_is_sorted { i = i - 1, xs = xs,
+    acc = acc + if seq::is_sorted { xs = xs } then 1 else 0 }
+
+let l_is_sorted_by = { i, acc, xs } -> if i <= 0 then acc
+  else l_is_sorted_by { i = i - 1, xs = xs,
+    acc = acc + if seq::is_sorted_by { xs = xs, f = { x } -> x * 2 } then 1 else 0 }
+
+let l_binary_search = { i, acc, xs } -> if i <= 0 then acc
+  else l_binary_search { i = i - 1, xs = xs,
+    acc = acc + match seq::binary_search { xs = xs, x = 7 } is
+      Some { val } -> val
+      None -> 0 }
+
 pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
   let args = argv {}
   let n = arg_at { args = args, i = 0, def = 2000 }
@@ -184,6 +227,11 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
   let k = 9
   let xs = build { i = m, acc = [] }
   let dups = build_dup { i = m, acc = [], m = m }
+  ## Ascending, for the rows whose operation SHORT-CIRCUITS on
+  ## disorder: `build` counts down, so `is_sorted` over it would stop
+  ## at the first pair and `binary_search` would probe input its
+  ## contract does not fit. Sorted here, once, outside every loop.
+  let asc = seq::sort { xs = xs }
   let ss = build_strs { i = m, acc = [] }
   let floor = min_of { thunk = {} -> control_loop { i = floor_n, acc = 0 }, warm = warm, k = k }
   let floor_ps = (floor.min * 1000) / floor_n
@@ -215,3 +263,13 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
            label = "unique via set CEIL  ", thunk = {} -> l_unique_set { i = n, acc = 0, xs = dups } }
   report { idx = 13, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "seq::sort_by_key     ", thunk = {} -> l_sort_by_key { i = n, acc = 0, xs = xs } }
+  report { idx = 14, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "seq::min_by         ", thunk = {} -> l_min_by { i = n, acc = 0, xs = xs } }
+  report { idx = 15, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "seq::max_by         ", thunk = {} -> l_max_by { i = n, acc = 0, xs = xs } }
+  report { idx = 16, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "seq::is_sorted ASC  ", thunk = {} -> l_is_sorted { i = n, acc = 0, xs = asc } }
+  report { idx = 17, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "seq::is_sorted_by   ", thunk = {} -> l_is_sorted_by { i = n, acc = 0, xs = asc } }
+  report { idx = 18, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "seq::bsearch PROBES ", thunk = {} -> l_binary_search { i = n, acc = 0, xs = asc } }

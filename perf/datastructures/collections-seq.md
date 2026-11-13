@@ -4,7 +4,7 @@
 
 # seq
 
-`std::collections::seq` · 124 operations · 30 with a bench row · 12 with a number
+`std::collections::seq` · 124 operations · 35 with a bench row · 17 with a number
 
 | op | ps/op | elems | ps/elem | vs floor | bench |
 |---|---|---|---|---|---|
@@ -12,7 +12,7 @@
 | `all` | — | | | | called in seq_fusion, no number |
 | `any` | — | | | | called in ds_matrix, seq_fusion, no number |
 | `average` | **UNMEASURED** | | | | |
-| `binary_search` | **UNMEASURED** | | | | |
+| `binary_search` | 121 162 | 100 | 1 211 | — | seqsurface:18 |
 | `binary_search_by` | **UNMEASURED** | | | | |
 | `binary_search_insert_point` | **UNMEASURED** | | | | |
 | `cartesian_product` | **UNMEASURED** | | | | |
@@ -60,8 +60,8 @@
 | `insert_at` | 284 888 | 100 | 2 848 | — | seqsurface:10 |
 | `intersperse` | 390 398 | 100 | 3 903 | — | seqsurface:4 |
 | `is_empty` | — | | | | called in allocsurface, no number |
-| `is_sorted` | **UNMEASURED** | | | | |
-| `is_sorted_by` | **UNMEASURED** | | | | |
+| `is_sorted` | 944 678 | 100 | 9 446 | — | seqsurface:16 |
+| `is_sorted_by` | 1 532 995 | 100 | 15 329 | — | seqsurface:17 |
 | `is_sorted_descending` | **UNMEASURED** | | | | |
 | `join` | 937 582 | 100 | 9 375 | — | seqsurface:3 |
 | `last` | **UNMEASURED** | | | | |
@@ -69,11 +69,11 @@
 | `lower_bound` | **UNMEASURED** | | | | |
 | `map` | — | | | | called in bytesurface, capthresh, codec-decode, codec-encode-walker, codec-vs-handwritten, collfold, concurrent_map_compare, ds_matrix, fuseall, fusegaps, http-work-route, iter_perf_compare, iterremit, list_ops_compare, listwalk, polyglot_seq_crossing, seq_fold_compare, seq_fusion, no number |
 | `max` | **UNMEASURED** | | | | |
-| `max_by` | **UNMEASURED** | | | | |
+| `max_by` | 229 406 | 100 | 2 294 | — | seqsurface:15 |
 | `max_float` | **UNMEASURED** | | | | |
 | `median` | **UNMEASURED** | | | | |
 | `min` | **UNMEASURED** | | | | |
-| `min_by` | **UNMEASURED** | | | | |
+| `min_by` | 226 149 | 100 | 2 261 | — | seqsurface:14 |
 | `min_float` | **UNMEASURED** | | | | |
 | `none` | **UNMEASURED** | | | | |
 | `nth` | **UNMEASURED** | | | | |
@@ -133,6 +133,6 @@
 | `zip_with` | **UNMEASURED** | | | | |
 | `zip_with_index` | **UNMEASURED** | | | | |
 
-## Unmeasured (94 of 124)
+## Unmeasured (89 of 124)
 
-`average`, `binary_search`, `binary_search_by`, `binary_search_insert_point`, `cartesian_product`, `chunks_exact`, `combinations`, `compare`, `contains`, `count_element`, `dedup_by`, `distinct`, `drop`, `drop_while`, `empty`, `ends_with`, `enumerate`, `equal_range`, `equals`, `fill`, `fill_with`, `find_index`, `first`, `flat_map`, `flatten`, `for_each`, `from_deque`, `from_list`, `from_map`, `from_set`, `from_sorted_map`, `from_sorted_set`, `group_consecutive`, `group_consecutive_by`, `head`, `index_of`, `init`, `is_sorted`, `is_sorted_by`, `is_sorted_descending`, `last`, `last_index_of`, `lower_bound`, `max`, `max_by`, `max_float`, `median`, `min`, `min_by`, `min_float`, `none`, `nth`, `of`, `partition`, `permutations`, `product`, `product_float`, `push_front`, `range_step`, `reduce`, `remove`, `remove_at`, `replace`, `replace_all`, `reverse`, `rotate_left`, `rotate_right`, `scan`, `singleton`, `sliding`, `span`, `split`, `split_at`, `starts_with`, `stddev`, `subsequences`, `sum_float`, `swap`, `tail`, `take`, `take_while`, `to_deque`, `to_list`, `to_map`, `to_sorted_map`, `to_sorted_set`, `unzip`, `update`, `upper_bound`, `variance`, `zip3`, `zip4`, `zip_with`, `zip_with_index`
+`average`, `binary_search_by`, `binary_search_insert_point`, `cartesian_product`, `chunks_exact`, `combinations`, `compare`, `contains`, `count_element`, `dedup_by`, `distinct`, `drop`, `drop_while`, `empty`, `ends_with`, `enumerate`, `equal_range`, `equals`, `fill`, `fill_with`, `find_index`, `first`, `flat_map`, `flatten`, `for_each`, `from_deque`, `from_list`, `from_map`, `from_set`, `from_sorted_map`, `from_sorted_set`, `group_consecutive`, `group_consecutive_by`, `head`, `index_of`, `init`, `is_sorted_descending`, `last`, `last_index_of`, `lower_bound`, `max`, `max_float`, `median`, `min`, `min_float`, `none`, `nth`, `of`, `partition`, `permutations`, `product`, `product_float`, `push_front`, `range_step`, `reduce`, `remove`, `remove_at`, `replace`, `replace_all`, `reverse`, `rotate_left`, `rotate_right`, `scan`, `singleton`, `sliding`, `span`, `split`, `split_at`, `starts_with`, `stddev`, `subsequences`, `sum_float`, `swap`, `tail`, `take`, `take_while`, `to_deque`, `to_list`, `to_map`, `to_sorted_map`, `to_sorted_set`, `unzip`, `update`, `upper_bound`, `variance`, `zip3`, `zip4`, `zip_with`, `zip_with_index`

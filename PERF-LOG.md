@@ -14372,3 +14372,97 @@ THE REST OF THE FAMILY, unbenched and so unfixed: `flatMap`, `minBy`/`maxBy`,
 the three `isSorted` variants, and both binary searches all still call
 `prepareArgs` or `cmpInt` per element or per comparison. Each gets a bench row
 before it gets a fix, which is the discipline that found this one.
+
+#### The `isSorted` family — 2.22x and 1.70x, and a prediction that was WRONG about two of five
+
+Five members of the `prepareArgs`/`cmpInt` family had no bench row and no
+coverage row, so nothing in the ranking could point at any of them. Each got a
+row, and each row recorded what reading the source PREDICTED it would pay, so
+the measurement could contradict it rather than merely agree.
+
+It contradicted it.
+
+| row | ps/element | predicted |
+|---|---|---|
+| `is_sorted_by` | 34 109 | 4 allocations an element |
+| `is_sorted` | 16 086 | 2 an element |
+| `max_by` | 2 305 | 4 — "the worst of the family" |
+| `min_by` | 2 264 | 4 — "the worst of the family" |
+| `binary_search` | ~7 probes a call | no effect |
+| `sum` (control) | 496 | — |
+
+**`min_by` and `max_by` were predicted worst and measured 7x CHEAPER per element
+than `is_sorted`, which was predicted to cost half as much.** Allocation counting
+cannot produce that, and the reason is that they do not run the code being read:
+`ChainCanonicalizer` handles `NativeOp.MIN_BY` and emits `SinkIR.MinBy`, so the
+fuser answers that shape and `SeqNatives.minBy`'s `prepareArgs` is a path this
+spelling never takes. Reading a code path and assuming it is the one that runs
+is the same error as reading `bytes::fold` as a callback control when
+`BuiltinSumBytes` deletes the callback — the fourth time this session.
+
+WHAT SURVIVED IS BETTER EVIDENCE THAN THE PREDICTION WAS. `is_sorted_by` over
+`is_sorted` is 2.12x, and those two are precisely the ones that DO reach the
+native, where the allocation counts stand at four and two. The shape predicts 2x
+between them; the measurement said 2.12x before either was touched.
+
+SELF-A/B. The first measurement is the before arm: the bench source did not
+change between the two builds, only the three natives.
+
+| row | before | after | |
+|---|---|---|---|
+| `seq::is_sorted_by` n=5e4 | 3 352 853 ps | 1 475 762 | **2.27x** |
+| `seq::is_sorted_by` n=1e5 | 3 410 864 | 1 532 995 | **2.22x** |
+| `seq::is_sorted` n=1e5 | 1 615 143 | 955 521 | **1.69x** |
+| `seq::is_sorted` n=2e5 | 1 608 556 | 944 678 | **1.70x** |
+| `seq::min_by` (control) | 226 434 | 226 149 | 1.00x |
+| `seq::max_by` (control) | 230 522 | 229 406 | 1.00x |
+| `seq::binary_search` (control) | 119 819 | 121 162 | 0.99x |
+| `seq::sum` (control) | 49 559 | 49 814 | 0.99x |
+
+**THE FALSIFIABLE PREDICTION HELD.** `binary_search` was put in this set
+specifically to show nothing: it calls `cmpInt` once per PROBE, about seven
+times for a hundred elements rather than a hundred, so a per-call saving has
+nowhere to show up in the total. It did not move. A family is a claim about a
+shape, and the row that could have refuted the shape instead confirmed it.
+
+`min_by` and `max_by` holding at 1.00x is the second half of that: they are the
+rows the fused-path explanation says cannot move, because they do not call the
+natives this changed.
+
+`is_sorted_descending` is ported too and no number is claimed for it — it is
+unbenched. It is the exact twin of `is_sorted`, and leaving one of an identical
+pair on the slow path is how twins drift apart.
+
+The patch did not apply on the first attempt, which is worth recording: the
+anchor assumed `isSortedBy` followed `isSorted`, and `cmpInt`'s own definition
+sits between them. The assertion refused rather than patching the wrong place.
+
+##### What is left of the `prepareArgs`/`cmpInt` family, and why most of it is not worth porting
+
+Fourteen `prepareArgs` call sites and four `cmpInt` sites remain in
+`SeqNatives`, down from eighteen and eight. The remainder is NOT simply "more of
+the same", and the difference matters because porting it blind would be changing
+code with no evidence:
+
+- **`minBy`/`maxBy` (four sites) are the UNFUSED FALLBACK.** `ChainCanonicalizer`
+  emits `SinkIR.MinBy`/`MaxBy`, which is why those two rows measured 2 264 and
+  2 305 ps/element and did not budge when this family was ported. The native is
+  reached only by a spelling the fuser declines, and no bench exercises that
+  spelling, so there is nothing to measure and nothing to claim.
+- **The predicate sites (three) belong to `find`/`any`/`all`**, which have
+  `SinkIR.Find`, `SinkIR.Any` and `SinkIR.All`. Same story.
+- **`forEach`'s site is its own fallback** — it hand-rolls `ScalarBypass` on the
+  path that matters and falls back here.
+- **`seq::flat_map` IS worth measuring**, and is the one real candidate left. It
+  has no bench row (the `flat_map` rows in `coverage.tsv` are `iter::flat_map`,
+  a different native), and it has no fused path — the fusion ledger lists
+  flat_map among the still-unfused shapes at 480x. Its `iter` analogue went
+  41 713 to 13 902 ps once fixed, which is the reason to look rather than a
+  claim about this one.
+- `dedup_by`, `chunk_by` and `update` hold the rest. All unbenched.
+
+So the family is not finished, it is bounded: one operation worth a bench row,
+and a dozen sites whose code the compiler does not run for any shape anyone has
+written down. Each gets a row before it gets a fix — the order that turned
+`sort_by_key` from invisible into 1.95x, and the order that stopped `min_by`
+being "fixed" for a cost it never paid.
