@@ -102,7 +102,7 @@
 | `sliding` | **UNMEASURED** | | | | |
 | `sort` | — | | | | called in asyncsurface, bytesurface, datetimesurface, ds_matrix, dsmore, jsonsurface, list_fold_compare, list_ops_compare, mapsurface, qsort_mut, qsort_native, qsort_pure, seq_fold_compare, seqsurface, surface, no number |
 | `sort_by` | 1 274 164 | 100 | 12 741 | — | seqsurface:8 |
-| `sort_by_key` | 4 044 011 | 100 | 40 440 | — | seqsurface:13 |
+| `sort_by_key` | 1 987 264 | 100 | 19 872 | — | seqsurface:13 |
 | `span` | **UNMEASURED** | | | | |
 | `split` | **UNMEASURED** | | | | |
 | `split_at` | **UNMEASURED** | | | | |

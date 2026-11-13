@@ -1246,20 +1246,38 @@ public final class SeqNatives {
 
     public static MezzeSeq sortByKey(MezzeSeq seq, MezzeFunction keyFn, MezzeFunction cmpFn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        // Both callbacks go through `ScalarCall`, which resolves the scalar-ABI
+        // bypass ONCE and reuses one args array. This used to call
+        // `prepareArgs` per element for the key and `cmpInt` per comparison,
+        // and each of those allocates twice — an `Object[]` and a
+        // `MezzeRecord` wrapper. At a hundred elements that is two hundred
+        // allocations for the keys and about thirteen hundred for the
+        // comparisons, which is most of what made this the worst seq operation
+        // except `unique`.
+        var keyCall = ScalarCall.prepare1(keyFn, "x");
+        var cmp = ScalarCall.prepare2(cmpFn, "a", "b");
+
         // Pre-compute keys to avoid calling keyFn multiple times per element
         int size = seq.size();
         Object[] elements = new Object[size];
         Object[] keys = new Object[size];
         for (int i = 0; i < size; i++) {
             elements[i] = seq.get(i);
-            keys[i] = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elements[i]));
+            keys[i] = keyCall.call1(callNode, elements[i]);
         }
 
         // Sort indices by key, comparing keys via the threaded comparator
         // (the key type's Ord impl), not the primitive-only compare().
+        //
+        // `Integer[]` stays: `indices[i] = i` looks like an allocation an
+        // element and is not, because `Integer.valueOf` caches -128..127 —
+        // checked on this JVM, identity holds at 99 and 127 and fails at 128.
+        // Above 127 it would allocate, and `Arrays.sort` takes no comparator
+        // over `int[]`, so replacing it means a hand-written index sort: its
+        // own change, with its own measurement at a size where it bites.
         Integer[] indices = new Integer[size];
         for (int i = 0; i < size; i++) indices[i] = i;
-        Arrays.sort(indices, (a, b) -> cmpInt(cmpFn, keys[a], keys[b], callNode));
+        Arrays.sort(indices, (a, b) -> cmp.callCmp(callNode, keys[a], keys[b]));
 
         // Reorder elements
         Object[] result = new Object[size];

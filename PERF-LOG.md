@@ -14316,3 +14316,59 @@ NO TEST FAILS WITHOUT THIS EITHER, for the same reason as `sortBy`: the change
 is pure allocation and the semantics are identical, so a test that appeared to
 discriminate would be measuring something else. `SetMapAdvancedOperationsTest`
 covers `group_by`'s answers and is green.
+
+#### `seq::sort_by_key` — 1.95x, the operation nobody had measured
+
+Measured for the first time one commit ago at 40 600 ps/element: the worst seq
+operation except `unique`, and 3.2x `sort_by` for the same sort plus a key
+extraction. It had no bench row and no coverage row, so no ranking could have
+pointed at it; it came out of reading `SeqNatives` while tracing why `sortBy`
+allocated per comparison.
+
+Two call sites, both hoisted into `ScalarCall`: the key function, called once
+per element through `prepareArgs`, and the comparator, called once per
+comparison through `cmpInt`. Each of those allocates TWICE — an `Object[] args`
+and a `MezzeRecord` wrapper — so a hundred elements paid about two hundred
+allocations for the keys and thirteen hundred for the comparisons.
+
+SELF-A/B, two builds from identical source, only those two call sites differing:
+
+| row | hand-rolled | `ScalarCall` | |
+|---|---|---|---|
+| `seq::sort_by_key` n=1e4 | 3 764 815 ps | 1 889 744 | **1.99x** |
+| `seq::sort_by_key` n=2e4 | 3 823 336 | 1 987 264 | **1.92x** |
+| `seq::group_by` (control) | 1 896 141 | 1 917 711 | 0.99x |
+| `seq::sort_by` (control) | 1 264 471 | 1 255 512 | 1.01x |
+| `seq::dedup` (control) | 2 014 737 | 2 030 416 | 0.99x |
+| `seq::sum` (control) | 49 486 | 50 278 | 0.98x |
+
+`sort_by` is the control that earns its place here: it is already on
+`ScalarCall` and shares `callCmp` with the code this changed, so if it had moved
+the suspect would be the shared helper rather than `sortByKey`. It held to 1%.
+
+THE CROSS-BUILD READING WOULD HAVE SAID 2.01x, from comparing against the
+previous arm instead of its own. Close to the truth this time, but `group_by`
+and `dedup` drifted about 5% between two builds differing only in `sortByKey` —
+code neither of them touches. That is the third time this session build drift
+has been large enough to invent or erase a result, and it is why the A/B is not
+optional.
+
+STILL 19 873 ps/element against `sort_by`'s 12 555, and that residual is
+expected rather than left behind: this operation extracts a key per element and
+sorts through an index indirection, which is strictly more work than sorting the
+elements directly.
+
+WHAT IS DELIBERATELY NOT TOUCHED. `Integer[] indices` with `indices[i] = i`
+looks like an allocation per element and is not: `Integer.valueOf` caches
+-128..127, checked on this JVM rather than read off the spec because the bound
+is configurable — identity holds at 99 and 127, fails at 128 and 999. At the
+benched hundred elements it allocates nothing. Above 127 it would, and
+`Arrays.sort` takes no comparator over `int[]`, so removing it means writing an
+index sort by hand: a separate change, with its own measurement at a size where
+it bites. Attributing this row's cost to that array — which is what reading the
+source first suggested — would have been wrong.
+
+THE REST OF THE FAMILY, unbenched and so unfixed: `flatMap`, `minBy`/`maxBy`,
+the three `isSorted` variants, and both binary searches all still call
+`prepareArgs` or `cmpInt` per element or per comparison. Each gets a bench row
+before it gets a fix, which is the discipline that found this one.
