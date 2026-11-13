@@ -241,9 +241,36 @@ pub let intersperse: { xs: List 'a, sep: 'a } -> List 'a = { xs, sep } -> match 
   }
 
 
+## Natural order through the element's own `Ord` — the typed intermediary the
+## native needs.
+##
+## PRIVATE AND SINGLE-CALLER, for the reason `seq`'s twin is: when the compiler
+## proves `'a` directly comparable it rewrites the call below to
+## `__native_list_sort { xs = xs }` and DROPS `le`, so that native means
+## "ordered by the element's own Ord" and nothing else. A caller handing it a
+## different comparator would have it silently discarded.
+let sort_by_ord: { xs: List 'a, le: { it: 'a, r: 'a } -> Bool } with Ord 'a -> List 'a
+  = { xs, le } -> __native_list_sort_by_ord { xs = xs, le = le }
+
 ## Sorts elements in ascending order using the element's Ord impl.
+##
+## The comparator is typed by `sort_by_ord`'s signature, which is the only thing
+## connecting it to `xs`'s element: `__native_*` is an untyped boundary, so an
+## inline lambda handed straight to the native has its `<=` applied to fresh
+## variables and is refused.
+##
+## Costs ONE guest call per comparison, which is what it has always cost —
+## 1 713 883 ps for a hundred descending elements, against 1 530 512 for
+## `sort_by` itself, so the wrapper was nearly free and the comparator was the
+## cost. Where the element is provably directly comparable the compiler
+## replaces the whole thing with a comparator-free sort.
+##
+## FLOAT: NaN SORTS LAST, the same rule `seq::sort` states and reached the same
+## way — `Arrays.sort(Object[])` compares through `Double.compareTo`, whose
+## order is IEEE 754's total order. The comparison OPERATORS do not change, so
+## `NaN <= x` is still False and `float::is_nan` is still the test.
 pub let sort: { xs: List 'a } with Ord 'a -> List 'a = { xs } ->
-  sort_by { xs = xs, cmp = { a, b } -> a <= b }
+  sort_by_ord { xs = xs, le = { it, r } -> it <= r }
 
 ## Sorts using a `less-or-equal` comparator: `cmp { a, b }` returns True when `a`
 ## should come before `b` (matches `Ord`'s `lt`/`le` and the `<`/`<=` operators).
@@ -435,11 +462,23 @@ pub let none: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Bool <...> = { xs, 
 pub let count: { xs: List 'a, p: { x: 'a } -> Bool <...> } -> Int <...> = { xs, p } ->
   __native_list_count { xs = xs, p = p }
 
-## Removes duplicate elements, keeping the first occurrence.
-pub let unique: { xs: List 'a } -> List 'a = { xs } -> __native_list_unique { xs = xs }
+## Removes duplicate elements, keeping the first occurrence. O(n).
+##
+## `Eq 'a, Hash 'a` IS PART OF THE CONTRACT, matching `seq::unique`. This was
+## previously unconstrained and deduped STRUCTURALLY, so a type whose `Eq` the
+## author wrote was ignored: two values that author calls equal, represented
+## differently, both survived. The pair is what lets the element be bucketed by
+## its own instances instead.
+##
+## Unlike `seq::unique` this buys no speed — it was already O(n). It buys the
+## right answer, and agreement between two functions of the same name.
+pub let unique: { xs: List 'a } with Eq 'a, Hash 'a -> List 'a = { xs } ->
+  __native_list_unique { xs = xs }
 
-## Alias for unique.
-pub let distinct: { xs: List 'a } -> List 'a = { xs } -> __native_list_distinct { xs = xs }
+## Alias for unique. Shares its native: `__native_list_distinct` existed only to
+## delegate.
+pub let distinct: { xs: List 'a } with Eq 'a, Hash 'a -> List 'a = { xs } ->
+  __native_list_unique { xs = xs }
 
 ## Flattens a list of lists into a single list (alias for concat).
 pub let flatten: { xss: List (List 'a) } -> List 'a = { xss } -> concat { xss = xss }

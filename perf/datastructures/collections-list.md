@@ -4,7 +4,7 @@
 
 # list
 
-`std::collections::list` · 104 operations · 16 with a bench row · 0 with a number
+`std::collections::list` · 104 operations · 16 with a bench row · 2 with a number
 
 | op | ps/op | elems | ps/elem | vs floor | bench |
 |---|---|---|---|---|---|
@@ -87,8 +87,8 @@
 | `size` | — | | | | called in ds_matrix, list_fusion, list_ops_compare, list_perf, mapsurface, seq_reconstruct, no number |
 | `slice` | **UNMEASURED** | | | | |
 | `sliding` | **UNMEASURED** | | | | |
-| `sort` | **UNMEASURED** | | | | |
-| `sort_by` | **UNMEASURED** | | | | |
+| `sort` | 730 000 | 100 | 7 300 | — | lsprobe |
+| `sort_by` | 1 530 512 | 100 | 15 305 | — | lsprobe |
 | `sort_by_key` | **UNMEASURED** | | | | |
 | `span` | **UNMEASURED** | | | | |
 | `split_at` | **UNMEASURED** | | | | |

@@ -3276,6 +3276,10 @@ class TypedASTCompiler(
         // represented values are equal would keep BOTH. Widening `unique` to
         // `with Eq 'a, Hash 'a` is what makes the pair available here.
         "__native_seq_unique_hashed" to "__native_seq_unique_hashed_with_evidence",
+        // `list::unique` had the same hole and no constraint at all, so a
+        // hand-written `Eq` was ignored and the two `unique`s disagreed
+        // about what a duplicate is.
+        "__native_list_unique" to "__native_list_unique_with_evidence",
     )
 
     /**
@@ -3359,13 +3363,26 @@ class TypedASTCompiler(
      */
     private val ordNativeFastForm: Map<String, String> = mapOf(
         "__native_seq_sort_by_ord" to "__native_seq_sort",
+        // `list::sort` carried the same defect as `seq::sort`, down to an
+        // identical dead `__native_list_sort` whose comparator ended
+        // `return 0`. Same rewrite, same gate.
+        "__native_list_sort_by_ord" to "__native_list_sort",
     )
 
-    /** The element type of a Seq, or null for anything else — including a Seq
-     *  whose element the solver left unsolved, which must decline. */
+    /**
+     * The element type of a Seq or a List, or null for anything else —
+     * including one whose element the solver left unsolved, which must decline.
+     *
+     * Both are admitted because both have a `sort` with the same shape and the
+     * same comparator cost. Naming the two constructors here rather than
+     * accepting any single-argument application keeps a `Set` or an `Iter`,
+     * whose sorts do not exist or do not mean this, from reaching the rewrite.
+     */
     private fun seqElementType(type: MezzeType): MezzeType? {
         val app = type as? MezzeType.TypeApplication ?: return null
-        if (app.constructor != com.mezze.language.ast.BuiltinTypes.SEQ) return null
+        val c = app.constructor
+        if (c != com.mezze.language.ast.BuiltinTypes.SEQ &&
+            c != com.mezze.language.ast.BuiltinTypes.LIST) return null
         return app.args.firstOrNull()
     }
 

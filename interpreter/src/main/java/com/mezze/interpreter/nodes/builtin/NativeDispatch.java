@@ -1100,6 +1100,11 @@ public final class NativeDispatch extends MezzeNode {
             ListNatives.drop(getList(r, "xs"), getLong(r, "n")));
         HANDLERS.put("__native_list_reverse", (r, c) ->
             ListNatives.reverse(getList(r, "xs")));
+        // `list::sort` with no comparator, and its general form. LIVE as of
+        // this change: `__native_list_sort` was registered here and in
+        // `ListOps.kt` and called from nowhere, exactly as the seq one was.
+        HANDLERS.put("__native_list_sort_by_ord", (r, c) ->
+            ListNatives.sortByOrd(getList(r, "xs"), getFunction(r, "le"), c));
         HANDLERS.put("__native_list_sort", (r, c) ->
             ListNatives.sort(getList(r, "xs")));
         HANDLERS.put("__native_list_range", (r, c) ->
@@ -1214,10 +1219,13 @@ public final class NativeDispatch extends MezzeNode {
             ListNatives.count(getList(r, "xs"), getFunction(r, "p"), c));
 
         // Unique/Distinct/Flatten
+        // `list::distinct` is an ALIAS and now shares this native, the way
+        // `seq::distinct` does; `__native_list_distinct` only delegated.
+        HANDLERS.put("__native_list_unique_with_evidence", (r, c) ->
+            ListNatives.uniqueWithEvidence(getList(r, "xs"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
         HANDLERS.put("__native_list_unique", (r, c) ->
             ListNatives.unique(getList(r, "xs")));
-        HANDLERS.put("__native_list_distinct", (r, c) ->
-            ListNatives.distinct(getList(r, "xs")));
         HANDLERS.put("__native_list_flatten", (r, c) ->
             ListNatives.flatten(getList(r, "xss")));
 

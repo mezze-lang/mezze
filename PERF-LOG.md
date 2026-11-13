@@ -15287,3 +15287,98 @@ insert at 45 ns is in the normal band for a HAMT; that ratio is probably mostly
 inherent, and anyone taking it as a 106x opportunity should measure its real
 ceiling the same way first. `unfold` has the same story already in this log:
 it looked 700x and the ceiling was 6.5x.
+
+
+## `map::insert` and `map::remove` are AT the trie's own cost — closed, not opportunities
+
+NOT A FIX, and the point is that there is nothing to fix. Ranked second, third
+and fourth in the whole table at 145x, 132x and 106x "vs floor", these are the
+most inviting-looking numbers left. They are inherent.
+
+Measured by calling `MezzeMap` DIRECTLY FROM JAVA, no Mezze in between, on the
+same shape `mapsurface` uses — a 1000-key Long-keyed map, keys cycling, each op
+producing a new map because the structure is persistent:
+
+| op | the trie, from Java | at the Mezze level | overhead |
+|---|---|---|---|
+| `get` | 6 422 ps | 9 529 | 1.48x |
+| `insert` | 46 106 | 45 272 | **~1.0x** |
+| `remove` | 67 573 | 61 912 | **~1.0x** |
+| `size` | 41 | — | — |
+
+`insert` and `remove` at the Mezze level cost what the trie costs. There is no
+boundary overhead to remove — Mezze reading a hair FASTER than the harness is
+JIT noise between two measurements of the same work. A CHAMP write copies the
+path from root to leaf; 46 ns for that is the structure's price, not a defect.
+
+The only gap is `get`, at 1.48x — about 3.1 ns of boundary on a 6.4 ns read.
+Real, but small in absolute terms and nothing like the 22x the table suggests.
+
+WHY THE RANKING MISLED, which is the same lesson as `flat_map` directly above:
+`vs floor` compares every operation against `map::fold`'s flat walk. A
+persistent-trie WRITE measured against a flat READ will always look enormous.
+The column is the right first question — it found `seq::unique`'s quadratic and
+`iter::zip`'s missing fusion — and the wrong last one.
+
+THE RULE THIS SUGGESTS. Before building anything for a high-ratio row, measure
+what the operation's OWN SHAPE costs: for a fusion gap, hand-write the fused
+form (both `flat_map` and `zip` could be); for a data-structure operation, call
+the structure directly from Java. Three of the top four entries closed in about
+twenty minutes this way, against days of work had any of them been taken at
+face value.
+
+
+## `list::sort` had `seq::sort`'s defect verbatim — 2.35x, and the estimate was too high
+
+Found by looking at the DARKEST surface rather than the biggest number. `list`
+is 104 operations, 16 with a bench row, and ZERO with a number — every one reads
+"called in X, no number", which is precisely the blind spot
+`collection-coverage.py` now documents: a call site is not a measurement. The
+two largest wins of this session, `seq::unique`'s quadratic and `seq::sort`,
+were both in exactly that state.
+
+`list::sort` read character for character as `seq::sort` did:
+
+    sort = { xs } -> sort_by { xs = xs, cmp = { a, b } -> a <= b }
+
+and `ListNatives.sort` was registered in BOTH `NativeDispatch` and `ListOps.kt`,
+called from nowhere, with the same instanceof chain ending `return 0` — a list
+of records would have come back in its original order reported as sorted. The
+same dead-and-wrong native, copied.
+
+| | ps/op, 100 descending elements |
+|---|---|
+| `list::sort` before | 1 713 883 |
+| `list::sort_by` (control) | 1 530 512 |
+| **`list::sort` after** | **~730 000** |
+| `list::sort_by` after (control) | ~1 590 000, flat |
+
+**2.35x.** The control moving 4% while the subject moved 2.35x is what
+attributes it.
+
+MY ESTIMATE WAS 3.4x AND IT WAS TOO HIGH. I scaled from `seq`'s result using the
+measured boxed-vs-primitive ratio (266 065 against 68 387, 3.9x) and forgot that
+a list pays a cons walk at BOTH ends — `toArray` in and `MezzeList.of` out —
+which is a larger fixed share of a list sort than of a seq's. Recorded because
+the method was right and the arithmetic was not: scaling one collection's result
+to another needs the parts that do not scale counted too.
+
+WHY LESS THAN SEQ'S 10.2x, stated plainly: a `MezzeSeq` of Ints is backed by a
+`long[]`, so its comparator-free sort is `Arrays.sort(long[])` — no boxing, no
+comparator. A `MezzeList` is cons cells holding BOXED elements, so the best
+available is `Arrays.sort(Object[])` through `Comparable`.
+
+THE NaN RULE CARRIED OVER WITHOUT BEING CARRIED. `Arrays.sort(Object[])`
+compares Doubles through `Double.compareTo`, whose order is the same IEEE 754
+total order `Arrays.sort(double[])` implements — so `list::sort` and `seq::sort`
+agree that NaN sorts last without either being told about the other. Tested.
+
+The gate is load-bearing for list as well, verified by removing it: both
+instance cases fail, the reversed-`Ord` newtype and the record.
+
+STILL OPEN, FOUND ON THE WAY: `list::unique` has NO constraint at all — not
+`Eq`, not `Hash` — and dedupes structurally through a `LinkedHashSet` with no
+evidence route. So a hand-written `Eq` is IGNORED there, which is the soundness
+hole `seq::unique` closed this session. `seq::unique` and `list::unique` now
+disagree about what a duplicate is. Widening it is the same user-facing decision
+`seq::unique`'s was, so it is recorded rather than taken.
