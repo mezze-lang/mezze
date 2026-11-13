@@ -54,10 +54,7 @@ public abstract class DirectLessThanOrEqualNode extends MezzeNode {
     @Fallback
     @TruffleBoundary
     public static Object typeError(Object left, Object right) {
-        throw new RuntimeException(
-            "Cannot compare " + (left == null ? "null" : left.getClass().getSimpleName()) +
-            " <= " + (right == null ? "null" : right.getClass().getSimpleName())
-        );
+        throw OperandTypeError.binary("compare", left, "<=", right);
     }
 
     public static DirectLessThanOrEqualNode create(MezzeNode left, MezzeNode right) {

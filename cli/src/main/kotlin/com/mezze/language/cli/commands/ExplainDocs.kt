@@ -593,5 +593,45 @@ object ExplainDocs {
             - The field names come from the function or constructor's
               record-typed parameter; hover the callee to see them.
         """.trimIndent(),
+
+        "I0004" to """
+            # I0004: Runtime invariant violated — a bug in Mezze
+
+            While running, the program reached a guard that **cannot be reached in a
+            well-typed program**: an operator met an operand of the wrong type, a
+            field read met something that is not a record, or a match found no arm.
+
+            Type checking rules every one of those out before the program runs. So
+            reaching one does not mean your program is wrong — it means the
+            typechecker accepted a program it should have refused.
+
+            ## Example of what it looks like
+
+            ```
+            error[I0004]: cannot multiply a Str and an Int
+            ```
+
+            A `Str` arrived where the program's own types say an `Int` is, and the
+            next arithmetic operation had no case for it.
+
+            ## What to do
+
+            - **Please report it**, with the program that triggered it. That program
+              is the valuable part: it is a soundness hole, and a reproducer is what
+              lets it be closed.
+            - `--verbose` prints the internal trace, which names the node that
+              failed.
+            - There is no change to your program that makes this correct. A
+              workaround may make the symptom go away — adding an annotation,
+              reordering a `let` — but the hole stays open for the next program.
+
+            ## Why it is reported this way
+
+            These failures used to surface as a raw JVM exception
+            (`java.lang.RuntimeException: Cannot multiply String and Long`): a Java
+            class name, and JVM type names for values you would call `Str` and
+            `Int`. The failure is Mezze's, so it is now named in Mezze's terms and
+            says whose fault it is.
+        """.trimIndent(),
     )
 }

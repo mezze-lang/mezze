@@ -105,10 +105,7 @@ public abstract class DirectMultiplyNode extends MezzeNode {
     @Fallback
     @TruffleBoundary
     public static Object typeError(Object left, Object right) {
-        throw new RuntimeException(
-            "Cannot multiply " + (left == null ? "null" : left.getClass().getSimpleName()) +
-            " and " + (right == null ? "null" : right.getClass().getSimpleName())
-        );
+        throw OperandTypeError.binary("multiply", left, "and", right);
     }
 
     public static DirectMultiplyNode create(MezzeNode left, MezzeNode right) {

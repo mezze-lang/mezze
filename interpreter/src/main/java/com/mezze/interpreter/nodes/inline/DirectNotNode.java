@@ -27,9 +27,7 @@ public abstract class DirectNotNode extends MezzeNode {
     @Fallback
     @TruffleBoundary
     public static Object typeError(Object value) {
-        throw new RuntimeException(
-            "Cannot apply ! to " + (value == null ? "null" : value.getClass().getSimpleName())
-        );
+        throw OperandTypeError.unary("apply `!` to", value);
     }
 
     public static DirectNotNode create(MezzeNode operand) {

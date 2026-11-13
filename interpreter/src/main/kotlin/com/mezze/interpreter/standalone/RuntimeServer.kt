@@ -940,7 +940,7 @@ object RuntimeServer {
         } catch (e: Exception) {
             dapExitCode = 1
             sendExited(send, state, code = 1, reason = "error", detail = ExitDetail(
-                message = "${e.javaClass.simpleName}: ${e.message ?: "no message"}"
+                message = RuntimeFailureMessage.render(e)
             ))
         } finally {
             // DAP: tell the client the debuggee finished so VS Code closes the
@@ -1304,7 +1304,7 @@ object RuntimeServer {
         } catch (e: Exception) {
             send(evalFailed(
                 eval.requestId, EvalError.Kind.FAILED,
-                "${e.javaClass.simpleName}: ${e.message ?: "no message"}",
+                RuntimeFailureMessage.render(e),
             ))
         } finally {
             timeoutWatchdog.disarm()
@@ -1498,7 +1498,7 @@ object RuntimeServer {
         }
         val src = e.sourceLocation
         return ExitDetail(
-            message = e.message ?: "polyglot error",
+            message = RuntimeFailureMessage.render(e),
             stack = frames,
             sourceFile = src?.source?.name,
             sourceLine = src?.startLine,

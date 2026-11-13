@@ -87,10 +87,7 @@ public abstract class DirectSubtractNode extends MezzeNode {
     @Fallback
     @TruffleBoundary
     public static Object typeError(Object left, Object right) {
-        throw new RuntimeException(
-            "Cannot subtract " + (left == null ? "null" : left.getClass().getSimpleName()) +
-            " and " + (right == null ? "null" : right.getClass().getSimpleName())
-        );
+        throw OperandTypeError.binary("subtract", left, "and", right);
     }
 
     public static DirectSubtractNode create(MezzeNode left, MezzeNode right) {

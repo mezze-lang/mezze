@@ -28,10 +28,7 @@ public abstract class DirectOrNode extends MezzeNode {
     @Fallback
     @TruffleBoundary
     public static Object typeError(Object left, Object right) {
-        throw new RuntimeException(
-            "Cannot apply || to " + (left == null ? "null" : left.getClass().getSimpleName()) +
-            " and " + (right == null ? "null" : right.getClass().getSimpleName())
-        );
+        throw OperandTypeError.binary("apply `||` to", left, "and", right);
     }
 
     public static DirectOrNode create(MezzeNode left, MezzeNode right) {

@@ -57,9 +57,7 @@ public abstract class DirectNegateNode extends MezzeNode {
     @Fallback
     @TruffleBoundary
     public static Object typeError(Object value) {
-        throw new RuntimeException(
-            "Cannot negate " + (value == null ? "null" : value.getClass().getSimpleName())
-        );
+        throw OperandTypeError.unary("negate", value);
     }
 
     public static DirectNegateNode create(MezzeNode operand) {

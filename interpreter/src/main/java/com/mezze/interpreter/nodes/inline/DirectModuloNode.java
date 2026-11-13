@@ -44,10 +44,7 @@ public abstract class DirectModuloNode extends MezzeNode {
     @Fallback
     @TruffleBoundary
     public static Object typeError(Object left, Object right) {
-        throw new RuntimeException(
-            "Cannot modulo " + (left == null ? "null" : left.getClass().getSimpleName()) +
-            " by " + (right == null ? "null" : right.getClass().getSimpleName())
-        );
+        throw OperandTypeError.binary("modulo", left, "by", right);
     }
 
     public static DirectModuloNode create(MezzeNode left, MezzeNode right) {

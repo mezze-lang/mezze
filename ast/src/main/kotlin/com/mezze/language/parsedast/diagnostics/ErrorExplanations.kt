@@ -824,6 +824,16 @@ fun ErrorCode.explain(): String = when (this) {
         "reason that is not a diagnostic about your program. The message names the " +
         "phase and the underlying exception; `--verbose` prints the full trace. " +
         "This is a compiler bug — please report it."
+
+    ErrorCode.I0004_RUNTIME_INVARIANT_VIOLATED ->
+        "While running, the program reached a guard that cannot be reached in a " +
+        "well-typed program: an operator met an operand of the wrong type, a field " +
+        "read met something that is not a record, or a match found no arm. Every " +
+        "one of those is ruled out by type checking, so reaching one means the " +
+        "typechecker accepted a program it should have refused. The message says " +
+        "what was found, in Mezze's own types; `--verbose` prints the internal " +
+        "trace. This is a compiler bug, not a mistake in your program — please " +
+        "report it with the program that triggered it."
 }
 
 fun explainErrorCode(codeStr: String): String? {

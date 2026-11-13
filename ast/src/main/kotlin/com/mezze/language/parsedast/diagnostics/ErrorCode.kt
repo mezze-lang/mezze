@@ -213,6 +213,11 @@ enum class ErrorCode {
     I0001_UNKNOWN_TYPECHECK_FAILURE,
     I0002_PIPELINE_NO_TYPED_MODULE,
     I0003_INTERNAL_EMIT_FAILURE,
+    /** A runtime guard that is unreachable in a well-typed program was reached:
+     *  an operator met an operand of the wrong type, a field read met a
+     *  non-record, a match found no arm. Reaching one means the typechecker let
+     *  something through, so it is a compiler bug and never user error. */
+    I0004_RUNTIME_INVARIANT_VIOLATED,
 }
 
 /** Format an [ErrorCode] for display in the error header, e.g. `T0201`. */

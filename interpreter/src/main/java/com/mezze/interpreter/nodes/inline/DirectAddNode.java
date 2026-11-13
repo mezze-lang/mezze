@@ -141,10 +141,7 @@ public abstract class DirectAddNode extends MezzeNode {
     @Fallback
     @TruffleBoundary
     public static Object typeError(Object left, Object right) {
-        throw new RuntimeException(
-            "Cannot add " + (left == null ? "null" : left.getClass().getSimpleName()) +
-            " and " + (right == null ? "null" : right.getClass().getSimpleName())
-        );
+        throw OperandTypeError.binary("add", left, "and", right);
     }
 
     public static DirectAddNode create(MezzeNode left, MezzeNode right) {
