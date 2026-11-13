@@ -1347,6 +1347,15 @@ object ChainCanonicalizer {
                 }
                 // No lambda, no expression — nothing addresses a frame.
                 StageIR.Enumerate -> stage
+                // THE SECOND SOURCE DOES ADDRESS THE FRAME: `RawSeq(
+                // ReadLocalIR(slot))`, or a range whose bounds are locals. Left
+                // unsubstituted, those slots point into the wrong frame once
+                // the chain is inlined.
+                is StageIR.Zip -> {
+                    val ns = mapSourceIR(stage.second) { substituteSlots(it, slotValues, paramCount) }
+                    if (ns != stage.second) changed = true
+                    StageIR.Zip(ns)
+                }
             }
         }
         return if (changed) result else stages
@@ -2305,6 +2314,12 @@ object ChainCanonicalizer {
                 current = enumPeeled
                 continue
             }
+            val zipPeeled = tryPeelIterZip(current, classifier, allFunctions, ext)
+            if (zipPeeled != null) {
+                stages.add(StageIR.Zip(zipPeeled.second))
+                current = zipPeeled.first
+                continue
+            }
             val takePeeled = tryPeelIterTake(current, classifier)
             if (takePeeled != null) {
                 stages.add(StageIR.Take(takePeeled.first))
@@ -2550,6 +2565,45 @@ object ChainCanonicalizer {
         val rec = node.args.singleOrNull() as? MakeRecordIR ?: return null
         val srcFld = rec.fields.singleOrNull { it.name in SRC_NAMES } ?: return null
         return srcFld.value
+    }
+
+    /**
+     * `zip(a, b)` as its FIRST source plus the second, or null.
+     *
+     * The second source is classified by this same machinery, recursively, and
+     * must come back with no stages of its own — `zip(a, map(f, b))` would need
+     * b's pipeline driven through the same loop, which is separate work.
+     * Declining sends the chain to the real pipeline: correct, merely slower.
+     *
+     * An Opaque second source is refused for the reason every Opaque is: the
+     * runtime value could be any collection and the loop reads it by index.
+     *
+     * Only the record ABI. A scalar-ABI zip has its two sources in positional
+     * args and nothing downstream has been taught that shape yet.
+     */
+    private fun tryPeelIterZip(
+        node: NodeIR,
+        classifier: ChainHofClassifier,
+        allFunctions: Map<Hash, FunctionIR>,
+        ext: FrameExtender?,
+    ): Pair<NodeIR, SourceIR>? {
+        if (node !is CallNativeIR) return null
+        if (!node.isElementOp(NativeOp.ZIP) || node.isScalarABI) return null
+        val mr = node.arg as? MakeRecordIR ?: return null
+        var a: NodeIR? = null
+        var b: NodeIR? = null
+        for (fld in mr.fields) when (fld.name) {
+            "a" -> a = fld.value
+            "b" -> b = fld.value
+            // An unexpected field means this is not the shape being priced.
+            else -> return null
+        }
+        val first = a ?: return null
+        val secondExpr = b ?: return null
+        val (secondStages, secondSource) = peelSource(secondExpr, classifier, allFunctions, ext)
+        if (secondStages.isNotEmpty()) return null
+        if (secondSource is SourceIR.Opaque) return null
+        return first to secondSource
     }
 
     private fun tryPeelIterTake(
@@ -2847,6 +2901,10 @@ object ChainCanonicalizer {
                         is StageIR.TakeWhile, is StageIR.DropWhile -> stage
                         is StageIR.Take -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Take(nn) } else stage }
                         is StageIR.Drop -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Drop(nn) } else stage }
+                        is StageIR.Zip -> {
+                            val ns = mapSourceIR(stage.second, f)
+                            if (ns != stage.second) { stagesChanged = true; StageIR.Zip(ns) } else stage
+                        }
                     }
                 }
                 val newSink: SinkIR = when (val sk = node.sink) {

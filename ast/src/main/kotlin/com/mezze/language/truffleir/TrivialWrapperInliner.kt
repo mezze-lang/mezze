@@ -940,6 +940,12 @@ object TrivialWrapperInliner {
                         StageIR.Enumerate -> stage
                         is StageIR.Take -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Take(nn) } else stage }
                         is StageIR.Drop -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Drop(nn) } else stage }
+                        // The second source holds NodeIRs that this pass
+                        // rewrites like any other; rebuilt only when it changed.
+                        is StageIR.Zip -> {
+                            val ns = mapSourceIR(stage.second, f)
+                            if (ns != stage.second) { stagesChanged = true; StageIR.Zip(ns) } else stage
+                        }
                     }
                 }
                 val newSink: SinkIR = when (val sk = node.sink) {

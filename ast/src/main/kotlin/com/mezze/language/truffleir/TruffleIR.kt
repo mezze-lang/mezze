@@ -587,6 +587,29 @@ sealed interface StageIR {
      * shapes that fuse.
      */
     @Serializable data object Enumerate : StageIR
+
+    /**
+     * Advance a SECOND source in lockstep, as `iter::zip` does, stopping at the
+     * shorter.
+     *
+     * Carries the second source and nothing else: the `{fst, snd}` RECORD the
+     * stage nominally produces is never built, the same way [Enumerate]'s
+     * `{i, val}` is not. Downstream lambdas read it as `x.fst` and `x.snd`,
+     * which the emitter resolves to the loop's element local and a second
+     * element local loaded beside it.
+     *
+     * WHY A STAGE AND NOT A SOURCE. Every [SourceIR] carries ONE source and the
+     * loop driver is built around that. `chain` also has two and is handled by
+     * a REWRITE — `fold(chain(a,b))` is `fold(b, fold(a))`, two ordinary
+     * single-source folds in sequence. That does not work here, because zip
+     * advances both sources in LOCKSTEP and there is no sequencing one after
+     * the other.
+     *
+     * The second source is a bare [SourceIR] with no stages of its own:
+     * `zip(a, map(f, b))` would need b's pipeline threaded through the same
+     * loop, which the peel declines so the chain falls back.
+     */
+    @Serializable data class Zip(val second: SourceIR) : StageIR
 }
 
 /** How elements are combined. */

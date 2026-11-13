@@ -64,6 +64,10 @@ class FusedChainCaptureFrameTest {
                 is StageIR.Take, is StageIR.Drop -> {}
                 // No lambda, so no capture to check.
                 StageIR.Enumerate -> {}
+                // Carries a SOURCE, not a lambda — its captures, if any, live
+                // in that source's expressions and are checked with the chain's
+                // own source rather than here.
+                is StageIR.Zip -> {}
             }
         }
         when (val sk = chain.sink) {

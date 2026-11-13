@@ -35,15 +35,18 @@ public final class SeqNatives {
     private static final String[] FIELD_I = {"i"};
     private static final String[] FIELD_ACC_X = {"acc", "x"};
     private static final String[] FIELD_A_B = {"a", "b"};
-    private static final String[] FIELD_FST_SND = {"fst", "snd"};
+    private static final String[] FIELD_FST_SND =
+        {com.mezze.language.truffleir.NativeHofNames.PAIR_FST, com.mezze.language.truffleir.NativeHofNames.PAIR_SND};
     private static final String[] FIELD_VALUE_INDEX = {"value", "index"};
     private static final String[] FIELD_FSTS_SNDS = {"fsts", "snds"};
     private static final String[] FIELD_PASS_FAIL = {"pass", "fail"};
     private static final String[] FIELD_KEY_VALUES = {"key", "values"};
     private static final String[] FIELD_L_R = {"l", "r"};
     private static final String[] FIELD_START_END = {"start", "end"};
-    private static final String[] FIELD_FST_SND_THD = {"fst", "snd", "thd"};
-    private static final String[] FIELD_FST_SND_THD_FTH = {"fst", "snd", "thd", "fth"};
+    private static final String[] FIELD_FST_SND_THD =
+        {com.mezze.language.truffleir.NativeHofNames.PAIR_FST, com.mezze.language.truffleir.NativeHofNames.PAIR_SND, com.mezze.language.truffleir.NativeHofNames.PAIR_THD};
+    private static final String[] FIELD_FST_SND_THD_FTH =
+        {com.mezze.language.truffleir.NativeHofNames.PAIR_FST, com.mezze.language.truffleir.NativeHofNames.PAIR_SND, com.mezze.language.truffleir.NativeHofNames.PAIR_THD, com.mezze.language.truffleir.NativeHofNames.PAIR_FTH};
 
     // ==================== Basic Operations ====================
 

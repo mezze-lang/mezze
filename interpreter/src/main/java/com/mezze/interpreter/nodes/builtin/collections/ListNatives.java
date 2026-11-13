@@ -19,6 +19,11 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
  * All operations are designed for JIT compilation.
  */
 public final class ListNatives {
+    /** `{ fst, snd }`, hoisted: this was allocated per call. Names from
+     *  {@link com.mezze.language.truffleir.NativeHofNames} so a rename reaches every spelling. */
+    private static final String[] FIELD_FST_SND =
+        {com.mezze.language.truffleir.NativeHofNames.PAIR_FST, com.mezze.language.truffleir.NativeHofNames.PAIR_SND};
+
 
     private ListNatives() {}
 
@@ -417,7 +422,7 @@ public final class ListNatives {
         Object[] result = new Object[len];
         for (int i = 0; i < len; i++) {
             result[i] = MezzeRecord.fromFields(
-                new String[]{"fst", "snd"},
+                FIELD_FST_SND,
                 new Object[]{src1[i], src2[i]}
             );
         }

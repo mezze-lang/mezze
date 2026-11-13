@@ -37,7 +37,8 @@ public final class MapNatives {
 
     private static final String[] FIELD_K_V = {ENTRY_KEY, ENTRY_VALUE};
     private static final String[] FIELD_PASS_FAIL = {"pass", "fail"};
-    private static final String[] FIELD_FST_SND = {"fst", "snd"};
+    private static final String[] FIELD_FST_SND =
+        {com.mezze.language.truffleir.NativeHofNames.PAIR_FST, com.mezze.language.truffleir.NativeHofNames.PAIR_SND};
 
     // ==================== Factory Operations ====================
 

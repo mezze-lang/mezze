@@ -321,6 +321,10 @@ class ComptimeIr(private val comptimeHash: Hash? = null) {
                     is StageIR.Take -> st.copy(n = f(st.n))
                     is StageIR.Drop -> st.copy(n = f(st.n))
                     StageIR.Enumerate -> st
+                    // The second source holds NodeIRs like any other source and
+                    // is rewritten through the same mapper.
+                    is StageIR.Zip -> st.copy(
+                        second = com.mezze.language.truffleir.mapSourceIR(st.second, f))
                     is StageIR.Map, is StageIR.Filter,
                     is StageIR.TakeWhile, is StageIR.DropWhile -> st
                 }

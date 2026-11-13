@@ -245,6 +245,14 @@ object FunctionIRReachability {
                         is com.mezze.language.truffleir.StageIR.DropWhile -> queue.add(stage.p.functionHash)
                         // No lambda and no expression, so nothing to keep reachable.
                         com.mezze.language.truffleir.StageIR.Enumerate -> {}
+                        // THE SECOND SOURCE IS LIVE CODE. Its expressions can
+                        // name functions, and a hash not collected here is a
+                        // FunctionIR pruned from the dep graph — the chain then
+                        // calls something that was never emitted.
+                        is com.mezze.language.truffleir.StageIR.Zip ->
+                            com.mezze.language.truffleir.forEachSourceNode(stage.second) { n ->
+                                collectHashesFromNode(n, queue)
+                            }
                     }
                 }
                 when (val sk = node.sink) {

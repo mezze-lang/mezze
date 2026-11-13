@@ -164,7 +164,11 @@ public final class BytecodeCompiler {
     private static final int NONE_TAG = com.mezze.language.ast.BuiltinTypes.INSTANCE
             .computeVariantTag(com.mezze.language.ast.BuiltinTypes.NONE, null);
     /** Cached field name array for Option payload records ({val = x}). */
-    private static final String[] VAL_FIELD = new String[] { "val" };
+    /** `Option.Some`'s payload field. The NAME comes from `BuiltinTypes`,
+     *  which already owned it — this array spelled it a second time. It is
+     *  NOT `iter::enumerate`'s `val`, which shares only the spelling. */
+    private static final String[] VAL_FIELD =
+        new String[] { com.mezze.language.ast.BuiltinTypes.VAL_FIELD };
 
     private final MezzeLanguage language;
 
@@ -5404,6 +5408,21 @@ public final class BytecodeCompiler {
                     predShape.cmpOp, predShape.cmpRhs, predShape.cmpRhsNode,
                     predShape.callHash, predShape.callScalarABI, predShape.callFieldName,
                     /*innerXs=*/ null)));
+            } else {
+                // A STAGE THIS CHAIN DOES NOT RECOGNISE MUST DECLINE, NOT
+                // VANISH. Without this branch an unmatched StageIR variant is
+                // simply never added to `classifiedStages`, so the stage
+                // disappears from the pipeline and the loop computes a
+                // different function than the program wrote — a wrong answer
+                // where a refusal costs only speed. PERF-LOG records that shape
+                // as BUG 42, "a stage nobody wrote".
+                //
+                // Every variant is handled above today, so this is unreachable
+                // now and exists for the NEXT one: whoever adds a StageIR gets
+                // a fallback to the real pipeline instead of silent corruption.
+                if (dbg) System.err.println("[chain-canon-emit] reject: no classifier for stage "
+                        + stage.getClass().getSimpleName());
+                return false;
             }
         }
         java.util.Collections.reverse(classifiedStages);
@@ -8261,7 +8280,7 @@ public final class BytecodeCompiler {
                         b.beginConditional();
                           b.emitLoadLocal(foundSlot);
                           b.beginMakeVariantSingleFieldPayload(SOME_TAG,
-                              com.mezze.language.ast.BuiltinTypes.SOME, "val");
+                              com.mezze.language.ast.BuiltinTypes.SOME, com.mezze.language.ast.BuiltinTypes.VAL_FIELD);
                             b.emitLoadLocal(resultSlot);
                           b.endMakeVariantSingleFieldPayload();
                           b.emitMakeVariantNoPayload(NONE_TAG,
@@ -8274,7 +8293,7 @@ public final class BytecodeCompiler {
                 b.beginConditional();
                   b.emitLoadLocal(hasAccSlot);
                   b.beginMakeVariantSingleFieldPayload(SOME_TAG,
-                      com.mezze.language.ast.BuiltinTypes.SOME, "val");
+                      com.mezze.language.ast.BuiltinTypes.SOME, com.mezze.language.ast.BuiltinTypes.VAL_FIELD);
                     b.emitLoadLocal(accSlot);
                   b.endMakeVariantSingleFieldPayload();
                   b.emitMakeVariantNoPayload(NONE_TAG,
@@ -8305,7 +8324,7 @@ public final class BytecodeCompiler {
                 b.beginConditional();
                   b.emitLoadLocal(foundSlot);
                   b.beginMakeVariantSingleFieldPayload(SOME_TAG,
-                      com.mezze.language.ast.BuiltinTypes.SOME, "val");
+                      com.mezze.language.ast.BuiltinTypes.SOME, com.mezze.language.ast.BuiltinTypes.VAL_FIELD);
                     b.emitLoadLocal(resultSlot);
                   b.endMakeVariantSingleFieldPayload();
                   b.emitMakeVariantNoPayload(NONE_TAG,
@@ -8317,7 +8336,7 @@ public final class BytecodeCompiler {
                 b.beginConditional();
                   b.emitLoadLocal(foundSlot);
                   b.beginMakeVariantSingleFieldPayload(SOME_TAG,
-                      com.mezze.language.ast.BuiltinTypes.SOME, "val");
+                      com.mezze.language.ast.BuiltinTypes.SOME, com.mezze.language.ast.BuiltinTypes.VAL_FIELD);
                     b.emitLoadLocal(accSlot);
                   b.endMakeVariantSingleFieldPayload();
                   b.emitMakeVariantNoPayload(NONE_TAG,
@@ -8341,7 +8360,7 @@ public final class BytecodeCompiler {
                 b.beginConditional();
                   b.emitLoadLocal(foundSlot);
                   b.beginMakeVariantSingleFieldPayload(SOME_TAG,
-                      com.mezze.language.ast.BuiltinTypes.SOME, "val");
+                      com.mezze.language.ast.BuiltinTypes.SOME, com.mezze.language.ast.BuiltinTypes.VAL_FIELD);
                     b.emitLoadLocal(accSlot);
                   b.endMakeVariantSingleFieldPayload();
                   b.emitMakeVariantNoPayload(NONE_TAG,

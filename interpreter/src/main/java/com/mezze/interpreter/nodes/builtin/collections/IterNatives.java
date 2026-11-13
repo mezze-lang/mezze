@@ -20,6 +20,11 @@ import com.oracle.truffle.api.nodes.IndirectCallNode;
  * slow-path fallback and the constructors that don't need specialization.
  */
 public final class IterNatives {
+    /** `{ fst, snd }`, hoisted: this was allocated per call. Names from
+     *  {@link com.mezze.language.truffleir.NativeHofNames} so a rename reaches every spelling. */
+    private static final String[] FIELD_FST_SND =
+        {com.mezze.language.truffleir.NativeHofNames.PAIR_FST, com.mezze.language.truffleir.NativeHofNames.PAIR_SND};
+
 
     private IterNatives() {}
 
@@ -594,7 +599,7 @@ public final class IterNatives {
                 Object b = right.next();
                 if (b == IterCursor.END) return true;
                 if (!consumer.accept(MezzeRecord.fromFields(
-                        new String[]{"fst", "snd"}, new Object[]{a, b}))) {
+                        FIELD_FST_SND, new Object[]{a, b}))) {
                     return false;
                 }
             }

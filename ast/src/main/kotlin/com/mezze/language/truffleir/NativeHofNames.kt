@@ -45,6 +45,41 @@ object NativeHofNames {
     /** All names that mean "the collection source position". */
     val SRC_FIELDS: Set<String> = setOf(XS, SRC, IT, S, D, M)
 
+    // ── Fields of the records collections PRODUCE ───────────────────────
+    //
+    // The names above are what natives CONSUME; these are what they hand
+    // back. They are spelled here and nowhere else because the FUSED LOOP
+    // MATCHES ON THEM — `.fst`, `.snd`, `.val` and `.i` are resolved to loop
+    // locals instead of a record being built — so a rename that misses a site
+    // yields a record that resolves in some positions and not others, and an
+    // unresolved field declines the fusion silently.
+    //
+    // NOT the same as `BuiltinTypes.VAL_FIELD`, which is `Option.Some`'s
+    // field and merely shares the spelling. Renaming one must not rename the
+    // other, so they are separate constants on purpose.
+
+    /** `zip`'s pair, for `iter` and `seq` alike: `{ fst, snd }`. */
+    const val PAIR_FST = "fst"
+    const val PAIR_SND = "snd"
+    /** `seq::zip3` and `seq::zip4` continue the same series. */
+    const val PAIR_THD = "thd"
+    const val PAIR_FTH = "fth"
+
+    /** `iter::enumerate` — `{ i, val }`. */
+    const val ITER_ENUM_INDEX = "i"
+    const val ITER_ENUM_VAL = "val"
+
+    /**
+     * `seq::enumerate` and `seq::zip_with_index` — `{ value, index }`.
+     *
+     * THE SAME CONCEPT AS [ITER_ENUM_INDEX]/[ITER_ENUM_VAL] UNDER DIFFERENT
+     * NAMES, which writing them side by side is what makes visible. Unifying
+     * the two spellings changes the stdlib's public API, so it is a decision
+     * for its owner rather than something to quietly normalise here.
+     */
+    const val SEQ_ENUM_VALUE = "value"
+    const val SEQ_ENUM_INDEX = "index"
+
     /** Function / transform callback. */
     const val F = "f"
     /** Predicate callback. */

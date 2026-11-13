@@ -18,6 +18,11 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
  * All operations are immutable (return new deques).
  */
 public final class DequeNatives {
+    /** `{ fst, snd }`, hoisted: this was allocated per call. Names from
+     *  {@link com.mezze.language.truffleir.NativeHofNames} so a rename reaches every spelling. */
+    private static final String[] FIELD_FST_SND =
+        {com.mezze.language.truffleir.NativeHofNames.PAIR_FST, com.mezze.language.truffleir.NativeHofNames.PAIR_SND};
+
 
     private DequeNatives() {}
 
@@ -681,7 +686,7 @@ public final class DequeNatives {
         java.util.Iterator<Object> it2 = d2.iterator();
         while (it1.hasNext() && it2.hasNext()) {
             result = result.pushBack(MezzeRecord.fromFields(
-                new String[]{"fst", "snd"},
+                FIELD_FST_SND,
                 new Object[]{it1.next(), it2.next()}
             ));
         }

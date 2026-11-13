@@ -59,6 +59,11 @@ import com.oracle.truffle.api.nodes.IndirectCallNode;
  * an assumption guarding.
  */
 public abstract class IterCursor {
+    /** `{ fst, snd }`, hoisted: this was allocated per call. Names from
+     *  {@link com.mezze.language.truffleir.NativeHofNames} so a rename reaches every spelling. */
+    private static final String[] FIELD_FST_SND =
+        {com.mezze.language.truffleir.NativeHofNames.PAIR_FST, com.mezze.language.truffleir.NativeHofNames.PAIR_SND};
+
 
     /** Returned by {@link #next} when the source is exhausted. */
     public static final Object END = new Object();
@@ -115,6 +120,7 @@ public abstract class IterCursor {
 
     /** Calls a guest unary function, honouring the scalar bypass. */
     private static final class Call {
+
         private final CallTarget direct;
         private final CallTarget wrapped;
         private final Object[] args;
@@ -451,7 +457,7 @@ public abstract class IterCursor {
             if (a == END) return END;
             Object b = second.next();
             if (b == END) return END;
-            return MezzeRecord.fromFields(new String[]{"fst", "snd"}, new Object[]{a, b});
+            return MezzeRecord.fromFields(FIELD_FST_SND, new Object[]{a, b});
         }
     }
 

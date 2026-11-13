@@ -430,7 +430,9 @@ object DeadLetEliminator {
 
             is FusedChainIR -> {
                 // #446 — mirror of TrivialWrapperInliner.recurseChildren case.
-                val newSource: SourceIR = when (val s = node.source) {
+                // Identity-preserving: returns the SAME object when nothing
+                // changed, which the `!==` comparisons below depend on.
+                fun walkSource(s0: SourceIR): SourceIR = when (val s = s0) {
                     is SourceIR.RangeSeq -> {
                         val nStart = f(s.start); val nEnd = f(s.end)
                         if (nStart !== s.start || nEnd !== s.end)
@@ -458,6 +460,7 @@ object DeadLetEliminator {
                         if (nE !== s.expr) SourceIR.Opaque(nE) else s
                     }
                 }
+                val newSource: SourceIR = walkSource(node.source)
                 var stagesChanged = false
                 val newStages = node.stages.map { stage ->
                     when (stage) {
@@ -466,6 +469,13 @@ object DeadLetEliminator {
                         StageIR.Enumerate -> stage
                         is StageIR.Take -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Take(nn) } else stage }
                         is StageIR.Drop -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Drop(nn) } else stage }
+                        // THE SECOND SOURCE IS A REFERENCE TOO. A `let` used
+                        // only here would look dead and be eliminated, leaving
+                        // the chain reading a slot nothing binds.
+                        is StageIR.Zip -> {
+                            val nSec = walkSource(stage.second)
+                            if (nSec !== stage.second) { stagesChanged = true; StageIR.Zip(nSec) } else stage
+                        }
                     }
                 }
                 val newSink: SinkIR = when (val sk = node.sink) {
