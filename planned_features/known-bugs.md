@@ -4091,3 +4091,72 @@ effectful callback.
 
 `mez check` on the program above reports a type that parses back unchanged.
 A round-trip property test covers inferred types generally.
+
+---
+
+## BUG 35 — OPEN: a `perform` never checks the performer's `having` binding against the body's
+
+Found 2026-11-13 probing associated types on effects. **Soundness hole: reaches a
+raw JVM exception.** Pinned by `PerformHandlerBindingSpecTest`, whose BREAK tests
+assert the broken behaviour — a red test there means someone fixed it.
+
+```mezze
+effect Store having 'val where { get: {} -> 'val <Store> }
+impl Store for IntStore having 'val = Int where { get = {} -> 1 }
+impl Store for StrStore having 'val = Str where { get = {} -> "A STRING" }
+
+pub let as_int: {} -> Int <Store> = {} -> Store.get {}
+pub let bad: {} -> Int <*> = {} -> perform StrStore in as_int {}
+```
+
+MEASURED, `mez check` then `mez dev` against the dev runtime:
+
+```
+Check passed
+bad (declared Int) = A STRING
+java.lang.RuntimeException: Cannot multiply String and Long
+```
+
+`as_int` prints as `pub as_int : {} -> Int <Store having 'val = Int>` — the body
+DOES pin the binding — and `StrStore` binds `'val = Str`. Nothing compares them.
+
+**Cause, located.** `PerformValidator.validatePerformExpression` builds its check
+from `collectThrownErrorTypes(expr.body, …)`: types flowing INTO an op, the
+`Exception`/`'error` case. There is nothing for the RETURN direction, so
+`get: {} -> 'val` is never compared against the performer's binding at all. The
+parameter direction works and is kept as a test beside the hole — a thrown
+`ValidationError` under `perform StringHandler` is V0501 today.
+
+**Why the single-impl cases looked healthy.** With ONE impl in scope, inference
+takes its binding, so the clash surfaces at the body's own annotation as a
+T0201/T0210 naming `<Store having 'val = …>`. Two impls leave nothing to infer
+from, and the perform site was the only check left. Every confirmatory probe I
+wrote had one impl.
+
+**Fix, and the input it needs already exists.** Derive the body's required
+bindings from its inferred ROW rather than only from throw sites — the row
+carries `having 'val = Int` and the printer already shows it — and compare
+against each handler's `associatedTypeBindings`, reusing
+`areAssociatedTypesCompatible` and the existing `HandlerTypeMismatch` (V0501).
+
+**Two accepting cases the fix must not break**, both in the spec test: the
+matching performer (`perform IntStore in as_int`), and two bodies at two
+bindings each with its own performer. The second is the whole point of an
+associated type, so the fix cannot be "one binding per effect".
+
+SURVEY THE STDLIB FOR THE SHAPE BEFORE ADDING THE RULE. Three checks written
+during this same session were reverted for firing on legitimate stdlib code
+(V0504-on-bodies, `removeEffectsFromType`-as-identity, the bare-`<...>` check in
+`validateEffectsNotOverpromised`). The shapes a fix has to keep accepting, all
+of them in `std/effects/` today — surveyed, not guessed:
+
+| performer | binding |
+|---|---|
+| `ExceptionToResult`, `ExceptionToOption`, `AbortException`, `IgnoreException`, `CrashException` | `having 'error = 'e` |
+| `EarlyReturn` (`early_return.mz:8`) | `having 'result = 'r` |
+| `UseFallback`, `FirstErr`, `FirstNone` (`condition.mz`) | `having 'ctx = 'c` |
+| `WithReader { val: 'a }` (`reader.mz:34`) | `having 'a = 'a`, on a performer that also takes a PARAM |
+
+Every one of them binds to a VARIABLE, not a concrete type. A comparison that
+demands syntactic equality refuses all of them; it has to unify, which is why
+`areAssociatedTypesCompatible` is the right tool rather than a new predicate.
