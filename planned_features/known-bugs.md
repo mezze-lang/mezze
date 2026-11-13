@@ -4572,3 +4572,77 @@ already supplied, so a call that completes one has to merge those in BEFORE the
 completeness check; the capture path appears to check first and merge after, so
 the second call looks partial again. Pinned as a disabled test with the minimal
 shape in `TrampolinePartialShapeCacheTest`.
+
+
+## BUG 44 — `sorted_set::union` silently loses elements when the element's `Ord` is hand-written
+
+**FIXED 2026-11-13**, same day, in `MezzeSortedSet` plus a compiler route.
+Found while surveying `sorted_set`, which had 46 operations and ZERO measured
+numbers.
+
+`union`, `intersect` and `difference` carry NO constraint — not `Ord 'a` —
+while `insert`, `remove`, `contains` and `from_seq` all do. The set's ORDER
+comes from a guest-side search using the author's `Ord`;
+`SortedSetNatives.addAt` says so outright: it "takes no comparator because it
+makes no comparison". But the three set operations merge NATIVELY through
+`MezzeSortedSet.compareElements`, which opens:
+
+    if (a instanceof Long la && b instanceof Long lb) return Long.compare(la, lb);
+
+A `newtype R = Int` is a boxed Long at runtime. So a set BUILT descending by the
+author's `Ord` is MERGED as if ascending by that fast path — and the operation
+could not use the author's order even if it wanted to, having no constraint to
+carry it.
+
+REPRODUCED, not reasoned about. `newtype R = Int` with a descending `Ord`:
+
+    a = from_seq [1,5,3]   ->  5, 3, 1     correct
+    b = from_seq [2,6,4]   ->  6, 4, 2     correct
+    union a b              ->  5, 3, 1, 6, 4, 2
+
+That is neither order — it is CONCATENATION. The merge assumes both inputs are
+ascending, exhausts the first, and appends the second.
+
+**THE CONSEQUENCE IS SILENT DATA LOSS**, because the result violates the
+invariant `contains` binary-searches on:
+
+    size(union) = 6
+    contains 1:yes  2:NO  3:yes  4:NO  5:yes  6:NO
+
+Every element from the SECOND set is present and unreachable.
+
+BLAST RADIUS: confined to types with a hand-written `Ord`. A plain `Int` set
+unions correctly and every `contains` answers yes, because there the fast path
+IS the author's order.
+
+This is the BUG 10 family — a newtype is a primitive at runtime, so a
+type-based fast path silently contradicts the order its author wrote.
+
+THE FIX NEEDED NO API CHANGE, which the first reading of it got wrong. The set
+ALREADY carries the author's order: `from_seq` threads a comparator built from
+the element's `Ord`, and `MezzeSortedSet`'s own field comment says so. The
+comparator was never missing — `compareElements` simply answered before asking
+it. So the fix is two halves inside the implementation:
+
+  1. The type-based fast paths are gated on the order actually BEING natural.
+  2. The compiler hands `from_seq` no comparator at all when the element is
+     `OrdKind.DIRECT`, so Int and Str sets are natural-ordered from the start.
+
+HALF ONE ALONE WAS CORRECT AND UNSHIPPABLE: a Mezze set always supplies a
+comparator — even for plain Int, where it IS natural order written as a guest
+closure — so the gate turned the fast path off everywhere and cost **8.2x on
+union, 9.9x on intersect**, measured. Half two restores it: union 1 363 400 ps
+against 1 295 222 before the fix, intersect 830 270 against 1 039 625. No
+measurable cost for correctness.
+
+`naturalOrder` is remembered as the comparator AS SUPPLIED, not the effective
+one, which is never null after construction — passing the effective comparator
+to a derived set made every set derived from a natural-ordered one look custom
+and lose the fast path for good.
+
+Guarded by `SortedSetCustomOrdTest`: removing the gate fails four of its seven,
+all three merges and the findability case. `MezzeSortedMap` was checked for the
+same `instanceof` fast paths and has none.
+
+Probe: scratchpad `ssprobe`; the shape is six lines of `from_seq` + `union` +
+`contains`.

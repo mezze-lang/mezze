@@ -39,12 +39,40 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
     @CompilationFinal
     private final Comparator<Object> comparator;
 
+    /**
+     * Whether this set is ordered by the NATURAL order of its elements — true
+     * exactly when no comparator was supplied at construction.
+     *
+     * It gates the type-based fast paths in {@link #compareElements}. Those
+     * answer from `Long.compare` and friends WITHOUT consulting
+     * {@link #comparator}, which is only sound when the two agree. A
+     * `newtype R = Int` is a boxed Long at runtime, so a set ordered by a
+     * hand-written descending `Ord` took the ascending fast path and `union`
+     * concatenated instead of merging — see known-bugs.md BUG 44, where the
+     * result reported size 6 while `contains` denied three of its elements.
+     */
+    @CompilationFinal
+    private final boolean naturalOrder;
+
+    /**
+     * The comparator AS SUPPLIED — null when the order is the natural one.
+     *
+     * Held apart from {@link #comparator}, which is the EFFECTIVE one and is
+     * never null after construction. A derived set must inherit this and not
+     * that: passing the effective comparator along made every set derived from
+     * a natural-ordered one look custom, which turned the fast path off for
+     * the rest of its life.
+     */
+    private final Comparator<?> customComparator;
+
     private final Object[] ownerToken;
 
     @SuppressWarnings("unchecked")
     private MezzeSortedSet(Object[] elements, Comparator<?> comparator) {
         this.elements = elements;
         this.length = elements.length;
+        this.naturalOrder = comparator == null;
+        this.customComparator = comparator;
         this.comparator = comparator != null
                 ? (Comparator<Object>) comparator
                 : (a, b) -> ((Comparable<Object>) a).compareTo(b);
@@ -55,6 +83,8 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
     private MezzeSortedSet(Object[] elements, int length, Comparator<?> comparator, Object[] ownerToken) {
         this.elements = elements;
         this.length = length;
+        this.naturalOrder = comparator == null;
+        this.customComparator = comparator;
         this.comparator = comparator != null
                 ? (Comparator<Object>) comparator
                 : (a, b) -> ((Comparable<Object>) a).compareTo(b);
@@ -290,7 +320,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
 
         Object[] token = new Object[1];
         @SuppressWarnings("unchecked")
-        MezzeSortedSet<A> result = new MezzeSortedSet<>(newElements, length + 1, comparator, token);
+        MezzeSortedSet<A> result = new MezzeSortedSet<>(newElements, length + 1, customComparator, token);
         token[0] = result;
         return result;
     }
@@ -313,7 +343,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
         System.arraycopy(elements, 0, newElements, 0, idx);
         System.arraycopy(elements, idx + 1, newElements, idx, length - idx - 1);
 
-        return new MezzeSortedSet<>(newElements, comparator);
+        return new MezzeSortedSet<>(newElements, customComparator);
     }
 
     /**
@@ -330,7 +360,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
         Object[] newElements = new Object[length - 1];
         System.arraycopy(elements, 0, newElements, 0, i);
         System.arraycopy(elements, i + 1, newElements, i, length - i - 1);
-        return new MezzeSortedSet<>(newElements, comparator);
+        return new MezzeSortedSet<>(newElements, customComparator);
     }
 
     /**
@@ -341,7 +371,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
         int lo = Math.max(0, Math.min(from, length));
         int hi = Math.max(lo, Math.min(to, length));
         if (lo == hi) return empty(comparator);
-        return new MezzeSortedSet<>(Arrays.copyOfRange(elements, lo, hi), comparator);
+        return new MezzeSortedSet<>(Arrays.copyOfRange(elements, lo, hi), customComparator);
     }
 
     /**
@@ -444,7 +474,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
         Object[] token = new Object[1];
         @SuppressWarnings("unchecked")
         MezzeSortedSet<A> result =
-                new MezzeSortedSet<>(newElements, length + 1, comparator, token);
+                new MezzeSortedSet<>(newElements, length + 1, customComparator, token);
         token[0] = result;
         return result;
     }
@@ -466,7 +496,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
         System.arraycopy(elements, 0, newElements, 0, idx);
         System.arraycopy(elements, idx + 1, newElements, idx, length - idx - 1);
 
-        return new MezzeSortedSet<>(newElements, comparator);
+        return new MezzeSortedSet<>(newElements, customComparator);
     }
 
     // ===== RANGE OPERATIONS =====
@@ -489,7 +519,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
             return empty();
         }
 
-        return new MezzeSortedSet<>(Arrays.copyOfRange(elements, fromIdx, toIdx), comparator);
+        return new MezzeSortedSet<>(Arrays.copyOfRange(elements, fromIdx, toIdx), customComparator);
     }
 
     /**
@@ -503,7 +533,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
             return empty();
         }
 
-        return new MezzeSortedSet<>(Arrays.copyOfRange(elements, idx, length), comparator);
+        return new MezzeSortedSet<>(Arrays.copyOfRange(elements, idx, length), customComparator);
     }
 
     /**
@@ -521,7 +551,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
             return empty();
         }
 
-        return new MezzeSortedSet<>(Arrays.copyOfRange(elements, 0, idx), comparator);
+        return new MezzeSortedSet<>(Arrays.copyOfRange(elements, 0, idx), customComparator);
     }
 
     // ===== NAVIGATION =====
@@ -600,19 +630,22 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
      */
     @SuppressWarnings("unchecked")
     private int compareElements(Object a, Object b) {
-        // Fast path for Long (common case)
-        if (a instanceof Long la && b instanceof Long lb) {
-            return Long.compare(la, lb);
+        // THE TYPE-BASED FAST PATHS ARE GATED ON NATURAL ORDER. They answer
+        // without consulting `comparator`, which is sound only where the two
+        // agree. A newtype over Int is a boxed Long here, so an author's
+        // descending `Ord` was silently overridden by `Long.compare` —
+        // known-bugs.md BUG 44.
+        if (naturalOrder) {
+            if (a instanceof Long la && b instanceof Long lb) {
+                return Long.compare(la, lb);
+            }
+            if (a instanceof Integer ia && b instanceof Integer ib) {
+                return Integer.compare(ia, ib);
+            }
+            if (a instanceof String sa && b instanceof String sb) {
+                return sa.compareTo(sb);
+            }
         }
-        // Fast path for Integer
-        if (a instanceof Integer ia && b instanceof Integer ib) {
-            return Integer.compare(ia, ib);
-        }
-        // Fast path for String
-        if (a instanceof String sa && b instanceof String sb) {
-            return sa.compareTo(sb);
-        }
-        // General case
         return comparator.compare(a, b);
     }
 
@@ -647,7 +680,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
             result[k++] = other.elements[j++];
         }
 
-        return new MezzeSortedSet<>(Arrays.copyOf(result, k), comparator);
+        return new MezzeSortedSet<>(Arrays.copyOf(result, k), customComparator);
     }
 
     /**
@@ -673,7 +706,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
         }
 
         if (k == 0) return empty();
-        return new MezzeSortedSet<>(Arrays.copyOf(result, k), comparator);
+        return new MezzeSortedSet<>(Arrays.copyOf(result, k), customComparator);
     }
 
     /**
@@ -704,7 +737,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
         }
 
         if (k == 0) return empty();
-        return new MezzeSortedSet<>(Arrays.copyOf(result, k), comparator);
+        return new MezzeSortedSet<>(Arrays.copyOf(result, k), customComparator);
     }
 
     // ===== ITERATION =====
