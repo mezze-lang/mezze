@@ -15,7 +15,7 @@
 | `contains` | 6 811 |  |  | — | mapsurface:6 |
 | `contains_with_evidence` | **UNMEASURED** | | | | |
 | `count` | **UNMEASURED** | | | | |
-| `difference` | 11 447 000 | 1000 | 11 447 | — | mapsurface:30 |
+| `difference` | 11 565 233 | 1000 | 11 565 | — | mapsurface:30 |
 | `empty` | — | | | | called in mapsurface, no number |
 | `equals` | **UNMEASURED** | | | | |
 | `filter` | 15 498 984 | 1000 | 15 498 | — | mapsurface:26 |
@@ -33,7 +33,7 @@
 | `insert` | 12 764 |  |  | — | mapsurface:7 |
 | `insert_all` | **UNMEASURED** | | | | |
 | `insert_with_evidence` | **UNMEASURED** | | | | |
-| `intersection` | 11 423 834 | 1000 | 11 423 | — | mapsurface:29 |
+| `intersection` | 11 377 833 | 1000 | 11 377 | — | mapsurface:29 |
 | `is_disjoint` | **UNMEASURED** | | | | |
 | `is_empty` | **UNMEASURED** | | | | |
 | `is_subset` | **UNMEASURED** | | | | |
@@ -55,11 +55,11 @@
 | `size` | — | | | | called in mapsurface, seq_reconstruct, no number |
 | `sum` | — | | | | called in fuseall, no number |
 | `sum_float` | **UNMEASURED** | | | | |
-| `symmetric_difference` | 26 651 363 | 1000 | 26 651 | — | mapsurface:31 |
+| `symmetric_difference` | 26 488 822 | 1000 | 26 488 | — | mapsurface:31 |
 | `to_list` | **UNMEASURED** | | | | |
 | `to_seq` | 4 288 408 | 1000 | 4 288 | — | mapsurface:32 |
 | `to_sorted_set` | **UNMEASURED** | | | | |
-| `union` | 30 464 935 | 1000 | 30 464 | — | mapsurface:28 |
+| `union` | 8 615 178 | 1000 | 8 615 | — | mapsurface:28 |
 
 ## Unmeasured (38 of 52)
 

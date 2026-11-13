@@ -14511,3 +14511,82 @@ SIX OPERATIONS IN THIS FAMILY, FIXED ON MEASURED EVIDENCE: `is_sorted_by`
 2.22x, `sort_by_key` 1.95x, `is_sorted` 1.70x, `flat_map` ~1.7x, `sort_by`
 1.63x, `group_by` 1.53x — plus `is_sorted_descending`, ported with no number
 claimed because it is unbenched and is `is_sorted`'s exact twin.
+
+#### `set::union` rebuilt both tries to merge them — 3.6x, and it is now faster than `intersection`
+
+`MezzeSet.union` has a two-pointer merge over sorted arrays for
+`LongSetStorage`, which is optimal — and `LongSetStorage.MAX_SIZE` is **32**. A
+thousand-element Int set is a `LongTrieSetStorage`, so that path never saw one
+and union fell through to `addAll`, which collects BOTH sides into arrays and
+calls `fromElements`: every element rehashed, both input tries discarded.
+`MezzeMap.putAll` does the same through `fromEntries`.
+
+THE CEILING, MEASURED BEFORE BUILDING, on the real structure at 1000 elements a
+side, decomposing what `addAll` does into the part any union must pay and the
+part a structural merge replaces:
+
+| inputs | WALK both sides | REBUILD | WHOLE | rebuild's share |
+|---|---|---|---|---|
+| disjoint | 6 790 ps/elem | 29 556 | 35 384 | **84%** |
+| identical | 6 497 | 18 621 | 25 865 | **72%** |
+
+Measuring the rebuild's SHARE rather than implementing a CHAMP merge twice is
+what made this cheap to decide: if the walk had dominated, the merge would not
+be worth building whatever the trie theory says. 35 384 also brackets the
+in-language `set::union` at 30 465, which is what said the harness was on the
+real path.
+
+THE MERGE. `LongTrieSetStorage.unionWith` walks the two tries bit by bit — four
+cases per position, and no collision case because the class already documents
+`mix64` as a bijection, so distinct elements must part before the bits run out.
+Where only one side has a subtree, that subtree is **shared by reference**: no
+copy, no hashing, no allocation. `a == b` short-circuits to `a`, which is what
+makes an overlapping union cheap rather than merely correct. The size is
+accumulated as the merge goes, the way `insert` does it, rather than derived by
+walking the result.
+
+SELF-A/B. `unionWith` stays compiled in both arms; only the two routing lines in
+`MezzeSet.union` differ.
+
+| row | `addAll` | structural | |
+|---|---|---|---|
+| `set::union` n=1e4 | 31 247 528 ps | 8 599 324 | **3.63x** |
+| `set::union` n=2e4 | 31 072 670 | 8 615 178 | **3.61x** |
+| `set::intersection` (control) | 11 688 559 | 11 377 833 | 1.03x |
+| `set::difference` (control) | 11 325 140 | 11 565 233 | 0.98x |
+| `set::symmetric_difference` (control) | 26 941 457 | 26 488 822 | 1.02x |
+| `map::merge` (control) | 39 079 805 | 38 548 989 | 1.01x |
+
+The three sibling combinators are the controls that make this attributable: all
+four live in the same class and only `union` was rerouted, so if they had moved
+the cause would be the build. They held to 3%. The A/B was run even though those
+four already agreed with their recorded values to within 1% — because earlier in
+this session an untouched `map::filter` read 15% faster across two builds, and
+credible is not the same as measured.
+
+**3.6x against a ceiling that predicted 4-5x, and landing under it is the honest
+outcome**: the merge still allocates a node wherever both sides have content, so
+it cannot reach the pure-walk floor the decomposition measured.
+
+`set::union` is now FASTER THAN `set::intersection` and `set::difference`, which
+still rebuild — 8 615 against 11 378 and 11 565. A union doing strictly more
+work than an intersection while costing less is the clearest statement of what
+the rebuild was costing, and it makes those two, `symmetric_difference` at
+26 489, and `map::merge` at 38 549 the obvious next candidates for the same
+treatment.
+
+TESTS: `LongTrieUnionTest`, 10 cases, and they are heavier than the rest of this
+session's because this is the only change that could be subtly WRONG rather than
+merely slow. They compare against `HashSet` — not another MezzeSet path, which
+could share a bug — and they check SIZE separately from MEMBERSHIP, because the
+size is accumulated independently and a wrong count would pass every membership
+test. They also assert both inputs are unchanged, since the merge shares their
+subtrees by reference and a mutation would corrupt a value someone else holds.
+
+AND THE DANGEROUS BRANCH WAS PROVEN TO RUN. `aData && bNode` carries the
+subtlest arithmetic in the merge — B contributes its whole subtree except A's
+own element when B already had it, read back from whether `insert` reported a
+growth. Passing tests do not prove a branch executed, so it was made to throw:
+four separate cases failed, so the coverage is real. A sparse-left/dense-right
+case was added on the suspicion it was under-covered; it turned out already
+exercised, and now that is known rather than hoped.
