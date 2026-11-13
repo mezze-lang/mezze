@@ -710,10 +710,14 @@ public final class NativeDispatch extends MezzeNode {
             SeqNatives.indexOf(getSeq(r, "xs"), getField(r, "x")));
         HANDLERS.put("__native_seq_sort", (r, c) ->
             SeqNatives.sort(getSeq(r, "xs")));
-        HANDLERS.put("__native_seq_unique", (r, c) ->
-            SeqNatives.unique(getSeq(r, "xs"), getFunction(r, "eq"), c));
-        HANDLERS.put("__native_seq_distinct", (r, c) ->
-            SeqNatives.distinct(getSeq(r, "xs"), getFunction(r, "eq"), c));
+        // `seq::unique` in O(n). The quadratic it replaces is gone, not
+        // deprecated: `__native_seq_unique` had exactly one caller, the
+        // `unique_with_eq` helper, which is deleted with it.
+        HANDLERS.put("__native_seq_unique_hashed", (r, c) ->
+            SeqNatives.uniqueHashed(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_unique_hashed_with_evidence", (r, c) ->
+            SeqNatives.uniqueHashedWithEvidence(getSeq(r, "xs"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
         HANDLERS.put("__native_seq_flatten", (r, c) ->
             SeqNatives.flatten(getSeq(r, "xs")));
         HANDLERS.put("__native_seq_equals", (r, c) ->

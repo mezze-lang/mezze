@@ -14880,3 +14880,83 @@ the unwritten capacity as trailing NULs. That tangle wants resolving before any
 of them is exposed; it is NOT resolved here and no fix is claimed for it.
 
 `buffer` goes from 0% to 89% covered, and the collection table from 25% to 27%.
+
+#### `seq::unique` is O(n) — 43.7x at a hundred elements, 400x at a thousand, and the exponent is 1.00
+
+The quadratic is gone, by the decision this was blocked on: `unique` and
+`distinct` now read `with Eq 'a, Hash 'a`.
+
+That was never a performance choice to make unilaterally. With `Eq 'a` alone
+there is nothing to bucket by, which is exactly what the old implementation's
+own comment said — "O(n^2) in the worst case because Eq is not required to be
+hashable (only equatable)" — so it compared every element against every survivor
+through a guest call. A caller whose element type has a hand-written `Eq` and no
+`Hash` no longer compiles against this, which is the honest outcome: that
+combination is precisely what the quadratic was paying for.
+
+| m | before | after | |
+|---|---|---|---|
+| 100 | 40 243 498 ps | **921 495** | **43.7x** |
+| 1 000 | 4 169 669 450 | **10 423 579** | **400x** |
+| 10 000 | ~420 ms, projected and never measured | **104 898 765** | — |
+
+**THE EXPONENT IS THE CLAIM, SO IT IS MEASURED AT THREE SIZES.** The old one
+grew 103.6x for a tenfold n — exponent 2.02. The new one grows 11.3x then
+10.06x: **exponent 1.00**. One size could not tell those apart, which is how a
+quadratic sat in the stdlib unnoticed. The m=10 000 point exists because the old
+implementation could not reach it in reasonable time, so the shape is confirmed
+on ground the quadratic never saw.
+
+Controls flat: `seq::dedup` 2 028 373 → 2 049 522 (1%), `seq::sum` 49 580 →
+49 727.
+
+**IT BEATS THE CEILING THAT WAS MEASURED BEFORE BUILDING IT.** Row 12 — dedupe
+through a set, the O(n) route a program could already write — reads 2 155 762
+against the new 921 495. A `LinkedHashSet` does in ONE pass what `to_set`
+followed by `to_seq` does in two structures, and it keeps insertion order, which
+the set route cannot. It is also faster than `dedup`, which removes only
+ADJACENT duplicates and so does strictly less work — because `dedup` calls guest
+code per pair and the structural `unique` calls none.
+
+TWO PATHS, UNDER THE EVIDENCE RULE THAT ALREADY EXISTED.
+
+  - STRUCTURAL: a structurally-bucketed `MezzeSet` hashes with `hashCode()`
+    through `TrieHash.mix32` and compares with `Objects.equals` — which is
+    exactly `java.util.LinkedHashSet`'s element semantics, and `LinkedHashSet`
+    adds the insertion order that "keeps the first occurrence" requires. Four
+    lines, and provably the same bucketing the set uses.
+  - WITH EVIDENCE: `ClosureHashing` already existed for this and already
+    refuses to supply one half without the other, for the reason its own
+    comment gives. An open-addressed table of indices rather than a wrapper per
+    element, so the author's `hash` runs once per element and the author's `eq`
+    only on a slot collision.
+
+`TypedASTCompiler.evidenceNativeForm` routes the structural native to the
+evidence one under the same rule it applies to `set::from_seq` — both halves
+present and at least one hand-written. No new gate.
+
+**AND THE SOUNDNESS IS PROVEN TO DEPEND ON THAT ROUTE.** A `newtype P` whose
+`Eq` and `Hash` read `x` alone makes two points with different `y` into
+duplicates — two elements where structural bucketing gives four. Disabling the
+`evidenceNativeForm` entry makes that test FAIL, so the answer comes from the
+author's instance and not from luck. This is the case that made "just route
+`unique` through a set" the wrong fix: bucketing by the compiler's hashing while
+the author's `Eq` decides equality keeps BOTH of two values the author calls
+equal — a wrong answer, not a slow one.
+
+ONLY ONE OF THE TWO CUSTOM-INSTANCE TESTS DISCRIMINATES, established by
+disabling the route rather than assumed. The "first occurrence survives" case
+passes either way: structurally those two points are distinct, so both survive
+and the first is still first. It is kept — it would catch a dedupe that keeps
+the LAST occurrence — but it is not evidence that the author's instance was used,
+and the test file says so.
+
+THE OLD PATH IS DELETED, not bypassed: `unique_with_eq`, the
+`__native_seq_unique` handler, and `SeqNatives.unique`/`distinct` are gone.
+`unique_with_eq` existed to thread an `eq` closure through a typing trick its
+comment explained; with no closure to thread there was nothing left for it to
+do.
+
+A STALE CLAIM IN THE BENCH CORRECTED IN THE SAME COMMIT: `seqsurface`'s row 1 was
+labelled `QUADRATIC` and its header asserted "unique IS QUADRATIC AND CALLS GUEST
+CODE PER COMPARISON". Both were true when written and are now false.

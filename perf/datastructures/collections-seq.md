@@ -24,7 +24,7 @@
 | `contains` | **UNMEASURED** | | | | |
 | `count` | — | | | | called in ds_matrix, fusegaps, no number |
 | `count_element` | **UNMEASURED** | | | | |
-| `dedup` | 2 028 373 | 100 | 20 283 | — | seqsurface:2 |
+| `dedup` | 2 049 522 | 100 | 20 495 | — | seqsurface:2 |
 | `dedup_by` | **UNMEASURED** | | | | |
 | `distinct` | **UNMEASURED** | | | | |
 | `drop` | **UNMEASURED** | | | | |
@@ -121,7 +121,7 @@
 | `to_set` | — | | | | called in seqsurface, no number |
 | `to_sorted_map` | **UNMEASURED** | | | | |
 | `to_sorted_set` | **UNMEASURED** | | | | |
-| `unique` | 40 243 498 | 100 | 402 434 | — | seqsurface:1 |
+| `unique` | 921 495 | 100 | 9 214 | — | seqsurface:1 |
 | `unzip` | **UNMEASURED** | | | | |
 | `update` | **UNMEASURED** | | | | |
 | `upper_bound` | **UNMEASURED** | | | | |

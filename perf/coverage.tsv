@@ -147,3 +147,5 @@ buffer	write_byte	28946	2e6	1	buffersurface:3	2026-11-13
 buffer	write	37111	2e5	1024	buffersurface:4	2026-11-13
 buffer	write_str	82060	2e5	1024	buffersurface:5	2026-11-13
 buffer	to_bytes	64455	2e5	1024	buffersurface:7	2026-11-13
+seq	unique	921495	2e4	100	seqsurface:1	2026-11-13
+seq	dedup	2049522	2e4	100	seqsurface:2	2026-11-13

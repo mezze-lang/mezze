@@ -229,20 +229,24 @@ pub let sort_by
   -> ['a] <...>
   = { xs, cmp } -> __native_seq_sort_by { xs = xs, cmp = { a, b } -> if cmp { a = a, b = b } then 0 - 1 else 1 }
 
-## Removes duplicate elements by an explicit equality. The declared `eq` param type
-## ties the comparison to the element type (the trick `sort`/`sort_by` uses so the
-## `with Eq 'a` wrappers below type-check): a top-level `let` signature's type var does
-## not flow into body annotations, but a param's declared type does unify with the arg.
-let unique_with_eq: { xs: ['a], eq: { a: 'a, b: 'a } -> Bool } -> ['a] = { xs, eq } ->
-  __native_seq_unique { xs = xs, eq = eq }
-
-## Removes duplicate elements, keeping the first occurrence.
-pub let unique: { xs: ['a] } with Eq 'a -> ['a] = { xs } ->
-  unique_with_eq { xs = xs, eq = { a, b } -> a == b }
+## Removes duplicate elements, keeping the first occurrence. O(n).
+##
+## `Hash 'a` IS PART OF THE CONTRACT, and it is what makes this linear. With
+## `Eq 'a` alone there is nothing to bucket by, so the old implementation
+## compared every element against every survivor: measured at 40 243 498 ps for
+## a hundred elements and 4 169 669 450 for a thousand — 103.6x for a tenfold
+## n, an exponent of 2.02. A caller whose element type has a hand-written `Eq`
+## and no `Hash` will not compile against this, which is the honest outcome:
+## that combination is exactly what the quadratic was paying for.
+##
+## The first occurrence is kept, so this is NOT `seq::to_set` followed by
+## `set::to_seq` — a set has no order to preserve.
+pub let unique: { xs: ['a] } with Eq 'a, Hash 'a -> ['a] = { xs } ->
+  __native_seq_unique_hashed { xs = xs }
 
 ## Alias for unique.
-pub let distinct: { xs: ['a] } with Eq 'a -> ['a] = { xs } ->
-  unique_with_eq { xs = xs, eq = { a, b } -> a == b }
+pub let distinct: { xs: ['a] } with Eq 'a, Hash 'a -> ['a] = { xs } ->
+  __native_seq_unique_hashed { xs = xs }
 
 ## Flattens a sequence of sequences into a single sequence.
 pub let flatten: { xss: [['a]] } -> ['a] = { xss } -> __native_seq_flatten { xs = xss }

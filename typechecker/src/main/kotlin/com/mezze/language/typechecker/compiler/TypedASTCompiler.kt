@@ -3265,6 +3265,12 @@ class TypedASTCompiler(
         // its own instance installed, or the map buckets by representation and
         // silently disagrees with that instance.
         "__native_map_from_seq" to "__native_map_from_seq_with_evidence",
+        // `seq::unique` buckets to find duplicates, so it needs the element's
+        // instances for the same reason `set::from_seq` does: bucketing by the
+        // compiler's hashing while the author's `Eq` says two differently
+        // represented values are equal would keep BOTH. Widening `unique` to
+        // `with Eq 'a, Hash 'a` is what makes the pair available here.
+        "__native_seq_unique_hashed" to "__native_seq_unique_hashed_with_evidence",
     )
 
     /**

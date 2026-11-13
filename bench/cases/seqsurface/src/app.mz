@@ -6,7 +6,7 @@
 ## per-element allocation, string building, a slice per window, and the one
 ## operation whose own comment admits a quadratic.
 ##
-## `unique` IS QUADRATIC AND CALLS GUEST CODE PER COMPARISON. `SeqNatives.distinct`
+## `unique` WAS QUADRATIC AND CALLED GUEST CODE PER COMPARISON. `SeqNatives.distinct`
 ## says why — "O(n^2) in the worst case because Eq is not required to be hashable
 ## (only equatable)" — so it is a deliberate trade, not an oversight. Rows 1 and
 ## 2 run it at two sizes so the shape is on the record as a number: a 10x in n
@@ -89,7 +89,14 @@ let build_dup = { i, acc, m } -> if i <= 0 then acc
 let build_strs = { i, acc } -> if i <= 0 then acc
   else build_strs { i = i - 1, acc = seq::push { xs = acc, x = "item" } }
 
-## ── 1. unique ─ THE QUADRATIC, with a guest call per comparison ──────
+## ── 1. unique ─ WAS the quadratic; O(n) since `Hash 'a` joined the signature.
+## Measured before: 40 243 498 ps at m=100 and 4 169 669 450 at m=1000, an
+## exponent of 2.02. After: 921 495 and 10 423 579, and 104 898 765 at m=10000 —
+## growth of 11.3x then 10.06x, so an exponent of 1.00. It is now FASTER than
+## row 12's via-a-set route, which was measured as the ceiling before the fix,
+## because a LinkedHashSet does in one pass what to_set/to_seq does in two
+## structures — and faster than `dedup`, which removes only ADJACENT duplicates
+## but still calls guest code per pair where this calls none.
 let l_unique = { i, acc, xs } -> if i <= 0 then acc
   else l_unique { i = i - 1, xs = xs,
     acc = acc + seq::size { xs = seq::unique { xs = xs } } }
@@ -254,7 +261,7 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
   println { msg = "seqsurface (n=$(int::to_str { n = n }) ops, $(int::to_str { n = m }) elements): $(int::to_str { n = warm }) warmup + $(int::to_str { n = k }) measured, MIN per row" }
   println { msg = "  control (floor)     : $(int::to_str { n = floor_ps }) ps/op" }
   report { idx = 1, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
-           label = "seq::unique QUADRATIC", thunk = {} -> l_unique { i = n, acc = 0, xs = dups } }
+           label = "seq::unique O(n)     ", thunk = {} -> l_unique { i = n, acc = 0, xs = dups } }
   report { idx = 2, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "seq::dedup  one pass ", thunk = {} -> l_dedup { i = n, acc = 0, xs = dups } }
   report { idx = 3, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
