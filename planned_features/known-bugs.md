@@ -4862,6 +4862,29 @@ A first reading blamed the result for losing its evidence. The probe disproved
 that — the union result still recognised a differently-spelled member — and
 localised it to the merge itself.
 
+**THE SWEEP IS CLOSED.** The method was then run over every container that
+takes an instance, and this was the only defect in any of them:
+
+| container | probed with | result |
+|---|---|---|
+| `set` | Eq coarser than representation (by tens) | **union wrong**, nine others correct |
+| `map` | the same | **merge wrong** |
+| `sorted_set` | a DESCENDING `Ord` | clean — add, remove, union, difference, take, drop, head_set, tail_set, filter, and each result re-probed by adding to it |
+| `sorted_map` | the same | clean — insert, remove, and both compositions |
+| `deque` | the same | clean — sort, min, max, contains, index_of, to_sorted_set |
+| `seq`, `list`, `nonemptylist` | fixed earlier the same day, with tests |
+
+The sorted containers are clean because the comparator rides on the CONTAINER
+and every slice inherits it; the hash containers needed the instance per
+operation, and only the two that collapse ACROSS sides could get it wrong.
+
+For the four other rebuild sites in `MezzeSet` — intersect, difference, map,
+filter — the right question is not `contains` (which answers from the call
+site's evidence whatever the storage holds) but whether INSERTING a
+differently-spelled member into the result grows it. Asked that way they are
+correct, and for a reason: each returns a subset of ONE side, whose elements
+were already collapsed when that side was built.
+
 Related: BUG 44 (a type-based fast path overriding the element's own `Ord`) and
 BUG 45 (a constraint declared and never threaded). Same family, third form:
 a REBUILD that drops the instance the collection was carrying.
