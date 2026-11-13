@@ -1355,9 +1355,22 @@ class AbilityChecker internal constructor(
             // check whether one already exists and is merely unimported.
             val home = if (abilityImpls(abilityName).isEmpty()) blanketImplHome(abilityName) else null
             if (home != null) return "`$abilityName` isn't imported here, so `$typeNames` can't use it"
+            val candidates = formatAbilityCandidates(abilityName)
+            // A candidate that asks for something is the likely fix, and the
+            // skeleton is the likely MISTAKE: writing `impl Show for W U`
+            // alongside a generic `impl Show for W 'a` is V0407 "Overlapping
+            // ability impls", so the advice as written costs a compile cycle
+            // and lands on a second error. `formatAbilityCandidates` has
+            // already worked out which candidates carry requirements.
+            val someCandidateRequires = candidates.contains("(requires ")
             val advice = registry.lookupAbility(abilityName)?.metadata?.missing
-                ?: "To enable this, implement: $skeleton"
-            return "$typeNames does not implement '$abilityName'. $advice${formatAbilityCandidates(abilityName)}"
+                ?: if (someCandidateRequires) {
+                    "An impl below applies to this shape but requires more — implement what it " +
+                        "asks for on the type argument. Only if none applies, write: $skeleton"
+                } else {
+                    "To enable this, implement: $skeleton"
+                }
+            return "$typeNames does not implement '$abilityName'. $advice$candidates"
         }
 
         return when (abilityName) {
@@ -1464,15 +1477,38 @@ class AbilityChecker internal constructor(
     private fun formatAbilityCandidates(abilityName: String): String {
         val impls = abilityImpls(abilityName)
         if (impls.isEmpty()) return ""
+        // Each impl's own `with` constraints, kept beside its rendered target.
+        // An impl may DEMAND something the ability never declares — the stdlib
+        // relies on it (`impl Eq for List 'a` requires `Eq 'a`) — and a reader
+        // told only "Available impls: impl Show for W 'a" cannot see why that
+        // impl was declined. Worse, the accompanying advice says to write
+        // `impl Show for W U`, which is V0407 "Overlapping ability impls"
+        // against the generic one: the suggestion costs a compile cycle and
+        // lands on a second error.
+        val constraintsByTarget = mutableMapOf<String, List<String>>()
         val rendered = impls.mapNotNull { info ->
             val targets = info.targetTypeAnnotations
-            when {
+            val tuple = when {
                 targets != null && targets.isNotEmpty() ->
                     targets.joinToString(", ") { renderAnnotation(it) }
                 info.targetTypes.isNotEmpty() ->
                     info.targetTypes.joinToString(", ")
                 else -> null
             }
+            if (tuple != null) {
+                val cons = info.operationConstraints
+                    .map { c ->
+                        val args = c.typeArgs.joinToString(" ") { renderAnnotation(it) }
+                        if (args.isEmpty()) c.abilityName else "${c.abilityName} $args"
+                    }
+                    .distinct()
+                // Several impls can render the same target tuple; the one that
+                // asks for something is the informative one, so it wins.
+                if (cons.isNotEmpty() || tuple !in constraintsByTarget) {
+                    constraintsByTarget[tuple] = cons
+                }
+            }
+            tuple
         }.distinct()
             // Sort before taking: the impl set's iteration order is not stable
             // (it now includes transitively-carried impls), so a fixed order
@@ -1495,7 +1531,10 @@ class AbilityChecker internal constructor(
             val n = classArgCount.coerceAtMost((parts.size - 1).coerceAtLeast(0))
             val classArgs = parts.take(n)
             val receiver = parts.drop(n).joinToString(", ")
-            renderImplSkeleton(abilityName, receiver, classArgs, withBody = false)
+            val skeleton = renderImplSkeleton(abilityName, receiver, classArgs, withBody = false)
+            val requires = constraintsByTarget[targetTuple].orEmpty()
+            if (requires.isEmpty()) skeleton
+            else skeleton + " (requires " + requires.joinToString(", ") { "`$it`" } + ")"
         }
         return "\n  Available impls: $implList$suffix"
     }
