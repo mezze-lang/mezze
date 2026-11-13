@@ -165,3 +165,15 @@ nonemptylist	sort	875225	5e3	400	nelsort	2026-11-13
 nonemptylist	sort_by	1122897	2e4	100	nelsort	2026-11-13
 nonemptylist	sort_by	4254247	5e3	400	nelsort	2026-11-13
 nonemptylist	size	11827	2e4	100	nelsort	2026-11-13
+list	reverse	6417	5e3	400	listsurface	2026-11-13
+list	intersperse	8795	5e3	400	listsurface	2026-11-13
+list	zip	21164	5e3	400	listsurface	2026-11-13
+list	unzip	14994	5e3	400	listsurface	2026-11-13
+list	init	6491	5e3	400	listsurface	2026-11-13
+list	enumerate	19386	5e3	400	listsurface	2026-11-13
+list	append	13154	5e3	400	listsurface	2026-11-13
+list	repeat	5006	5e3	400	listsurface	2026-11-13
+list	flat_map	36484	5e3	400	listsurface	2026-11-13
+list	is_sorted_by	263636	5e3	400	listsurface	2026-11-13
+list	cons	10028	5e3	1	listsurface	2026-11-13
+list	singleton	12166	5e3	1	listsurface	2026-11-13

@@ -66,6 +66,68 @@ applies · raw array-write cost where materialising is unavoidable · otherwise
 nice-to-have: a pass that emits `SlotKind.OBJECT` without looking up the type is
 a defect, not a conservative default.
 
+### `list` — five operations moved to natives that were already there
+
+14 `list` natives were registered in `NativeDispatch` and referenced NOWHERE.
+Reading that as a perf backlog is only sometimes right, and the whole value of
+this entry is the rule that separates the cases:
+
+> A dead native that would move a COMPARISON — or any guest callback — into
+> host code is deliberately dead. One that only moves DATA is a candidate.
+
+Graal cannot inline a guest function into host code, so the moment the host has
+to call back out per element the native loses. This is not a guess: every
+`SortedMap`/`SortedSet` search is guest-side ON PURPOSE and worth ~20x, with
+`floor_key` at 70x and `ceiling_key` at 66x. The 22 unused `sorted_map` natives
+are that abandoned host-side search, and wiring one up is a large REGRESSION —
+which is what this sweep was about to do before checking.
+
+Measured at four hundred elements, min of warm passes, against `list::reverse`
+as the native single-pass floor (6417):
+
+| op          | before | after  | win   | ×floor after |
+|-------------|--------|--------|-------|--------------|
+| intersperse | 30 991 |  8 795 | 3.52x | 1.37x        |
+| zip         | 67 928 | 21 164 | 3.21x | 3.30x        |
+| unzip       | 40 817 | 14 994 | 2.72x | 2.34x        |
+| init        | 13 052 |  6 491 | 2.01x | 1.01x        |
+| enumerate   | 28 982 | 19 386 | 1.49x | 3.02x        |
+
+`init` lands exactly ON the floor, which is what it should be — it copies n-1
+cells where `reverse` copies n. `zip`'s residual 3.30x is the n RECORDS it
+allocates that `reverse` does not.
+
+**`is_sorted_by` is the largest number on the board at 41x the floor and is
+deliberately untouched**, because it takes a comparator. There is a test pinning
+it so it is not "optimised" later by someone reading only the ratio.
+
+**TWO CANDIDATES REJECTED BY MEASUREMENT**, both recorded in the stdlib beside
+the code that stayed:
+
+- `append` through the native `concat`: 12 290 against 13 154, inside the
+  run-to-run spread of 13 154-15 171. Flat.
+- `__native_list_append` is not even this operation — it appends ONE ELEMENT,
+  not a list. The first dead native checked in the whole sweep, and it was a
+  false lead, which is why a dead native's NAME is worthless as evidence.
+
+**A FABRICATED NEGATIVE RESULT, nearly recorded as fact.** The batch script
+printed `. init` and then died on the next assertion — and because its
+`write()` came after, nothing was saved. So `init` was measured UNWIRED against
+itself, read 13 348 against 13 052 as noise, and the conclusion written down was
+that `MezzeList.init()` "runs the same algorithm, so there is nothing to win".
+Wired for real it is **2.01x**. The source-level reasoning was true and the
+conclusion drawn from it was false: the native does build-reversed-then-reverse,
+but in HOST code with no per-step guest dispatch and no `Option` allocation, and
+that is the 2x. A script that reports a step it did not persist is worse than
+one that fails.
+
+**THE BENCH'S OWN SINK WAS THE FIRST BUG.** Every row ended in `list::size` on
+a freshly built list, which WALKS — `MezzeCons` caches `cachedSize` but a new
+cell has none — so each row measured its operation plus a full traversal. It
+was caught because `cons`, a point operation, read 201 400 ps at n=100 and
+764 110 at n=400: worse with n, which a point operation cannot be. The sink is
+now `is_empty`.
+
 ### `nonemptylist::sort` — 5.04x, the third collection with `seq::sort`'s defect
 
 `sort` routed through `sort_by`, so each of ~n log n comparisons ran a guest
