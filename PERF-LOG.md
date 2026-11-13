@@ -66,6 +66,56 @@ applies · raw array-write cost where materialising is unavoidable · otherwise
 nice-to-have: a pass that emits `SlotKind.OBJECT` without looking up the type is
 a defect, not a conservative default.
 
+### `any` / `all` / `find` / `none` vectorise — 4.5x to 6.4x
+
+The SIMD gate admitted exactly three sink kinds — SUM, COUNT, REDUCE — so a
+chain under a SHORT-CIRCUIT sink ran the scalar loop while the identical walk
+under a `fold` vectorised. The control is what makes that visible:
+`filter+fold` is a SUM sink whose filter is a STAGE, so it vectorises at 81
+ps/elem; `any` carries its predicate on the SINK, fell out of the gate, and
+cost 477 — while doing LESS work, since the fold accumulates over every match
+and `any` stops at the first.
+
+| row | before | after | |
+|---|---|---|---|
+| `any` | 477 | **74** | 6.4x |
+| `all` | 424 | **94** | 4.5x |
+| `find` | 460 | **75** | 6.1x |
+| `sum` (floor, control) | 60 | 56 | — |
+| `filter+fold` (control) | 81 | 81 | — |
+
+`any` now essentially reaches the vectorised floor.
+
+**HOW IT VECTORISES.** The loop already computes a lane mask for the filter
+stage and a vector of elements. The sink predicate is a second mask over the
+post-map value: `any` is `anyTrue`, `none` its negation, `all` is "no SURVIVING
+lane fails" — the stage mask is ANDed in, because an element the filter dropped
+is not a counterexample — and `find` takes `firstTrue`, which is the first match
+in SOURCE order because lanes ascend.
+
+**MEASUREMENT, HONESTLY.** These are MIN of many passes, and min is the right
+estimator here because contention only ever inflates. The machine became
+heavily loaded partway through (load 4.1 rising to 6.4) and the readings went
+BIMODAL: with the `sum` floor healthy at 59-85 in every case, `any` read 74 and
+75 in two passes and 5 147 and 6 473 in two others, same binary. A `filter+fold`
+control read 5 117, 4 943, then 164 across three consecutive runs. Both arms
+degraded — HEAD's own `any` read 898 where it had measured 477 — so the
+comparison above is between runs whose CONTROLS sat at their known-good values,
+and a run whose control is 50x off is not evidence in either direction.
+
+A healthy `sum` does NOT by itself validate a run: it vectorises trivially and
+stayed fast through passes where every predicate-bearing row was 70x slower.
+The control that matters for these rows is `filter+fold`.
+
+**WHAT THE TESTS PIN**, because SIMD only engages past `SIMD_THRESHOLD` and
+this loop already has a stage-order bug on record that was CORRECT at small
+sizes and wrong at scale: a match in the first lane and in the last; a match
+only in the SCALAR TAIL past the vector bound, which is a second implementation
+of the same predicate and can drift from the first; `find` returning the lowest
+set lane when several match at once; `all` with a filter, where a dropped
+element must not count as a counterexample; and the same questions below the
+threshold, where the scalar path answers and the two must agree.
+
 ### `iter::flat_map` fuses — 27.4x, the largest measured gap in the iter table
 
 The last of the four stages `NativeHofNames` declared and `ChainCanonicalizer`

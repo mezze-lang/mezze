@@ -3670,13 +3670,32 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             if (fromArray
                     && FlpSimd.AVAILABLE
                     && n >= FlpSimd.SIMD_THRESHOLD
-                    && (sinkKind == FLP_SINK_SUM || sinkKind == FLP_SINK_COUNT
-                        || sinkKind == FLP_SINK_REDUCE)
-                    && sinkPredCmpOp < 0) {
+                    && ((sinkKind == FLP_SINK_SUM || sinkKind == FLP_SINK_COUNT
+                         || sinkKind == FLP_SINK_REDUCE)
+                        // A SHORT-CIRCUIT sink vectorises too: compare a
+                        // vector of lanes and test the mask. `any` is
+                        // anyTrue, `all` is "no surviving lane fails", `find`
+                        // takes firstTrue — and lanes ascend, so the lowest
+                        // set lane is the first match in SOURCE order.
+                        //
+                        // These were excluded, so a chain under `any` ran the
+                        // scalar loop while the same walk under a `fold`
+                        // vectorised: 477 ps/elem against 81 for a filter+fold
+                        // doing MORE work. The win is in the walk, not the
+                        // exit — a predicate matching at element 0 returns
+                        // immediately either way.
+                        || sinkKind == FLP_SINK_ANY || sinkKind == FLP_SINK_ALL
+                        || sinkKind == FLP_SINK_FIND || sinkKind == FLP_SINK_NONE)
+                    // Still required for the ACCUMULATING sinks, which have no
+                    // sink predicate of their own and never had one here.
+                    && (sinkPredCmpOp < 0
+                        || sinkKind == FLP_SINK_ANY || sinkKind == FLP_SINK_ALL
+                        || sinkKind == FLP_SINK_FIND || sinkKind == FLP_SINK_NONE)) {
                 return FlpSimd.flpArraySimd(data, n, sinkKind,
                         mapOp, mapOperand, selfMap, extraOps, extraLits,
                         filterPreOp, filterPreRhs, filterCmpOp, filterCmpRhs,
-                        foldOp, foldInit, filterFirst);
+                        foldOp, foldInit, filterFirst,
+                        sinkPredPreOp, sinkPredPreRhs, sinkPredCmpOp, sinkPredCmpRhs);
             }
 
             long acc = foldInit;
@@ -4026,13 +4045,32 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             // Gated off on SVM and when jdk.incubator.vector is absent.
             if (FlpSimd.AVAILABLE
                     && n >= FlpSimd.SIMD_THRESHOLD
-                    && (sinkKind == FLP_SINK_SUM || sinkKind == FLP_SINK_COUNT
-                        || sinkKind == FLP_SINK_REDUCE)
-                    && sinkPredCmpOp < 0) {
+                    && ((sinkKind == FLP_SINK_SUM || sinkKind == FLP_SINK_COUNT
+                         || sinkKind == FLP_SINK_REDUCE)
+                        // A SHORT-CIRCUIT sink vectorises too: compare a
+                        // vector of lanes and test the mask. `any` is
+                        // anyTrue, `all` is "no surviving lane fails", `find`
+                        // takes firstTrue — and lanes ascend, so the lowest
+                        // set lane is the first match in SOURCE order.
+                        //
+                        // These were excluded, so a chain under `any` ran the
+                        // scalar loop while the same walk under a `fold`
+                        // vectorised: 477 ps/elem against 81 for a filter+fold
+                        // doing MORE work. The win is in the walk, not the
+                        // exit — a predicate matching at element 0 returns
+                        // immediately either way.
+                        || sinkKind == FLP_SINK_ANY || sinkKind == FLP_SINK_ALL
+                        || sinkKind == FLP_SINK_FIND || sinkKind == FLP_SINK_NONE)
+                    // Still required for the ACCUMULATING sinks, which have no
+                    // sink predicate of their own and never had one here.
+                    && (sinkPredCmpOp < 0
+                        || sinkKind == FLP_SINK_ANY || sinkKind == FLP_SINK_ALL
+                        || sinkKind == FLP_SINK_FIND || sinkKind == FLP_SINK_NONE)) {
                 return FlpSimd.flpRangeSimd(start, n, sinkKind,
                         mapOp, mapOperand, selfMap, extraOps, extraLits,
                         filterPreOp, filterPreRhs, filterCmpOp, filterCmpRhs,
-                        foldOp, foldInit, filterFirst);
+                        foldOp, foldInit, filterFirst,
+                        sinkPredPreOp, sinkPredPreRhs, sinkPredCmpOp, sinkPredCmpRhs);
             }
 
             long acc = foldInit;

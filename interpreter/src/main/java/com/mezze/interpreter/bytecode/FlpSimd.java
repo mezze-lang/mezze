@@ -67,6 +67,24 @@ final class FlpSimd {
 
     private FlpSimd() {}
 
+    /**
+     * The SINK predicate as a lane mask, ANDed with the stage mask.
+     *
+     * <p>The sink predicate is NOT the filter stage: `iter::any { it, p }`
+     * carries `p` on the sink, and a chain can have both. It is applied to the
+     * POST-MAP value, which is where the scalar loop applies it.
+     *
+     * <p>A sink with no predicate at all — `any` over a bare chain — is "every
+     * surviving element qualifies", so the stage mask is the answer.
+     */
+    private static VectorMask<Long> sinkMask(LongVector v, VectorMask<Long> mask,
+                                             int sinkPredPreOp, LongVector sinkPreRhsVec,
+                                             int sinkPredCmpOp, LongVector sinkCmpRhsVec) {
+        if (sinkPredCmpOp < 0) return mask;
+        LongVector sv = sinkPredPreOp >= 0 ? simdOp(sinkPredPreOp, v, sinkPreRhsVec) : v;
+        return simdCmp(sinkPredCmpOp, sv, sinkCmpRhsVec).and(mask);
+    }
+
     // ── Range pipeline: generate values on-the-fly ──
 
     /**
@@ -80,11 +98,15 @@ final class FlpSimd {
                                int extraOps, long[] extraLits,
                                int filterPreOp, long filterPreRhs,
                                int filterCmpOp, long filterCmpRhs,
-                               int foldOp, long foldInit, boolean filterFirst) {
+                               int foldOp, long foldInit, boolean filterFirst,
+                               int sinkPredPreOp, long sinkPredPreRhs,
+                               int sinkPredCmpOp, long sinkPredCmpRhs) {
         // Pre-compute broadcast vectors
         LongVector filterPreRhsVec = LongVector.broadcast(Vectors.SPECIES, filterPreRhs);
         LongVector filterCmpRhsVec = LongVector.broadcast(Vectors.SPECIES, filterCmpRhs);
         LongVector mapOperandVec   = LongVector.broadcast(Vectors.SPECIES, mapOperand);
+        LongVector sinkPreRhsVec   = LongVector.broadcast(Vectors.SPECIES, sinkPredPreRhs);
+        LongVector sinkCmpRhsVec   = LongVector.broadcast(Vectors.SPECIES, sinkPredCmpRhs);
         LongVector[] extraVecs     = broadcastExtras(extraLits);
 
         // Iota vector: [0, 1, 2, ..., VL-1]
@@ -94,6 +116,11 @@ final class FlpSimd {
 
         LongVector accVec = LongVector.zero(Vectors.SPECIES);
         long countAcc = 0;
+        // Short-circuit state, with the SAME meaning the scalar loop gives it:
+        // for ANY and FIND `found` is a match, for ALL and NONE it is a
+        // COUNTEREXAMPLE, and `flpResult` reads it that way for each kind.
+        boolean found = false;
+        long foundVal = 0;
         boolean reduceNeedInit = sinkKind == MezzeBytecodeRootNode.FLP_SINK_REDUCE;
         long scalarAcc = foldInit;
 
@@ -140,6 +167,29 @@ final class FlpSimd {
                 accVec = accVec.add(v, mask);
             } else if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_COUNT) {
                 countAcc += mask.trueCount();
+            } else if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_ANY
+                    || sinkKind == MezzeBytecodeRootNode.FLP_SINK_FIND
+                    || sinkKind == MezzeBytecodeRootNode.FLP_SINK_NONE) {
+                // A HIT in any lane ends it. Lanes ascend, so the lowest set
+                // lane is the first match in SOURCE order, which is what
+                // `find` has to return.
+                VectorMask<Long> hit = sinkMask(v, mask, sinkPredPreOp,
+                        sinkPreRhsVec, sinkPredCmpOp, sinkCmpRhsVec);
+                if (hit.anyTrue()) {
+                    found = true;
+                    if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_FIND) {
+                        foundVal = v.lane(hit.firstTrue());
+                    }
+                    break;
+                }
+            } else if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_ALL) {
+                // `found` is a COUNTEREXAMPLE here, as in the scalar loop: a
+                // surviving lane that FAILS the predicate. A lane the filter
+                // dropped is not a counterexample, which is why the stage mask
+                // is ANDed in rather than ignored.
+                VectorMask<Long> pass = sinkMask(v, mask, sinkPredPreOp,
+                        sinkPreRhsVec, sinkPredCmpOp, sinkCmpRhsVec);
+                if (mask.andNot(pass).anyTrue()) { found = true; break; }
             } else if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_REDUCE) {
                 // For reduce: accumulate with the fold op.
                 // First passing element initializes the accumulator.
@@ -179,7 +229,9 @@ final class FlpSimd {
         }
 
         // ── Scalar tail ──
-        for (; i < n; i++) {
+        // `found` means the vector loop already answered; the remaining
+        // elements cannot change it, for any of these four sinks.
+        for (; i < n && !found; i++) {
             long v = start + i;
             if (filterCmpOp >= 0 && filterFirst) {
                 long fv = filterPreOp >= 0
@@ -201,12 +253,37 @@ final class FlpSimd {
             } else if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_REDUCE) {
                 if (reduceNeedInit) { scalarAcc = v; reduceNeedInit = false; }
                 else scalarAcc = flpOp(foldOp, scalarAcc, v);
+            } else {
+                // The same four sinks, element at a time, for the elements
+                // past the vector bound. Written exactly as the scalar
+                // pipeline writes them so the two cannot drift.
+                boolean hit;
+                if (sinkPredCmpOp < 0) {
+                    hit = true;
+                } else {
+                    long sv = sinkPredPreOp >= 0
+                            ? flpOp(sinkPredPreOp, v, sinkPredPreRhs) : v;
+                    hit = flpCmp(sinkPredCmpOp, sv, sinkPredCmpRhs);
+                }
+                if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_ALL) {
+                    if (!hit) found = true;
+                } else if (hit) {
+                    found = true;
+                    if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_FIND) foundVal = v;
+                }
             }
         }
 
         // ── Reduce vectors to scalar ──
         // scalarAcc holds foldInit + any scalar-tail contributions.
         // accVec holds the vectorized partial sums. Combine them.
+        if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_ANY
+                || sinkKind == MezzeBytecodeRootNode.FLP_SINK_ALL
+                || sinkKind == MezzeBytecodeRootNode.FLP_SINK_FIND
+                || sinkKind == MezzeBytecodeRootNode.FLP_SINK_NONE) {
+            return MezzeBytecodeRootNode.FusedLongPipeline.flpResult(
+                    sinkKind, 0, found, foundVal);
+        }
         if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_SUM) {
             long sum = scalarAcc + accVec.reduceLanes(VectorOperators.ADD);
             return MezzeBytecodeRootNode.FusedLongPipeline.flpResult(sinkKind, sum, false, 0);
@@ -233,14 +310,23 @@ final class FlpSimd {
                                int extraOps, long[] extraLits,
                                int filterPreOp, long filterPreRhs,
                                int filterCmpOp, long filterCmpRhs,
-                               int foldOp, long foldInit, boolean filterFirst) {
+                               int foldOp, long foldInit, boolean filterFirst,
+                               int sinkPredPreOp, long sinkPredPreRhs,
+                               int sinkPredCmpOp, long sinkPredCmpRhs) {
         LongVector filterPreRhsVec = LongVector.broadcast(Vectors.SPECIES, filterPreRhs);
         LongVector filterCmpRhsVec = LongVector.broadcast(Vectors.SPECIES, filterCmpRhs);
         LongVector mapOperandVec   = LongVector.broadcast(Vectors.SPECIES, mapOperand);
+        LongVector sinkPreRhsVec   = LongVector.broadcast(Vectors.SPECIES, sinkPredPreRhs);
+        LongVector sinkCmpRhsVec   = LongVector.broadcast(Vectors.SPECIES, sinkPredCmpRhs);
         LongVector[] extraVecs     = broadcastExtras(extraLits);
 
         LongVector accVec = LongVector.zero(Vectors.SPECIES);
         long countAcc = 0;
+        // Short-circuit state, with the SAME meaning the scalar loop gives it:
+        // for ANY and FIND `found` is a match, for ALL and NONE it is a
+        // COUNTEREXAMPLE, and `flpResult` reads it that way for each kind.
+        boolean found = false;
+        long foundVal = 0;
         boolean reduceNeedInit = sinkKind == MezzeBytecodeRootNode.FLP_SINK_REDUCE;
         long scalarAcc = foldInit;
 
@@ -276,6 +362,29 @@ final class FlpSimd {
                 accVec = accVec.add(v, mask);
             } else if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_COUNT) {
                 countAcc += mask.trueCount();
+            } else if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_ANY
+                    || sinkKind == MezzeBytecodeRootNode.FLP_SINK_FIND
+                    || sinkKind == MezzeBytecodeRootNode.FLP_SINK_NONE) {
+                // A HIT in any lane ends it. Lanes ascend, so the lowest set
+                // lane is the first match in SOURCE order, which is what
+                // `find` has to return.
+                VectorMask<Long> hit = sinkMask(v, mask, sinkPredPreOp,
+                        sinkPreRhsVec, sinkPredCmpOp, sinkCmpRhsVec);
+                if (hit.anyTrue()) {
+                    found = true;
+                    if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_FIND) {
+                        foundVal = v.lane(hit.firstTrue());
+                    }
+                    break;
+                }
+            } else if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_ALL) {
+                // `found` is a COUNTEREXAMPLE here, as in the scalar loop: a
+                // surviving lane that FAILS the predicate. A lane the filter
+                // dropped is not a counterexample, which is why the stage mask
+                // is ANDed in rather than ignored.
+                VectorMask<Long> pass = sinkMask(v, mask, sinkPredPreOp,
+                        sinkPreRhsVec, sinkPredCmpOp, sinkCmpRhsVec);
+                if (mask.andNot(pass).anyTrue()) { found = true; break; }
             } else if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_REDUCE) {
                 if (reduceNeedInit && mask.anyTrue()) {
                     int firstLane = mask.firstTrue();
@@ -308,7 +417,9 @@ final class FlpSimd {
         }
 
         // Scalar tail
-        for (; i < n; i++) {
+        // `found` means the vector loop already answered; the remaining
+        // elements cannot change it, for any of these four sinks.
+        for (; i < n && !found; i++) {
             long v = data[i];
             if (filterCmpOp >= 0 && filterFirst) {
                 long fv = filterPreOp >= 0 ? flpOp(filterPreOp, v, filterPreRhs) : v;
@@ -328,9 +439,34 @@ final class FlpSimd {
             } else if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_REDUCE) {
                 if (reduceNeedInit) { scalarAcc = v; reduceNeedInit = false; }
                 else scalarAcc = flpOp(foldOp, scalarAcc, v);
+            } else {
+                // The same four sinks, element at a time, for the elements
+                // past the vector bound. Written exactly as the scalar
+                // pipeline writes them so the two cannot drift.
+                boolean hit;
+                if (sinkPredCmpOp < 0) {
+                    hit = true;
+                } else {
+                    long sv = sinkPredPreOp >= 0
+                            ? flpOp(sinkPredPreOp, v, sinkPredPreRhs) : v;
+                    hit = flpCmp(sinkPredCmpOp, sv, sinkPredCmpRhs);
+                }
+                if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_ALL) {
+                    if (!hit) found = true;
+                } else if (hit) {
+                    found = true;
+                    if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_FIND) foundVal = v;
+                }
             }
         }
 
+        if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_ANY
+                || sinkKind == MezzeBytecodeRootNode.FLP_SINK_ALL
+                || sinkKind == MezzeBytecodeRootNode.FLP_SINK_FIND
+                || sinkKind == MezzeBytecodeRootNode.FLP_SINK_NONE) {
+            return MezzeBytecodeRootNode.FusedLongPipeline.flpResult(
+                    sinkKind, 0, found, foundVal);
+        }
         if (sinkKind == MezzeBytecodeRootNode.FLP_SINK_SUM) {
             long sum = scalarAcc + accVec.reduceLanes(VectorOperators.ADD);
             return MezzeBytecodeRootNode.FusedLongPipeline.flpResult(sinkKind, sum, false, 0);
