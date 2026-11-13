@@ -161,6 +161,13 @@ class SortedSetOrderOperandTest {
         "1, 3, 5 means the mapped set was ordered naturally, ignoring R's Ord",
     )
 
+    // WHAT THIS TEST DOES NOT SHOW, and it matters: the source above is a
+    // TOP-LEVEL expression, and that — not the `let` — is what makes it
+    // correct. The identical binding INSIDE A FUNCTION loses the order, so a
+    // built program, where everything sits under `main`, never takes this
+    // path. See `Bug46TargetOrderTest`, which pins the in-function behaviour
+    // and the direction it actually follows: the SOURCE element's `Ord`.
+
     /**
      * THE SAME MAP IN ARGUMENT POSITION STILL LOSES THE ORDER, and this pins
      * that rather than hiding it.

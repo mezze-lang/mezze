@@ -4771,7 +4771,54 @@ NINE places where a type-based shortcut or an unthreaded constraint silently
 disagreed with a hand-written `Ord`. Worth more as a pattern than as nine fixes:
 the tell is a native that decides an ORDER without being handed one.
 
-## BUG 46 — `sorted_set::map`'s `Ord 'b` dictionary does not arrive in argument position
+## BUG 46 — `sorted_set::map` orders by the SOURCE element's `Ord` inside a function
+
+**RE-CHARACTERISED 2026-11-13**, same day it was filed. The original heading
+said "does not arrive in argument position" and the original entry said a
+let-BOUND map keeps the target order. BOTH ARE WRONG, and the entry is kept
+below with this correction on top because the wrong version had a test pinning
+it.
+
+MEASURED across four shapes:
+
+    top-level, bound          [5, 3, 1]   correct
+    top-level, argument pos   [1, 3, 5]
+    inside a function, bound  [1, 3, 5]
+    inside a function, arg    [1, 3, 5]
+
+The saving condition is being a TOP-LEVEL EXPRESSION, not being bound.
+Annotating the binding (`let m: SortedSet R = ...`) or the lambda's return does
+not help. **A BUILT PROGRAM LOSES THE ORDER IN EVERY SHAPE**, because
+everything there sits inside `main` — which is why this looked narrower than it
+is: the test suite's sources are top-level expressions and a real program's
+never are.
+
+**IT IS NOT "NATURAL ORDER".** Reading `1, 3, 5` as natural was a coincidence
+of the source being Int. With a DESCENDING source and an ASCENDING target the
+result is descending; with the directions swapped it is ascending. It follows
+the SOURCE both times, so `with Ord 'b` is being discharged with the `Ord 'a`
+dictionary.
+
+**TWO MECHANISMS RULED OUT BY EXPERIMENT:**
+
+  - NOT the D-1 collapse (a top-level `let` under a constraint collapsing the
+    variable onto the one type with a hand-written impl). Adding a SECOND type
+    with its own hand-written `Ord` leaves the top-level case correct, so it
+    genuinely resolves the target there.
+  - NOT the `VAR_SEP` prefix scan in `abilityOpDictSlot`, which would hand back
+    another variable's slot. Instrumented, it never fires for `lt`/`le`/`gt`/`ge`
+    here: the comparator closure lives in the STDLIB and was compiled with it,
+    so what varies is the dictionary the CALLER passes at the call site. That is
+    where to look next.
+
+`Bug46TargetOrderTest` pins all of this, asserting the broken behaviour on
+purpose in both directions. The older `SortedSetOrderOperandTest` case that
+reads "a let-bound map keeps the target order" is TRUE ONLY AT TOP LEVEL and
+now says so.
+
+### The original entry, kept for its narrowing work
+
+
 
 **OPEN.** Found 2026-11-13 while fixing BUG 44's construction half.
 
