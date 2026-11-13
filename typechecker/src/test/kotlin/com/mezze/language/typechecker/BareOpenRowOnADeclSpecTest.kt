@@ -36,13 +36,36 @@ import org.junit.jupiter.api.Test
  * is that the wrong channel reports it, and in the channel users actually run,
  * nothing does.
  *
- * THE FIX, when it is taken: reject at the annotation with T0210, the way
- * `validateEffectsNotOverpromised` handles the opposite direction.
- * `AnnotationValidator.hasBareOpenRow` already identifies the shape and is
- * currently "used only to improve a diagnostic". Evidence that rejecting is
- * safe: this same invariant runs over the ENTIRE stdlib in the interpreter gate
- * and passes, so nothing legitimate depends on the laundering. Flip the two
- * tests below to `rejects(..., "T0210", ...)` at that point.
+ * THE WANTED DIAGNOSTIC names the row mismatch rather than the generic
+ * annotation-vs-body story: "the row `<...>` does not match <Tick>. `<...>` is a
+ * row VARIABLE — it stands for whatever a caller's callbacks bring — so it
+ * cannot absorb <Tick>, which this body performs itself", directing to
+ * `<Tick, ...>` or `<Tick>`.
+ *
+ * THE OBVIOUS FIX IS WRONG — tried 2026-11-13 and reverted. Adding that check to
+ * `validateEffectsNotOverpromised`, comparing the annotation's row against the
+ * INFERRED row, breaks stdlib precompilation. Two reasons, both instructive:
+ *
+ *  1. By the time that validator runs the row is ALREADY ERASED — the inferred
+ *     type is `{} -> Int`, so there is nothing concrete left to compare and the
+ *     check never fires on the case it was written for.
+ *  2. Where it does fire, it fires on legitimate code.
+ *     `std/effects/reader.mz:45`
+ *     `with_reader: { val: 'a, body: {} -> 'b <Reader, ...> } -> 'b <...>` has a
+ *     bare own row and a body that performs Reader and then DISCHARGES it with a
+ *     handler. The invariant's own message says the part I missed: "handler-
+ *     discharged effects are excluded".
+ *
+ * So the check needs the PERFORMED-AND-NOT-DISCHARGED set, which is exactly what
+ * `InvariantChecker.collectPerformedNotDischarged` computes from the typed body.
+ * That argues for PROMOTING the invariant's rule to a user-facing diagnostic —
+ * it already excludes discharged effects and already names them — rather than
+ * writing a second, weaker one against the inferred row. Its `if (anyOpen)
+ * continue` would need narrowing too: a bare open row with no named effects is
+ * the one case where "open rows are ⊇ anything" does not hold.
+ *
+ * Flip the two invariant-asserting tests below to `rejects(..., "T0210", ...)`
+ * when that lands.
  */
 class BareOpenRowOnADeclSpecTest : VariantSpecBase() {
 
