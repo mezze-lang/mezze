@@ -7,11 +7,17 @@ import com.mezze.language.ast.ScopedEffectConstants
 
 object EffectHandlerBindings {
 
+    /**
+     * [performReturnVar] lets the CALLER own the payload variable, so the type
+     * the solve unifies it with survives the solve. Defaults to a fresh one for
+     * callers that do not care.
+     */
     fun extendWithAbortAndResume(
         context: TypingContext,
-        opReturnType: MezzeType
+        opReturnType: MezzeType,
+        performReturnVar: MezzeType? = null,
     ): TypingContext {
-        val performReturn = MezzeType.VarType(TypeVar.fresh())
+        val performReturn = performReturnVar ?: MezzeType.VarType(TypeVar.fresh())
         return context
             .extendMono(ScopedEffectConstants.RESUME, resumeType(opReturnType, performReturn))
             .extendMono(ScopedEffectConstants.ABORT, abortType(performReturn))

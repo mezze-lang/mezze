@@ -709,6 +709,13 @@ class TypeChecker(
                         checkConstructorPayloads(constraintResults, substitution, registry)
                     }
                 )
+                collectedErrors.addAll(
+                    checkAbortPayloads(
+                        constraintResults,
+                        programConstraintResult.abortPayloadVars,
+                        substitution,
+                    )
+                )
                 // S0.4/#373 — POST-SOLVE SUBSTITUTION IDEMPOTENCE, now that
                 // saturate() above establishes it. `apply(apply(t)) == apply(t)`: no
                 // stored RHS still mentions a var the same substitution rewrites.
@@ -1215,6 +1222,66 @@ class TypeChecker(
      * see VariantStructuralAliasExtTest), and arity is reported elsewhere in its
      * own words.
      */
+    /**
+     * A performer's `abort { val = … }` decides what the whole `perform` block
+     * yields, so it must agree with what the site does with that block.
+     *
+     * `ContextBuilder.extractSuspensionType` already compares them, but it types
+     * the payload by walking PARSED expressions — fine for a literal, impossible
+     * for a call, where it falls back to a fresh variable that unifies with
+     * anything and makes the comparison vacuous. MEASURED before this check:
+     *
+     *     impl Ex for AbortComputed having 'error = Str where {
+     *       throw = { error } -> abort { val = make_str {} }   # make_str : {} -> Str
+     *     }
+     *     pub let run: {} -> Int <*> = {} -> perform AbortComputed in divide { a = 10, b = 0 }
+     *
+     * checked clean, and the Str reached an Int-typed site.
+     *
+     * Why POST-SOLVE rather than fed forward: the op-body solve that computes the
+     * payload's real type runs during constraint generation, and a `perform` site
+     * may precede the impl in the file. `ImplValidator` therefore keeps the
+     * payload VARIABLE and this resolves it once everything is solved — the same
+     * reason `checkConstructorPayloads` above exists.
+     *
+     * Conservative on purpose: only a pair that both resolve to CONCRETE and
+     * DIFFERENT types is reported. An unresolved variable means the program did
+     * not pin it, and three checks earlier in this sweep were reverted for
+     * firing on shapes their authors had not surveyed.
+     */
+    private fun checkAbortPayloads(
+        constraintResults: Map<String, ConstraintResult>,
+        abortPayloadVars: Map<String, MezzeType>,
+        substitution: Substitution,
+    ): List<TypeChecker.TypeCheckError> {
+        if (abortPayloadVars.isEmpty()) return emptyList()
+        val errors = mutableListOf<TypeChecker.TypeCheckError>()
+        for (result in constraintResults.values) {
+            for ((loc, handled) in result.performSiteExpectation) {
+                for ((performerName, blockType) in handled) {
+                    val payloadVar = abortPayloadVars[performerName] ?: continue
+                    val payload = substitution.apply(payloadVar)
+                    val expected = substitution.apply(blockType)
+                    if (payload.holdsTypeVar() || expected.holdsTypeVar()) continue
+                    if (payload == expected) continue
+                    errors.add(
+                        TypeChecker.TypeCheckError(
+                            phase = "AbortPayload",
+                            message = "Performer '$performerName' aborts with " +
+                                "${prettyPrintType(payload)}, but this `perform` block is used " +
+                                "as ${prettyPrintType(expected)}.\n" +
+                                "`abort { val = … }` decides what the whole block yields, so the " +
+                                "payload and the block's type are the same thing.",
+                            loc = loc,
+                            code = ErrorCode.T0201_TYPE_MISMATCH,
+                        )
+                    )
+                }
+            }
+        }
+        return errors
+    }
+
     private fun checkConstructorPayloads(
         constraintResults: Map<String, ConstraintResult>,
         substitution: Substitution,

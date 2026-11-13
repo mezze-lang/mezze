@@ -503,6 +503,21 @@ data class ConstraintResult(
      * that the inference was at fault rather than the program.
      */
     val performBodyFnRow: Map<Loc, Set<String>> = emptyMap(),
+    /**
+     * Per `perform` site: the performers handled there, paired with the type the
+     * perform EXPRESSION produces.
+     *
+     * The other half of the computed-abort-payload check. A performer's
+     * `abort { val = … }` decides what the whole block yields, and
+     * `ContextBuilder.extractSuspensionType` can only type that payload when it
+     * is a literal — for a call it falls back to a fresh variable, which unifies
+     * with anything and makes the site comparison vacuous. The op-body solve DOES
+     * compute the real type (`ImplValidator.drainAbortPayloadVars`), but it runs
+     * during constraint generation and a perform site may precede the impl in the
+     * file, so it cannot be fed forward. Both ends are therefore recorded and
+     * compared after solving.
+     */
+    val performSiteExpectation: Map<Loc, List<Pair<String, MezzeType>>> = emptyMap(),
     // Per-lambda solved PARAMETER types, keyed by the lambda's Loc. A lambda that
     // is an argument to a callee whose type nothing declares — the comparator in
     // `__native_seq_sort_by { xs = xs, cmp = { a, b } -> … }` — gets no expected
@@ -691,6 +706,7 @@ data class ConstraintResult(
             doBindingSolvedTypes = overlay(subs) { it.doBindingSolvedTypes },
             performFullyDischarged = overlay(subs) { it.performFullyDischarged },
             performBodyFnRow = overlay(subs) { it.performBodyFnRow },
+            performSiteExpectation = overlay(subs) { it.performSiteExpectation },
             lambdaParamTypes = overlay(subs) { it.lambdaParamTypes },
             lambdaRowInstances = overlay(subs) { it.lambdaRowInstances },
         )

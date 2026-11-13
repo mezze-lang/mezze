@@ -135,8 +135,8 @@ class PerformAbortPayloadSpecTest : VariantSpecBase() {
         )
     }
 
-    @Test fun `a computed abort payload still goes unchecked`() {
-        accepts(
+    @Test fun `a computed abort payload is checked`() {
+        rejects(
             """
             $exEffect
             pub let make_str: {} -> Str = {} -> "computed"
@@ -147,15 +147,19 @@ class PerformAbortPayloadSpecTest : VariantSpecBase() {
             pub let run: {} -> Int <*> = {} -> perform AbortComputed in divide { a = 10, b = 0 }
             $MAIN
             """,
-            "BREAK, asserted so it is not mistaken for fixed. Identical to the " +
-                "refused literal case except the payload is a CALL, which this " +
-                "walker cannot type: it runs at context-build time over parsed, " +
-                "un-typechecked expressions. Adding cases will never finish the " +
-                "job — the fix is to compare the SOLVED `performReturn` from " +
-                "ImplValidator's per-op solve in a post-solve pass, the way " +
-                "TypeChecker.checkConstructorPayloads already does for a check that " +
-                "deferred and never came back. Flip this to `rejects` when that " +
-                "lands.",
+            "T0201",
+            "FIXED, and by the route this comment predicted. The payload is a " +
+                "CALL, which `extractSuspensionType`'s walker cannot type — it " +
+                "runs at context-build time over parsed, un-typechecked " +
+                "expressions and falls back to a fresh variable that unifies with " +
+                "anything. Adding cases there would never have finished the job. " +
+                "`ImplValidator` now KEEPS the `abort` payload variable its op-body " +
+                "solve already unified with the real type, and " +
+                "`TypeChecker.checkAbortPayloads` resolves it post-solve against " +
+                "each perform site's block type — post-solve because that solve " +
+                "runs during constraint generation and a site may precede the impl " +
+                "in the file. Conservative: reported only when both sides resolve " +
+                "CONCRETE and differ.",
         )
     }
 

@@ -70,6 +70,24 @@ internal class ImplValidator(
      *
      * The work was always being done. This is the channel that keeps it.
      */
+    /**
+     * Each performer's `abort { val = … }` payload type, as a VARIABLE the
+     * op-body solve will have unified with the real payload.
+     *
+     * `ContextBuilder.extractSuspensionType` guesses this syntactically, walking
+     * PARSED expressions — which works for a literal and cannot work for a call,
+     * where it falls back to a fresh variable that unifies with anything. The
+     * solve already computes the answer; this keeps it so a post-solve pass can
+     * compare it against what each `perform` site expects.
+     */
+    private val abortPayloadVars = mutableMapOf<String, MezzeType>()
+
+    fun drainAbortPayloadVars(): Map<String, MezzeType> {
+        val snapshot = abortPayloadVars.toMap()
+        abortPayloadVars.clear()
+        return snapshot
+    }
+
     private val implOpSolutions = mutableListOf<ImplOpSolution>()
 
     fun drainImplOpSolutions(): List<ImplOpSolution> {
@@ -1191,8 +1209,14 @@ internal class ImplValidator(
                     validationReason = "Effect body validation",
                     recordLiteralBindings = scopeRecordBindings,
                     prepareContext = { ctx ->
+                        // The payload variable is created HERE rather than inside
+                        // the helper, so it survives the solve and a post-solve
+                        // pass can resolve what `abort { val = … }` actually
+                        // produced. See `drainAbortPayloadVars`.
+                        val payloadVar = MezzeType.VarType(TypeVar.fresh())
+                        abortPayloadVars[impl.performerName] = payloadVar
                         EffectHandlerBindings
-                            .extendWithAbortAndResume(ctx, expectedReturnType)
+                            .extendWithAbortAndResume(ctx, expectedReturnType, payloadVar)
                     },
                     // Whatever variables SURVIVE the `having` substitution are the
                     // site's — EXCEPT the ones the effect declared as associated

@@ -614,6 +614,13 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
         performFullyDischarged = exprResult.performFullyDischarged + (expr.loc to fullyDischargedHere),
         performBodyFnRow = exprResult.performBodyFnRow +
             (if (bodyFnRow != null) mapOf(expr.loc to bodyFnRow) else emptyMap()),
+        // The site end of the computed-abort-payload check: which performers are
+        // handled here, and what this perform EXPRESSION produces. Compared
+        // post-solve against each performer's solved `abort` payload, because
+        // the payload's real type is only known after the op-body solve and a
+        // site may precede the impl in the file.
+        performSiteExpectation = exprResult.performSiteExpectation +
+            mapOf(expr.loc to expr.handlers.map { it.performer.localName to resultType }),
         // BUG 3: a nested perform's dead handlers must be unioned, not replaced.
         unusedHandlers = exprResult.unusedHandlers + deadHandlers,
     )

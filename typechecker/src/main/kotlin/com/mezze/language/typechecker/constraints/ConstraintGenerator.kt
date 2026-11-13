@@ -37,6 +37,10 @@ data class ProgramConstraintResult(
     // merges their side tables and substitutions into the module's, so emit can
     // read an impl body's types instead of rebuilding them from nothing.
     val implOpSolutions: List<ImplOpSolution> = emptyList(),
+    /** Each performer's `abort { val = … }` payload, as a variable the op-body
+     *  solve unified with the real type. Resolved after solving — see
+     *  `TypeChecker.checkAbortPayloads`. */
+    val abortPayloadVars: Map<String, MezzeType> = emptyMap(),
 ) {
 }
 
@@ -787,6 +791,7 @@ class ConstraintGenerator(
             collectedTypeCheckErrors = collectedTypeCheckErrors,
             inferredImplConstraints = implValidator.drainInferredImplConstraints(),
             implOpSolutions = implValidator.drainImplOpSolutions(),
+            abortPayloadVars = implValidator.drainAbortPayloadVars(),
         )
     }
 
