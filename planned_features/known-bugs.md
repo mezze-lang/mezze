@@ -4167,9 +4167,22 @@ Two things that had to be noticed rather than assumed:
   The `HANDLER_BINDING_CONTEXT` branch in `ErrorMessageBuilder` restores all
   three, and `ExceptionTypeInferenceTest` then passed UNCHANGED.
 
-**Follow-up, not done:** V0501's handler-mismatch path in `PerformValidator` may
-now be unreachable. Unproven — it was left in place rather than deleted on a
-guess.
+**V0501's path in `PerformValidator` is NOT dead** — this entry said it "may now
+be unreachable" and that was wrong. A reachability probe over the whole
+typechecker suite (temporary `error(...)` in place of the `errors.add`) hit it
+twice, both the VARIANT SUBSET case:
+
+    handler=PartialHandler effect=Exception
+      expected=VariantType([BadRequest, NotFound])
+      actual=VariantType([Unauthorized, BadRequest, NotFound])
+
+An equality constraint cannot catch that: unification JOINS variant rows rather
+than demanding equality, so a handler covering fewer constructors than the body
+throws unifies happily. `areAssociatedTypesCompatible` asks the subset question
+unification will not. The two checks are COMPLEMENTARY — concrete disagreement
+here, variant coverage there — and `ExceptionTypeInferenceTest`'s "test partial
+handler missing variants fails" / "test handler with subset of variants fails"
+are what depend on it.
 
 **Two accepting cases the fix must not break**, both in the spec test: the
 matching performer (`perform IntStore in as_int`), and two bodies at two

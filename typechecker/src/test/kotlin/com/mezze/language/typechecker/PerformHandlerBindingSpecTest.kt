@@ -139,13 +139,17 @@ class PerformHandlerBindingSpecTest : VariantSpecBase() {
             $MAIN
             """,
             "T0201",
-            "THE PARAMETER DIRECTION, which the fix SUBSUMES. This used to be " +
-                "V0501 from `PerformValidator`; the body's `<Exception having " +
-                "'error = ValidationError>` now reaches the same conclusion first, " +
-                "so one check covers both directions instead of two covering one " +
-                "each. V0501's message named the handler, the effect and both " +
-                "types, so the replacement had to as well — that is what the " +
-                "`HANDLER_BINDING_CONTEXT` branch in ErrorMessageBuilder is for.",
+            "THE PARAMETER DIRECTION. This used to be V0501 from " +
+                "`PerformValidator`; the body's `<Exception having 'error = " +
+                "ValidationError>` now reaches the same conclusion first. V0501's " +
+                "message named the handler, the effect and both types, so the " +
+                "replacement had to as well — that is what the " +
+                "`HANDLER_BINDING_CONTEXT` branch in ErrorMessageBuilder is for.\n" +
+                "It does NOT make `PerformValidator`'s check redundant, which a " +
+                "reachability probe over the whole suite settled: that path still " +
+                "fires on a VARIANT SUBSET (a handler covering fewer constructors " +
+                "than the body throws), because unification JOINS variant rows " +
+                "instead of demanding equality. Complementary, not duplicated.",
         )
     }
 

@@ -29,10 +29,6 @@ package com.mezze.interpreter.runtime;
 @SuppressWarnings("serial")
 public final class MezzeInternalError extends RuntimeException {
 
-    /** The diagnostic code this renders as. Kept as a string so the interpreter
-     *  does not have to reach into the ast module's enum from a hot node. */
-    public static final String CODE = "I0004";
-
     public MezzeInternalError(String message) {
         super(message);
     }

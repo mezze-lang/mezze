@@ -188,6 +188,26 @@ class PerformValidator(
                 val compatible = areAssociatedTypesCompatible(handlerType, thrownType)
 
                 if (!compatible) {
+                    // NOT DEAD, measured 2026-11-13. BUG 35's fix in
+                    // `ExprPerformConstraints` compares the same two things with a
+                    // `Constraint.Equality`, which looked like it subsumed this —
+                    // it does for a concrete disagreement (Int against Str), and it
+                    // fires first there.
+                    //
+                    // It does NOT subsume the VARIANT SUBSET case, because
+                    // unification JOINS variant rows rather than demanding
+                    // equality, so a handler covering fewer constructors than the
+                    // body throws unifies happily. A reachability probe over the
+                    // whole suite hit this path exactly here:
+                    //
+                    //     handler=PartialHandler effect=Exception
+                    //       expected=VariantType([BadRequest, NotFound])
+                    //       actual=VariantType([Unauthorized, BadRequest, NotFound])
+                    //
+                    // `ExceptionTypeInferenceTest` "test partial handler missing
+                    // variants fails" and "test handler with subset of variants
+                    // fails" are the two. `areAssociatedTypesCompatible` asks the
+                    // subset question that unification will not.
                     errors.add(
                         ValidationError.HandlerTypeMismatch(
                             handlerName = handlerName,
