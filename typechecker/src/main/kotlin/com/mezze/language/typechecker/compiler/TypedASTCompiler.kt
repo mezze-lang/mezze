@@ -3383,6 +3383,12 @@ class TypedASTCompiler(
         "__native_sorted_set_from_seq" to "__native_sorted_set_from_seq",
         "__native_sorted_set_from_set" to "__native_sorted_set_from_set",
         "__native_set_to_sorted_set" to "__native_set_to_sorted_set",
+        // `sorted_map::map_keys` and `invert` produce keys of a NEW type, so
+        // the order is the target's and is threaded; dropped where that key
+        // is directly comparable. Their natives previously set it to null
+        // outright — see known-bugs.md BUG 45.
+        "__native_sorted_map_map_keys" to "__native_sorted_map_map_keys",
+        "__native_sorted_map_invert" to "__native_sorted_map_invert",
         "__native_sorted_set_from_list" to "__native_sorted_set_from_list",
         // The merges take their order as an operand (BUG 44), so a directly
         // comparable element drops it and they keep the native fast paths.

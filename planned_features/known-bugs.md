@@ -4701,11 +4701,28 @@ exercises all seven entries with a plain Int — the case where the operand IS
 dropped — and a new entry whose field is not optional fails there immediately
 rather than wherever that native is next used.
 
+AND TWO IN `sorted_map`, which were KNOWN. `map_keys` and `invert` both declared
+their constraint (`with Ord 'k2`, `with Ord 'v`) and neither passed it on: the
+natives set `order = null` outright, with a comment reading "these fall back to
+natural ordering and are therefore still primitive-only (tracked with the
+sorted-container gap)". A deliberate deferral rather than an oversight, and cheap
+to close only because the operand-dropping route now exists to keep plain-Int
+keys fast. Measured broken first: `map_keys` into a descending newtype gave keys
+`1, 3, 5` and a `get` that found one of three.
+
+`sorted_map` ESCAPED THE REST OF THE FAMILY and the reason is worth keeping: it
+has NO merge operations — no union, intersect or difference — so nothing
+natively re-reads its array against a comparator. `sorted_set` broke because it
+has four. A `sorted_map` built by `empty {}` + `insert` is therefore CORRECT,
+which was predicted to be broken and measured not to be; that case is now a
+test, recorded so the prediction is not made again.
+
 THE RUNNING COUNT OF THIS ONE MISTAKE, in a single session: `seq::sort`,
 `list::sort`, `sorted_set`'s fast path (BUG 44), its six comparator-less
-rebuilds, `from_set`, and `set::to_sorted_set`. Seven places where a
-type-based shortcut or an unthreaded constraint silently disagreed with a
-hand-written `Ord`. Worth more as a pattern than as seven fixes.
+rebuilds, `from_set`, `set::to_sorted_set`, and `sorted_map`'s `map_keys` and `invert`.
+NINE places where a type-based shortcut or an unthreaded constraint silently
+disagreed with a hand-written `Ord`. Worth more as a pattern than as nine fixes:
+the tell is a native that decides an ORDER without being handed one.
 
 ## BUG 46 — `sorted_set::map`'s `Ord 'b` dictionary does not arrive in argument position
 

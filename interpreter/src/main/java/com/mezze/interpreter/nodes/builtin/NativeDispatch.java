@@ -1816,13 +1816,14 @@ public final class NativeDispatch extends MezzeNode {
 
         // Additional higher-order functions
         HANDLERS.put("__native_sorted_map_map_keys", (r, c) ->
-            SortedMapNatives.mapKeys(getSortedMap(r, "m"), getFunction(r, "f"), c));
+            SortedMapNatives.mapKeys(getSortedMap(r, "m"), getFunction(r, "f"),
+                getFunctionOrNull(r, "cmp"), c));
         HANDLERS.put("__native_sorted_map_filter_keys", (r, c) ->
             SortedMapNatives.filterKeys(getSortedMap(r, "m"), getFunction(r, "p"), c));
         HANDLERS.put("__native_sorted_map_filter_values", (r, c) ->
             SortedMapNatives.filterValues(getSortedMap(r, "m"), getFunction(r, "p"), c));
         HANDLERS.put("__native_sorted_map_invert", (r, c) ->
-            SortedMapNatives.invert(getSortedMap(r, "m")));
+            SortedMapNatives.invert(getSortedMap(r, "m"), getFunctionOrNull(r, "cmp")));
 
         // List conversion
         HANDLERS.put("__native_sorted_map_to_list", (r, c) ->

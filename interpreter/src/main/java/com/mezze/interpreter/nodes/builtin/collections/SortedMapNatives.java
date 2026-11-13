@@ -650,11 +650,17 @@ public final class SortedMapNatives {
     // ==================== Additional Higher-Order Functions ====================
 
     public static MezzeSortedMap mapKeys(MezzeSortedMap map, MezzeFunction f,
+                                         MezzeFunction cmpFn,
                                          com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        // mapKeys / invert produce keys of a DIFFERENT type, so the source map's
-        // comparator does not apply; these fall back to natural ordering and are
-        // therefore still primitive-only (tracked with the sorted-container gap).
-        java.util.Comparator<Object> order = null;
+        // ORDERED BY THE TARGET'S `Ord`, supplied by the caller. These produce
+        // keys of a DIFFERENT type, so the source map's comparator genuinely
+        // does not apply — but `null` meant natural ordering, which silently
+        // overrode a hand-written `Ord`: `map_keys` into a descending newtype
+        // gave `1, 3, 5` and a `get` that found one key of three. The comment
+        // this replaces called it "primitive-only (tracked with the
+        // sorted-container gap)"; the gap is this. `cmpFn` is null when the
+        // compiler proved the new key directly comparable.
+        java.util.Comparator<Object> order = ElementComparator.of(cmpFn);
         var ctx = ScalarCall.prepare1(f, "val");
         MezzeSortedMap result = MezzeSortedMap.empty(order);
         for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
@@ -693,11 +699,10 @@ public final class SortedMapNatives {
     }
 
     @TruffleBoundary
-    public static MezzeSortedMap invert(MezzeSortedMap map) {
-        // mapKeys / invert produce keys of a DIFFERENT type, so the source map's
-        // comparator does not apply; these fall back to natural ordering and are
-        // therefore still primitive-only (tracked with the sorted-container gap).
-        java.util.Comparator<Object> order = null;
+    /** See {@link #mapKeys}: the new keys are the old VALUES, so the order is
+     *  theirs and comes from the caller. */
+    public static MezzeSortedMap invert(MezzeSortedMap map, MezzeFunction cmpFn) {
+        java.util.Comparator<Object> order = ElementComparator.of(cmpFn);
         MezzeSortedMap result = MezzeSortedMap.empty(order);
         for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
             result = result.putObject(entry.value(), entry.key());
