@@ -16,7 +16,7 @@ was reverted.
 
 | module | ops | benched | numbered | cover |
 |---|---|---|---|---|
-| [seq](datastructures/collections-seq.md) | 124 | 35 | 17 | 28% |
+| [seq](datastructures/collections-seq.md) | 124 | 36 | 18 | 29% |
 | [list](datastructures/collections-list.md) | 104 | 16 | 0 | 15% |
 | [deque](datastructures/collections-deque.md) | 73 | 11 | 3 | 15% |
 | [map](datastructures/collections-map.md) | 58 | 20 | 16 | 34% |
@@ -29,7 +29,7 @@ was reverted.
 | [bytes](datastructures/collections-bytes.md) | 25 | 16 | 12 | 64% |
 | [char](datastructures/char.md) | 14 | 0 | 0 | 0% |
 | [buffer](datastructures/collections-buffer.md) | 9 | 0 | 0 | 0% |
-| **subtotal** | **635** | **158** | **73** | **25%** |
+| **subtotal** | **635** | **159** | **74** | **25%** |
 
 ## Core types
 
@@ -130,13 +130,13 @@ was reverted.
 
 | group | ops | benched | numbered | cover |
 |---|---|---|---|---|
-| Data structures | 635 | 158 | 73 | 25% |
+| Data structures | 635 | 159 | 74 | 25% |
 | Effects | 526 | 0 | 0 | 0% |
 | Numbers and math | 102 | 4 | 0 | 4% |
 | Core types | 98 | 20 | 13 | 20% |
 | Abilities, meta and tooling | 44 | 0 | 0 | 0% |
 | Codecs | 28 | 4 | 4 | 14% |
-| **TOTAL** | **1433** | **186** | **90** | **13%** |
+| **TOTAL** | **1433** | **187** | **91** | **13%** |
 
 **Effects reads 0% and is not zero.** An effect operation is invoked
 through an ability call (`Console.println {}`, `Mut.set {}`) or a

@@ -385,10 +385,16 @@ public final class SeqNatives {
 
     public static MezzeSeq flatMap(MezzeSeq seq, MezzeFunction mapper,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        // `ScalarCall` resolves the scalar-ABI bypass ONCE and reuses one args
+        // array; `prepareArgs` allocated an `Object[]` and a
+        // `MezzeRecord.wrapX` per element. At 27 765 ps per input element this
+        // was the most expensive seq operation still unfixed apart from
+        // `unique`, and above `group_by`'s 20 588 — which is where the
+        // prediction had it below.
+        var ctx = ScalarCall.prepare1(mapper, "x");
         java.util.ArrayList<Object> results = new java.util.ArrayList<>();
         for (int i = 0; i < seq.size(); i++) {
-            Object mapped = callNode.call(mapper.getCallTarget(),
-                prepareArgs(mapper, seq.get(i)));
+            Object mapped = ctx.call1(callNode, seq.get(i));
             if (mapped instanceof MezzeSeq innerSeq) {
                 for (int j = 0; j < innerSeq.size(); j++) {
                     results.add(innerSeq.get(j));

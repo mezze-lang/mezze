@@ -14466,3 +14466,48 @@ and a dozen sites whose code the compiler does not run for any shape anyone has
 written down. Each gets a row before it gets a fix — the order that turned
 `sort_by_key` from invisible into 1.95x, and the order that stopped `min_by`
 being "fixed" for a cost it never paid.
+
+#### `seq::flat_map` — 1.7x, and the figure carries ±5% rather than pretending otherwise
+
+The last candidate in the `prepareArgs` family, and the last one worth a bench
+row. The `flat_map` rows already in `coverage.tsv` are `iter::flat_map`, a
+different native; `seq::flat_map` had none anywhere.
+
+MEASURED FIRST, 27 765 ps per INPUT element, converged across two n. The
+prediction written before the measurement said "above `map`'s per-element cost
+and below `group_by`'s". The first half held; the second did not — it is above
+`group_by`'s 20 588, which made it the most expensive seq operation still
+unfixed apart from `unique`, and earned the port on its own number rather than
+on the family argument.
+
+SELF-A/B:
+
+| row | before | after | |
+|---|---|---|---|
+| `seq::flat_map` n=2e4 | 2 817 027 ps | 1 630 164 | **1.73x** |
+| `seq::flat_map` n=4e4 | 2 776 543 | 1 693 122 | **1.64x** |
+| `seq::is_sorted` (control) | 948 088 | 968 224 | 2.1% |
+| `seq::group_by` (control) | 2 058 801 | 2 012 400 | 2.3% |
+| `seq::sum` (control) | 51 554 | 49 088 | 4.8% |
+
+**THIS ONE IS NOISIER THAN THE REST AND THE NUMBER IS QUOTED ACCORDINGLY.** The
+two sizes disagree by 5% and the `sum` control moved 4.8%, where every earlier
+result in this family had its controls inside 1-2%. So: about 1.7x, ±5%. The
+direction and the rough size are solid — a 1.64x floor against a 4.8% control
+drift is not ambiguous — but quoting 1.73x from the better-looking size would be
+picking the number rather than reporting it.
+
+THE FAMILY IS NOW EXHAUSTED, not abandoned. Every remaining `prepareArgs` site
+is one of two things: a fallback for a shape the fuser answers — `min_by` and
+`max_by` through `SinkIR.MinBy`/`MaxBy`, `find`/`any`/`all` through their own
+sinks, `forEach` through its hand-rolled bypass — or an operation nobody has
+benched (`dedup_by`, `chunk_by`, `update`). The first group cannot be measured
+because no written spelling reaches it; the second gets a row before it gets a
+fix. `min_by` is the standing argument for that order: predicted the worst of
+the family, measured 7x cheaper than something predicted at half its cost, and
+"fixed" for nothing had the prediction been trusted.
+
+SIX OPERATIONS IN THIS FAMILY, FIXED ON MEASURED EVIDENCE: `is_sorted_by`
+2.22x, `sort_by_key` 1.95x, `is_sorted` 1.70x, `flat_map` ~1.7x, `sort_by`
+1.63x, `group_by` 1.53x — plus `is_sorted_descending`, ported with no number
+claimed because it is unbenched and is `is_sorted`'s exact twin.

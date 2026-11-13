@@ -217,6 +217,20 @@ let l_binary_search = { i, acc, xs } -> if i <= 0 then acc
       Some { val } -> val
       None -> 0 }
 
+## ── 19. flat_map ─ the last unmeasured member of the prepareArgs family.
+## The `flat_map` rows in coverage.tsv are `iter::flat_map`, a different
+## native; this one had none. `SeqNatives.flatMap` calls `prepareArgs` per
+## element — two allocations each — and has no fused path, which is what makes
+## it the only remaining site worth a row rather than a fallback the compiler
+## never reaches.
+##
+## The inner seq is a CONSTANT, built once outside the timed loop: mapping each
+## element to a freshly constructed seq would measure seq construction a
+## hundred times over instead of flat_map's walk and concatenation.
+let l_flat_map = { i, acc, xs, pair } -> if i <= 0 then acc
+  else l_flat_map { i = i - 1, xs = xs, pair = pair,
+    acc = acc + seq::size { xs = seq::flat_map { xs = xs, f = { x } -> pair } } }
+
 pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
   let args = argv {}
   let n = arg_at { args = args, i = 0, def = 2000 }
@@ -232,6 +246,8 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
   ## at the first pair and `binary_search` would probe input its
   ## contract does not fit. Sorted here, once, outside every loop.
   let asc = seq::sort { xs = xs }
+  ## The constant inner seq for row 19.
+  let pair = [1, 2]
   let ss = build_strs { i = m, acc = [] }
   let floor = min_of { thunk = {} -> control_loop { i = floor_n, acc = 0 }, warm = warm, k = k }
   let floor_ps = (floor.min * 1000) / floor_n
@@ -273,3 +289,5 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
            label = "seq::is_sorted_by   ", thunk = {} -> l_is_sorted_by { i = n, acc = 0, xs = asc } }
   report { idx = 18, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "seq::bsearch PROBES ", thunk = {} -> l_binary_search { i = n, acc = 0, xs = asc } }
+  report { idx = 19, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "seq::flat_map       ", thunk = {} -> l_flat_map { i = n, acc = 0, xs = xs, pair = pair } }

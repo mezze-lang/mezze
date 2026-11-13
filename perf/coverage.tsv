@@ -127,3 +127,4 @@ seq	max_by	229406	1e5	100	seqsurface:15	2026-11-13
 seq	is_sorted	944678	2e5	100	seqsurface:16	2026-11-13
 seq	is_sorted_by	1532995	1e5	100	seqsurface:17	2026-11-13
 seq	binary_search	121162	1e6	100	seqsurface:18	2026-11-13
+seq	flat_map	1693122	4e4	100	seqsurface:19	2026-11-13
