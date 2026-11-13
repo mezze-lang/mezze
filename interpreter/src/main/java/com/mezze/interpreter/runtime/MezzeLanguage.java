@@ -613,7 +613,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         if (roots.isEmpty()) return;
         // Register user functions in context so lookupFunctionIR can find
         // monomorphized functions during BytecodeCompiler emit (e.g.
-        // KnownMutOps resolution of mono'd stdlib wrappers like get<Int>).
+        // KnownMutOps resolving a mono'd `for_range` wrapper).
         MezzeContext ctx;
         try { ctx = getCurrentContext(); } catch (Exception e) { ctx = null; }
         int regCount = 0;

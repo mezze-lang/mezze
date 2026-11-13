@@ -2362,380 +2362,39 @@ public final class BytecodeCompiler {
             // AST callee's normalizeArgs treats args[0] as scalar not
             // record. Record-ABI callers already pass a record — the
             // callee is expecting it, so no marker needed.
-            // ── KnownMutOps: inline Mut stdlib wrappers directly ──
-            // Mut is hermetic — no effect dispatch needed.
-            // Three tiers:
-            //  1. Typed BDSL ops (MutReadInt, MutSize, MutIncr, MutSwap, MutSet)
-            //     — return primitive long/boolean, no boxing, PE-transparent.
-            //  2. Generic InlineMutOp1/2/3 — typed MUT_* constants (int_to_mut,
-            //     seq_to_mut, etc.) that go through the opKind switch.
-            //  3. Generic InlineMutRecord1/2/3/4 — ANY Mut wrapper around a
-            //     __native_* call.  Builds a MezzeRecord and calls the handler
-            //     directly.  @TruffleBoundary but eliminates effect dispatch.
+            // ── for_range: compile the Mut `for_range` wrapper to a counted loop ──
+            // Mut is hermetic, so no effect dispatch is needed. The gate is
+            // `isScalarABI()`, which `ParamScalarizer` sets for EXTRACTED
+            // LAMBDAS — and `for_range`'s `body` is one.
+            //
+            // This is all that remains of a three-tier KnownMutOps layer that
+            // mapped 73 of mut's 94 natives onto dedicated bytecode operations:
+            // typed ops (MutReadInt, MutIncr, MutSize, …), generic
+            // InlineMutOp1/2/3, record-ABI InlineMutRecord1/2/3/4, and a fused
+            // MUT_GET+match path. A reachability probe across the stdlib
+            // compile, both mut benchmarks and the whole interpreter suite
+            // (7330 tests) reached EXACTLY ONE branch — this one. The rest is
+            // deleted; the commit carries the evidence.
+            //
+            // Worth knowing if you are tempted by the rest: the note that said
+            // the layer was dead ENTIRELY proved it by killing the layer and
+            // benchmarking, having poisoned tier 1 and tier 2 arity-1
+            // individually. It never touched arity 4 — the branch that actually
+            // fires. Deleting this one as well would have failed no test;
+            // `for_range` would simply have gotten slower.
             if (c.isScalarABI() && !c.isTailCall()) {
                 var mutOp = KnownMutOps.lookupOrResolve(c.getTargetHash(), language);
-                if (mutOp != null && c.getArgs().size() == mutOp.arity()) {
-                    // ── Generic record-ABI bypass (tier 3) ──
-                    if (mutOp.isGeneric()) {
-                        var handler = com.mezze.interpreter.nodes.builtin.NativeDispatch
-                            .recordHandlerOf(mutOp.nativeName());
-                        if (handler != null) {
-                            switch (mutOp.arity()) {
-                                case 1 -> {
-                                    b.beginInlineMutRecord1(handler, mutOp.shape());
-                                    emitNode(c.getArgs().get(0), b, argCount, localMap);
-                                    b.endInlineMutRecord1();
-                                }
-                                case 2 -> {
-                                    b.beginInlineMutRecord2(handler, mutOp.shape());
-                                    for (NodeIR arg : c.getArgs())
-                                        emitNode(arg, b, argCount, localMap);
-                                    b.endInlineMutRecord2();
-                                }
-                                case 3 -> {
-                                    b.beginInlineMutRecord3(handler, mutOp.shape());
-                                    for (NodeIR arg : c.getArgs())
-                                        emitNode(arg, b, argCount, localMap);
-                                    b.endInlineMutRecord3();
-                                }
-                                case 4 -> {
-                                    b.beginInlineMutRecord4(handler, mutOp.shape());
-                                    for (NodeIR arg : c.getArgs())
-                                        emitNode(arg, b, argCount, localMap);
-                                    b.endInlineMutRecord4();
-                                }
-                            }
-                            return;
-                        }
-                        // Handler not found — fall through to normal call
-                    } else {
-                        // ── Typed fast paths (tier 1) ──
-                        // Each case emits a dedicated @Operation with typed
-                        // params/returns (long, double, boolean) — no boxing.
-                        Hash mutHash = new Hash(
-                            com.mezze.interpreter.nodes.effect.MarkerEffects.MUT_EFFECT_HASH_HEX);
-                        switch (mutOp.kind()) {
-                            // ── MutInt ──
-                            case MezzeBytecodeRootNode.MUT_READ_INT, MezzeBytecodeRootNode.MUT_INT_TO_IMMUT -> {
-                                b.beginMutReadInt();
-                                emitNode(c.getArgs().get(0), b, argCount, localMap);
-                                b.endMutReadInt();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_INCR -> {
-                                b.beginMutIncr();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutIncr();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_DECR -> {
-                                b.beginMutDecr();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutDecr();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_WRITE_INT -> {
-                                b.beginMutWriteInt();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutWriteInt();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_MUL_INT -> {
-                                b.beginMutMulInt();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutMulInt();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_DIV_INT -> {
-                                b.beginMutDivInt();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutDivInt();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_MOD_INT -> {
-                                b.beginMutModInt();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutModInt();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_CAS_INT -> {
-                                b.beginMutCasInt();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutCasInt();
-                                return;
-                            }
-                            // ── MutSeq ──
-                            case MezzeBytecodeRootNode.MUT_SIZE -> {
-                                b.beginMutSize();
-                                emitNode(c.getArgs().get(0), b, argCount, localMap);
-                                b.endMutSize();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_SWAP -> {
-                                b.beginMutSwap();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutSwap();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_SET -> {
-                                b.beginMutSet();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutSet();
-                                return;
-                            }
-                            // ── MutFloat ──
-                            case MezzeBytecodeRootNode.MUT_READ_FLOAT, MezzeBytecodeRootNode.MUT_FLOAT_TO_IMMUT -> {
-                                b.beginMutReadFloat();
-                                emitNode(c.getArgs().get(0), b, argCount, localMap);
-                                b.endMutReadFloat();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_WRITE_FLOAT -> {
-                                b.beginMutFloatMutate(MezzeBytecodeRootNode.MutFloatMutate.WRITE);
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutFloatMutate();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_ADD_FLOAT -> {
-                                b.beginMutFloatMutate(MezzeBytecodeRootNode.MutFloatMutate.ADD);
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutFloatMutate();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_SUB_FLOAT -> {
-                                b.beginMutFloatMutate(MezzeBytecodeRootNode.MutFloatMutate.SUB);
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutFloatMutate();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_MUL_FLOAT -> {
-                                b.beginMutFloatMutate(MezzeBytecodeRootNode.MutFloatMutate.MUL);
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutFloatMutate();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_DIV_FLOAT -> {
-                                b.beginMutFloatMutate(MezzeBytecodeRootNode.MutFloatMutate.DIV);
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutFloatMutate();
-                                return;
-                            }
-                            // ── MutBool ──
-                            case MezzeBytecodeRootNode.MUT_READ_BOOL, MezzeBytecodeRootNode.MUT_BOOL_TO_IMMUT -> {
-                                b.beginMutReadBool();
-                                emitNode(c.getArgs().get(0), b, argCount, localMap);
-                                b.endMutReadBool();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_WRITE_BOOL -> {
-                                b.beginMutWriteBool();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutWriteBool();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_TOGGLE_BOOL -> {
-                                b.beginMutToggleBool();
-                                emitNode(c.getArgs().get(0), b, argCount, localMap);
-                                b.endMutToggleBool();
-                                return;
-                            }
-                            // MutChar — Char is String at runtime, MutReadChar/MutWriteChar
-                            // are Object-typed @Operations (no primitive return).
-                            // Emitting them here bypasses InlineMutOp1 switch overhead.
-                            case MezzeBytecodeRootNode.MUT_READ_CHAR, MezzeBytecodeRootNode.MUT_CHAR_TO_IMMUT -> {
-                                b.beginMutReadChar();
-                                emitNode(c.getArgs().get(0), b, argCount, localMap);
-                                b.endMutReadChar();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_WRITE_CHAR -> {
-                                b.beginMutWriteChar();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutWriteChar();
-                                return;
-                            }
-                            // MUT_CHAR_IS_DIGIT, IS_LETTER, IS_WHITESPACE, TO_UPPER, TO_LOWER
-                            // fall through to InlineMutOp1 (tier 2)
-                            // ── MutMap ──
-                            case MezzeBytecodeRootNode.MUT_MAP_SIZE -> {
-                                b.beginMutMapSize();
-                                emitNode(c.getArgs().get(0), b, argCount, localMap);
-                                b.endMutMapSize();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_MAP_CONTAINS -> {
-                                b.beginMutMapContains();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutMapContains();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_MAP_GET -> {
-                                b.beginMutMapGet();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutMapGet();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_MAP_PUT -> {
-                                b.beginMutMapPut();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutMapPut();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_MAP_REMOVE -> {
-                                b.beginMutMapRemove();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutMapRemove();
-                                return;
-                            }
-                            // ── MutSet ──
-                            case MezzeBytecodeRootNode.MUT_SET_SIZE -> {
-                                b.beginMutCSetSize();
-                                emitNode(c.getArgs().get(0), b, argCount, localMap);
-                                b.endMutCSetSize();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_SET_CONTAINS -> {
-                                b.beginMutCSetContains();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutCSetContains();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_SET_ADD -> {
-                                b.beginMutCSetAdd();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutCSetAdd();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_SET_REMOVE -> {
-                                b.beginMutCSetRemove();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutCSetRemove();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_SET_TOGGLE -> {
-                                b.beginMutCSetToggle();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutCSetToggle();
-                                return;
-                            }
-                            // ── MutBytes ──
-                            case MezzeBytecodeRootNode.MUT_BYTES_LEN -> {
-                                b.beginMutBytesLen();
-                                emitNode(c.getArgs().get(0), b, argCount, localMap);
-                                b.endMutBytesLen();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_BYTES_GET -> {
-                                b.beginMutBytesGet();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutBytesGet();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_BYTES_SET -> {
-                                b.beginMutBytesSet();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutBytesSet();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_BYTES_SWAP -> {
-                                b.beginMutBytesSwap();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutBytesSwap();
-                                return;
-                            }
-                            // ── MutDeque ──
-                            case MezzeBytecodeRootNode.MUT_DEQUE_SIZE -> {
-                                b.beginMutDequeSize();
-                                emitNode(c.getArgs().get(0), b, argCount, localMap);
-                                b.endMutDequeSize();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_DEQUE_IS_EMPTY -> {
-                                b.beginMutDequeIsEmpty();
-                                emitNode(c.getArgs().get(0), b, argCount, localMap);
-                                b.endMutDequeIsEmpty();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_DEQUE_PUSH_BACK -> {
-                                b.beginMutDequePushBack();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutDequePushBack();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_DEQUE_PUSH_FRONT -> {
-                                b.beginMutDequePushFront();
-                                for (NodeIR arg : c.getArgs()) emitNode(arg, b, argCount, localMap);
-                                b.endMutDequePushFront();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_DEQUE_POP_BACK -> {
-                                b.beginMutDequePopBack();
-                                emitNode(c.getArgs().get(0), b, argCount, localMap);
-                                b.endMutDequePopBack();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_DEQUE_POP_FRONT -> {
-                                b.beginMutDequePopFront();
-                                emitNode(c.getArgs().get(0), b, argCount, localMap);
-                                b.endMutDequePopFront();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_DEQUE_PEEK_FRONT -> {
-                                b.beginMutDequePeekFront();
-                                emitNode(c.getArgs().get(0), b, argCount, localMap);
-                                b.endMutDequePeekFront();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_DEQUE_PEEK_BACK -> {
-                                b.beginMutDequePeekBack();
-                                emitNode(c.getArgs().get(0), b, argCount, localMap);
-                                b.endMutDequePeekBack();
-                                return;
-                            }
-                            // ── MutString ──
-                            case MezzeBytecodeRootNode.MUT_STRING_LEN -> {
-                                b.beginMutStringLen();
-                                emitNode(c.getArgs().get(0), b, argCount, localMap);
-                                b.endMutStringLen();
-                                return;
-                            }
-                            case MezzeBytecodeRootNode.MUT_STRING_IS_EMPTY -> {
-                                b.beginMutStringIsEmpty();
-                                emitNode(c.getArgs().get(0), b, argCount, localMap);
-                                b.endMutStringIsEmpty();
-                                return;
-                            }
-                            default -> {}  // fall through to arity-based dispatch
-                        }
-                        // ── Typed InlineMutOp (tier 2) ──
-                        switch (mutOp.arity()) {
-                            case 1 -> {
-                                b.beginInlineMutOp1(mutOp.kind(), mutHash, c.getTargetHash());
-                                emitNode(c.getArgs().get(0), b, argCount, localMap);
-                                b.endInlineMutOp1();
-                            }
-                            case 2 -> {
-                                b.beginInlineMutOp2(mutOp.kind(), mutHash, c.getTargetHash());
-                                for (NodeIR arg : c.getArgs())
-                                    emitNode(arg, b, argCount, localMap);
-                                b.endInlineMutOp2();
-                            }
-                            case 3 -> {
-                                b.beginInlineMutOp3(mutOp.kind(), mutHash, c.getTargetHash());
-                                for (NodeIR arg : c.getArgs())
-                                    emitNode(arg, b, argCount, localMap);
-                                b.endInlineMutOp3();
-                            }
-                            case 4 -> {
-                                // CompiledForRange: (start, end, step, body)
-                                b.beginCompiledForRange(mutHash, c.getTargetHash());
-                                for (NodeIR arg : c.getArgs())
-                                    emitNode(arg, b, argCount, localMap);
-                                b.endCompiledForRange();
-                            }
-                        }
-                        return;
-                    }
+                if (mutOp != null
+                        && mutOp.kind() == MezzeBytecodeRootNode.MUT_FOR_RANGE
+                        && c.getArgs().size() == mutOp.arity()) {
+                    Hash mutHash = new Hash(
+                        com.mezze.interpreter.nodes.effect.MarkerEffects.MUT_EFFECT_HASH_HEX);
+                    // CompiledForRange: (start, end, step, body)
+                    b.beginCompiledForRange(mutHash, c.getTargetHash());
+                    for (NodeIR arg : c.getArgs())
+                        emitNode(arg, b, argCount, localMap);
+                    b.endCompiledForRange();
+                    return;
                 }
             }
             boolean needsScalarMarker = c.isScalarABI()
@@ -3978,251 +3637,30 @@ public final class BytecodeCompiler {
      * pre-lowered function map, looked up by Hash during CallDirectIR
      * emission to replace CallDirect with InlineMutOp1/2/3.
      */
+    /**
+     * Resolves the stdlib `for_range` wrapper so the bytecode compiler can emit
+     * a counted loop (`CompiledForRange`) for it.
+     *
+     * <p>This was a 73-entry table feeding a three-tier fast-path layer. A
+     * reachability probe over the stdlib compile, both mut benchmarks and the
+     * whole interpreter suite reached one entry, so the rest went with the
+     * tiers. `for_range` is identified BY NAME — it is not a single native
+     * call, which is why the native-name table and the body-inspecting
+     * resolver were only ever needed by the deleted tiers.
+     */
     static final class KnownMutOps {
-        /** kind = MUT_* constant for typed fast paths, or MUT_GENERIC_NATIVE
-         *  for generic record-ABI bypass.  nativeName/shape are set only
-         *  for generic entries; shape is pre-cached at resolve time to skip
-         *  ShapeCache lookup on every invocation. */
-        record MutOp(int kind, int arity, String nativeName,
-                     com.mezze.interpreter.values.MezzeRecord.Shape shape) {
-            MutOp(int kind, int arity) { this(kind, arity, null, null); }
-            boolean isGeneric() { return kind == MUT_GENERIC_NATIVE; }
-        }
-        static final int MUT_GENERIC_NATIVE = -2;
+        record MutOp(int kind, int arity) { }
 
-        private static final java.util.Map<String, MutOp> KEY_TO_OP;
-        static {
-            var m = new java.util.HashMap<String, MutOp>();
-            // ── MutInt ──
-            m.put("read_int@mutation.mz",  new MutOp(MezzeBytecodeRootNode.MUT_READ_INT, 1));
-            m.put("int_to_mut@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_INT_TO_MUT, 1));
-            m.put("int_to_immut@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_INT_TO_IMMUT, 1));
-            m.put("incr@mutation.mz",      new MutOp(MezzeBytecodeRootNode.MUT_INCR, 2));
-            m.put("decr@mutation.mz",      new MutOp(MezzeBytecodeRootNode.MUT_DECR, 2));
-            m.put("write_int@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_WRITE_INT, 2));
-            m.put("mul_int@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_MUL_INT, 2));
-            m.put("div_int@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_DIV_INT, 2));
-            m.put("mod_int@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_MOD_INT, 2));
-            m.put("compare_and_swap@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_CAS_INT, 3));
-            // ── MutSeq ──
-            m.put("size@mutation.mz",      new MutOp(MezzeBytecodeRootNode.MUT_SIZE, 1));
-            m.put("seq_to_mut@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_SEQ_TO_MUT, 1));
-            m.put("seq_to_immut@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_SEQ_TO_IMMUT, 1));
-            m.put("get@mutation.mz",       new MutOp(MezzeBytecodeRootNode.MUT_GET, 2));
-            m.put("set@mutation.mz",       new MutOp(MezzeBytecodeRootNode.MUT_SET, 3));
-            m.put("swap@mutation.mz",      new MutOp(MezzeBytecodeRootNode.MUT_SWAP, 3));
-            m.put("sort@mutation.mz",      new MutOp(MezzeBytecodeRootNode.MUT_SEQ_SORT, 1));
-            m.put("reverse@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_SEQ_REVERSE, 1));
-            m.put("clear@mutation.mz",     new MutOp(MezzeBytecodeRootNode.MUT_SEQ_CLEAR, 1));
-            m.put("push@mutation.mz",      new MutOp(MezzeBytecodeRootNode.MUT_SEQ_PUSH, 2));
-            m.put("pop@mutation.mz",       new MutOp(MezzeBytecodeRootNode.MUT_SEQ_POP, 1));
-            m.put("insert@mutation.mz",    new MutOp(MezzeBytecodeRootNode.MUT_SEQ_INSERT, 3));
-            m.put("remove@mutation.mz",    new MutOp(MezzeBytecodeRootNode.MUT_SEQ_REMOVE, 2));
-            // ── MutFloat ──
-            m.put("read_float@mutation.mz",  new MutOp(MezzeBytecodeRootNode.MUT_READ_FLOAT, 1));
-            m.put("float_to_mut@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_FLOAT_TO_MUT, 1));
-            m.put("float_to_immut@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_FLOAT_TO_IMMUT, 1));
-            m.put("write_float@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_WRITE_FLOAT, 2));
-            m.put("add_float@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_ADD_FLOAT, 2));
-            m.put("sub_float@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_SUB_FLOAT, 2));
-            m.put("mul_float@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_MUL_FLOAT, 2));
-            m.put("div_float@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_DIV_FLOAT, 2));
-            // ── MutBool ──
-            m.put("read_bool@mutation.mz",  new MutOp(MezzeBytecodeRootNode.MUT_READ_BOOL, 1));
-            m.put("toggle@mutation.mz",     new MutOp(MezzeBytecodeRootNode.MUT_TOGGLE_BOOL, 1));
-            m.put("bool_to_mut@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_BOOL_TO_MUT, 1));
-            m.put("bool_to_immut@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_BOOL_TO_IMMUT, 1));
-            m.put("write_bool@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_WRITE_BOOL, 2));
-            m.put("set_true@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_SET_TRUE, 1));
-            m.put("set_false@mutation.mz",  new MutOp(MezzeBytecodeRootNode.MUT_SET_FALSE, 1));
-            // ── MutChar ──
-            m.put("read_char@mutation.mz",  new MutOp(MezzeBytecodeRootNode.MUT_READ_CHAR, 1));
-            m.put("char_to_mut@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_CHAR_TO_MUT, 1));
-            m.put("char_to_immut@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_CHAR_TO_IMMUT, 1));
-            m.put("write_char@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_WRITE_CHAR, 2));
-            m.put("char_to_upper@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_CHAR_TO_UPPER, 1));
-            m.put("char_to_lower@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_CHAR_TO_LOWER, 1));
-            m.put("char_is_digit@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_CHAR_IS_DIGIT, 1));
-            m.put("char_is_letter@mutation.mz",  new MutOp(MezzeBytecodeRootNode.MUT_CHAR_IS_LETTER, 1));
-            m.put("char_is_whitespace@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_CHAR_IS_WHITESPACE, 1));
-            // ── MutString ──
-            m.put("string_len@mutation.mz",     new MutOp(MezzeBytecodeRootNode.MUT_STRING_LEN, 1));
-            m.put("string_is_empty@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_STRING_IS_EMPTY, 1));
-            m.put("read_str@mutation.mz",    new MutOp(MezzeBytecodeRootNode.MUT_STRING_READ, 1));
-            m.put("string_clear@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_STRING_CLEAR, 1));
-            m.put("string_reverse@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_STRING_REVERSE, 1));
-            m.put("string_to_mut@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_STRING_TO_MUT, 1));
-            m.put("string_to_immut@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_STRING_TO_IMMUT, 1));
-            m.put("write_str@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_STRING_WRITE, 2));
-            m.put("string_append@mutation.mz",  new MutOp(MezzeBytecodeRootNode.MUT_STRING_APPEND, 2));
-            m.put("string_prepend@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_STRING_PREPEND, 2));
-            // ── MutMap ──
-            m.put("map_size@mutation.mz",    new MutOp(MezzeBytecodeRootNode.MUT_MAP_SIZE, 1));
-            m.put("map_clear@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_MAP_CLEAR, 1));
-            m.put("map_to_mut@mutation.mz",  new MutOp(MezzeBytecodeRootNode.MUT_MAP_TO_MUT, 1));
-            m.put("map_to_immut@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_MAP_TO_IMMUT, 1));
-            m.put("map_contains@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_MAP_CONTAINS, 2));
-            m.put("map_get@mutation.mz",     new MutOp(MezzeBytecodeRootNode.MUT_MAP_GET, 2));
-            m.put("map_remove@mutation.mz",  new MutOp(MezzeBytecodeRootNode.MUT_MAP_REMOVE, 2));
-            m.put("map_put@mutation.mz",     new MutOp(MezzeBytecodeRootNode.MUT_MAP_PUT, 3));
-            // ── MutSet ──
-            m.put("set_size@mutation.mz",    new MutOp(MezzeBytecodeRootNode.MUT_SET_SIZE, 1));
-            m.put("set_clear@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_SET_CLEAR, 1));
-            m.put("set_to_mut@mutation.mz",  new MutOp(MezzeBytecodeRootNode.MUT_CSET_TO_MUT, 1));
-            m.put("set_to_immut@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_CSET_TO_IMMUT, 1));
-            m.put("set_contains@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_SET_CONTAINS, 2));
-            m.put("set_add@mutation.mz",     new MutOp(MezzeBytecodeRootNode.MUT_SET_ADD, 2));
-            m.put("set_remove@mutation.mz",  new MutOp(MezzeBytecodeRootNode.MUT_SET_REMOVE, 2));
-            m.put("set_toggle@mutation.mz",  new MutOp(MezzeBytecodeRootNode.MUT_SET_TOGGLE, 2));
-            // ── MutBytes ──
-            m.put("bytes_len@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_BYTES_LEN, 1));
-            m.put("bytes_clear@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_BYTES_CLEAR, 1));
-            m.put("bytes_reverse@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_BYTES_REVERSE, 1));
-            m.put("bytes_to_mut@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_BYTES_TO_MUT, 1));
-            m.put("bytes_to_immut@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_BYTES_TO_IMMUT, 1));
-            m.put("bytes_get@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_BYTES_GET, 2));
-            m.put("bytes_set@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_BYTES_SET, 3));
-            m.put("bytes_swap@mutation.mz",  new MutOp(MezzeBytecodeRootNode.MUT_BYTES_SWAP, 3));
-            // ── MutDeque ──
-            m.put("deque_size@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_SIZE, 1));
-            m.put("deque_is_empty@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_IS_EMPTY, 1));
-            m.put("deque_clear@mutation.mz",  new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_CLEAR, 1));
-            m.put("deque_reverse@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_REVERSE, 1));
-            m.put("deque_pop_front@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_POP_FRONT, 1));
-            m.put("deque_pop_back@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_POP_BACK, 1));
-            m.put("deque_peek_front@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_PEEK_FRONT, 1));
-            m.put("deque_peek_back@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_PEEK_BACK, 1));
-            m.put("deque_to_mut@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_TO_MUT, 1));
-            m.put("deque_to_immut@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_TO_IMMUT, 1));
-            m.put("deque_push_front@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_PUSH_FRONT, 2));
-            m.put("deque_push_back@mutation.mz", new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_PUSH_BACK, 2));
-            // ── 4-arg: compiled loop ──
-            m.put("for_range@mutation.mz",   new MutOp(MezzeBytecodeRootNode.MUT_FOR_RANGE, 4));
-            KEY_TO_OP = java.util.Map.copyOf(m);
-        }
+        private static final String FOR_RANGE_KEY = "for_range@mutation.mz";
+        private static final MutOp FOR_RANGE =
+            new MutOp(MezzeBytecodeRootNode.MUT_FOR_RANGE, 4);
 
-        /**
-         * Secondary map: native function name → MutOp.
-         * Used to identify monomorphized Mut operations whose IR name is
-         * empty but whose body is a CallNativeIR after MutEraser β-reduction.
-         */
-        /**
-         * Secondary map: native function name → MutOp.
-         * Names match the actual {@code __native_*} calls in mutation.mz
-         * after MutEraser β-reduces the Mut.mutate wrapper.
-         */
-        private static final java.util.Map<String, MutOp> NATIVE_NAME_TO_OP;
-        static {
-            var n = new java.util.HashMap<String, MutOp>();
-            // ── MutInt ──
-            n.put("__native_mut_int_read", new MutOp(MezzeBytecodeRootNode.MUT_READ_INT, 1));
-            n.put("__native_int_to_mut",   new MutOp(MezzeBytecodeRootNode.MUT_INT_TO_MUT, 1));
-            n.put("__native_int_to_immut", new MutOp(MezzeBytecodeRootNode.MUT_INT_TO_IMMUT, 1));
-            n.put("__native_mut_int_incr", new MutOp(MezzeBytecodeRootNode.MUT_INCR, 2));
-            n.put("__native_mut_int_decr", new MutOp(MezzeBytecodeRootNode.MUT_DECR, 2));
-            n.put("__native_mut_int_write", new MutOp(MezzeBytecodeRootNode.MUT_WRITE_INT, 2));
-            n.put("__native_mut_int_mul",  new MutOp(MezzeBytecodeRootNode.MUT_MUL_INT, 2));
-            n.put("__native_mut_int_div",  new MutOp(MezzeBytecodeRootNode.MUT_DIV_INT, 2));
-            n.put("__native_mut_int_mod",  new MutOp(MezzeBytecodeRootNode.MUT_MOD_INT, 2));
-            n.put("__native_mut_int_cas",  new MutOp(MezzeBytecodeRootNode.MUT_CAS_INT, 3));
-            // ── MutSeq ──
-            n.put("__native_mut_seq_len",  new MutOp(MezzeBytecodeRootNode.MUT_SIZE, 1));
-            n.put("__native_seq_to_mut",   new MutOp(MezzeBytecodeRootNode.MUT_SEQ_TO_MUT, 1));
-            n.put("__native_seq_to_immut", new MutOp(MezzeBytecodeRootNode.MUT_SEQ_TO_IMMUT, 1));
-            n.put("__native_mut_seq_get",  new MutOp(MezzeBytecodeRootNode.MUT_GET, 2));
-            n.put("__native_mut_seq_set",  new MutOp(MezzeBytecodeRootNode.MUT_SET, 3));
-            n.put("__native_mut_seq_swap", new MutOp(MezzeBytecodeRootNode.MUT_SWAP, 3));
-            n.put("__native_mut_seq_sort", new MutOp(MezzeBytecodeRootNode.MUT_SEQ_SORT, 1));
-            n.put("__native_mut_seq_reverse", new MutOp(MezzeBytecodeRootNode.MUT_SEQ_REVERSE, 1));
-            n.put("__native_mut_seq_clear", new MutOp(MezzeBytecodeRootNode.MUT_SEQ_CLEAR, 1));
-            n.put("__native_mut_seq_push", new MutOp(MezzeBytecodeRootNode.MUT_SEQ_PUSH, 2));
-            n.put("__native_mut_seq_pop",  new MutOp(MezzeBytecodeRootNode.MUT_SEQ_POP, 1));
-            n.put("__native_mut_seq_insert", new MutOp(MezzeBytecodeRootNode.MUT_SEQ_INSERT, 3));
-            n.put("__native_mut_seq_remove", new MutOp(MezzeBytecodeRootNode.MUT_SEQ_REMOVE, 2));
-            // ── MutFloat ──
-            n.put("__native_mut_float_read", new MutOp(MezzeBytecodeRootNode.MUT_READ_FLOAT, 1));
-            n.put("__native_float_to_mut",   new MutOp(MezzeBytecodeRootNode.MUT_FLOAT_TO_MUT, 1));
-            n.put("__native_float_to_immut", new MutOp(MezzeBytecodeRootNode.MUT_FLOAT_TO_IMMUT, 1));
-            n.put("__native_mut_float_write", new MutOp(MezzeBytecodeRootNode.MUT_WRITE_FLOAT, 2));
-            n.put("__native_mut_float_add",  new MutOp(MezzeBytecodeRootNode.MUT_ADD_FLOAT, 2));
-            n.put("__native_mut_float_sub",  new MutOp(MezzeBytecodeRootNode.MUT_SUB_FLOAT, 2));
-            n.put("__native_mut_float_mul",  new MutOp(MezzeBytecodeRootNode.MUT_MUL_FLOAT, 2));
-            n.put("__native_mut_float_div",  new MutOp(MezzeBytecodeRootNode.MUT_DIV_FLOAT, 2));
-            // ── MutBool ──
-            n.put("__native_mut_bool_read",  new MutOp(MezzeBytecodeRootNode.MUT_READ_BOOL, 1));
-            n.put("__native_mut_bool_toggle", new MutOp(MezzeBytecodeRootNode.MUT_TOGGLE_BOOL, 1));
-            n.put("__native_bool_to_mut",    new MutOp(MezzeBytecodeRootNode.MUT_BOOL_TO_MUT, 1));
-            n.put("__native_bool_to_immut",  new MutOp(MezzeBytecodeRootNode.MUT_BOOL_TO_IMMUT, 1));
-            n.put("__native_mut_bool_write", new MutOp(MezzeBytecodeRootNode.MUT_WRITE_BOOL, 2));
-            n.put("__native_mut_bool_set_true", new MutOp(MezzeBytecodeRootNode.MUT_SET_TRUE, 1));
-            n.put("__native_mut_bool_set_false", new MutOp(MezzeBytecodeRootNode.MUT_SET_FALSE, 1));
-            // ── MutChar ──
-            n.put("__native_mut_char_read",  new MutOp(MezzeBytecodeRootNode.MUT_READ_CHAR, 1));
-            n.put("__native_char_to_mut",    new MutOp(MezzeBytecodeRootNode.MUT_CHAR_TO_MUT, 1));
-            n.put("__native_char_to_immut",  new MutOp(MezzeBytecodeRootNode.MUT_CHAR_TO_IMMUT, 1));
-            n.put("__native_mut_char_write", new MutOp(MezzeBytecodeRootNode.MUT_WRITE_CHAR, 2));
-            n.put("__native_mut_char_to_upper", new MutOp(MezzeBytecodeRootNode.MUT_CHAR_TO_UPPER, 1));
-            n.put("__native_mut_char_to_lower", new MutOp(MezzeBytecodeRootNode.MUT_CHAR_TO_LOWER, 1));
-            n.put("__native_mut_char_is_digit", new MutOp(MezzeBytecodeRootNode.MUT_CHAR_IS_DIGIT, 1));
-            n.put("__native_mut_char_is_letter", new MutOp(MezzeBytecodeRootNode.MUT_CHAR_IS_LETTER, 1));
-            n.put("__native_mut_char_is_whitespace", new MutOp(MezzeBytecodeRootNode.MUT_CHAR_IS_WHITESPACE, 1));
-            // ── MutString ──
-            n.put("__native_mut_string_len",  new MutOp(MezzeBytecodeRootNode.MUT_STRING_LEN, 1));
-            n.put("__native_mut_string_is_empty", new MutOp(MezzeBytecodeRootNode.MUT_STRING_IS_EMPTY, 1));
-            n.put("__native_mut_string_read", new MutOp(MezzeBytecodeRootNode.MUT_STRING_READ, 1));
-            n.put("__native_mut_string_clear", new MutOp(MezzeBytecodeRootNode.MUT_STRING_CLEAR, 1));
-            n.put("__native_mut_string_reverse", new MutOp(MezzeBytecodeRootNode.MUT_STRING_REVERSE, 1));
-            n.put("__native_string_to_mut",   new MutOp(MezzeBytecodeRootNode.MUT_STRING_TO_MUT, 1));
-            n.put("__native_string_to_immut", new MutOp(MezzeBytecodeRootNode.MUT_STRING_TO_IMMUT, 1));
-            n.put("__native_mut_string_write", new MutOp(MezzeBytecodeRootNode.MUT_STRING_WRITE, 2));
-            n.put("__native_mut_string_append", new MutOp(MezzeBytecodeRootNode.MUT_STRING_APPEND, 2));
-            n.put("__native_mut_string_prepend", new MutOp(MezzeBytecodeRootNode.MUT_STRING_PREPEND, 2));
-            // ── MutMap ──
-            n.put("__native_mut_map_size",    new MutOp(MezzeBytecodeRootNode.MUT_MAP_SIZE, 1));
-            n.put("__native_mut_map_clear",   new MutOp(MezzeBytecodeRootNode.MUT_MAP_CLEAR, 1));
-            n.put("__native_map_to_mut",      new MutOp(MezzeBytecodeRootNode.MUT_MAP_TO_MUT, 1));
-            n.put("__native_map_to_immut",    new MutOp(MezzeBytecodeRootNode.MUT_MAP_TO_IMMUT, 1));
-            n.put("__native_mut_map_contains", new MutOp(MezzeBytecodeRootNode.MUT_MAP_CONTAINS, 2));
-            n.put("__native_mut_map_get",     new MutOp(MezzeBytecodeRootNode.MUT_MAP_GET, 2));
-            n.put("__native_mut_map_remove",  new MutOp(MezzeBytecodeRootNode.MUT_MAP_REMOVE, 2));
-            n.put("__native_mut_map_put",     new MutOp(MezzeBytecodeRootNode.MUT_MAP_PUT, 3));
-            // ── MutSet ──
-            n.put("__native_mut_set_size",    new MutOp(MezzeBytecodeRootNode.MUT_SET_SIZE, 1));
-            n.put("__native_mut_set_clear",   new MutOp(MezzeBytecodeRootNode.MUT_SET_CLEAR, 1));
-            n.put("__native_set_to_mut",      new MutOp(MezzeBytecodeRootNode.MUT_CSET_TO_MUT, 1));
-            n.put("__native_set_to_immut",    new MutOp(MezzeBytecodeRootNode.MUT_CSET_TO_IMMUT, 1));
-            n.put("__native_mut_set_contains", new MutOp(MezzeBytecodeRootNode.MUT_SET_CONTAINS, 2));
-            n.put("__native_mut_set_add",     new MutOp(MezzeBytecodeRootNode.MUT_SET_ADD, 2));
-            n.put("__native_mut_set_remove",  new MutOp(MezzeBytecodeRootNode.MUT_SET_REMOVE, 2));
-            n.put("__native_mut_set_toggle",  new MutOp(MezzeBytecodeRootNode.MUT_SET_TOGGLE, 2));
-            // ── MutBytes ──
-            n.put("__native_mut_bytes_len",   new MutOp(MezzeBytecodeRootNode.MUT_BYTES_LEN, 1));
-            n.put("__native_mut_bytes_clear", new MutOp(MezzeBytecodeRootNode.MUT_BYTES_CLEAR, 1));
-            n.put("__native_mut_bytes_reverse", new MutOp(MezzeBytecodeRootNode.MUT_BYTES_REVERSE, 1));
-            n.put("__native_bytes_to_mut",    new MutOp(MezzeBytecodeRootNode.MUT_BYTES_TO_MUT, 1));
-            n.put("__native_bytes_to_immut",  new MutOp(MezzeBytecodeRootNode.MUT_BYTES_TO_IMMUT, 1));
-            n.put("__native_mut_bytes_get",   new MutOp(MezzeBytecodeRootNode.MUT_BYTES_GET, 2));
-            n.put("__native_mut_bytes_set",   new MutOp(MezzeBytecodeRootNode.MUT_BYTES_SET, 3));
-            n.put("__native_mut_bytes_swap",  new MutOp(MezzeBytecodeRootNode.MUT_BYTES_SWAP, 3));
-            // ── MutDeque ──
-            n.put("__native_mut_deque_size",   new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_SIZE, 1));
-            n.put("__native_mut_deque_is_empty", new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_IS_EMPTY, 1));
-            n.put("__native_mut_deque_clear",  new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_CLEAR, 1));
-            n.put("__native_mut_deque_reverse", new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_REVERSE, 1));
-            n.put("__native_mut_deque_pop_front", new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_POP_FRONT, 1));
-            n.put("__native_mut_deque_pop_back", new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_POP_BACK, 1));
-            n.put("__native_mut_deque_peek_front", new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_PEEK_FRONT, 1));
-            n.put("__native_mut_deque_peek_back", new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_PEEK_BACK, 1));
-            n.put("__native_deque_to_mut",    new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_TO_MUT, 1));
-            n.put("__native_deque_to_immut",  new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_TO_IMMUT, 1));
-            n.put("__native_mut_deque_push_front", new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_PUSH_FRONT, 2));
-            n.put("__native_mut_deque_push_back", new MutOp(MezzeBytecodeRootNode.MUT_DEQUE_PUSH_BACK, 2));
-            // for_range is not a single native call — identified by name only
-            NATIVE_NAME_TO_OP = java.util.Map.copyOf(n);
-        }
-
+        /** Target hashes known to be `for_range`, built once from the
+         *  prelowered stdlib. */
         private static volatile java.util.Map<Hash, MutOp> hashToOp;
-        /** Extra entries discovered at compile time (monomorphized variants). */
+
+        /** Monomorphized variants resolved at compile time, plus negative
+         *  results so a miss is not re-resolved on every call. */
         private static final java.util.concurrent.ConcurrentHashMap<Hash, MutOp> dynamicOps =
             new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -4241,123 +3679,27 @@ public final class BytecodeCompiler {
         }
 
         /**
-         * Fallback lookup for monomorphized functions: resolve the target
-         * FunctionIR by hash and check name+source against KEY_TO_OP.
-         * When the name is empty (monomorphized), inspects the function
-         * body — after MutEraser β-reduction it is a CallNativeIR whose
-         * native name uniquely identifies the Mut operation.
-         * Caches the result (positive or negative) in dynamicOps.
+         * Fallback for a monomorphized target, whose hash is not in the
+         * prelowered map. Resolves the FunctionIR and checks its name against
+         * `for_range`, caching either answer.
          */
         static MutOp lookupOrResolve(Hash targetHash, MezzeLanguage lang) {
             var op = lookup(targetHash);
             if (op != null) return op;
-            // Check negative cache
             if (dynamicOps.containsKey(targetHash)) return null;
-            // No language context — can't resolve dynamically (unit tests)
+            // No language context — cannot resolve dynamically (unit tests).
             if (lang == null) return null;
-            // Try resolving via the language's function registry
             var fn = lang.lookupFunctionIR(targetHash);
             if (fn != null) {
-                // First try name-based lookup (works for non-monomorphized)
                 var name = fn.getName();
-                if (name != null && !name.isEmpty()) {
-                    var key = name + "@" + KnownArithOps.basename(fn.getSourceFile());
-                    op = KEY_TO_OP.get(key);
-                    if (op != null) {
-                        dynamicOps.put(targetHash, op);
-                        return op;
-                    }
-                }
-                // Monomorphized functions have empty names — identify by
-                // the native call in their body. Two shapes:
-                // (a) Post-MutEraser: body IS a CallNativeIR directly.
-                // (b) Pre-MutEraser (mono'd): body is PerformOpIR("mutate",
-                //     MakeRecordIR({act=MakeLambdaIR(lambdaHash)})) — look
-                //     through the lambda to find the CallNativeIR inside.
-                if (name == null || name.isEmpty()) {
-                    op = resolveByBody(fn, lang);
-                    if (op != null) {
-                        dynamicOps.put(targetHash, op);
-                        return op;
-                    }
+                if (name != null && !name.isEmpty()
+                        && FOR_RANGE_KEY.equals(
+                            name + "@" + KnownArithOps.basename(fn.getSourceFile()))) {
+                    dynamicOps.put(targetHash, FOR_RANGE);
+                    return FOR_RANGE;
                 }
             }
-            // Negative cache
             dynamicOps.put(targetHash, NEGATIVE);
-            return null;
-        }
-
-        /**
-         * Identify a Mut operation by its body structure.
-         *
-         * Shape A (post-MutEraser): body = CallNativeIR("__native_*").
-         *   This only matches known typed ops in NATIVE_NAME_TO_OP, because
-         *   any function with a CallNativeIR body matches Shape A — not just
-         *   Mut wrappers.  (e.g. monomorphized seq::sort_by<Int> also has
-         *   CallNativeIR body.)
-         *
-         * Shape B (monomorphized, pre-erasure): body = PerformOpIR("mutate",
-         *   MakeRecordIR({act = MakeLambdaIR(λhash)})).  This is UNAMBIGUOUSLY
-         *   a Mut wrapper.  Both typed and generic ops match here.
-         */
-        private static MutOp resolveByBody(
-                com.mezze.language.truffleir.FunctionIR fn, MezzeLanguage lang) {
-            var body = fn.getBody();
-
-            // Shape A: direct native call (post-MutEraser)
-            // ONLY typed ops — Shape A is ambiguous (matches any native body)
-            if (body instanceof com.mezze.language.truffleir.CallNativeIR nir) {
-                return NATIVE_NAME_TO_OP.get(nir.getName());
-            }
-
-            // Shape B: PerformOpIR("mutate", {act = λ})
-            // Both typed AND generic — this is unambiguously a Mut wrapper
-            if (body instanceof com.mezze.language.truffleir.PerformOpIR pop
-                    && "mutate".equals(pop.getOperationName())
-                    && pop.getArg() instanceof com.mezze.language.truffleir.MakeRecordIR mr
-                    && mr.getFields().size() == 1
-                    && "act".equals(mr.getFields().get(0).getName())
-                    && mr.getFields().get(0).getValue()
-                        instanceof com.mezze.language.truffleir.MakeLambdaIR ml) {
-                var lambdaFn = lang.lookupFunctionIR(ml.getFunctionHash());
-                if (lambdaFn != null
-                        && lambdaFn.getBody()
-                            instanceof com.mezze.language.truffleir.CallNativeIR nir) {
-                    // Typed fast path first
-                    var typed = NATIVE_NAME_TO_OP.get(nir.getName());
-                    if (typed != null) return typed;
-                    // Generic: extract field names from the native's record arg
-                    var fieldNames = extractFieldNames(nir);
-                    if (fieldNames == null) return null;
-                    // Check NativeDispatch has a handler for this native
-                    var handler = com.mezze.interpreter.nodes.builtin.NativeDispatch
-                        .recordHandlerOf(nir.getName());
-                    if (handler == null) return null;
-                    // Pre-cache the Shape at compile time to skip ShapeCache
-                    // lookup on every invocation at runtime
-                    var shape = com.mezze.interpreter.values.ShapeCache
-                        .getOrCreateAllObjects(fieldNames);
-                    return new MutOp(MUT_GENERIC_NATIVE, fieldNames.length,
-                        nir.getName(), shape);
-                }
-            }
-            return null;
-        }
-
-        /** Extract field names from a record-ABI CallNativeIR's arg. */
-        private static String[] extractFieldNames(
-                com.mezze.language.truffleir.CallNativeIR nir) {
-            // Record-ABI: arg is a MakeRecordIR with named fields
-            if (nir.getArg() instanceof com.mezze.language.truffleir.MakeRecordIR mr) {
-                var fields = mr.getFields();
-                var names = new String[fields.size()];
-                for (int i = 0; i < fields.size(); i++) {
-                    names[i] = fields.get(i).getName();
-                }
-                return names;
-            }
-            // Scalar-ABI: args are positional, no field names available
-            // (would need NativeSignatures, which may not be on classpath)
             return null;
         }
 
@@ -4368,8 +3710,7 @@ public final class BytecodeCompiler {
             for (var e : pre.entrySet()) {
                 var fn = e.getValue();
                 var key = fn.getName() + "@" + KnownArithOps.basename(fn.getSourceFile());
-                var op = KEY_TO_OP.get(key);
-                if (op != null) m.put(e.getKey(), op);
+                if (FOR_RANGE_KEY.equals(key)) m.put(e.getKey(), FOR_RANGE);
             }
             return m;
         }
@@ -7776,127 +7117,9 @@ public final class BytecodeCompiler {
      * followed by the chained IfThenElse whose then/else branches each
      * yield the case-body value.
      */
-    /**
-     * Detect and emit the fused {@code match get { seq, i } is Some { val } -> expr, None -> default}
-     * pattern.  Returns true if the fusion was applied.
-     *
-     * <p>Fused form: {@code MutGetRaw(seq, i)} returns raw value or null,
-     * then {@code IfThenElse(IsNotNull(raw), some_body, none_body)}.
-     * Eliminates: MezzeVariant allocation, VariantTagEquals, ReadVariantField.
-     */
-    private boolean tryEmitFusedMutGetMatch(MatchIR m, MezzeBytecodeRootNodeGen.Builder b,
-                                             int argCount, BytecodeLocal[] localMap) {
-        // Check: scrutinee is a MUT_GET call
-        NodeIR scrutinee = m.getScrutinee();
-        if (!(scrutinee instanceof CallDirectIR c)) return false;
-        if (!c.isScalarABI() || c.isTailCall()) return false;
-        var mutOp = KnownMutOps.lookupOrResolve(c.getTargetHash(), language);
-        if (mutOp == null || mutOp.kind() != MezzeBytecodeRootNode.MUT_GET) return false;
-        if (c.getArgs().size() != 2) return false;
-
-        // Check: exactly 2 cases, no guards, no if-let bindings
-        var cases = m.getCases();
-        if (cases.size() != 2) return false;
-        CaseIR someCase = null, noneCase = null;
-        for (CaseIR cs : cases) {
-            if (cs.getGuard() != null) return false;
-            if (!cs.getIfLetBindings().isEmpty()) return false;
-            var pat = cs.getPattern();
-            if (pat instanceof PatternIR.Variant vp) {
-                if ("Some".equals(vp.getTagName()) && vp.getFieldNames().size() == 1) {
-                    someCase = cs;
-                } else if ("None".equals(vp.getTagName()) && vp.getFieldNames().isEmpty()) {
-                    noneCase = cs;
-                }
-            } else if (pat instanceof PatternIR.Wildcard) {
-                noneCase = cs;
-            }
-        }
-        if (someCase == null || noneCase == null) return false;
-
-        // Extract the "val" binding slot from the Some pattern
-        PatternIR.Variant somePat = (PatternIR.Variant) someCase.getPattern();
-        int valSlot = somePat.getFieldSlots().get(0);
-
-        // Emit fused get + match using the split MutInBounds + MutReadLong
-        // pattern.  For MutableLongSeq, MutReadLong returns unboxed long —
-        // zero boxing in the entire get+compare path.
-        //
-        // Structure:
-        //   Block {
-        //     seqLocal = seq_expr
-        //     idxLocal = i_expr
-        //     Conditional(
-        //       MutInBounds(seqLocal, idxLocal),
-        //       Block { val = MutReadLong(seqLocal, idxLocal); someBody },
-        //       noneBody
-        //     )
-        //   }
-        b.beginBlock();
-
-        // Evaluate seq and index once, store for reuse
-        BytecodeLocal seqLocal = b.createLocal();
-        BytecodeLocal idxLocal = b.createLocal();
-        b.beginStoreLocal(seqLocal);
-        emitNode(c.getArgs().get(0), b, argCount, localMap);
-        b.endStoreLocal();
-        b.beginStoreLocal(idxLocal);
-        emitNode(c.getArgs().get(1), b, argCount, localMap);
-        b.endStoreLocal();
-
-        // Zero-init binding slots (same as generic emitMatch)
-        java.util.Set<Integer> bindingSlots = new java.util.HashSet<>();
-        collectBindingSlots(cases, bindingSlots);
-        for (Integer slot : bindingSlots) {
-            if (slot != null && slot >= argCount && slot - argCount < localMap.length) {
-                b.beginStoreLocal(localMap[slot - argCount]);
-                b.emitLoadNullConstant();
-                b.endStoreLocal();
-            }
-        }
-
-        // Conditional: MutInBounds check
-        b.beginConditional();
-        b.beginMutInBounds();
-        b.emitLoadLocal(seqLocal);
-        b.emitLoadLocal(idxLocal);
-        b.endMutInBounds();
-        // Then (Some branch): unchecked read + body
-        b.beginBlock();
-        // Write the val binding — MutReadLong returns long for MutableLongSeq
-        if (valSlot >= argCount && valSlot - argCount < localMap.length) {
-            b.beginStoreLocal(localMap[valSlot - argCount]);
-            b.beginMutReadLong();
-            b.emitLoadLocal(seqLocal);
-            b.emitLoadLocal(idxLocal);
-            b.endMutReadLong();
-            b.endStoreLocal();
-        }
-        // Emit any case-level bindings for the Some case
-        for (var binding : someCase.getBindings()) {
-            if (binding.getSlot() >= argCount && binding.getSlot() - argCount < localMap.length) {
-                b.beginStoreLocal(localMap[binding.getSlot() - argCount]);
-                b.beginMutReadLong();
-                b.emitLoadLocal(seqLocal);
-                b.emitLoadLocal(idxLocal);
-                b.endMutReadLong();
-                b.endStoreLocal();
-            }
-        }
-        emitNode(someCase.getBody(), b, argCount, localMap);
-        b.endBlock();
-        // Else (None branch)
-        emitNode(noneCase.getBody(), b, argCount, localMap);
-        b.endConditional();
-        b.endBlock();
-        return true;
-    }
 
     private void emitMatch(MatchIR m, MezzeBytecodeRootNodeGen.Builder b,
                            int argCount, BytecodeLocal[] localMap) {
-        // Try fused MutGetRaw + match pattern first
-        if (tryEmitFusedMutGetMatch(m, b, argCount, localMap)) return;
-
         b.beginBlock();
         BytecodeLocal scrutineeLocal = b.createLocal();
         b.beginStoreLocal(scrutineeLocal);
