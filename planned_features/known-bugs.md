@@ -4277,6 +4277,31 @@ are resolved rather than during the declaring module's own check. The
 alternative — refusing two same-named effect declarations outright — is a
 bigger language change and would break the agreeing case above.
 
+**ABILITIES DO NOT HAVE THIS HOLE, and why is the fix lead.** Measured
+2026-11-13 with the identical shape — two modules each declaring `ability Show`,
+fx2's with an extra `tag`, then calling `t.tag {}` on fx's `T`:
+
+| probe | abilities | effects |
+|---|---|---|
+| one module, impl omits a method/op | V0404 | V0404 |
+| **same omission split across two modules** | **V0402** | **accepted** |
+| same name, different signature | T0210/V0402 | T0210 |
+| extra method/op via the merge | V0405 | — |
+| two agreeing same-named declarations | accepted, both dispatch | accepted |
+
+An ability METHOD CALL resolves through a constraint at the USE SITE, so the
+merge cannot hide anything: `t.tag {}` just asks "does `T` implement `Show`?"
+and the answer is no — V0402, naming the impl to write. An effect OP resolves
+through the performer's handler record, and nothing asks the equivalent question
+per op; `perform Ticker in Tick.tock {}` only checks that `Ticker` handles
+`Tick`, never that it handles `tock`.
+
+So the fix need not be "re-run V0404 later". The narrower and better-precedented
+move is to ask the ability question at the op call site: does THIS performer
+provide THIS operation. That is a local check at a site that already resolves
+the performer, it reports like V0402 (naming what to add), and it needs no
+phase reordering.
+
 ### Sub-finding: duplicate effect impls across modules are accepted, load order wins
 
 ```mezze
