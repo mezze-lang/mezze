@@ -136,3 +136,4 @@ map	merge	10994675	2e4	1000	mapsurface:24	2026-11-13
 map	filter	21875381	2e4	1000	mapsurface:22	2026-11-13
 map	to_seq	17786669	5e4	1000	mapsurface:20	2026-11-13
 set	union	8810684	1e4	1000	mapsurface:28	2026-11-13
+set	symmetric_difference	10506913	1e4	1000	mapsurface:31	2026-11-13

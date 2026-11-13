@@ -277,6 +277,193 @@ public final class LongTrieSetStorage implements SetStorage {
         return total;
     }
 
+    /**
+     * STRUCTURAL SYMMETRIC DIFFERENCE — elements in exactly one side, sharing
+     * every subtree only one side has and rehashing nothing.
+     *
+     * <p>`SetNatives.symmetricDifference` walked both sides probing the other
+     * and rebuilt the survivors through {@code fromElements}. At 26 464 686 ps
+     * for two half-overlapping thousand-element sets that was the most
+     * expensive set row left, and roughly 56% of it was the rebuild.
+     *
+     * <p>Unlike {@link #unionWith} this CANCELS, so a position can contribute
+     * nothing and a subtree can come back empty. Each position's contribution
+     * is therefore computed before the bitmaps are built, so no bit is ever
+     * recorded for an empty child.
+     *
+     * @return the symmetric difference, empty when the two tries cancel out
+     */
+    static LongTrieSetStorage symmetricDifferenceWith(LongTrieSetStorage a,
+                                                      LongTrieSetStorage b) {
+        int[] count = new int[1];
+        Node root = symDiffNodes(a.root, b.root, 0, count);
+        if (root == null) return new LongTrieSetStorage();
+        return new LongTrieSetStorage(root, count[0]);
+    }
+
+    /**
+     * The symmetric difference of two subtrees, or null when it is empty.
+     *
+     * <p>Null rather than an empty Node so a caller never records a bit for a
+     * child holding nothing — the hazard this operation has and the union does
+     * not.
+     */
+    private static Node symDiffNodes(Node a, Node b, int shift, int[] count) {
+        // Identical subtrees cancel entirely. The opposite of the union's
+        // short-circuit, and the reason a self-symmetric-difference is empty.
+        if (a == b) return null;
+
+        int bits = a.dataMap | a.nodeMap | b.dataMap | b.nodeMap;
+        int upper = Integer.bitCount(bits);
+
+        // Contributions first, bitmaps after — see the class note above.
+        long[] elems = new long[upper];
+        Node[] kids = new Node[upper];
+        int[] elemBit = new int[upper];
+        int[] kidBit = new int[upper];
+        int ne = 0, nk = 0;
+
+        int rest = bits;
+        while (rest != 0) {
+            int bit = rest & -rest;
+            rest ^= bit;
+            boolean aData = (a.dataMap & bit) != 0, aNode = (a.nodeMap & bit) != 0;
+            boolean bData = (b.dataMap & bit) != 0, bNode = (b.nodeMap & bit) != 0;
+
+            if (aData && bData) {
+                long ea = a.elems[idx(a.dataMap, bit)];
+                long eb = b.elems[idx(b.dataMap, bit)];
+                if (ea == eb) {
+                    continue;                       // cancels
+                }
+                // Both survive, and they collided on this bit, so they go one
+                // level down together — a SUBTREE here, not data.
+                kidBit[nk] = bit;
+                kids[nk++] = merge(ea, TrieHash.mix64(ea), eb, TrieHash.mix64(eb),
+                    shift + BITS);
+                count[0] += 2;
+                continue;
+            }
+
+            if (aData && bNode) {
+                Node sub = b.nodes[idx(b.nodeMap, bit)];
+                long ea = a.elems[idx(a.dataMap, bit)];
+                Node toggled = toggle(sub, ea, TrieHash.mix64(ea), shift + BITS, count);
+                if (toggled != null) { kidBit[nk] = bit; kids[nk++] = toggled; }
+                continue;
+            }
+
+            if (aNode && bData) {
+                Node sub = a.nodes[idx(a.nodeMap, bit)];
+                long eb = b.elems[idx(b.dataMap, bit)];
+                Node toggled = toggle(sub, eb, TrieHash.mix64(eb), shift + BITS, count);
+                if (toggled != null) { kidBit[nk] = bit; kids[nk++] = toggled; }
+                continue;
+            }
+
+            if (aNode && bNode) {
+                Node sub = symDiffNodes(a.nodes[idx(a.nodeMap, bit)],
+                    b.nodes[idx(b.nodeMap, bit)], shift + BITS, count);
+                if (sub != null) { kidBit[nk] = bit; kids[nk++] = sub; }
+                continue;
+            }
+
+            // One side only: everything here is in exactly one side.
+            if (aData) {
+                elemBit[ne] = bit;
+                elems[ne++] = a.elems[idx(a.dataMap, bit)];
+                count[0]++;
+            } else if (bData) {
+                elemBit[ne] = bit;
+                elems[ne++] = b.elems[idx(b.dataMap, bit)];
+                count[0]++;
+            } else if (aNode) {
+                Node sub = a.nodes[idx(a.nodeMap, bit)];
+                kidBit[nk] = bit;
+                kids[nk++] = sub;                   // SHARED BY REFERENCE
+                count[0] += countElems(sub);
+            } else {
+                Node sub = b.nodes[idx(b.nodeMap, bit)];
+                kidBit[nk] = bit;
+                kids[nk++] = sub;                   // SHARED BY REFERENCE
+                count[0] += countElems(sub);
+            }
+        }
+
+        if (ne == 0 && nk == 0) return null;
+
+        int dataMap = 0, nodeMap = 0;
+        for (int i = 0; i < ne; i++) dataMap |= elemBit[i];
+        for (int i = 0; i < nk; i++) nodeMap |= kidBit[i];
+
+        long[] outElems = ne == 0 ? NO_ELEMS : java.util.Arrays.copyOf(elems, ne);
+        Node[] outKids = nk == 0 ? NO_NODES : java.util.Arrays.copyOf(kids, nk);
+        return new Node(dataMap, nodeMap, outElems, outKids);
+    }
+
+    /**
+     * [n] with [elem] removed if present and added if absent, or null when the
+     * result is empty — the "in exactly one side" rule for a single element
+     * against a whole subtree.
+     */
+    private static Node toggle(Node n, long elem, long hash, int shift, int[] count) {
+        if (containsIn(n, elem, hash, shift)) {
+            Node without = delete(n, elem, hash, shift);
+            if (without != null) count[0] += countElems(without);
+            return without;
+        }
+        int[] grew = new int[1];
+        Node with = insert(n, elem, hash, shift, grew);
+        count[0] += countElems(with);
+        return with;
+    }
+
+    /** Whether [elem] is in this subtree. */
+    private static boolean containsIn(Node n, long elem, long hash, int shift) {
+        for (;;) {
+            int bit = 1 << (int) ((hash >>> shift) & MASK);
+            if ((n.dataMap & bit) != 0) return n.elems[idx(n.dataMap, bit)] == elem;
+            if ((n.nodeMap & bit) == 0) return false;
+            n = n.nodes[idx(n.nodeMap, bit)];
+            shift += BITS;
+        }
+    }
+
+    /**
+     * [n] without [elem], or null when that empties the subtree. Rebuilt rather
+     * than routed through the storage's own `remove`, which works from a root
+     * and a size this does not have here.
+     */
+    private static Node delete(Node n, long elem, long hash, int shift) {
+        int bit = 1 << (int) ((hash >>> shift) & MASK);
+
+        if ((n.dataMap & bit) != 0) {
+            int i = idx(n.dataMap, bit);
+            if (n.elems[i] != elem) return n;             // not here
+            if (n.elems.length == 1 && n.nodes.length == 0) return null;
+            long[] elems = new long[n.elems.length - 1];
+            System.arraycopy(n.elems, 0, elems, 0, i);
+            System.arraycopy(n.elems, i + 1, elems, i, n.elems.length - i - 1);
+            return new Node(n.dataMap ^ bit, n.nodeMap, elems, n.nodes);
+        }
+
+        if ((n.nodeMap & bit) == 0) return n;             // not here
+
+        int i = idx(n.nodeMap, bit);
+        Node now = delete(n.nodes[i], elem, hash, shift + BITS);
+        if (now == n.nodes[i]) return n;
+        if (now == null) {
+            if (n.elems.length == 0 && n.nodes.length == 1) return null;
+            Node[] nodes = new Node[n.nodes.length - 1];
+            System.arraycopy(n.nodes, 0, nodes, 0, i);
+            System.arraycopy(n.nodes, i + 1, nodes, i, n.nodes.length - i - 1);
+            return new Node(n.dataMap, n.nodeMap ^ bit, n.elems, nodes);
+        }
+        Node[] nodes = n.nodes.clone();
+        nodes[i] = now;
+        return new Node(n.dataMap, n.nodeMap, n.elems, nodes);
+    }
+
     private static Node merge(long e1, long h1, long e2, long h2, int shift) {
         int i1 = (int) ((h1 >>> shift) & MASK);
         int i2 = (int) ((h2 >>> shift) & MASK);

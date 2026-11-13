@@ -14657,3 +14657,69 @@ literally `union(other).difference(intersect(other))`. `SetNatives` has its own
 implementation and never calls it. The control not moving when the composition
 said it must is what exposed that — the `MezzeSet` method is dead code for the
 native path.
+
+#### `set::symmetric_difference` — 2.5x, and the tidy refactor on its own would have been 1.64x SLOWER
+
+`SetNatives.symmetricDifference` had its own walk-and-rebuild: both sides walked
+while probing the other, survivors collected, `fromElements` rehashing every
+one. At 26 464 686 ps for two half-overlapping thousand-element sets it was the
+most expensive set row left.
+
+It also never called `MezzeSet.symmetricDifference`, which is how it was found:
+the row did NOT move when `set::union` became 3.6x faster, although that method
+is literally `union(other).difference(intersect(other))`. The control not moving
+when the composition said it must is what exposed the duplicate.
+
+THREE IMPLEMENTATIONS, THREE NUMBERS, AND THEY DO NOT AGREE ON THE ORDER:
+
+| implementation | ps/op |
+|---|---|
+| composition — `union` → `intersect` → `difference` | **43 400 884** |
+| the native that shipped — walk, probe, rebuild | 26 464 686 |
+| structural — one pass over both tries | **10 506 913** |
+
+**THE OBVIOUS REFACTOR WOULD HAVE BEEN A REGRESSION.** "Delete the duplicate
+native and delegate to `MezzeSet.symmetricDifference`" is the tidy change the
+dead-code finding invites, and on its own it is **1.64x SLOWER** than the native
+it replaces, because the composition walks the sets three times and rebuilds at
+each step — even with the structural union underneath it. The structural
+implementation is what makes the delegation safe. Measuring the arm that was
+merely a cleanup is what caught that.
+
+So two comparisons, kept apart rather than merged into whichever is larger:
+
+- **4.13x against the composition** — a same-build A/B,
+  `symmetricDifferenceWith` compiled in both arms and one routing line
+  differing. Controls: `union` 1.3%, `intersection` 2.5%, `difference` 0.6%,
+  `map::merge` 0.04%.
+- **2.52x against what actually shipped** — the number a user feels, and a
+  CROSS-BUILD read, because the native only existed on the earlier build. Four
+  controls sit within 1.9% of their values there, which makes it credible; it is
+  labelled cross-build rather than dressed as an A/B, since a cross-build read
+  earlier in this session showed 15% on untouched code.
+
+WHY THIS ONE WAS HARDER THAN THE UNION OR THE MERGE. Those only grow: every
+position contributes something, so bitmaps can be decided in one pass and filled
+in a second. A symmetric difference CANCELS — equal elements annihilate and a
+recursion can come back empty — so a position may produce nothing. Deciding
+bitmaps first would record a bit for a child that turns out empty, leaving a
+node that claims a subtree holding nothing: invisible to every membership test,
+and a `size` that disagrees with the structure. So contributions are computed
+FIRST and the bitmaps built from what survived, and `symDiffNodes` returns null
+rather than an empty node so no caller can record a bit for nothing.
+
+The second new hazard is the TOGGLE: where one side has a single element and the
+other a whole subtree, the element is removed if the subtree had it and added if
+not. Backwards gives a result wrong by exactly two elements and entirely
+plausible. Seven tests reach that branch, proven by making it throw.
+
+TESTS: `LongTrieSymDiffTest`, 11 cases, aimed at the cancellation. Identical
+sets must cancel to EMPTY — checked both through the `a == b` short-circuit and
+through two distinct-but-equal tries, which takes the whole walk. One case
+leaves a single survivor after most of the trie has pruned itself away. Every
+shared element is asserted ABSENT, because a symmetric difference that forgot to
+cancel would otherwise pass. Size is checked separately from membership: a size
+disagreeing with the contents is the signature of a mis-pruned node.
+
+AND THE DUPLICATE IS DELETED, not documented — `SetNatives.symmetricDifference`
+delegates now, so the second implementation is gone.

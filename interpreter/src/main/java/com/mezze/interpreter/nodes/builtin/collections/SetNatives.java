@@ -489,21 +489,23 @@ public final class SetNatives {
         return MezzeList.of(result);
     }
 
+    /**
+     * Elements in exactly one of the two sets.
+     *
+     * <p>THIS USED TO HAVE ITS OWN WALK AND REBUILD — both sides walked while
+     * probing the other, survivors collected, then `fromElements` rehashing
+     * every one — and that is why `set::symmetric_difference` did NOT move when
+     * `set::union` became 3.6x faster: it never called
+     * {@code MezzeSet.symmetricDifference} at all, so that method was dead code
+     * for this path. The control not moving when the composition said it must
+     * is what exposed it.
+     *
+     * <p>It delegates now, and the trie pair is answered structurally in one
+     * pass by `LongTrieSetStorage.symmetricDifferenceWith`.
+     */
     @TruffleBoundary
     public static MezzeSet symmetricDifference(MezzeSet s1, MezzeSet s2) {
-        Object[] out = new Object[s1.size() + s2.size()];
-        int[] n = {0};
-        s1.walkElems(e -> {
-            if (!s2.contains(e)) {
-                out[n[0]++] = e;
-            }
-        });
-        s2.walkElems(e -> {
-            if (!s1.contains(e)) {
-                out[n[0]++] = e;
-            }
-        });
-        return MezzeSet.fromElements(out, n[0]);
+        return s1.symmetricDifference(s2);
     }
 
     // ==================== Task #30: Collect Operations ====================

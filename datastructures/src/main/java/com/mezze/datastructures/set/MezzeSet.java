@@ -396,6 +396,23 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
      * Symmetric difference (elements in either but not both).
      */
     public MezzeSet<A> symmetricDifference(MezzeSet<A> other) {
+        if (isEmpty()) return other;
+        if (other.isEmpty()) return this;
+
+        // THE TRIE CANCELS STRUCTURALLY. The composition below walks the sets
+        // THREE times — a union, an intersection, then a difference of the two
+        // — and each of those rebuilds. `symmetricDifferenceWith` does it in
+        // one pass, sharing every subtree only one side has and rehashing
+        // nothing. At 26 464 686 ps for two half-overlapping thousand-element
+        // sets this was the most expensive set row left.
+        if (storage instanceof LongTrieSetStorage lt
+                && other.storage instanceof LongTrieSetStorage otherLt) {
+            LongTrieSetStorage out =
+                LongTrieSetStorage.symmetricDifferenceWith(lt, otherLt);
+            if (out.size() == 0) return empty();
+            return new MezzeSet<>(out);
+        }
+
         return union(other).difference(intersect(other));
     }
 

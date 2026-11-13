@@ -55,7 +55,7 @@
 | `size` | — | | | | called in mapsurface, seq_reconstruct, no number |
 | `sum` | — | | | | called in fuseall, no number |
 | `sum_float` | **UNMEASURED** | | | | |
-| `symmetric_difference` | 26 488 822 | 1000 | 26 488 | — | mapsurface:31 |
+| `symmetric_difference` | 10 506 913 | 1000 | 10 506 | — | mapsurface:31 |
 | `to_list` | **UNMEASURED** | | | | |
 | `to_seq` | 4 288 408 | 1000 | 4 288 | — | mapsurface:32 |
 | `to_sorted_set` | **UNMEASURED** | | | | |
