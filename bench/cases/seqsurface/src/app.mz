@@ -238,6 +238,22 @@ let l_flat_map = { i, acc, xs, pair } -> if i <= 0 then acc
   else l_flat_map { i = i - 1, xs = xs, pair = pair,
     acc = acc + seq::size { xs = seq::flat_map { xs = xs, f = { x } -> pair } } }
 
+## ── 20. sort ─ the natural-order sort, and NO bench row existed for it ──
+## `seq::sort` carries `with Ord 'a` and routes through `sort_by`, so every
+## comparison runs TWO guest lambdas: the `{ a, b } -> a <= b` the stdlib
+## writes, inside the `if cmp { ... } then 0 - 1 else 1` wrapper `sort_by` adds.
+##
+## Meanwhile `__native_seq_sort` is registered in BOTH `NativeDispatch` and
+## `SeqOps.kt` and has no caller anywhere — the same shape as `OP_COUNT_ALL`.
+##
+## `xs` is DESCENDING and that is deliberate: TimSort finishes an already
+## ordered run in O(n), so sorting `asc` would measure run detection instead of
+## the sort. The Java floor for this shape is 68 387 ps at a hundred elements
+## for `Arrays.sort(long[])` and 266 065 for boxed TimSort.
+let l_sort = { i, acc, xs } -> if i <= 0 then acc
+  else l_sort { i = i - 1, xs = xs,
+    acc = acc + seq::size { xs = seq::sort { xs = xs } } }
+
 pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
   let args = argv {}
   let n = arg_at { args = args, i = 0, def = 2000 }
@@ -298,3 +314,5 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
            label = "seq::bsearch PROBES ", thunk = {} -> l_binary_search { i = n, acc = 0, xs = asc } }
   report { idx = 19, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "seq::flat_map       ", thunk = {} -> l_flat_map { i = n, acc = 0, xs = xs, pair = pair } }
+  report { idx = 20, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "seq::sort NATURAL   ", thunk = {} -> l_sort { i = n, acc = 0, xs = xs } }

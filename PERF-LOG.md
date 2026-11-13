@@ -14960,3 +14960,187 @@ do.
 A STALE CLAIM IN THE BENCH CORRECTED IN THE SAME COMMIT: `seqsurface`'s row 1 was
 labelled `QUADRATIC` and its header asserted "unique IS QUADRATIC AND CALLS GUEST
 CODE PER COMPARISON". Both were true when written and are now false.
+
+
+## `seq::sort` called a guest lambda per comparison — ~10x
+
+`seq::sort` routed through `sort_by`, so each of roughly n log n comparisons ran
+a guest lambda. It now sorts the unboxed array with no guest call at all
+wherever the compiler can PROVE the element directly comparable.
+
+**SELF-A/B**, two builds from identical source except the single
+`ordNativeFastForm` entry — the only difference being whether the compiler
+upgrades the call:
+
+| | upgrade off | upgrade on | |
+|---|---|---|---|
+| m=100 | 1 155 297 ps | **~113 000** | **~10.2x** |
+| m=1000 | 12 538 993 | **~1 300 000** | **~9.6x** |
+
+**QUOTED AS A SPREAD BECAUSE THAT IS WHAT IT IS.** Six readings of the upgraded
+row at m=100 across rebuilds: 108 745, 110 186, 110 361, 110 860, 112 879,
+119 580 — about 113 000 +/- 5%. My first write-up said 10.49x, which took the
+best of those; the row does not support a second decimal. At m=1000:
+1 272 217, 1 283 928, 1 299 136, 1 359 067.
+
+Controls: `seq::sum` 50 082 -> 50 156 -> 51 103 across the three builds (+2%).
+`seq::sort_by` — the sharp control, sharing the native's neighbourhood, the
+`ScalarCall` context and the `toArray`/`fromArray` boxing, differing only in
+that nothing upgrades it — moves within 3% across all builds, which is the
+drift the spread above already absorbs.
+
+**THE ROW HAD TO BE RESIZED BEFORE ANY NUMBER WAS QUOTED.** At the n that sized
+it before, the upgraded row came back 114 294 ps flagged `WARMUP-DOMINATED` —
+the harness's own warning that the row is now too fast for its own n. Climbing n
+until the flag cleared AND the figure converged: 110 361 at n=4e5, 108 745 at
+n=1.6e6. The first number I saw was not the row's cost.
+
+**THE CEILING WAS MEASURED FIRST AND SAID 18.9x; THIS IS 10.5x.** A Java harness
+over the same descending input: `Arrays.sort(long[])` 68 387 ps, boxed TimSort
+266 065, the defensive copy alone 40 298. Against the subject's 1 291 024 that
+promised 18.9x. The result lands at 1.61x the raw Java floor, and the gap is not
+mysterious: the floor timed the sort and its copy, while the row also pays the
+native dispatch and a `seq::size` every iteration. Quoting the ceiling as the
+result would have been quoting a harness that measured less work.
+
+WHAT THE COST ACTUALLY WAS. 1 266 573 ps for ~550 comparisons is 2.3 ns each
+against 0.51 ns for a Java lambda over the same data — the comparator, not the
+sort. `toArray` boxes every element through `get(i)` and `fromArray` re-detects
+the storage and unboxes back, a further ~16%. The comparator-free native reads
+`LongSeqStorage.getArray()` and returns a `LongSeqStorage`, so none of that
+happens.
+
+**THE NATIVE WAS ALREADY THERE, DEAD, AND WRONG.** `__native_seq_sort` was
+registered in BOTH `NativeDispatch` and `SeqOps.kt` — the latter with a
+scalar-ABI declaration — and called from nowhere, the same shape as
+`OP_COUNT_ALL`. Its comparator dispatched on Long/Double/String and ended
+`return 0`, so a seq of records would have come back in its original order
+reported as sorted. An unreachable wrong answer is still a wrong answer waiting
+for a caller; it now throws and names the broken promise.
+
+**THE DIRECTION OF THE REWRITE IS THE SAFETY PROPERTY.** The stdlib writes the
+GENERAL form — the element's own `Ord` via `le`, correct for everything — and
+`TypedASTCompiler.ordNativeCall` only ever UPGRADES, on proof, dropping the
+comparator. Every decline is therefore a correct answer that is merely slower.
+The inverse arrangement would make each decline a silently wrong order, and
+would also break the stdlib's own generic compile, where no specialization has
+recorded any impl at all.
+
+**AND THE GATE IS PROVEN LOAD-BEARING**, not assumed. Removing
+`if (ordKindOf(elem) != OrdKind.DIRECT) return null` fails exactly three tests,
+in the two different ways that matter:
+
+- `newtype R = Int` with a DESCENDING `Ord`: `expected: <5> but was: <1>`. A
+  wrong answer, silently — R is a long at runtime, so the primitive sort
+  contradicts the order its author wrote. known-bugs.md BUG 10 in min_by's
+  clothing, and why `ordKindOf` answers INSTANCE for a newtype over Int.
+- a record element: the new `IllegalStateException`, naming the native, the
+  class that reached it, and the fact that it is a compiler bug rather than a
+  program error.
+
+Dropping `le` is sound for the elements whose `Ord` is the compiler's own and
+which a user cannot own an impl on. The same bet `classifyMinMaxByMode` already
+makes on the same enum.
+
+**FLOAT IS INCLUDED, UNDER A DECIDED RULE: NaN SORTS LAST.** A user decision,
+and the one place this change touches language semantics. Sorting gets a total
+order with NaN at the end; the comparison OPERATORS are unchanged, so
+`NaN <= x` is still False in both directions and `float::is_nan` is still the
+test. The rule and the fastest implementation coincide, which is why it is free:
+`Arrays.sort(double[])` already sorts by IEEE 754's `totalOrder`.
+
+**WHY A RULE WAS NEEDED AT ALL**, measured on the same seven values in two
+arrangements rather than argued from the standard:
+
+| input | before | after |
+|---|---|---|
+| `5, 2, NaN, 8, 1, 9, 3` | `2, 5, NaN, 1, 3, 8, 9` | `1, 2, 3, 5, 8, 9, NaN` |
+| `NaN, 5, 2, 8, 1, 9, 3` | `NaN, 1, 2, 3, 5, 8, 9` | `1, 2, 3, 5, 8, 9, NaN` |
+
+The first row is the point and it is not about NaN: **5.0 came out ahead of
+1.0**. One NaN reordered values that had nothing to do with it, because every
+comparison involving it is False and the merge left two runs that never
+reconciled. The second row is the same data rearranged, where the good values
+happened to survive — so the old behaviour was not reliably wrong, it was
+ARRANGEMENT-DEPENDENT, which is harder to catch.
+
+**AND `is_sorted` RETURNED TRUE ON THE CORRUPTED OUTPUT.** It compares by
+negation, so NaN passes in both directions. The language's own sortedness check
+certified the scrambled result, which means the corruption could not be detected
+from inside the language at all. That, rather than the perf, is the strongest
+reason this rule exists.
+
+**WHAT THE ALTERNATIVES WERE.** Rust makes `f64` `PartialOrd` and not `Ord`, so
+`sort()` does not compile and `sort_by(f64::total_cmp)` is the one-word opt-in
+(stable since 1.62). That design does not port cheaply: Mezze's `Ord` BOTH
+desugars `<` and licenses sorting, so copying Rust means splitting the ability —
+a redesign, not a fix. Removing `impl Ord for Float` was measured as a
+possibility and rejected on that basis: the stdlib breaks in only ONE place
+(a `<` in `std::effects::random`), but the real cost is that floats could no
+longer be compared with `<` at all. Roc defers the whole question, leaving
+`F32.compare`/`F64.compare` unimplemented pending exactly these semantics while
+its base-10, NaN-free `Dec` does get a `compare`. Haskell shipped the lawless
+instance — `compare NaN x` and `compare x NaN` both answer `GT` — and its own
+`Data.Ord` docs warn against ordered containers keyed on Double because "data
+loss and corruption may happen". Mezze was in Haskell's position.
+
+**WHAT IS DELIBERATELY NOT FIXED.** `seq::min`, `seq::max` and `is_sorted` go
+through the IEEE operators, so `min` of a seq whose FIRST element is NaN is
+still NaN — verified, not assumed. Making those total would put a NaN check on
+every float comparison in the language, against the instruction to take the most
+performant option. Documented on `seq::sort` and beside `impl Ord for Float`,
+which are the two places someone hits the question.
+
+**THE FLOAT SPEEDUP IS NOT SEPARATELY MEASURED** and is not claimed as a number.
+Float takes the identical mechanism — `Arrays.sort(double[])` where Int takes
+`Arrays.sort(long[])` — but the ~10x above was measured on Int, and only Int.
+
+`-0.0` was NOT exercised and nothing is claimed about it: `0.0 - 0.0` is
+positive zero, so the obvious spelling never constructs it.
+
+**THREE SPELLINGS OF THE STDLIB BODY FAILED FIRST**, and each failure is worth
+keeping. `__native_*` is an untyped boundary — the comment in `TypedAstBuilder`
+already records this for `__native_seq_sort_by` — so nothing connected `xs`'s
+element to the comparator and `<=` applied `Ord` to fresh variables:
+
+1. `le = { a, b } -> a <= b` — "the body applies Ord to a type the annotation
+   does not name".
+2. `le = { a: 'a, b: 'a } -> ...` — refused identically. A `'a` written inside a
+   lambda is a FRESH variable, not the enclosing signature's.
+3. `le = natural_le`, a named `with Ord 'a` function passed by reference —
+   refused identically: through an untyped boundary it instantiates at fresh
+   variables.
+
+What works is what `sort_by` already does: a typed Mezze function in between,
+naming one `'a` in both `xs` and `le`. Hence `sort_by_ord`, private and
+single-caller — which matters, because the compiler DROPS the `le`, so the
+native's name has to mean "ordered by the element's own Ord" and no public
+surface may reach it. A caller handing it an arbitrary comparator would have
+that comparator silently discarded: the same class of bug as the `return 0` this
+change deletes. `sort_by` is a different native and is never upgraded, so an
+arbitrary comparator still works — tested.
+
+Then the callback's parameters had to be `{ it, r }`, not `{ a, b }`: callback
+params are matched BY NAME.
+
+`ScalarCall.callEq` gained an honest name. Its body — `call2(...) instanceof
+Boolean && result` — was never specific to `eq`; it is "call a two-argument
+guest function and read its Bool", which is exactly what `Ord`'s `le` needs.
+Rather than invoke `le` through a method named `callEq`, the reader is now
+`callBool` and `callEq` delegates: one implementation, two accurate names.
+
+ONE PROPERTY IS INHERITED AND SAID SO IN THE CODE: `le(a,b) ? -1 : 1` never
+answers 0, so two equal elements compare as -1 in both directions and TimSort's
+"Comparison method violates its general contract" check can in principle fire.
+That is what this path already cost — the stdlib wrapped the comparator as
+`if cmp { ... } then 0 - 1 else 1` and `sort` went through it. Fixing it costs
+about 1.5 guest calls per comparison, which changes the general path's cost and
+belongs with its own measurement, not here.
+
+A TEST OF MINE WAS WRONG BEFORE THE CODE WAS: "a record element sorts by its
+derived Ord" assumed records derive `Ord`. They do not, and the typechecker said
+so plainly, listing the nine impls that exist. The case was worth keeping — a
+record is what the old `return 0` answered wrongly — so it writes the impl.
+
+Row 20 of `seqsurface` is new: `seq::sort` had no bench row anywhere, in a
+module where it is also the harness's own median helper.

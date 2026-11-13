@@ -2138,6 +2138,11 @@ class TypedASTCompiler(
                     // native exactly as it was, so a `Set Int` keeps its specialised
                     // storage and iteration order.
                     evidenceNativeCall(binding.name, argIR, src)?.let { return it }
+                    // `seq::sort` with no comparator at all, when the element was
+                    // proved directly comparable. An UPGRADE only — declining
+                    // leaves the element's own `le` in place, which is correct
+                    // for everything. See [ordNativeCall].
+                    ordNativeCall(binding.name, argIR, expr.type, src)?.let { return it }
                     // Scalar-ABI emission: if the native is declared in the
                     // NativeOp DSL, transpose the user record into positional
                     // args in the registry's declared order. The interpreter
@@ -3300,6 +3305,68 @@ class TypedASTCompiler(
             ),
             src = src,
         )
+    }
+
+    /**
+     * The comparator-free native for [nativeName] when the element was PROVED
+     * directly comparable — else null, leaving the call as the stdlib wrote it.
+     *
+     * ONLY EVER AN UPGRADE, and that is the safety property. The stdlib writes
+     * `__native_seq_sort_by_ord { xs, le }`, correct for every element because
+     * `le` is the element's own `Ord`. Were the fast native the default and
+     * this a DOWNGRADE on spotting a custom `Ord`, every decline would be a
+     * silently wrong order — and the stdlib's own generic compile, where no
+     * specialization has recorded an impl, would decline every time.
+     *
+     * A newtype over Int is INSTANCE and must decline: its `Ord` may reverse
+     * the order of the type it wraps while it is a long at runtime, so the
+     * primitive sort would contradict it. See known-bugs.md BUG 10. The
+     * measurement is in PERF-LOG; the Float/NaN rule is on `seq::sort`.
+     */
+    private fun ordNativeCall(nativeName: String, argIR: NodeIR, resultType: MezzeType,
+                              src: SourceInfo): NodeIR? {
+        val fastName = ordNativeFastForm[nativeName] ?: return null
+        if (argIR !is MakeRecordIR) return null
+        val elem = seqElementType(resultType) ?: return null
+        // Null (undecided) declines exactly like INSTANCE — never upgrade on a guess.
+        if (ordKindOf(elem) != OrdKind.DIRECT) return null
+        // Float upgrades too. Int and Str are totally ordered so dropping the
+        // comparator cannot change an answer; Float is a DECIDED RULE —
+        // `seq::sort` places NaN LAST while the comparison operators keep IEEE
+        // semantics — and `Arrays.sort(double[])` implements exactly that
+        // order. The rule, its measured justification and what it leaves
+        // unfixed are stated on `seq::sort` and beside `impl Ord for Float`,
+        // which is where someone meets the question; repeating it here would
+        // be the third copy.
+        val xs = argIR.fields.firstOrNull { it.name == "xs" } ?: return null
+        return CallNativeIR(
+            name = fastName,
+            arg = MakeRecordIR(listOf(xs), src),
+            src = src,
+            producesKind = collectionKindOf(resultType),
+            ownerKind = NativeHofNames.ownerOf(fastName),
+            opKind = NativeHofNames.opOf(fastName),
+        )
+    }
+
+    /**
+     * The general native paired with the comparator-free one that supersedes it
+     * when the element is directly comparable.
+     *
+     * Keyed on the native's NAME because that is what a native IS here, the same
+     * way [evidenceNativeForm] is keyed — a table of operations, not a dispatch
+     * on any type's spelling.
+     */
+    private val ordNativeFastForm: Map<String, String> = mapOf(
+        "__native_seq_sort_by_ord" to "__native_seq_sort",
+    )
+
+    /** The element type of a Seq, or null for anything else — including a Seq
+     *  whose element the solver left unsolved, which must decline. */
+    private fun seqElementType(type: MezzeType): MezzeType? {
+        val app = type as? MezzeType.TypeApplication ?: return null
+        if (app.constructor != com.mezze.language.ast.BuiltinTypes.SEQ) return null
+        return app.args.firstOrNull()
     }
 
     /** True when the author wrote this impl rather than the compiler deriving it. */

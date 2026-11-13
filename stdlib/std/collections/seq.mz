@@ -217,9 +217,48 @@ pub let count: { xs: ['a], p: { x: 'a } -> Bool <...> } -> Int <...> = { xs, p }
 ## Reverses the sequence.
 pub let reverse: { xs: ['a] } -> ['a] = { xs } -> __native_seq_reverse { xs = xs }
 
+## Natural order through the element's own `Ord` — the typed intermediary the
+## native needs.
+##
+## PRIVATE AND SINGLE-CALLER ON PURPOSE. When the compiler proves `'a` directly
+## comparable it rewrites the call below to `__native_seq_sort { xs = xs }` and
+## DROPS `le`, so `__native_seq_sort_by_ord` means "ordered by the element's own
+## Ord" and nothing else. Anything handing it a different comparator would have
+## that comparator silently discarded — the same class of bug as the `return 0`
+## this native's old body contained.
+let sort_by_ord: { xs: ['a], le: { it: 'a, r: 'a } -> Bool } with Ord 'a -> ['a]
+  = { xs, le } -> __native_seq_sort_by_ord { xs = xs, le = le }
+
 ## Sorts elements in ascending order using the element's Ord impl.
+##
+## The comparator is written here and typed by `sort_by_ord`'s signature, which
+## is the only thing that connects it to `xs`'s element: `__native_*` is an
+## untyped boundary, so an inline lambda handed straight to the native has its
+## `<=` applied to fresh variables and is refused. Annotating the lambda does
+## not help — a `'a` inside a lambda is a fresh variable, not this one's.
+##
+## Costs ONE guest call per comparison, which is what it has always cost. Where
+## the element is provably directly comparable (Int, Float, Str) the compiler
+## replaces the whole thing with a comparator-free sort of the unboxed array:
+## 68 387 ps against 1 291 024 for a hundred descending elements.
+##
+## FLOAT: NaN SORTS LAST. Sorting uses a total order; the comparison operators
+## do not change, so `NaN <= x` is still False and `float::is_nan` is still the
+## way to test for it.
+##
+## This is a rule and not an accident, because without one a single NaN reorders
+## values that have nothing to do with it — every comparison involving NaN is
+## False, so the merge leaves runs that never reconcile.
+## `[5.0, 2.0, NaN, 8.0, 1.0, 9.0, 3.0]` used to sort to
+## `2.0, 5.0, NaN, 1.0, 3.0, 8.0, 9.0`, with 5.0 ahead of 1.0, and `is_sorted`
+## answered True on it. Now the non-NaN values come out in order wherever the
+## NaN sits.
+##
+## `min`, `max` and `is_sorted` still use the operators, so they still answer
+## NaN for a seq whose first element is NaN. Use `float::is_nan` to filter first
+## if that matters.
 pub let sort: { xs: ['a] } with Ord 'a -> ['a] = { xs } ->
-  sort_by { xs = xs, cmp = { a, b } -> a <= b }
+  sort_by_ord { xs = xs, le = { it, r } -> it <= r }
 
 ## Sorts using a `less-or-equal` comparator: `cmp { a, b }` returns True when `a`
 ## should come before `b`. Matches how ordering is expressed everywhere else in

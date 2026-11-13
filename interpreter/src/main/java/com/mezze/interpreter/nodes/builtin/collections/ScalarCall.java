@@ -208,6 +208,22 @@ public final class ScalarCall {
      * throwing inside a collection walk.
      */
     public boolean callEq(IndirectCallNode callNode, Object a, Object b) {
+        return callBool(callNode, a, b);
+    }
+
+    /**
+     * Call a prepared two-argument guest function and read its Bool.
+     *
+     * <p>This is what {@link #callEq} always was — nothing in the body is
+     * specific to `eq`. `Ord`'s `le` needs the identical reader, and invoking
+     * `le` through a method named `callEq` would make the call site lie about
+     * which operation it is asking for.
+     *
+     * <p>A non-Bool result reads as false. That is deliberate and matches
+     * {@link #callEq}: a broken impl must not throw from inside a collection
+     * walk, where the exception would surface far from its cause.
+     */
+    public boolean callBool(IndirectCallNode callNode, Object a, Object b) {
         return call2(callNode, a, b) instanceof Boolean result && result;
     }
 

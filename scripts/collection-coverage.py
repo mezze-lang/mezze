@@ -23,6 +23,16 @@ WHAT IT CANNOT SEE: an operation exercised indirectly. The `sum(0..10M)` row in
 `iter_perf_compare` calls `iter::fold`, so `iter::sum` counts as unbenchmarked,
 which is the correct answer to the question asked here — nobody has measured
 `iter::sum` itself.
+
+AND THE INVERSE, WHICH HID A 10x. A call site in a bench is not a row measuring
+it. `seqsurface`'s own harness calls `seq::sort` to take the median of its
+passes, so `seq::sort` counted as benched from the day the harness was written
+while NO row had ever timed it — and it was routing through `sort_by`, paying a
+guest lambda per comparison. Adding that row moved `numbered` from 98 to 99 and
+left `benched` at 196, which is the discrepancy as a number: this script counts
+whether an operation is NAMED under bench/cases, and a harness names the
+operations it uses on itself. For "is there a number for it", read the
+`numbered` count and perf/coverage.tsv, not this one.
 """
 import glob
 import os

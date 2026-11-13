@@ -708,8 +708,15 @@ public final class NativeDispatch extends MezzeNode {
             SeqNatives.contains(getSeq(r, "xs"), getField(r, "x")));
         HANDLERS.put("__native_seq_index_of", (r, c) ->
             SeqNatives.indexOf(getSeq(r, "xs"), getField(r, "x")));
+        // `seq::sort` with no comparator. LIVE as of this change: the native was
+        // registered here and in `SeqOps.kt` and called from nowhere, while
+        // `seq::sort` routed through `sort_by` and paid a guest lambda per
+        // comparison. The compiler picks between the two forms from the
+        // element's `OrdKind` — see `TypedASTCompiler.ordNativeCall`.
         HANDLERS.put("__native_seq_sort", (r, c) ->
             SeqNatives.sort(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_sort_by_ord", (r, c) ->
+            SeqNatives.sortByOrd(getSeq(r, "xs"), getFunction(r, "le"), c));
         // `seq::unique` in O(n). The quadratic it replaces is gone, not
         // deprecated: `__native_seq_unique` had exactly one caller, the
         // `unique_with_eq` helper, which is deleted with it.

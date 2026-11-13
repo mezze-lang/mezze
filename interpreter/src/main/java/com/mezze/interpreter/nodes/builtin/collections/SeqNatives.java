@@ -695,21 +695,101 @@ public final class SeqNatives {
 
     // ==================== Sort Operations ====================
 
+    /**
+     * Natural-order sort with NO guest call and NO boxing — the whole point.
+     *
+     * <p>WHAT THIS REPLACES. `seq::sort` routed through `sort_by`, so each of the
+     * roughly n log n comparisons ran a guest lambda. MEASURED at a hundred
+     * descending elements: 1 291 024 ps, against 68 387 for `Arrays.sort(long[])`
+     * over the same input and 266 065 for boxed TimSort. The comparator was the
+     * cost, not the sort.
+     *
+     * <p>Reached ONLY when the compiler proved the element directly comparable —
+     * {@code OrdKind.DIRECT}, which is Int, Float and Str and nothing else. For
+     * every other element {@code TypedASTCompiler} rewrites the call to
+     * {@code __native_seq_sort_by_ord} and hands over that element's own `le`.
+     * That gate is not a nicety: a `newtype R = Int` with a reversed `Ord`
+     * compares as a long here and would silently contradict the order its author
+     * wrote. See known-bugs.md BUG 10, which is this bug in min_by's clothing.
+     *
+     * <p>THE PREVIOUS BODY WAS DEAD AND WRONG. `__native_seq_sort` was registered
+     * in both {@code NativeDispatch} and {@code SeqOps.kt} and called from
+     * nowhere, and its comparator ended {@code return 0} — so had anything
+     * reached it with a record, TimSort would have treated every pair as
+     * equal and handed back the original order as sorted. An unreachable
+     * wrong answer is still a wrong answer waiting for a caller.
+     *
+     * <p>The tag switch is a carried decision, not a type guess: the storage
+     * tier IS the element representation. Anything else throws, because the
+     * compiler promised DIRECT and a broken promise is a compiler bug — there is
+     * no sensible order to fall back to, and inventing one is what the old
+     * {@code return 0} did.
+     */
     @TruffleBoundary
     public static MezzeSeq sort(MezzeSeq seq) {
+        int n = seq.size();
+        if (n <= 1) return seq;
+        byte tag = seq.getStrategyTag();
+        if (tag == SeqStorage.TAG_LONG) {
+            long[] arr = seq.toLongArray();        // already a defensive copy
+            Arrays.sort(arr);                      // dual-pivot quicksort, no comparator
+            return MezzeSeq.fromStorage(new LongSeqStorage(arr));
+        }
+        if (tag == SeqStorage.TAG_DOUBLE) {
+            double[] arr = seq.toDoubleArray();
+            Arrays.sort(arr);
+            return MezzeSeq.fromStorage(new DoubleSeqStorage(arr));
+        }
+        // The object tier holds whatever the element is, so Str is CHECKED here
+        // rather than assumed. The scan is O(n) against the sort's O(n log n),
+        // and it buys an error that names the broken promise instead of a
+        // ClassCastException from inside TimSort.
         Object[] arr = seq.toArray();
-        Arrays.sort(arr, (a, b) -> {
-            if (a instanceof Long && b instanceof Long) {
-                return Long.compare((Long) a, (Long) b);
+        for (Object elem : arr) {
+            if (!(elem instanceof String)) {
+                throw new IllegalStateException(
+                    "__native_seq_sort reached a " + (elem == null ? "null" : elem.getClass().getName())
+                    + " element: this native sorts only the directly comparable elements"
+                    + " (Int, Float, Str). Anything else must have been rewritten to"
+                    + " __native_seq_sort_by_ord by TypedASTCompiler, so this is a"
+                    + " compiler bug, not a program error.");
             }
-            if (a instanceof Double && b instanceof Double) {
-                return Double.compare((Double) a, (Double) b);
-            }
-            if (a instanceof String && b instanceof String) {
-                return ((String) a).compareTo((String) b);
-            }
-            return 0;
-        });
+        }
+        Arrays.sort(arr);
+        return MezzeSeq.fromArray(arr);
+    }
+
+    /**
+     * Natural-order sort through the element's OWN `Ord` — the general path.
+     *
+     * <p>This is where every element the compiler could not prove directly
+     * comparable goes: records, variants, and above all a newtype whose `Ord`
+     * disagrees with the type it wraps. `le` is `Ord`'s own operation and
+     * answers True when `it` should come before `r`, which is exactly the
+     * contract {@code sortBy} already documents, so the normalisation to
+     * -1 / 1 happens here rather than in a guest wrapper.
+     *
+     * <p>ONE `le` per comparison, which is what this path already cost: the
+     * stdlib wrapped the comparator as `if cmp { ... } then 0 - 1 else 1` and
+     * `sort` went through it. That shape never answers 0, so two equal elements
+     * compare as -1 in BOTH directions and TimSort's "Comparison method
+     * violates its general contract" check can in principle fire. The property
+     * is inherited, not introduced — `le(a,b) ? (le(b,a) ? 0 : -1) : 1` would
+     * fix it at about 1.5 guest calls per comparison, which is a change to the
+     * general path's cost and belongs with its own measurement, not here.
+     *
+     * <p>Through {@link ScalarCall} for the same reason {@code sortBy} is: it
+     * resolves the scalar-ABI bypass once and reuses one args array for the
+     * whole sort, where a per-comparison {@code prepareArgsComparator} allocates
+     * an {@code Object[]} and a {@code MezzeRecord} every time.
+     */
+    public static MezzeSeq sortByOrd(MezzeSeq seq, MezzeFunction leFn,
+                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        int n = seq.size();
+        if (n <= 1) return seq;
+        var ctx = ScalarCall.prepare2(leFn, "it", "r");
+        Object[] arr = seq.toArray();
+        Arrays.sort(arr, (a, b) -> ctx.callBool(callNode, a, b) ? -1 : 1);
         return MezzeSeq.fromArray(arr);
     }
 

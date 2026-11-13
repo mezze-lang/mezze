@@ -4,7 +4,7 @@
 
 # seq
 
-`std::collections::seq` · 124 operations · 36 with a bench row · 18 with a number
+`std::collections::seq` · 124 operations · 36 with a bench row · 19 with a number
 
 | op | ps/op | elems | ps/elem | vs floor | bench |
 |---|---|---|---|---|---|
@@ -100,7 +100,7 @@
 | `size` | — | | | | called in allocsurface, asyncsurface, buffersurface, bytesurface, datetimesurface, ds_matrix, dsmore, fusegaps, iter_perf_compare, jsonsurface, list_fold_compare, list_ops_compare, mapsurface, mutvsimmut, polyglot_array_read, qsort_pure, range_alloc_probe, seq_fold_compare, seq_fusion, seqsurface, surface, no number |
 | `slice` | — | | | | called in qsort_mut, qsort_native, qsort_pure, no number |
 | `sliding` | **UNMEASURED** | | | | |
-| `sort` | — | | | | called in asyncsurface, buffersurface, bytesurface, datetimesurface, ds_matrix, dsmore, jsonsurface, list_fold_compare, list_ops_compare, mapsurface, qsort_mut, qsort_native, qsort_pure, seq_fold_compare, seqsurface, surface, no number |
+| `sort` | 1 272 217 | 1000 | 1 272 | — | seqsurface:20 |
 | `sort_by` | 1 274 164 | 100 | 12 741 | — | seqsurface:8 |
 | `sort_by_key` | 1 987 264 | 100 | 19 872 | — | seqsurface:13 |
 | `span` | **UNMEASURED** | | | | |
