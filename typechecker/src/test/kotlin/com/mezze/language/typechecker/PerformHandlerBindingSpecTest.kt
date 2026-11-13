@@ -6,15 +6,14 @@ import org.junit.jupiter.api.Test
  * A `perform`'s handler must bind the effect's associated types to what the BODY
  * requires — in the RETURN direction as well as the parameter direction.
  *
- * The parameter direction IS checked. `PerformValidator.validatePerformExpression`
- * compares each handler's `associatedTypeBindings` against
- * `collectThrownErrorTypes(expr.body, …)` and raises V0501 "Handler type
- * mismatch", which is why `perform StringHandler in validate {}` is refused when
- * `validate` throws a ValidationError.
+ * FIXED. These were BREAK tests asserting the hole; they now assert the refusal.
  *
- * The RETURN direction is not checked at all, because `collectThrownErrorTypes`
- * only sees values flowing INTO an op. An associated type that flows OUT of one
- * — `get: {} -> 'val` — is never compared. MEASURED end to end:
+ * The hole: only the parameter direction was checked, by
+ * `PerformValidator.validatePerformExpression`, which works on the PARSED AST —
+ * it reads an operation's param-type annotation and rebuilds a type from the
+ * literal argument expression. That reaches a value flowing INTO an op and has
+ * no route to one flowing out, so `get: {} -> 'val` was never compared.
+ * MEASURED before the fix:
  *
  *     impl Store for IntStore having 'val = Int where { get = {} -> 1 }
  *     impl Store for StrStore having 'val = Str where { get = {} -> "A STRING" }
@@ -26,25 +25,27 @@ import org.junit.jupiter.api.Test
  *     bad (declared Int) = A STRING
  *     java.lang.RuntimeException: Cannot multiply String and Long
  *
- * The information needed is already computed and printed: the body's row carries
- * `having 'val = Int`. The perform site simply never compares it against the
- * performer's `having 'val = Str`.
- *
  * Why the single-impl cases DID get caught: with one impl in scope, inference
  * takes its binding, so the clash surfaces at the body's own annotation as a
  * T0201/T0210 naming `<Store having 'val = …>`. TWO impls leave nothing to infer
  * from, and the perform site was the only check left.
  *
- * THE BREAK TESTS ASSERT THE BROKEN BEHAVIOUR. A failure here means someone
- * fixed it — flip them to `rejects` with V0501 then. The fix belongs in
- * `PerformValidator`: derive the body's required bindings from its inferred ROW
- * (not only from throw sites) and compare them against each handler's bindings,
- * reusing `areAssociatedTypesCompatible` and the existing `HandlerTypeMismatch`.
+ * THE FIX is in `ExprPerformConstraints`, not in `PerformValidator`: by the time
+ * a perform's constraints are generated, the body's requirement is in
+ * `effectInstances` (`<Store having 'val = Int>` — what the printer shows) and
+ * the performer's binding is in `associatedTypes`. The suspension path twenty
+ * lines below already builds a substitution from exactly that pair; it just
+ * never asked whether they agree. Asking is one equality constraint, so the
+ * solver's unification decides rather than a hand-written comparison.
+ *
+ * ONLY A CONCRETE BINDING IS CHECKED, and the last test here is why: every
+ * performer in `std/effects/` binds to a VARIABLE, which must stay free to take
+ * the body's type.
  */
 class PerformHandlerBindingSpecTest : VariantSpecBase() {
 
-    @Test fun `BREAK - a performer whose binding contradicts the body is accepted`() {
-        accepts(
+    @Test fun `a performer whose binding contradicts the body is refused`() {
+        rejects(
             """
             effect Store having 'val where { get: {} -> 'val <Store> }
             impl Store for IntStore having 'val = Int where { get = {} -> 1 }
@@ -53,15 +54,19 @@ class PerformHandlerBindingSpecTest : VariantSpecBase() {
             pub let bad: {} -> Int <*> = {} -> perform StrStore in as_int {}
             $MAIN
             """,
-            "BREAK. `as_int`'s row is inferred as `<Store having 'val = Int>`, and " +
-                "StrStore binds 'val = Str. Measured: checks clean, then " +
-                "`bad (declared Int) = A STRING` and `Cannot multiply String and " +
-                "Long` at the first arithmetic. Should be V0501.",
+            "T0201",
+            "THE HOLE, NOW CLOSED. `as_int`'s row is inferred as " +
+                "`<Store having 'val = Int>` and StrStore binds 'val = Str. Before " +
+                "the fix this checked clean and then ran, printing " +
+                "`bad (declared Int) = A STRING` before dying in the first " +
+                "arithmetic. The message names the performer, the binding and both " +
+                "types: \"performer 'StrStore' binds `having 'val` to Str, but the " +
+                "body it handles requires Int\".",
         )
     }
 
-    @Test fun `BREAK - the same crossing with several associated types`() {
-        accepts(
+    @Test fun `the same crossing with several associated types is refused`() {
+        rejects(
             """
             effect Triple having 'a, 'b, 'c where {
               one: {} -> 'a <Triple>,
@@ -77,8 +82,11 @@ class PerformHandlerBindingSpecTest : VariantSpecBase() {
             pub let run = {} -> perform H in use_it {}
             $MAIN
             """,
-            "The same gap with several associated types: the site asks `one` for a " +
-                "Str while the impl binds 'a = Int. Nothing compares them.",
+            "T0201",
+            "The same crossing with several associated types — the site asks `one` " +
+                "for a Str while the impl binds 'a = Int. Each binding is compared " +
+                "separately, so an effect with three of them is three constraints, " +
+                "not one all-or-nothing match.",
         )
     }
 
@@ -115,7 +123,7 @@ class PerformHandlerBindingSpecTest : VariantSpecBase() {
         )
     }
 
-    @Test fun `the PARAMETER direction is already checked`() {
+    @Test fun `the PARAMETER direction is covered by the same check`() {
         rejects(
             """
             effect Exception having 'error where {
@@ -130,12 +138,70 @@ class PerformHandlerBindingSpecTest : VariantSpecBase() {
             pub let run = {} -> perform StringHandler in validate {}
             $MAIN
             """,
-            "V0501",
-            "The direction that WORKS, kept beside the one that does not. " +
-                "`collectThrownErrorTypes` sees the thrown ValidationError and " +
-                "compares it against StringHandler's 'error = Str. Only values " +
-                "flowing INTO an op are covered, which is exactly why the return " +
-                "direction is not.",
+            "T0201",
+            "THE PARAMETER DIRECTION, which the fix SUBSUMES. This used to be " +
+                "V0501 from `PerformValidator`; the body's `<Exception having " +
+                "'error = ValidationError>` now reaches the same conclusion first, " +
+                "so one check covers both directions instead of two covering one " +
+                "each. V0501's message named the handler, the effect and both " +
+                "types, so the replacement had to as well — that is what the " +
+                "`HANDLER_BINDING_CONTEXT` branch in ErrorMessageBuilder is for.",
+        )
+    }
+
+    @Test fun `a performer bound to a VARIABLE takes whatever the body requires`() {
+        accepts(
+            """
+            use std::result
+            effect Ex having 'error where { throw: { error: 'error } -> 'a <Ex> }
+            impl Ex for ToResult having 'error = 'e where {
+              throw = { error } -> abort { val = Err { error } }
+            }
+            pub let as_str: { b: Int } -> Int <Ex> = { b } ->
+              if b == 0 then Ex.throw { error = "div0" } else b
+            pub let run = {} -> perform ToResult in do
+              let v = as_str { b = 0 }
+              Ok { val = v }
+            $MAIN
+            """,
+            "THE SHAPE THE WHOLE STDLIB IS, and the reason the check skips a " +
+                "VARIABLE binding. `std/effects/` has no performer bound to a " +
+                "concrete type: `ExceptionToResult`, `ExceptionToOption`, " +
+                "`AbortException`, `IgnoreException` and `CrashException` all take " +
+                "`having 'error = 'e`; `EarlyReturn` takes `'result = 'r`; the " +
+                "three `Condition` performers take `'ctx = 'c`; `WithReader " +
+                "{ val: 'a }` takes `'a = 'a`. A variable must stay free to take " +
+                "the body's type — that IS the binding's purpose — so constraining " +
+                "it would refuse every one of them. `compileStdlib` is the real " +
+                "gate on this; the test is here so the reason is written down.",
+        )
+    }
+
+    @Test fun `the same variable-bound performer serves two different error types`() {
+        accepts(
+            """
+            use std::result
+            effect Ex having 'error where { throw: { error: 'error } -> 'a <Ex> }
+            type Code = | Bad, Worse |
+            impl Ex for ToResult having 'error = 'e where {
+              throw = { error } -> abort { val = Err { error } }
+            }
+            pub let s: { b: Int } -> Int <Ex> = { b } -> Ex.throw { error = "a str" }
+            pub let v: { b: Int } -> Int <Ex> = { b } -> Ex.throw { error = Bad }
+            pub let ra = {} -> perform ToResult in do
+              let x = s { b = 0 }
+              Ok { val = x }
+            pub let rb = {} -> perform ToResult in do
+              let x = v { b = 0 }
+              Ok { val = x }
+            $MAIN
+            """,
+            "The other half of why the check must not pin a variable binding: ONE " +
+                "performer at TWO error types, in the same module. `performerInfo` " +
+                "comes from the typing context, so a variable in it may be shared " +
+                "between perform sites — pinning it at the first would wrongly " +
+                "constrain the second. A concrete binding cannot be shared that way, " +
+                "which is what makes the concrete-only rule safe as well as correct.",
         )
     }
 }

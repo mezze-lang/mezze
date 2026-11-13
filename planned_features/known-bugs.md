@@ -4094,7 +4094,7 @@ A round-trip property test covers inferred types generally.
 
 ---
 
-## BUG 35 — OPEN: a `perform` never checks the performer's `having` binding against the body's
+## BUG 35 — FIXED: a `perform` never checked the performer's `having` binding against the body's
 
 Found 2026-11-13 probing associated types on effects. **Soundness hole: reaches a
 raw JVM exception.** Pinned by `PerformHandlerBindingSpecTest`, whose BREAK tests
@@ -4133,11 +4133,43 @@ T0201/T0210 naming `<Store having 'val = …>`. Two impls leave nothing to infer
 from, and the perform site was the only check left. Every confirmatory probe I
 wrote had one impl.
 
-**Fix, and the input it needs already exists.** Derive the body's required
-bindings from its inferred ROW rather than only from throw sites — the row
-carries `having 'val = Int` and the printer already shows it — and compare
-against each handler's `associatedTypeBindings`, reusing
-`areAssociatedTypesCompatible` and the existing `HandlerTypeMismatch` (V0501).
+**FIXED, and NOT where this entry first said.** `PerformValidator` is the wrong
+place to extend: it works on the PARSED AST, so there is no syntactic route to
+what an op returns, and building one would mean re-deriving types by hand.
+
+The fix is in `ExprPerformConstraints`. By the time a perform's constraints are
+generated both sides are solved and in hand — `exprResult.effectInstances`
+carries the body's `<Store having 'val = Int>`, `performerInfo.associatedTypes`
+carries the performer's binding — and the suspension path twenty lines below
+already builds a substitution from exactly that pair. It just never asked
+whether they agree. Asking is one `Constraint.Equality`, so the solver's
+unification decides rather than a hand-written comparison. It now reads:
+
+```
+error[T0201]: Handler type mismatch: performer 'StrStore' binds `having 'val` to Str,
+              but the body it handles requires Int.
+Use a performer that binds `'val` to Int, or change the body to work at Str.
+```
+
+**ONLY A CONCRETE BINDING IS CHECKED** — see the stdlib table below; a variable
+binding must stay free to take the body's type. It is also the safe half:
+`performerInfo` comes from the typing context, so a variable in it may be SHARED
+between perform sites and pinning one could constrain another.
+
+Two things that had to be noticed rather than assumed:
+
+- `baseType` switches on `continuationConstraints.isNotEmpty()`, so adding a
+  CHECK to that list would change the perform's RESULT TYPE as a side effect.
+  The binding constraints live in their own list.
+- the new check SUBSUMES `PerformValidator`'s parameter-direction V0501 and
+  fires first, which would have downgraded a message naming the handler, the
+  effect and both types into a bare `Type mismatch: expected X, but got Y`.
+  The `HANDLER_BINDING_CONTEXT` branch in `ErrorMessageBuilder` restores all
+  three, and `ExceptionTypeInferenceTest` then passed UNCHANGED.
+
+**Follow-up, not done:** V0501's handler-mismatch path in `PerformValidator` may
+now be unreachable. Unproven — it was left in place rather than deleted on a
+guess.
 
 **Two accepting cases the fix must not break**, both in the spec test: the
 matching performer (`perform IntStore in as_int`), and two bodies at two

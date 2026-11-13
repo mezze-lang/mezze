@@ -9,6 +9,7 @@ import com.mezze.language.typechecker.debug.DebugLogger
 import com.mezze.language.typechecker.debug.DebugLogger.Category
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.parsedast.diagnostics.FixHint
+import com.mezze.language.typechecker.printing.ErrorMessageBuilder
 
 internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, context: ConstraintContext): ConstraintResult {
     val contextWithPerform = context.copy(performContext = expr)
@@ -243,6 +244,10 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
     }
 
     val continuationConstraints = mutableListOf<Constraint>()
+    // Kept apart from `continuationConstraints` on purpose — see BUG 35 below:
+    // `baseType` switches on that list being non-empty, so a check must not add
+    // to it. These are pure assertions; they never steer the perform's type.
+    val bindingConstraints = mutableListOf<Constraint>()
     // Constraints and ability obligations from the HANDLER ARGUMENTS themselves
     // (`perform MockHttpClient { rules = [ … ] } in`). Generating the param
     // record produced these, but only its TYPE was being consumed — its
@@ -313,6 +318,72 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
                     expr.loc,
                     code = ErrorCode.T0201_TYPE_MISMATCH,
                 )
+            }
+        }
+
+        // BUG 35: the performer's `having` binding must agree with what the BODY
+        // requires — in the RETURN direction, not only the parameter one.
+        //
+        // `PerformValidator` already compares them, but it works on the PARSED
+        // AST: it reads the operation's param-type annotation and rebuilds a type
+        // from the literal argument expression. That reaches a value flowing INTO
+        // an op (`throw { error = … }`) and has no route at all to one flowing
+        // out, so `get: {} -> 'val` was never checked. Measured before this:
+        //
+        //     impl Store for StrStore having 'val = Str where { get = {} -> "A STRING" }
+        //     pub as_int : {} -> Int <Store having 'val = Int>
+        //     pub bad: {} -> Int <*> = {} -> perform StrStore in as_int {}
+        //     -> check passes, then `bad (declared Int) = A STRING`
+        //
+        // Here both sides are already in hand and solved: `effectInstances`
+        // carries the body's requirement (`<Store having 'val = Int>` — it is
+        // what the printer shows) and `associatedTypes` carries the performer's
+        // binding. Twenty lines below, the suspension path builds a substitution
+        // from exactly this pair; it just never asks whether they agree. Asking
+        // is one equality constraint, which also gets the solver's unification
+        // rather than a hand-written comparison.
+        //
+        // ONLY A CONCRETE BINDING IS CHECKED. Every performer in `std/effects/`
+        // binds to a VARIABLE — `ExceptionTo*` and friends take `having 'error =
+        // 'e`, `EarlyReturn` `'result = 'r`, the `Condition` three `'ctx = 'c`,
+        // `WithReader { val: 'a }` `'a = 'a` — and a variable must stay free to
+        // take the body's type, which is the whole point of the binding. It is
+        // also the safe half: `performerInfo` comes from the typing context and a
+        // variable in it may be shared between perform sites, so pinning one
+        // could constrain another. A concrete binding cannot be shared that way.
+        //
+        // Its own list, NOT `continuationConstraints`: `baseType` below switches
+        // on `continuationConstraints.isNotEmpty()`, so adding to that list would
+        // change the perform's result type as a side effect of adding a check.
+        val performerAssocForCheck = performerInfo.associatedTypes as? MezzeType.RecordType
+        if (performerAssocForCheck != null && performerAssocForCheck.fields.isNotEmpty()) {
+            val checkEffectPath = ModulePath.parse(performerInfo.effectName)
+            val bodyInstance = exprResult.effectInstances.find { instance ->
+                val instancePath = ModulePath.parse(instance.name)
+                instancePath == checkEffectPath || instancePath.endsWith(checkEffectPath)
+            }
+            if (bodyInstance != null) {
+                for ((assocTypeName, bodyRequired) in bodyInstance.associatedTypes) {
+                    // Either side may carry the leading `'` — see the note on
+                    // `performerBinding` below, which learned this the hard way.
+                    val binding = performerAssocForCheck.fields[assocTypeName]
+                        ?: performerAssocForCheck.fields[assocTypeName.removePrefix("'")]
+                        ?: continue
+                    if (binding is MezzeType.VarType) continue
+                    bindingConstraints.add(
+                        Constraint.Equality(
+                            left = binding,
+                            right = bodyRequired,
+                            // The marker ErrorMessageBuilder reads to name the
+                            // performer, the binding and both types. A bare
+                            // equality renders as "Type mismatch: expected Int,
+                            // but got Str", which names none of them.
+                            context = ErrorMessageBuilder.HANDLER_BINDING_CONTEXT +
+                                "${handler.performer.localName} $assocTypeName",
+                            loc = expr.loc,
+                        )
+                    )
+                }
             }
         }
 
@@ -426,7 +497,8 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
         }
     }
 
-    val rawConstraints = exprResult.constraints + handlerParamConstraints + continuationConstraints
+    val rawConstraints =
+        exprResult.constraints + handlerParamConstraints + continuationConstraints + bindingConstraints
     // #376: record handledEffects on every body Equality (accumulating onto any
     // effects already stamped by an enclosing perform, for the nested case).
     // This discharge-tracking is retained on the constraint; its former reader,

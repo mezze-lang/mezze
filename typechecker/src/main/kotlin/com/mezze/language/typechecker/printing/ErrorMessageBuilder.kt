@@ -456,6 +456,32 @@ private fun findFieldTypeMismatch(
                         failure.message
                     }
                 }
+                // A `perform` whose performer binds an associated type to one
+                // type while the body it handles requires another. Without this
+                // branch the user reads a bare "Type mismatch: expected Int, but
+                // got Str" with nothing naming the performer, the effect, or the
+                // binding — and the previous check this replaced DID name all
+                // three. Losing that would have been a quiet regression in
+                // exchange for closing a soundness hole.
+                stringContext.startsWith(HANDLER_BINDING_CONTEXT) -> {
+                    val (performer, assoc) = extractHandlerBinding(stringContext)
+                    if (performer != null && assoc != null) {
+                        // `expected`/`actual` come from prettyPrintTypePair(type2,
+                        // type1) — the pair is swapped relative to the
+                        // constraint's (left = the performer's binding, right =
+                        // what the body requires), so `actual` is the PERFORMER's
+                        // side here. Measured: naming them the other way printed
+                        // "StrStore binds `having val` to Int" for a performer
+                        // whose binding is Str.
+                        "Handler type mismatch: performer '$performer' binds " +
+                            "`having $assoc` to $actual, but the body it handles " +
+                            "requires $expected.\n" +
+                            "Use a performer that binds `$assoc` to $expected, or " +
+                            "change the body to work at $actual."
+                    } else {
+                        failure.message
+                    }
+                }
                 else -> failure.message
             }
         }
@@ -496,5 +522,27 @@ private fun findFieldTypeMismatch(
         return if (context.startsWith(prefix)) {
             context.removePrefix(prefix).trim()
         } else null
+    }
+
+    /**
+     * The marker `ExprPerformConstraints` puts on a handler-binding equality so
+     * the message can name what failed. Encoded in the context STRING because
+     * that is how the branches above already carry a name (`extractBindingName`,
+     * `extractFieldName`); a new `ErrorContext` case would have to be threaded
+     * through `ConstraintErrorClassifier` as well, for the same result.
+     */
+    const val HANDLER_BINDING_CONTEXT = "Handler binding "
+
+    /** `Handler binding <performer> <assocType>` -> the two names. */
+    private fun extractHandlerBinding(context: String): Pair<String?, String?> {
+        val parts = context.removePrefix(HANDLER_BINDING_CONTEXT).trim().split(' ', limit = 2)
+        if (parts.size < 2) return null to null
+        val performer = parts[0].takeIf { it.isNotBlank() }
+        // Either side may carry the leading `'` — an effect instance's keys do,
+        // a performer's record fields do not. The user wrote `having 'val`, so
+        // that is what the message says, whichever spelling arrived.
+        val assoc = parts[1].trim().takeIf { it.isNotBlank() }
+            ?.let { if (it.startsWith("'")) it else "'$it" }
+        return performer to assoc
     }
 }
