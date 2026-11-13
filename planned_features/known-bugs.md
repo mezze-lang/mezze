@@ -4316,3 +4316,107 @@ an imported type is V0406 "Orphan impl". Effects have neither. Whether effects
 should adopt the orphan rule is a design question, not just a missing check:
 `impl Tick for MyTicker` on an imported effect is legitimate and common, so only
 the DUPLICATE (same effect, same performer name) is clearly wrong.
+
+---
+
+## BUG 37 — OPEN: a performer's op signature is barely checked against the effect's declaration
+
+Found 2026-11-13 mapping what an impl is allowed to change. **Soundness hole:
+a declared `Int` comes back as a function.** Pinned by
+`ImplSignatureRulesSpecTest`, whose BREAK test asserts the current behaviour.
+
+```mezze
+effect E where { op: { a: Int, b: Int } -> Int <E> }
+
+## declared `{ a, b }`, destructured as `{ y, x }`
+impl E for H where { op = { y, x } -> x }
+
+pub let run: {} -> Int <*> = {} -> perform H in E.op { a = 10, b = 20 }
+```
+
+MEASURED — `mez check` then the dev runtime, with `let doubled = v * 2`:
+
+```
+pub run : {} -> Int <*>
+Check passed
+error[I0004]: cannot multiply a function and an Int
+```
+
+The one-parameter form is the same hole with a different wrong value: `op: { n:
+Int } -> Int` implemented as `op = { m } -> m`, called `E.op { n = 7 }`, returns
+the whole argument record `{ n = 7 }`. Renaming one of two is equally accepted.
+Controls with the declared names return 10 and 7.
+
+**Cause direction.** A performer's op body is checked for its param TYPE
+(T0201/V0901 when `{ n: Int }` becomes `{ n: Str }`) and its return type
+(T0201), but nothing compares the destructured FIELD NAMES against the
+operation's declaration. The lambda then binds a name the argument record does
+not have, and what the body returns is whatever that binding picked up — the
+record itself, or the function, depending on arity.
+
+**The ability side IS checked**, which is what makes this a gap rather than a
+design choice. The identical rename on an ability impl is T0201:
+
+```
+Wrong parameter type for 'f' in impl Op: expected {it: T, n: Int}, ...
+```
+
+So the fix has a model already in the tree: compare the op implementation's
+parameter record against the declaration the way `ImplValidator` does for an
+ability method, instead of checking only the types.
+
+**What must keep working** — all pinned in the same spec test:
+- a performer with the DECLARED names (measured: 10)
+- a performer that ADDS effects its op never declared; that is deliberate, and
+  the perform site answers for them (T0210 when unhandled)
+- an op returning a narrower variant than declared
+
+### Why this was not found earlier
+
+Every previous effect probe wrote the performer with the declared names,
+because that is what one writes when not attacking it. The rule was never
+stated anywhere, so nothing suggested testing it. It surfaced only from asking
+the flat question — *what, exactly, is an impl allowed to change?* — and
+walking the dimensions: param type, param name, arity, return, effects,
+constraints. Three of those six had never been asked for a performer.
+
+The full matrix now lives in `ImplSignatureRulesSpecTest`'s header.
+
+### It is wider than the parameter name, and there is ONE cause
+
+Walking the variance cells found two more, both reaching the same runtime
+message:
+
+| what the performer does | accepted? | runtime |
+|---|---|---|
+| renames a param | yes | `cannot multiply a function and an Int` |
+| **narrows a param type** (`\| A, B, C \|` -> `\| A, B \|`) | yes | `Non-exhaustive match: no variant tag matched — typechecker exhaustiveness guarantee violated` |
+| **widens the return** (`\| A, B \|` -> `\| A, B, C \|`) | yes | the same exhaustiveness violation, in the CALLER's match |
+| widens a param | yes | correct — contravariance, the SOUND direction |
+| changes a param to an unrelated type | no, T0201/V0901 | — |
+| changes the return to an unrelated type | no, T0201 | — |
+
+**THE CAUSE.** A performer's op signature is checked by UNIFICATION, and
+variant rows unify by MERGING rather than by requiring equality. An unrelated
+type (`Int` against `Str`) fails to unify and is caught; a narrower param or a
+wider return unifies happily and nothing complains.
+
+That is the same root cause that makes
+`PerformValidator.areAssociatedTypesCompatible` load-bearing — measured
+separately the same day: it is the one place in the effect path that asks the
+variant SUBSET question unification will not, and it asks it only about
+`having` types. An op's parameter and return types have no equivalent.
+
+**ABILITIES SURVIVE ALL OF IT, by two different mechanisms**, which is why this
+is a gap and not a design position:
+- an ability impl's method TYPE is compared by `ImplValidator`, not left to
+  unification — so the rename is T0201 and the wider return is T0201;
+- an ability impl's BODY is exhaustiveness-checked against the DECLARED type —
+  so a narrowed param is V0601 "Missing case: C" before variance matters.
+
+**Fix shape.** Compare a performer's op signature against the declaration the
+way `ImplValidator` does for an ability method, and keep the contravariant
+direction open — the last test in the spec file pins a performer accepting MORE
+than the op promises, which must stay legal. Alternatively, exhaustiveness-check
+an op body against the declared param type, which would catch the narrowing half
+with machinery that already exists.
