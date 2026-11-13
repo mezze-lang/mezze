@@ -188,8 +188,8 @@ class SortedSetOrderOperandTest {
      * must be updated. known-bugs.md BUG 46.
      */
     @Test
-    fun `map in argument position still loses the target order — BUG 46`() = assertEquals(
-        listOf(1L, 3L, 5L),
+    fun `map in argument position keeps the target order`() = assertEquals(
+        listOf(5L, 3L, 1L),
         elemsOf(
             """
             $desc
@@ -199,8 +199,8 @@ class SortedSetOrderOperandTest {
             } }
             """,
         ),
-        "if this now reads 5, 3, 1 the dictionary arrives and BUG 46 is fixed —" +
-            " delete this test and fold it into the one above",
+        "1, 3, 5 means the chain absorbed the sorted map as a flat stage and" +
+            " emitted elements in SOURCE order — BUG 46",
     )
 
     @Test

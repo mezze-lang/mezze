@@ -1750,6 +1750,27 @@ object ChainCanonicalizer {
         return if (isEffectSafe(candidate, allFunctions)) candidate else null
     }
 
+    /**
+     * True when the container's `map` REBUILDS under its own notion of element
+     * identity, so it cannot be absorbed as a one-for-one map stage.
+     *
+     * A `SortedSet` re-sorts: its result's elements are `'b` and it is handed
+     * `'b`'s comparator. A `Set` re-buckets: two sources that map to one value
+     * become one element. A map STAGE does neither — it emits exactly one
+     * element per input, in source order — so absorbing either silently
+     * substitutes the source's identity for the target's.
+     *
+     * MEASURED, both as `MEZZE_CHAIN_CANONICALIZE=0` against the same program:
+     * a descending set mapped to an ascending target came out descending
+     * (known-bugs.md BUG 46), and `set::size(set::map(from_seq [2,3], _ -> 7))`
+     * answered 2 where the set has one element.
+     *
+     * Distinct from [ownsItsOrdering], which is about ORDER alone and is what
+     * the MIN and MAX sinks need.
+     */
+    private fun mapRebuildsUnderOwnIdentity(owner: CollectionKind?): Boolean =
+        owner == CollectionKind.SORTED_SET || owner == CollectionKind.SET
+
     /** True when the container keeps an ordering INSIDE the data structure — it
      *  was handed the element's own comparator at construction and reuses it for
      *  every later query. Any rewrite that reaches such a container's elements
@@ -2493,6 +2514,24 @@ object ChainCanonicalizer {
         if (node is CallNativeIR
             && node.isElementOp(NativeOp.MAP)
             && !node.isScalarABI) {
+            // A SET'S OR SORTED SET'S `map` IS NOT A MAP STAGE. Both REBUILD
+            // under their own notion of element identity: a sorted set re-sorts
+            // by `'b`'s comparator, a set re-buckets by `'b`'s equality so two
+            // sources mapping to one value become one element. A map stage does
+            // neither — one element out per element in, in source order.
+            //
+            // Measured, each by rebuilding the same program with
+            // MEZZE_CHAIN_CANONICALIZE=0: `sorted_set::map` from a descending
+            // set to an ascending target came out descending (known-bugs.md
+            // BUG 46), and `set::size(set::map(from_seq [2,3], _ -> 7))`
+            // answered 2 for a set holding one element.
+            //
+            // The ORDERING half was found first and fixed with
+            // `ownsItsOrdering`, which the MIN and MAX sinks already consulted;
+            // the identity half followed from asking what else that reasoning
+            // covers. Refusing declines the chain to the native call, which is
+            // what the expression means.
+            if (mapRebuildsUnderOwnIdentity(node.ownerKind)) return null
             val mr = node.arg as? MakeRecordIR ?: return null
             val srcField = NativeHofNames.srcFieldFor(node.ownerKind)
             var src: NodeIR? = null; var f: NodeIR? = null

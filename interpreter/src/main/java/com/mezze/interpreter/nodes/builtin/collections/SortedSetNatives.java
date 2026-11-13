@@ -273,9 +273,30 @@ public final class SortedSetNatives {
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");
         MezzeSortedSet result = MezzeSortedSet.empty(ElementComparator.of(cmpFn));
+        java.util.List<Object> dbgMapped = System.getenv("MEZZE_DICT_DEBUG") != null
+                ? new java.util.ArrayList<>() : null;
         for (Object element : set) {
             Object mapped = ctx.call1(callNode, element);
+            if (dbgMapped != null) dbgMapped.add(mapped);
             result = result.addObject(mapped);
+        }
+        if (dbgMapped != null) {
+            // ASK THE COMPARATOR THAT ACTUALLY ARRIVED which way it orders the
+            // first two mapped elements. A wrong ANSWER here means the
+            // typechecker handed over the wrong Ord; a right answer with a
+            // wrong RESULT means the container is at fault.
+            String verdict;
+            if (cmpFn == null) {
+                verdict = "cmpFn=NULL -> natural order";
+            } else if (dbgMapped.size() >= 2) {
+                var c2 = ScalarCall.prepare2(cmpFn, "a", "b");
+                Object sign = c2.call2(callNode, dbgMapped.get(0), dbgMapped.get(1));
+                verdict = "cmpFn(" + dbgMapped.get(0) + ", " + dbgMapped.get(1) + ") = " + sign;
+            } else {
+                verdict = "cmpFn present, fewer than two elements";
+            }
+            System.err.println("[ssmap] in=" + dbgMapped + " " + verdict
+                + " result=" + result.toArray().length);
         }
         return result;
     }

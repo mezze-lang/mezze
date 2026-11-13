@@ -111,8 +111,8 @@ class Bug46TargetOrderTest {
     /** DESCENDING source, ASCENDING target, inside a function. Correct is
      *  `1, 3, 5` — Q ascends. It comes out descending: the source's order. */
     @Test
-    fun `inside a function the SOURCE order wins — descending to ascending`() = assertEquals(
-        listOf(5L, 3L, 1L),
+    fun `inside a function a descending source maps to an ascending target`() = assertEquals(
+        listOf(1L, 3L, 5L),
         elemsOf(
             """
             $two
@@ -123,15 +123,15 @@ class Bug46TargetOrderTest {
             go {}
             """,
         ),
-        "1, 3, 5 would mean Q's ascending Ord was used and BUG 46 is fixed",
+        "5, 3, 1 means the SOURCE's descending order was substituted for Q's — BUG 46",
     )
 
     /** And the reverse, which is what shows it follows the SOURCE rather than
      *  defaulting to natural order: ASCENDING source, DESCENDING target,
      *  result ascending. */
     @Test
-    fun `inside a function the SOURCE order wins — ascending to descending`() = assertEquals(
-        listOf(1L, 3L, 5L),
+    fun `inside a function an ascending source maps to a descending target`() = assertEquals(
+        listOf(5L, 3L, 1L),
         elemsOf(
             """
             $two
@@ -142,7 +142,57 @@ class Bug46TargetOrderTest {
             go {}
             """,
         ),
-        "5, 3, 1 would mean R's descending Ord was used and BUG 46 is fixed",
+        "1, 3, 5 means the SOURCE's ascending order was substituted for R's — BUG 46",
+    )
+
+    /**
+     * THE SAME DEFECT IN A HASH SET, which is what the fix's own reasoning
+     * turned up next: a `Set`'s `map` RE-BUCKETS, so two sources that map to
+     * one value become one element. Absorbed as a flat map stage it stops
+     * collapsing at all.
+     *
+     * Both elements map to the CONSTANT 7 — no arithmetic to misread — so the
+     * set holds ONE element. Fused, this answered 2.
+     *
+     * The predicate guarding it is therefore about element IDENTITY, not
+     * ordering: a sorted set re-sorts by `'b`'s comparator and a set
+     * re-buckets by `'b`'s equality, and a stage does neither.
+     */
+    @Test
+    fun `a set's map still collapses equal results`() = assertEquals(
+        1L,
+        MezzeTestHelper.run(
+            """
+            use std::collections::set
+            let go = { } -> set::size { s = set::map {
+              s = set::from_seq { xs = [2, 3] },
+              f = { val } -> 7,
+            } }
+            go {}
+            """.trimIndent(),
+        ),
+        "2 means the map was absorbed as a flat stage and the deduplication was lost",
+    )
+
+    /** And in the middle of a chain, the shape that triggered the ordering
+     *  half: there the map's result is never materialised as a container. */
+    @Test
+    fun `a set's map collapses inside a longer chain`() = assertEquals(
+        1L,
+        MezzeTestHelper.run(
+            """
+            use std::collections::set
+            use std::collections::seq
+            let go = { } -> seq::size { xs = seq::map {
+              xs = set::to_seq { s = set::map {
+                s = set::from_seq { xs = [2, 3] },
+                f = { val } -> 7,
+              } },
+              f = { x } -> x + 0,
+            } }
+            go {}
+            """.trimIndent(),
+        ),
     )
 
     /** THE SAME EXPRESSION AT TOP LEVEL IS CORRECT, which is the whole shape of

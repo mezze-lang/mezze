@@ -4771,7 +4771,77 @@ NINE places where a type-based shortcut or an unthreaded constraint silently
 disagreed with a hand-written `Ord`. Worth more as a pattern than as nine fixes:
 the tell is a native that decides an ORDER without being handed one.
 
-## BUG 46 — `sorted_set::map` orders by the SOURCE element's `Ord` inside a function
+## BUG 46 — FIXED: a set's or sorted set's `map` was absorbed as a flat map stage
+
+**FIXED 2026-11-13.** `ChainCanonicalizer.tryPeelIterMap` peeled
+`sorted_set::map` as an ordinary map stage. A map stage emits elements in
+SOURCE order; a sorted container's `map` RE-SORTS, because the result's
+elements are `'b` and it is handed `'b`'s comparator to build a new container
+under. So the source's ordering was silently substituted for the target's.
+
+`ownsItsOrdering` in that same file already says exactly this —
+
+> "the container keeps an ordering INSIDE the data structure ... Any rewrite
+> that reaches such a container's elements through `to_seq` loses that
+> comparator, so ordering-dependent sinks must not fuse over one"
+
+— and was consulted by the MIN and MAX sinks only. The same reasoning forbids
+the map stage, and the fix is that one call. Refusing declines the chain to the
+native call, which is what the expression means. THIRD TIME TODAY a guard
+existed and one site did not consult it: `MezzeSet.storage()` for BUG 47 and
+`seqElementType` for the `nonemptylist::sort` upgrade were the others.
+
+**AND THE SAME DEFECT IN A HASH SET**, found by asking what else that reasoning
+covers rather than by a second report. A `Set`'s `map` RE-BUCKETS: two sources
+that map to one value become one element. Absorbed as a flat map stage it stops
+collapsing at all —
+
+    set::size { s = set::map { s = from_seq [2, 3], f = { val } -> 7 } }
+        fused -> 2,  for a set that holds ONE element
+
+so the predicate is about element IDENTITY, not ordering: a sorted set re-sorts
+by `'b`'s comparator, a set re-buckets by `'b`'s equality, and a stage does
+neither. `mapRebuildsUnderOwnIdentity` covers both; `ownsItsOrdering` keeps its
+narrower meaning for the MIN and MAX sinks, which care about order alone.
+
+ONE WASTED RUN, worth recording: `MEZZE_CHAIN_CANONICALIZE` is read at COMPILE
+time, so setting it only at run time against an already-built jar proves
+nothing. The earlier test worked because the suite compiles its source at test
+time.
+
+**EVERY EARLIER DIAGNOSIS OF THIS BUG WAS WRONG, including the heading it was
+filed under.** It was filed as a dictionary-arrival bug, "does not arrive in
+argument position". It is not a dictionary bug at all:
+
+  - The COMPARATOR THAT ARRIVES IS CORRECT. Asking the native to call the
+    comparator it had been handed — `cmpFn(1, 3) = 1` for a descending target —
+    showed the right instance arriving while the RESULT was still wrong. That
+    single measurement, which should have been the first one, invalidated the
+    whole dictionary line of investigation.
+  - The in-function call NEVER REACHED `SortedSetNatives.map`. Only one of
+    three map calls logged there: the top-level one, the only one that worked.
+  - `MEZZE_CHAIN_CANONICALIZE=0` fixed it, which named fusion as the cause in
+    one run.
+
+Four dictionary mechanisms were eliminated before that, each by instrumenting
+it and watching it not fire: the D-1 collapse, `abilityOpDictSlot`'s `VAR_SEP`
+prefix scan, `injectDictFields`' concrete-type fallback, and
+`specEvidenceOpHash`'s ordering. All four were irrelevant. The lesson is the
+order of questions: ASK WHETHER THE VALUE ARRIVING IS WRONG BEFORE ASKING WHY
+IT WAS CHOSEN WRONGLY.
+
+**ALSO CORRECTED:** the filed claim that a let-BOUND map keeps the order and
+only argument position loses it. The saving condition was being a TOP-LEVEL
+EXPRESSION — inside a function every shape failed, so a built program lost the
+order everywhere, because everything there sits under `main`. The suite only
+ever saw the working shape because its sources are top-level expressions.
+
+`Bug46TargetOrderTest` now asserts the CORRECT order in both directions
+(descending source to ascending target and the reverse), which is what pins the
+fix: before it, the result followed the source either way.
+
+### The original entry, kept for its narrowing work
+
 
 **RE-CHARACTERISED 2026-11-13**, same day it was filed. The original heading
 said "does not arrive in argument position" and the original entry said a
