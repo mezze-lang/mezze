@@ -125,6 +125,9 @@ object BytesMapArithRewriter {
         val (op, k) = classifyArithMapper(f, allFunctions) ?: return null
         val nativeName = OP_TO_NATIVE[op] ?: return null
 
+        // Carries its decisions for the reason `FoldToSumRewriter` now does:
+        // a constructed native without them is one every kind-based predicate
+        // declines, silently.
         return CallNativeIR(
             name = nativeName,
             arg = MakeRecordIR(
@@ -132,6 +135,9 @@ object BytesMapArithRewriter {
                 mr.src,
             ),
             src = node.src,
+            producesKind = node.producesKind,
+            ownerKind = node.ownerKind,
+            opKind = NativeHofNames.opOf(nativeName),
         )
     }
 

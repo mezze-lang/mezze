@@ -112,10 +112,18 @@ object FoldToSumRewriter {
 
         if (!isPlainLongAddFolder(f, allFunctions)) return null
 
+        // The replacement carries the decisions the later passes read. The
+        // fold it replaces had them; dropping them here hands
+        // `ChainCanonicalizer` a sum its `isElementOp(NativeOp.SUM)` cannot
+        // recognise. Same omission as `trySequenceChainFold`, which cost 16x
+        // on `chain` before it was found.
         return CallNativeIR(
             name = sumName,
             arg = MakeRecordIR(listOf(FieldIR(srcField, srcExpr)), mr.src),
             src = node.src,
+            producesKind = node.producesKind,
+            ownerKind = node.ownerKind,
+            opKind = NativeHofNames.opOf(sumName),
         )
     }
 
@@ -188,6 +196,9 @@ object FoldToSumRewriter {
             name = sumName,
             arg = MakeRecordIR(listOf(FieldIR(NativeHofNames.M, srcExpr)), mr.src),
             src = node.src,
+            producesKind = node.producesKind,
+            ownerKind = node.ownerKind,
+            opKind = NativeHofNames.opOf(sumName),
         )
     }
 }
