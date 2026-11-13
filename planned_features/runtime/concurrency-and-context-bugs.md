@@ -25,6 +25,49 @@ SEPARATELY, `--no-daemon`.
 
 ---
 
+## C7 — OPEN: a scoped handler's `scope` outlives `finalize_scope`
+
+Found 2026-11-13 probing scope rules. **Repro, and it runs today:**
+
+```mezze
+effect Ctr where { get: {} -> Int <Ctr> }
+impl Ctr for Scoped where {
+  initialize_scope = {} -> { n = 7 },
+  finalize_scope = {} -> {},        # a real handler CLOSES ITS RESOURCE here
+  get = {} -> scope.n
+}
+pub let escape: {} -> Int <*> = {} -> do
+  let f = perform Scoped in {} -> Ctr.get {}
+  f {}                               # called after the block exited
+```
+
+Measured ordering, pinned by `ScopeOutlivedByBoundFunctionTest`:
+
+    INIT / FINALIZE / EXITED / OP reads scope.n / result = 7
+
+The op body runs **after** `finalize_scope`, and the read succeeds because
+`HandlerBoundFunction` snapshots the live chain — scope value included — into
+the returned function, which is what keeps the discharged row true.
+
+**Why it matters.** Harmless for a plain-data scope, which is exactly why it is
+invisible. Not harmless for a scope holding a resource, and the stdlib has two:
+`HttpClient` closes its connection pool in `finalize_scope`
+(`__native_http_client_close { client = scope.client }`), and `Async` finalizes
+its structured task scope. An escaped bound closure would use a closed one.
+
+**Not new, but newly easy to write.** A function REFERENCE could always escape
+this way; `986bf38b3` made a bare lambda handler-bound too, so the shape is now
+two lines. **UNPROVEN** against `HttpClient` specifically: the ordering is
+measured, the use-after-close is inferred from it, and no live HTTP repro has
+been run. Run one before acting.
+
+**Candidate fixes, none free:**
+- refuse the escape from a SCOPED handler — narrowest, and the typechecker can
+  already see that a performer declares `initialize_scope`
+- tie the scope's lifetime to the bound function's, so finalize waits for the
+  last holder (needs ownership the language does not have)
+- make a late call fail loudly rather than read a finalized scope
+
 ## C1 — FIXED: a dropped effect now FAILS the run it happened in
 
 **The effect still does not happen — that part is by design and cannot change
