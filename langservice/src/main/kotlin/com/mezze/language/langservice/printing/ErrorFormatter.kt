@@ -144,6 +144,10 @@ object ErrorFormatter {
             is ModuleError.CircularDependency -> formatModuleCircularDependencyError(error)
             is ModuleError.ParseError -> formatModuleParseError(error)
             is ModuleError.AmbiguousModule -> renderModuleError(error)
+            // Two imports binding DIFFERENT declarations to one name. Its own
+            // message already names both modules and the hint says what to do,
+            // so the shared renderer carries it.
+            is ModuleError.AmbiguousImportedName -> renderModuleError(error)
             is ModuleError.ImportError -> formatModuleImportError(error)
             is ModuleError.ExportNotFound -> formatModuleExportNotFoundError(error)
             is ModuleError.PrivateExport -> formatModulePrivateExportError(error)

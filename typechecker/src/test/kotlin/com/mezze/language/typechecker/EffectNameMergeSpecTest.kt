@@ -69,19 +69,25 @@ class EffectNameMergeSpecTest : VariantSpecBase() {
         )
     }
 
-    @Test fun `BREAK - the same omission split across two modules is accepted`() {
+    @Test fun `BUG 36 is closed at the import`() {
         givenPoorAndRichTick()
-        acceptsMain(
+        rejectsMain(
             """
             use fx::{ Tick, Ticker }
             use fx2::{ Tick, Tocker }
             pub let run: {} -> Int <*> = {} -> perform Ticker in Tick.tock {}
             $MAIN
             """,
-            "BREAK. `tock` is declared only by fx2's Tick; `Ticker` is fx's and " +
-                "implements only `tick`. The two Ticks merge by name, so `Tick.tock` " +
-                "resolves, V0404 never ran against the merged set, and the run dies " +
-                "with `handler for ….tock field is not a MezzeFunction (got null)`.",
+            "M0805",
+            "FIXED, and not where the entry predicted. BUG 36 proposed checking " +
+                "V0404 against the MERGED operation set, or asking at the op call " +
+                "site whether THIS performer provides THIS operation. The rule " +
+                "chosen instead refuses the arrangement one step earlier: two " +
+                "different declarations may not be imported under one name, so " +
+                "the merge never forms. Before: `tock` resolved through fx2's " +
+                "Tick while `Ticker` is fx's and implements only `tick`, and the " +
+                "run died with `handler for ….tock field is not a MezzeFunction " +
+                "(got null)`.",
         )
     }
 
@@ -122,10 +128,11 @@ class EffectNameMergeSpecTest : VariantSpecBase() {
             pub let run: {} -> Int <*> = {} -> perform StrTicker in Tick.tick {}
             $MAIN
             """,
-            "T0210",
-            "THE DIRECTION THAT HOLDS, and the reason the gap is specifically the " +
-                "op SET. Two Ticks whose `tick` returns different types do collide " +
-                "visibly at the use site.",
+            "M0805",
+            "Was T0210 at the use site; now refused at the import, since the two " +
+                "`Tick` declarations differ. The verdict is unchanged and the " +
+                "diagnostic is earlier — it names both declaring files instead of " +
+                "a downstream type mismatch.",
         )
     }
 

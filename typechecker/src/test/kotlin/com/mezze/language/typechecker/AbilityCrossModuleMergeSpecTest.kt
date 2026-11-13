@@ -67,13 +67,13 @@ class AbilityCrossModuleMergeSpecTest : VariantSpecBase() {
               t.tag {}
             $MAIN
             """,
-            "V0402",
-            "THE EFFECT VERSION OF THIS IS ACCEPTED — see EffectNameMergeSpecTest " +
-                "and known-bugs BUG 36. `tag` is declared only by fx2's Show and " +
-                "`T`'s impl is fx's, which has no `tag`. The constraint at the use " +
-                "site catches it because an ability method call ASKS whether the " +
-                "receiver implements the ability; an effect op never asks the " +
-                "equivalent per-operation question of its performer.",
+            "M0805",
+            "Now refused at the IMPORT — two different `Show` declarations may not " +
+                "be co-imported — so it never reaches the use-site constraint. " +
+                "That constraint is still what made abilities safe where effects " +
+                "were not, and the reasoning is preserved in the class header and " +
+                "in known-bugs BUG 36; this test simply stops earlier now. The " +
+                "V0402 path is still exercised by the single-module tests below.",
         )
     }
 

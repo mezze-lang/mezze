@@ -4208,7 +4208,7 @@ demands syntactic equality refuses all of them; it has to unify, which is why
 
 ---
 
-## BUG 36 — OPEN: same-named effects in two modules merge, and V0404 never sees the merged op set
+## BUG 36 — FIXED at the import: two DIFFERENT same-named declarations may not be co-imported
 
 Found 2026-11-13 finishing the effect-system soundness sweep. **Soundness hole:
 a performer is type-checked against an operation it does not implement.** Pinned
@@ -4301,6 +4301,40 @@ move is to ask the ability question at the op call site: does THIS performer
 provide THIS operation. That is a local check at a site that already resolves
 the performer, it reports like V0402 (naming what to add), and it needs no
 phase reordering.
+
+### FIXED 2026-11-13 — and not by either route this entry proposed
+
+Both proposals here were downstream: re-run V0404 against the merged operation
+set, or ask at the op call site whether THIS performer provides THIS operation.
+The rule adopted instead refuses the arrangement ONE STEP EARLIER, so the merge
+never forms:
+
+> Two modules may each declare an effect (or ability) of the same name.
+> Importing BOTH into one scope is an error.
+
+`ImportResolver.resolveImports` merges one `ModuleImportContext` per `use`
+statement, and `merge` is a plain map union — the second import silently
+overwrote the first. The check runs just before that union, while both sides are
+still separate, and reports M0805 naming both DECLARING FILES (not the import
+paths: with a re-export those differ, and the file is what the author has to
+change).
+
+**Keyed on CONTENT HASH, not name**, which is what makes it safe and is a
+refinement of the rule as stated:
+- a `pub use` re-export carries ONE declaration through several paths — still
+  legal, and the stdlib's 79 modules depend on it (surveyed: no stdlib module
+  imports one name from two paths, and `compileStdlib` is green);
+- two STRUCTURALLY IDENTICAL same-named declarations are one declaration, so
+  co-importing them is still legal and both performers still dispatch — the
+  agreeing case measured at 111 and 222 is preserved;
+- only two genuinely different declarations collide.
+
+Three existing tests moved from T0210 / V0402 / accepted to M0805: same
+verdicts, earlier, with a better message. `EffectNameMergeSpecTest` and
+`AbilityCrossModuleMergeSpecTest` hold them.
+
+The ability/effect asymmetry recorded below is still true and still the reason
+abilities were never exposed to this — it is simply no longer the fix.
 
 ### Sub-finding: duplicate effect impls across modules are accepted, load order wins
 

@@ -14,6 +14,50 @@ class ImportResolver(
     private val loader: ModuleLoader,
     private val typeChecker: ModuleTypeChecker? = null
 ) {
+    /**
+     * Names that two `use` statements would both bind to DIFFERENT declarations.
+     *
+     * Compares the declaration's content hash, so a `pub use` re-export — one
+     * declaration reached by several paths — is not a collision. A declaration
+     * with no hash is skipped rather than guessed at: reporting a collision we
+     * cannot prove would refuse working programs.
+     */
+    private fun ambiguousImportedNames(
+        accumulated: ModuleImportContext,
+        incoming: ModuleImportContext,
+        incomingPath: String,
+    ): List<ModuleError> = buildList {
+        // Each declaration's own file is the most useful thing to name: the
+        // import path says where a name was reached FROM, the file says where
+        // the declaration lives, and with a re-export those differ.
+        fun declaredIn(file: String, fallback: String) = file.ifEmpty { fallback }
+
+        for ((name, incomingEffect) in incoming.importedEffects) {
+            val existing = accumulated.importedEffects[name] ?: continue
+            val a = existing.contentHash ?: continue
+            val b = incomingEffect.contentHash ?: continue
+            if (a != b) {
+                add(ModuleError.AmbiguousImportedName(
+                    "effect", name,
+                    declaredIn(existing.loc.file, "an earlier import"),
+                    declaredIn(incomingEffect.loc.file, incomingPath),
+                ))
+            }
+        }
+        for ((name, incomingAbility) in incoming.importedAbilities) {
+            val existing = accumulated.importedAbilities[name] ?: continue
+            val a = existing.contentHash ?: continue
+            val b = incomingAbility.contentHash ?: continue
+            if (a != b) {
+                add(ModuleError.AmbiguousImportedName(
+                    "ability", name,
+                    declaredIn(existing.loc.file, "an earlier import"),
+                    declaredIn(incomingAbility.loc.file, incomingPath),
+                ))
+            }
+        }
+    }
+
     fun resolveImports(module: ParsedModule): ImportResolutionResult {
         val errors = mutableListOf<ModuleError>()
         var importContext = ModuleImportContext.empty()
@@ -34,6 +78,21 @@ class ImportResolver(
             val result = processUseDeclaration(usePath, alias, isPublic, loc)
             when (result) {
                 is ProcessResult.Success -> {
+                    // Two `use` statements may not bring DIFFERENT declarations
+                    // into scope under one name. Effects and abilities take no
+                    // `pub` — they "must be usable in type signatures across
+                    // modules" — so identity is keyed by name and two modules
+                    // may each declare `Tick`. Declaring both is fine; importing
+                    // both is not, because no use site can say which is meant,
+                    // and `merge` below is a map union where the second simply
+                    // wins.
+                    //
+                    // On CONTENT HASH, not name: a `pub use` re-export carries
+                    // one declaration through several paths and stays legal.
+                    // `usePath` is a sealed UsePath whose Selective variant has no
+                    // single rendered path, so the resolved module is the label.
+                    val incomingLabel = result.modules.firstOrNull()?.modulePath ?: "another import"
+                    errors.addAll(ambiguousImportedNames(importContext, result.context, incomingLabel))
                     importContext = importContext.merge(result.context)
                     result.modules.forEach { loadedModules[ModulePath.parse(it.modulePath)] = it }
                 }

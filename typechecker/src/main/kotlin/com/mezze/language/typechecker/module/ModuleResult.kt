@@ -101,6 +101,37 @@ sealed class ModuleError(override val message: String) : Exception(message) {
         )
     }
 
+    /**
+     * Two `use` statements brought DIFFERENT declarations into scope under the
+     * same name.
+     *
+     * Effects and abilities take no `pub` — the parser's reason is that they
+     * "must be usable in type signatures across modules" — so identity is keyed
+     * by name and two modules may each declare `Tick`. Declaring them is fine;
+     * importing both here is not, because nothing at a use site can say which
+     * one is meant.
+     *
+     * Keyed on the declaration's CONTENT HASH, not its name: a `pub use`
+     * re-export carries ONE declaration through several paths, and that must
+     * stay legal.
+     */
+    data class AmbiguousImportedName(
+        val kind: String,
+        val name: String,
+        val firstModule: String,
+        val secondModule: String,
+    ) : ModuleError(
+        "Both '$firstModule' and '$secondModule' export an $kind named '$name', and they are " +
+            "different declarations. Importing both leaves no way to say which one a use site " +
+            "means."
+    ) {
+        override val code = ErrorCode.M0805_AMBIGUOUS_MODULE
+        override val hints: List<String> = listOf(
+            "import only one of them, or rename one at its declaration — " +
+                "an $kind cannot be disambiguated at a use site"
+        )
+    }
+
     data class ImportError(
         val modulePath: String,
         val itemName: String,
