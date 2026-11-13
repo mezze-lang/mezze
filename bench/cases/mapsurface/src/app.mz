@@ -108,6 +108,15 @@ let build_map = { i, m } -> if i <= 0 then m
 let build_set = { i, s } -> if i <= 0 then s
   else build_set { i = i - 1, s = set::insert { s = s, x = i } }
 
+## A second MAP shifted by half, so the merge row has two DIFFERENT inputs with
+## a half overlap — exactly what `build_set_off` already gives the set rows.
+## Row 24 used to merge `m` with itself, which the structural merge answers in
+## O(1) by sharing the whole trie: a 5000x that measured the short-circuit and
+## not a merge.
+let build_map_off = { i, m, off } -> if i <= 0 then m
+  else build_map_off { i = i - 1, off = off,
+                       m = map::insert { m = m, k = i + off, v = i + off } }
+
 ## A second set shifted by half, so the two-set rows have a HALF OVERLAP: a
 ## union of `keys * 3 / 2`, an intersection and a difference of `keys / 2`, and
 ## a symmetric difference of `keys`. Disjoint or identical sets would each let
@@ -300,11 +309,26 @@ let l_count = { i, acc, m, keys } -> if i <= 0 then acc
   else l_count { i = i - 1, m = m, keys = keys,
                  acc = acc + map::count { m = m, p = { k, v } -> k > keys / 2 } }
 
-## 24. map::merge — two maps into one; merging with itself keeps the size.
-let l_merge = { i, acc, m } -> if i <= 0 then acc
+## 24. map::merge — TWO DIFFERENT maps, half overlapping, which is the shape
+## `set::union` (row 28) already measured. This row used to merge `m` with
+## itself and the structural merge turned that into an O(1) share: 38 548 989 ps
+## to 7 701, WARMUP-DOMINATED, a 5000x measuring the short-circuit. The answer
+## was still right — merging a map with itself IS that map — but the row had
+## stopped measuring a merge.
+let l_merge = { i, acc, m, mo } -> if i <= 0 then acc
+  else do
+    let m2 = map::merge { m1 = m, m2 = mo }
+    l_merge { i = i - 1, acc = acc + map::size { m = m2 }, m = m, mo = mo }
+
+## 32. map::merge WITH ITSELF — kept, and named for what it is. Both sides being
+## the same object is a real spelling with a real answer, and the structural
+## merge returns in O(1) because every key collides and the winner's values are
+## already in place. It is a legitimate number for that case and NOT a number
+## for merging two maps; row 24 is that.
+let l_merge_self = { i, acc, m } -> if i <= 0 then acc
   else do
     let m2 = map::merge { m1 = m, m2 = m }
-    l_merge { i = i - 1, acc = acc + map::size { m = m2 }, m = m }
+    l_merge_self { i = i - 1, acc = acc + map::size { m = m2 }, m = m }
 
 ## 25. map::contains_value — the only lookup that cannot use the hash, so it is
 ##     the control for how much the hashing is worth.
@@ -388,6 +412,7 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
   let m = build_map { i = keys, m = map::empty {} }
   let s = build_set { i = keys, s = set::empty {} }
   let t = build_set_off { i = keys, s = set::empty {}, off = keys / 2 }
+  let mo = build_map_off { i = keys, m = map::empty {}, off = keys / 2 }
   let set_xs = set::to_seq { s = s }
   let ks = build_strkeys { i = keys, acc = [] }
   let sm = build_strmap { i = keys, m = map::empty {}, ks = ks }
@@ -442,7 +467,7 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
   report { idx = 23, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "map::count           ", thunk = {} -> l_count { i = n, acc = 0, m = m, keys = keys } }
   report { idx = 24, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
-           label = "map::merge (self)    ", thunk = {} -> l_merge { i = n, acc = 0, m = m } }
+           label = "map::merge half-ovlp ", thunk = {} -> l_merge { i = n, acc = 0, m = m, mo = mo } }
   report { idx = 25, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "map::contains_value  ", thunk = {} -> l_contains_value { i = n, acc = 0, m = m, keys = keys } }
   report { idx = 10, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
@@ -465,6 +490,8 @@ pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime
            label = "set::difference      ", thunk = {} -> l_set_diff { i = n, acc = 0, s = s, t = t } }
   report { idx = 31, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "set::symmetric_diff  ", thunk = {} -> l_set_symdiff { i = n, acc = 0, s = s, t = t } }
+  report { idx = 34, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::merge SELF O(1) ", thunk = {} -> l_merge_self { i = n, acc = 0, m = m } }
   report { idx = 32, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
            label = "set::to_seq   CONTROL", thunk = {} -> l_set_to_seq { i = n, acc = 0, s = s } }
   report { idx = 33, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,

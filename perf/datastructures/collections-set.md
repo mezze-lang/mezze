@@ -59,7 +59,7 @@
 | `to_list` | **UNMEASURED** | | | | |
 | `to_seq` | 4 288 408 | 1000 | 4 288 | — | mapsurface:32 |
 | `to_sorted_set` | **UNMEASURED** | | | | |
-| `union` | 8 615 178 | 1000 | 8 615 | — | mapsurface:28 |
+| `union` | 8 810 684 | 1000 | 8 810 | — | mapsurface:28 |
 
 ## Unmeasured (38 of 52)
 

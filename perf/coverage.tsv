@@ -132,3 +132,7 @@ set	union	8615178	2e4	1000	mapsurface:28	2026-11-13
 set	intersection	11377833	1e4	1000	mapsurface:29	2026-11-13
 set	difference	11565233	1e4	1000	mapsurface:30	2026-11-13
 set	symmetric_difference	26488822	1e4	1000	mapsurface:31	2026-11-13
+map	merge	10994675	2e4	1000	mapsurface:24	2026-11-13
+map	filter	21875381	2e4	1000	mapsurface:22	2026-11-13
+map	to_seq	17786669	5e4	1000	mapsurface:20	2026-11-13
+set	union	8810684	1e4	1000	mapsurface:28	2026-11-13

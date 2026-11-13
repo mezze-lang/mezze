@@ -14590,3 +14590,70 @@ growth. Passing tests do not prove a branch executed, so it was made to throw:
 four separate cases failed, so the coverage is real. A sparse-left/dense-right
 case was added on the suspicion it was under-covered; it turned out already
 exercised, and now that is known rather than hoped.
+
+#### `map::merge` — 4.4x, after the first number turned out to be 5000x of nothing
+
+`MapNatives.merge` calls `MezzeMap.putAll`, which collected BOTH sides into
+arrays and called `fromEntries`: every key rehashed, both input tries discarded.
+Same defect `set::union` had, and `map::merge` was the most expensive row in the
+whole table at 38 549 ps/element.
+
+`LongTrieMapStorage.mergeWith` is the twin of the set version with one
+difference that drives the whole design: **`putAll` means OTHER'S VALUES WIN**,
+so the merge is asymmetric. Each case places the winner deliberately, and
+`aData && bNode` is the trap — `insert` OVERWRITES, so using it where A has one
+entry and B has a subtree would make A the winner on a shared key, backwards.
+Containment is checked first and B's subtree is returned untouched when B
+already has the key.
+
+**AND THE FIRST MEASUREMENT WAS A 5000x THAT MEASURED NOTHING.** The bench row
+was `map::merge { m1 = m, m2 = m }` — a map merged with ITSELF. The structural
+merge opens with `if (a == b) return b`, because where both sides are the same
+object every key collides, the winner is B, and B's values are already in place.
+So it returns in O(1): the row went 38 548 989 ps to 7 701 and reported
+WARMUP-DOMINATED. The checksum never changed, so the behaviour was right — it is
+the MEASUREMENT that stopped meaning anything, and "5000x" would have been a
+fabrication.
+
+The set rows had avoided this by construction: `build_set_off` gives
+`set::union` two DIFFERENT half-overlapping inputs. The map had no such sibling.
+It has one now, and row 24 measures the same shape the set union row does, so
+the two are comparable. The self-merge keeps its own row — 34, after the first
+attempt collided with an existing index 32 and printed `set::to_seq`'s number
+under the new label — because the short-circuit is a real optimisation for a
+real spelling and deserves a number, just not one standing in for a merge.
+
+THE CORRECTED ROW IS A HARDER CASE than the one it replaced. Under the rebuild,
+half-overlap costs 49.0M against self-merge's 38.9M: 2000 entries collapsing to
+1500 distinct keys builds a bigger result trie than collapsing to 1000.
+
+SELF-A/B, `mergeWith` compiled in both arms, only `putAll`'s routing differing:
+
+| row | rebuild | structural | |
+|---|---|---|---|
+| `map::merge` half-overlap n=1e4 | 49 010 555 ps | 10 975 401 | **4.47x** |
+| `map::merge` half-overlap n=2e4 | 47 912 740 | 10 994 675 | **4.36x** |
+| `map::merge` SELF (row 34) | 38 929 698 | 7 565 | O(1) short-circuit |
+| `map::filter` (control) | 21 579 508 | 21 875 381 | 1.4% |
+| `set::union` (control) | 8 462 418 | 8 810 684 | 4.1% |
+| `set::intersection` (control) | 11 378 614 | 11 449 110 | 0.6% |
+| `map::to_seq` (control) | 17 513 170 | 17 786 669 | 1.6% |
+
+4.4x, larger than the set union's 3.6x. The self-merge row is reported as what
+it is — an O(1) share, not a 5000x merge.
+
+TESTS: `LongTrieMergeTest`, 10 cases, and they check VALUES rather than key
+sets, because a merge that got every key right and the winner backwards would
+pass any membership test. Values carry the side they came from; one case makes
+EVERY key shared so the right-hand side must win all of them; and one asserts
+the merge is NOT commutative — `a⊕b` and `b⊕a` must agree on keys and disagree
+on exactly the shared band, since a merge that came out symmetric would mean the
+winner logic had been dropped. The asymmetric branch was proven to run by making
+it throw: five cases failed.
+
+A FINDING ON THE WAY PAST: `set::symmetric_difference` did NOT move when
+`set::union` became 3.6x faster, although `MezzeSet.symmetricDifference` is
+literally `union(other).difference(intersect(other))`. `SetNatives` has its own
+implementation and never calls it. The control not moving when the composition
+said it must is what exposed that — the `MezzeSet` method is dead code for the
+native path.

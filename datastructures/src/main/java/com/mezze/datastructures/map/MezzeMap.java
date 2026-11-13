@@ -295,6 +295,21 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
         if (other.isEmpty()) return this;
         if (isEmpty()) return other;
 
+        // THE TRIE MERGES STRUCTURALLY instead of rebuilding. The four arrays
+        // below hash every key again and discard both input tries; a
+        // thousand-key `map::merge` was the most expensive row measured at
+        // 38 549 ps/element. `LongTrieMapStorage.mergeWith` shares every
+        // subtree only one side has and hashes nothing — its set twin,
+        // `LongTrieSetStorage.unionWith`, measured 3.6x on the same shape once
+        // the rebuild was found to be 72-84% of the work.
+        //
+        // OTHER'S VALUES WIN, which is what this method means, and the merge is
+        // asymmetric for that reason — see `mergeWith`.
+        if (storage instanceof LongTrieMapStorage lt
+                && other.storage instanceof LongTrieMapStorage otherLt) {
+            return new MezzeMap<>(LongTrieMapStorage.mergeWith(lt, otherLt));
+        }
+
         // THE FOUR ARRAYS STAY HERE, and that is a measurement, not an
         // oversight. Everywhere else in this family, replacing `keys()` and
         // `values()` with a `storage.forEach` walk paid — 1.33x on

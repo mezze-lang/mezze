@@ -142,6 +142,153 @@ public final class LongTrieMapStorage implements MapStorage {
         return new LongTrieMapStorage(newRoot, size + grew[0]);
     }
 
+    /**
+     * STRUCTURAL MERGE — combines two tries, sharing every subtree only one
+     * side has, and rehashing nothing.
+     *
+     * <p>{@code MezzeMap.putAll} collected both sides into arrays and called
+     * {@link MezzeMap#fromEntries}, which hashes every key again and throws
+     * both input tries away. Its set twin,
+     * {@code LongTrieSetStorage.unionWith}, measured 3.6x on the same shape
+     * after the rebuild was found to be 72-84% of the work.
+     *
+     * <p>OTHER'S VALUES WIN, which is what {@code putAll} means and what makes
+     * this merge asymmetric: see the per-case handling below. No collision
+     * case, for the reason the class comment gives — {@link TrieHash#mix64} is
+     * a bijection, so distinct keys part before the bits run out.
+     */
+    static LongTrieMapStorage mergeWith(LongTrieMapStorage a, LongTrieMapStorage b) {
+        int[] grew = new int[1];
+        Node root = mergeNodes(a.root, b.root, 0, grew);
+        return new LongTrieMapStorage(root, a.size + grew[0]);
+    }
+
+    private static Node mergeNodes(Node a, Node b, int shift, int[] grew) {
+        // The same subtree on both sides: every key collides and B wins every
+        // one, and B's values are already in place — so B's node IS the answer.
+        // (The set version returns A here; for a map the winner matters.)
+        if (a == b) return b;
+
+        int dataOnly = 0, nodeOnly = 0;
+        int bits = a.dataMap | a.nodeMap | b.dataMap | b.nodeMap;
+
+        int rest = bits;
+        while (rest != 0) {
+            int bit = rest & -rest;
+            rest ^= bit;
+            boolean aData = (a.dataMap & bit) != 0, aNode = (a.nodeMap & bit) != 0;
+            boolean bData = (b.dataMap & bit) != 0, bNode = (b.nodeMap & bit) != 0;
+            if (aData && bData) {
+                if (a.keys[idx(a.dataMap, bit)] == b.keys[idx(b.dataMap, bit)]) {
+                    dataOnly |= bit;
+                } else {
+                    nodeOnly |= bit;
+                }
+            } else if (aNode || bNode) {
+                nodeOnly |= bit;
+            } else {
+                dataOnly |= bit;
+            }
+        }
+
+        int nData = Integer.bitCount(dataOnly), nNodes = Integer.bitCount(nodeOnly);
+        long[] keys = nData == 0 ? NO_KEYS : new long[nData];
+        Object[] values = nData == 0 ? NO_VALUES : new Object[nData];
+        Node[] nodes = nNodes == 0 ? NO_NODES : new Node[nNodes];
+        int di = 0, ni = 0;
+
+        rest = bits;
+        while (rest != 0) {
+            int bit = rest & -rest;
+            rest ^= bit;
+            boolean aData = (a.dataMap & bit) != 0, aNode = (a.nodeMap & bit) != 0;
+            boolean bData = (b.dataMap & bit) != 0, bNode = (b.nodeMap & bit) != 0;
+
+            if (aData && bData) {
+                int ia = idx(a.dataMap, bit), ib = idx(b.dataMap, bit);
+                long ka = a.keys[ia], kb = b.keys[ib];
+                if (ka == kb) {
+                    // Same key: B wins.
+                    keys[di] = kb;
+                    values[di++] = b.values[ib];
+                } else {
+                    grew[0]++;
+                    nodes[ni++] = merge(ka, a.values[ia], TrieHash.mix64(ka),
+                        kb, b.values[ib], TrieHash.mix64(kb), shift + BITS);
+                }
+            } else if (aData && bNode) {
+                // A's single entry against B's subtree. `insert` OVERWRITES, so
+                // using it here would make A the winner on a shared key, which
+                // is backwards. Containment decides instead: if B already has
+                // the key, B's subtree is the answer untouched.
+                Node sub = b.nodes[idx(b.nodeMap, bit)];
+                int ia = idx(a.dataMap, bit);
+                long ka = a.keys[ia];
+                long ha = TrieHash.mix64(ka);
+                boolean bHas = containsKeyIn(sub, ka, ha, shift + BITS);
+                grew[0] += countEntries(sub) - (bHas ? 1 : 0);
+                nodes[ni++] = bHas
+                    ? sub
+                    : insert(sub, ka, a.values[ia], ha, shift + BITS, new int[1]);
+            } else if (aNode && bData) {
+                // B's entry into A's subtree, overwriting on a shared key —
+                // which is the right winner, so `insert` does it directly and
+                // its `grew` counts B's entry exactly when it was new.
+                Node sub = a.nodes[idx(a.nodeMap, bit)];
+                int ib = idx(b.dataMap, bit);
+                long kb = b.keys[ib];
+                nodes[ni++] = insert(sub, kb, b.values[ib], TrieHash.mix64(kb),
+                    shift + BITS, grew);
+            } else if (aNode && bNode) {
+                nodes[ni++] = mergeNodes(a.nodes[idx(a.nodeMap, bit)],
+                    b.nodes[idx(b.nodeMap, bit)], shift + BITS, grew);
+            } else if (aData) {
+                int ia = idx(a.dataMap, bit);
+                keys[di] = a.keys[ia];
+                values[di++] = a.values[ia];
+            } else if (aNode) {
+                // SHARED BY REFERENCE: B has nothing here.
+                nodes[ni++] = a.nodes[idx(a.nodeMap, bit)];
+            } else if (bData) {
+                grew[0]++;
+                int ib = idx(b.dataMap, bit);
+                keys[di] = b.keys[ib];
+                values[di++] = b.values[ib];
+            } else {
+                Node sub = b.nodes[idx(b.nodeMap, bit)];
+                grew[0] += countEntries(sub);
+                nodes[ni++] = sub;
+            }
+        }
+
+        return new Node(dataOnly, nodeOnly, keys, values, nodes);
+    }
+
+    /** The compacted index of [bit] within [map]. */
+    private static int idx(int map, int bit) {
+        return Integer.bitCount(map & (bit - 1));
+    }
+
+    /** Whether [key] is in this subtree, without building anything. */
+    private static boolean containsKeyIn(Node n, long key, long hash, int shift) {
+        for (;;) {
+            int bit = 1 << (int) ((hash >>> shift) & MASK);
+            if ((n.dataMap & bit) != 0) {
+                return n.keys[idx(n.dataMap, bit)] == key;
+            }
+            if ((n.nodeMap & bit) == 0) return false;
+            n = n.nodes[idx(n.nodeMap, bit)];
+            shift += BITS;
+        }
+    }
+
+    /** Entries in a subtree. Only called for one being transplanted whole. */
+    private static int countEntries(Node n) {
+        int total = n.keys.length;
+        for (Node child : n.nodes) total += countEntries(child);
+        return total;
+    }
+
     private static Node insert(Node n, long key, Object value, long hash, int shift, int[] grew) {
         int bit = 1 << (int) ((hash >>> shift) & MASK);
 
