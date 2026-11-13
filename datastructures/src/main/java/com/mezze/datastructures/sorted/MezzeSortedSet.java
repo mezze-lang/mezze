@@ -65,6 +65,19 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
      */
     private final Comparator<?> customComparator;
 
+    /**
+     * The comparator AS SUPPLIED — null when this set is naturally ordered.
+     *
+     * What a derived set must inherit. {@link #comparator()} returns the
+     * EFFECTIVE one, which is never null, so rebuilding with it marks the
+     * result custom-ordered and forfeits the fast paths — measured at 8.2x on
+     * union in known-bugs.md BUG 44.
+     */
+    public Comparator<?> customComparator() {
+        return customComparator;
+    }
+
+
     private final Object[] ownerToken;
 
     @SuppressWarnings("unchecked")

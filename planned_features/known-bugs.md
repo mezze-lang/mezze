@@ -4646,3 +4646,110 @@ same `instanceof` fast paths and has none.
 
 Probe: scratchpad `ssprobe`; the shape is six lines of `from_seq` + `union` +
 `contains`.
+
+
+## BUG 45 — six more `sorted_set` natives rebuilt through a comparator-less set
+
+**FIXED 2026-11-13** alongside BUG 44.
+
+`SortedSetNatives.slice`'s own doc already named this failure mode: the set's
+`take` and `drop` "rebuilt through `MezzeSortedSet.empty()` with NO comparator,
+so the result lost the ordering it was sliced from". Those two were fixed and
+the identical line survived in six siblings — `range`, `head_set`, `tail_set`,
+`symmetric_difference`, `filter`, `partition`. All preserve the element type,
+so each now inherits the source's order.
+
+THREE OF THE SIX ARE DEAD NATIVES: `range`, `head_set` and `tail_set` are
+registered in `NativeDispatch` and called from nowhere — the stdlib reaches
+those shapes through the guest `find_index` + `slice` path instead, which is
+why they were correct in practice. Fixed anyway, for the reason the
+stage-classification catch-all exists: the next caller would hit it.
+
+The inherited comparator is the one AS SUPPLIED, not `comparator()`, which is
+never null after construction — rebuilding with the effective one marks the
+result custom-ordered and forfeits the fast paths, the 8.2x BUG 44 measured.
+
+Guarded by `SortedSetDerivedOrderTest`: reverting the six fails four of its
+five.
+
+TWO MORE OF THE SAME SHAPE, found by following the family rather than the
+ratios, and fixed here:
+
+  - `sorted_set::from_set` DECLARED `with Ord 'a` and never passed it on — the
+    body called its native bare, which built the set with no comparator. Its
+    sibling `from_list` has had the right shape all along, so this was the one
+    never brought along. A declared constraint that is never used is worse than
+    a missing one: it tells every reader the order is handled.
+  - `set::to_sorted_set` said "(elements must be comparable)" in its DOC COMMENT
+    and carried no constraint at all. The requirement was written for humans and
+    not for the typechecker.
+
+Both measured broken first — `1, 3, 5` with `contains` finding only the middle
+element — and both correct after, in argument position as well as let-bound.
+Guarded by two cases in `SortedSetOrderOperandTest`.
+
+ONE SELF-INFLICTED BREAK ON THE WAY, worth recording because the fix for it is
+now a test. Adding `from_list` to `ordNativeFastForm` made the compiler DROP its
+`cmp` operand, but its dispatch read that field with `getFunction` rather than
+`getFunctionOrNull` — so every Int set threw `Missing field 'cmp'` and four
+suites went red. Every other entry in the table already read its operand
+optionally; `from_list` was the one that did not, and it was only caught because
+`from_list` happens to be well covered.
+
+So `every native with a droppable order operand works on plain Ints` now
+exercises all seven entries with a plain Int — the case where the operand IS
+dropped — and a new entry whose field is not optional fails there immediately
+rather than wherever that native is next used.
+
+THE RUNNING COUNT OF THIS ONE MISTAKE, in a single session: `seq::sort`,
+`list::sort`, `sorted_set`'s fast path (BUG 44), its six comparator-less
+rebuilds, `from_set`, and `set::to_sorted_set`. Seven places where a
+type-based shortcut or an unthreaded constraint silently disagreed with a
+hand-written `Ord`. Worth more as a pattern than as seven fixes.
+
+## BUG 46 — `sorted_set::map`'s `Ord 'b` dictionary does not arrive in argument position
+
+**OPEN.** Found 2026-11-13 while fixing BUG 44's construction half.
+
+`sorted_set::map` now carries `with Ord 'b` and threads a comparator, because
+its result's elements are `'b` and the source's order says nothing about them.
+That fix HOLDS when the result is bound:
+
+    let mapped = sorted_set::map { s = <Int set>, f = { val } -> R.(val) }
+    ints { s = mapped }                     ->  5, 3, 1    correct
+
+and FAILS when the identical expression sits in argument position:
+
+    ints { s = sorted_set::map { s = <Int set>, f = { val } -> R.(val) } }
+                                            ->  1, 3, 5    naturally ordered
+
+The comparator IS threaded — the signature carries `Ord 'b` and the stdlib
+passes it. What does not arrive is the `Ord 'b` DICTIONARY, so the comparator
+built is the wrong one. This is the dictionary-plumbing family, not the
+ordering fix.
+
+NARROWED, by the sibling fixes landing in the same pass: `sorted_set::from_set`
+and `set::to_sorted_set` had the same missing-order defect and BOTH work in
+argument position once their comparator is threaded. The difference is where the
+type comes from — their `'a` is the INPUT's element type, already known, while
+`map`'s `'b` is inferred from the LAMBDA'S RETURN. So this is not "argument
+position" in general; it is the target type of a mapping function not being
+resolved by the time the dictionary is chosen.
+
+RULED OUT, each by experiment rather than reasoning:
+
+  - NOT the compiler's operand-dropping rewrite. Removing `map` from
+    `ordNativeFastForm` changes nothing. (It is removed anyway: `expr.type`
+    is not reliable for `map` in that position, so upgrading there would be
+    guessing — see the note in that table.)
+  - NOT test isolation. It fails run alone, so it is not the static
+    TypeChecker.
+
+CONSEQUENCE: a mapped set in argument position is naturally ordered while
+`contains` searches it by the target's `Ord`, so its own elements can be
+invisible — BUG 44's shape, reached through `map`.
+
+`SortedSetOrderOperandTest` asserts the BROKEN result on purpose, named
+`... still loses the target order — BUG 46`, so whoever fixes the dictionary
+arrival is told by a failing test that this improved and the two map cases
+should be folded together.

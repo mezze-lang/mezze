@@ -564,11 +564,16 @@ public final class SetNatives {
     // ==================== SortedSet Conversions ====================
 
     /**
-     * Convert Set to SortedSet.
+     * Convert Set to SortedSet, ordered by the element's `Ord`.
+     *
+     * <p>`set::to_sorted_set` used to say "elements must be comparable" in its
+     * DOC COMMENT and carry no constraint, so nothing supplied the order and
+     * the result was naturally ordered whatever that `Ord` said. See
+     * known-bugs.md BUG 45.
      */
     @TruffleBoundary
-    public static MezzeSortedSet toSortedSet(MezzeSet set) {
-        return SortedSetNatives.fromSet(set);
+    public static MezzeSortedSet toSortedSet(MezzeSet set, MezzeFunction cmpFn) {
+        return SortedSetNatives.fromSet(set, cmpFn);
     }
 
     /**

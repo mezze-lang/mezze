@@ -65,6 +65,26 @@ object NativeHofNames {
     const val PAIR_THD = "thd"
     const val PAIR_FTH = "fth"
 
+    // ── The operand that carries an ORDER ───────────────────────────────
+    //
+    // A native that must compare its elements takes the comparison as a field,
+    // because the comparison belongs to the element's `Ord` and only guest code
+    // has it. Two spellings exist and both are here: `le` answers Bool and `cmp`
+    // answers -1/0/1.
+    //
+    // `TypedASTCompiler.ordNativeCall` REMOVES this operand when the element was
+    // proved directly comparable, which is the whole reason the names have to be
+    // written down once: the compiler drops the field by name, so a rename that
+    // missed one site would silently stop the upgrade — a refusal, not a crash.
+
+    /** `Ord`'s own operation: True when `it` comes before `r`. */
+    const val ORD_LE = "le"
+    /** A three-way comparator field: -1, 0 or 1. */
+    const val ORD_CMP = "cmp"
+
+    /** Every field that carries an order, for the passes that strip one. */
+    val ORDER_FIELDS: Set<String> = setOf(ORD_LE, ORD_CMP)
+
     /** `iter::enumerate` — `{ i, val }`. */
     const val ITER_ENUM_INDEX = "i"
     const val ITER_ENUM_VAL = "val"

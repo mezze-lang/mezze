@@ -3342,10 +3342,16 @@ class TypedASTCompiler(
         // unfixed are stated on `seq::sort` and beside `impl Ord for Float`,
         // which is where someone meets the question; repeating it here would
         // be the third copy.
-        val xs = argIR.fields.firstOrNull { it.name == "xs" } ?: return null
+        // DROP THE ORDER OPERAND, keep everything else. This used to keep the
+        // single field named "xs", which is right only for a one-collection
+        // native: `union` is `{ s1, s2, cmp }` and would have lost both sets.
+        // Declining when there is nothing to drop matters — otherwise a native
+        // already in its fast form would be rewritten to itself forever.
+        val kept = argIR.fields.filterNot { it.name in NativeHofNames.ORDER_FIELDS }
+        if (kept.size == argIR.fields.size) return null
         return CallNativeIR(
             name = fastName,
-            arg = MakeRecordIR(listOf(xs), src),
+            arg = MakeRecordIR(kept, src),
             src = src,
             producesKind = collectionKindOf(resultType),
             ownerKind = NativeHofNames.ownerOf(fastName),
@@ -3375,6 +3381,25 @@ class TypedASTCompiler(
         // hand-written `Ord`. `fromArray` already reads `cmp` with
         // `getFunctionOrNull`, so the same native handles both.
         "__native_sorted_set_from_seq" to "__native_sorted_set_from_seq",
+        "__native_sorted_set_from_set" to "__native_sorted_set_from_set",
+        "__native_set_to_sorted_set" to "__native_set_to_sorted_set",
+        "__native_sorted_set_from_list" to "__native_sorted_set_from_list",
+        // The merges take their order as an operand (BUG 44), so a directly
+        // comparable element drops it and they keep the native fast paths.
+        "__native_sorted_set_union" to "__native_sorted_set_union",
+        "__native_sorted_set_intersect" to "__native_sorted_set_intersect",
+        "__native_sorted_set_difference" to "__native_sorted_set_difference",
+        "__native_sorted_set_symmetric_difference"
+            to "__native_sorted_set_symmetric_difference",
+        // `map` and `filter_map` are DELIBERATELY ABSENT. They construct the
+        // order rather than use it — their result is `SortedSet 'b` — and the
+        // element type this rewrite reads off `expr.type` is NOT RELIABLE for
+        // them: with the call bound to a `let` it resolves to `'b`, but in
+        // ARGUMENT position it came back directly comparable and the operand
+        // was dropped, leaving a naturally-ordered set for a descending `Ord`.
+        // Measured both ways. Until the target type can be read soundly here
+        // they always carry their comparator — slower for a plain Int map, and
+        // never a wrong order. Never upgrade on a guess.
     )
 
     /**

@@ -1438,7 +1438,7 @@ public final class NativeDispatch extends MezzeNode {
 
         // SortedSet conversions
         HANDLERS.put("__native_set_to_sorted_set", (r, c) ->
-            SetNatives.toSortedSet(getSet(r, "s")));
+            SetNatives.toSortedSet(getSet(r, "s"), getFunctionOrNull(r, "cmp")));
         HANDLERS.put("__native_set_from_sorted_set", (r, c) ->
             SetNatives.fromSortedSet(getSortedSet(r, "s")));
     }
@@ -1465,12 +1465,19 @@ public final class NativeDispatch extends MezzeNode {
             SortedSetNatives.min(getSortedSet(r, "s")));
         HANDLERS.put("__native_sorted_set_max", (r, c) ->
             SortedSetNatives.max(getSortedSet(r, "s")));
+        // The ORDER comes from the caller: a set built by `empty {}` + `add`
+        // holds its elements in the author's order while its comparator says
+        // natural. `cmp` is absent when the compiler proved the element
+        // directly comparable. See known-bugs.md BUG 44.
         HANDLERS.put("__native_sorted_set_union", (r, c) ->
-            SortedSetNatives.union(getSortedSet(r, "s1"), getSortedSet(r, "s2")));
+            SortedSetNatives.union(getSortedSet(r, "s1"), getSortedSet(r, "s2"),
+                getFunctionOrNull(r, "cmp")));
         HANDLERS.put("__native_sorted_set_intersect", (r, c) ->
-            SortedSetNatives.intersect(getSortedSet(r, "s1"), getSortedSet(r, "s2")));
+            SortedSetNatives.intersect(getSortedSet(r, "s1"), getSortedSet(r, "s2"),
+                getFunctionOrNull(r, "cmp")));
         HANDLERS.put("__native_sorted_set_difference", (r, c) ->
-            SortedSetNatives.difference(getSortedSet(r, "s1"), getSortedSet(r, "s2")));
+            SortedSetNatives.difference(getSortedSet(r, "s1"), getSortedSet(r, "s2"),
+                getFunctionOrNull(r, "cmp")));
         HANDLERS.put("__native_sorted_set_equals", (r, c) ->
             SortedSetNatives.equals(getSortedSet(r, "s1"), getSortedSet(r, "s2"),
                 getFunction(r, "eq"), c));
@@ -1480,10 +1487,14 @@ public final class NativeDispatch extends MezzeNode {
             SortedSetNatives.toList(getSortedSet(r, "s")));
         HANDLERS.put("__native_sorted_set_to_set", (r, c) ->
             SortedSetNatives.toSet(getSortedSet(r, "s")));
+        // `getFunctionOrNull`, NOT `getFunction`: every native listed in
+        // `ordNativeFastForm` has its order operand DROPPED when the element is
+        // directly comparable, so demanding the field throws `Missing field
+        // 'cmp'` for every Int set. That is how this one announced itself.
         HANDLERS.put("__native_sorted_set_from_list", (r, c) ->
-            SortedSetNatives.fromList(getList(r, "xs"), getFunction(r, "cmp")));
+            SortedSetNatives.fromList(getList(r, "xs"), getFunctionOrNull(r, "cmp")));
         HANDLERS.put("__native_sorted_set_from_set", (r, c) ->
-            SortedSetNatives.fromSet(getSet(r, "s")));
+            SortedSetNatives.fromSet(getSet(r, "s"), getFunctionOrNull(r, "cmp")));
 
         // HOF operations
         HANDLERS.put("__native_sorted_set_filter", (r, c) ->
@@ -1491,7 +1502,8 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_sorted_set_fold", (r, c) ->
             SortedSetNatives.fold(getSortedSet(r, "s"), getField(r, "init"), getFunction(r, "f"), c));
         HANDLERS.put("__native_sorted_set_map", (r, c) ->
-            SortedSetNatives.map(getSortedSet(r, "s"), getFunction(r, "f"), c));
+            SortedSetNatives.map(getSortedSet(r, "s"), getFunction(r, "f"),
+                getFunctionOrNull(r, "cmp"), c));
         HANDLERS.put("__native_sorted_set_any", (r, c) ->
             SortedSetNatives.any(getSortedSet(r, "s"), getFunction(r, "p"), c));
         HANDLERS.put("__native_sorted_set_all", (r, c) ->
@@ -1537,7 +1549,8 @@ public final class NativeDispatch extends MezzeNode {
 
         // Task #14: Advanced operations
         HANDLERS.put("__native_sorted_set_symmetric_difference", (r, c) ->
-            SortedSetNatives.symmetricDifference(getSortedSet(r, "s1"), getSortedSet(r, "s2")));
+            SortedSetNatives.symmetricDifference(getSortedSet(r, "s1"), getSortedSet(r, "s2"),
+                getFunctionOrNull(r, "cmp")));
         HANDLERS.put("__native_sorted_set_head_set", (r, c) ->
             SortedSetNatives.headSet(getSortedSet(r, "s"), getField(r, "to")));
         HANDLERS.put("__native_sorted_set_tail_set", (r, c) ->
@@ -1545,7 +1558,8 @@ public final class NativeDispatch extends MezzeNode {
 
         // Task #30: Collect operations
         HANDLERS.put("__native_sorted_set_filter_map", (r, c) ->
-            SortedSetNatives.filterMap(getSortedSet(r, "set"), getFunction(r, "f"), c));
+            SortedSetNatives.filterMap(getSortedSet(r, "set"), getFunction(r, "f"),
+                getFunctionOrNull(r, "cmp"), c));
         HANDLERS.put("__native_sorted_set_collect_seq", (r, c) ->
             SortedSetNatives.collectArray(getSortedSet(r, "set"), getFunction(r, "f"), c));
         HANDLERS.put("__native_sorted_set_collect_list", (r, c) ->
