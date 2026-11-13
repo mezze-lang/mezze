@@ -174,6 +174,8 @@ class ExpressionConstraintGenerator {
         // up (like doBindingSolvedTypes/callReturnTypes) so every nested perform's
         // entry reaches the top-level decl's ConstraintResult for emit to read.
         val performFullyDischarged = mutableMapOf<Loc, Boolean>()
+        // Merged up the same way, for the same reason — see the field's doc.
+        val performBodyFnRow = mutableMapOf<Loc, Set<String>>()
         // Per-lambda solved param types, merged up like callReturnTypes so a
         // lambda nested anywhere reaches the top-level decl's ConstraintResult.
         val lambdaParamTypes = mutableMapOf<Loc, Map<String, MezzeType>>()
@@ -213,6 +215,7 @@ class ExpressionConstraintGenerator {
             unusedHandlers.addAll(result.unusedHandlers)
             doBindingSolvedTypes.putAll(result.doBindingSolvedTypes)
             performFullyDischarged.putAll(result.performFullyDischarged)
+            performBodyFnRow.putAll(result.performBodyFnRow)
             lambdaParamTypes.putAll(result.lambdaParamTypes)
             lambdaRowInstances.putAll(result.lambdaRowInstances)
             patternWarnings.addAll(result.patternWarnings)
@@ -247,6 +250,7 @@ class ExpressionConstraintGenerator {
             doBindingEffects = doBindingEffects,
             doBindingSolvedTypes = doBindingSolvedTypes,
             performFullyDischarged = performFullyDischarged,
+            performBodyFnRow = performBodyFnRow,
             patternWarnings = patternWarnings,
             expectedTypeAt = expectedTypeAt,
             matchCaseBindings = matchCaseBindings,
@@ -496,6 +500,28 @@ class ExpressionConstraintGenerator {
         return Triple(valueType, effectRow.effects, effectRow.effectInstances)
     }
 
+    /**
+     * `perform H in f` DISCHARGES H from `f`'s own arrow, and that is correct
+     * rather than a laundering bug — because the runtime makes it true.
+     * `HandlerBoundFunction.wrap` snapshots the live handler chain at the point
+     * the function is produced and returns a function that re-installs it for
+     * each call. Its own note: "The type system discharges the effect from the
+     * function's type and 19 tests pin that, so the value has to carry the
+     * handler to make the type true."
+     *
+     * So do NOT make this an identity. Tried, 2026-11-13: 15+ tests across
+     * ComprehensiveEffectHandlingTest, ComprehensiveEffectRowTest,
+     * EffectfulCallResultTest and EffectHandlingTest fail, with names that say
+     * the feature outright — "perform on uncalled function removes effect from
+     * function type", "handle effect on bound function value".
+     *
+     * There IS a gap, but a narrower one: a LAMBDA LITERAL produced by the block
+     * gets the type stripped without being wrapped, so
+     * `let f = perform Ticker in {} -> Tick.tick {}` then `f {}` returns a
+     * MezzeSuspend from a binding declared Int. See
+     * EffectNoLaunderSpecTest's 14th shape — the fix belongs at the wrap site,
+     * not here.
+     */
     internal fun removeEffectsFromType(
         type: MezzeType,
         effectsToRemove: Set<String>,

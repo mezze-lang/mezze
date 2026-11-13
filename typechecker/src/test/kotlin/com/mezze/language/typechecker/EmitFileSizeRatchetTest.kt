@@ -97,7 +97,12 @@ class EmitFileSizeRatchetTest {
             // the bound moves rather than the code.
             // +2 on the rebase onto main: main grew this file too, and our +42
             // landed on top of it. The bound tracks the file, not either change.
-            E + "TypedAstBuilder.kt" to 2394,    // was 3,107
+            // +1: `capturesIntoResult` now reads the perform body's row from the
+            // side table recorded at constraint generation instead of re-deriving
+            // it from a post-solve type that had already been stripped. The
+            // decision belongs where TypedPerform is stamped — same reason as the
+            // lambda row above — and none of the siblings covers perform emit.
+            E + "TypedAstBuilder.kt" to 2395,    // was 3,107
         )
 
         val SPLIT_OUT = listOf(

@@ -67,6 +67,8 @@ internal fun buildPartialTypedModule(
         // Effect-model migration (S2): per-perform fully-discharged flags.
         val performFullyDischarged = constraintResults.values
             .fold(emptyMap<Loc, Boolean>()) { acc, r -> acc + r.performFullyDischarged }
+        val performBodyFnRow = constraintResults.values
+            .fold(emptyMap<Loc, Set<String>>()) { acc, r -> acc + r.performBodyFnRow }
         val tailCallLocations = constraintResults.values
             .flatMap { it.tailCalls }
             .filterNotNull()
@@ -82,6 +84,7 @@ internal fun buildPartialTypedModule(
             matchScrutineeTypes = matchScrutineeTypes,
             doBindingSolvedTypes = doBindingSolvedTypes,
             performFullyDischarged = performFullyDischarged,
+            performBodyFnRow = performBodyFnRow,
         )
         val builder = TypedAstBuilder(
             solved = solved,

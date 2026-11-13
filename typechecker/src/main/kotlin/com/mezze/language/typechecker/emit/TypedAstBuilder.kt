@@ -99,6 +99,7 @@ class TypedAstBuilder(
     private val lambdaRowInstances: Map<Loc, Set<MezzeType.EffectInstance>>
         get() = solved.lambdaRowInstances
     private val performFullyDischarged: Map<Loc, Boolean> get() = solved.performFullyDischarged
+    private val performBodyFnRow: Map<Loc, Set<String>> get() = solved.performBodyFnRow
 
 
     internal val identifierContext = mutableMapOf<String, MezzeType>()
@@ -1547,10 +1548,12 @@ class TypedAstBuilder(
                 // travel with the value, not just wrap this evaluation. Keyed on the
                 // effect HASH rather than the row's name, so a user effect that
                 // happens to share a name cannot be mistaken for the handled one.
+                // From the row recorded at constraint generation, NOT re-derived
+                // from `body.type` — see ConstraintResult.performBodyFnRow.
                 val capturesIntoResult = run {
-                    val row = (body.type as? MezzeType.FunctionType)?.effects ?: return@run false
+                    val row = performBodyFnRow[expr.loc] ?: return@run false
                     val handledHashes = handlers.map { it.effectHash }.toSet()
-                    row.allEffectNames.any { name ->
+                    row.any { name ->
                         val h = try { resolveEffectHash(name) } catch (_: IllegalStateException) { null }
                         h != null && h in handledHashes
                     }

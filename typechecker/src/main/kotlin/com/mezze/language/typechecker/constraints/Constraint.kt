@@ -488,6 +488,21 @@ data class ConstraintResult(
     // TypedPerform.fullyDischarges is sourced from the residual-effect set, not any
     // value-carried effect row (removed in the effect-model migration).
     val performFullyDischarged: Map<Loc, Boolean> = emptyMap(),
+    /**
+     * Per-`perform` row of the BODY, recorded only when the body's type is a
+     * FunctionType, and recorded BEFORE `removeEffectsFromType` strips it.
+     *
+     * S-20's `capturesIntoResult` used to re-derive this in TypedAstBuilder from
+     * the post-solve `body.type`. That works for a function REFERENCE, whose
+     * annotated type is concrete and cannot be overwritten, and fails for a bare
+     * LAMBDA, whose type starts as a variable and gets unified with the stripped
+     * result — so the row was already gone and the handler-bind was never
+     * emitted. MEASURED: `perform Ticker in my_func` then calling it gives 1,
+     * while `perform Ticker in {} -> Tick.tick {}` gives a MezzeSuspend from a
+     * binding declared Int. Annotating the lambda fixed it, which is the tell
+     * that the inference was at fault rather than the program.
+     */
+    val performBodyFnRow: Map<Loc, Set<String>> = emptyMap(),
     // Per-lambda solved PARAMETER types, keyed by the lambda's Loc. A lambda that
     // is an argument to a callee whose type nothing declares — the comparator in
     // `__native_seq_sort_by { xs = xs, cmp = { a, b } -> … }` — gets no expected
@@ -675,6 +690,7 @@ data class ConstraintResult(
             doBindingEffects = concat(subs) { it.doBindingEffects },
             doBindingSolvedTypes = overlay(subs) { it.doBindingSolvedTypes },
             performFullyDischarged = overlay(subs) { it.performFullyDischarged },
+            performBodyFnRow = overlay(subs) { it.performBodyFnRow },
             lambdaParamTypes = overlay(subs) { it.lambdaParamTypes },
             lambdaRowInstances = overlay(subs) { it.lambdaRowInstances },
         )

@@ -921,6 +921,7 @@ class TypeChecker(
                     lambdaParamTypes = aggregated.lambdaParamTypes,
                     lambdaRowInstances = aggregated.lambdaRowInstances,
                     performFullyDischarged = aggregated.performFullyDischarged,
+                    performBodyFnRow = aggregated.performBodyFnRow,
                 )
                 val emitResult = PhaseTiming.phase(currentModulePath, "emit") { emitTypedModuleAndLower(
                     parsedModule = parsedModule, module = module,
@@ -1016,6 +1017,7 @@ class TypeChecker(
         val expectedTypeAt: Map<Loc, MezzeType>,
         val doBindingSolvedTypes: Map<Loc, MezzeType>,
         val performFullyDischarged: Map<Loc, Boolean>,
+        val performBodyFnRow: Map<Loc, Set<String>>,
         val lambdaParamTypes: Map<Loc, Map<String, MezzeType>>,
         val lambdaRowInstances: Map<Loc, Set<MezzeType.EffectInstance>>,
     )
@@ -1060,6 +1062,8 @@ class TypeChecker(
         // no substitution needed).
         val performFullyDischarged = constraintResults.values
             .overlayAll { it.performFullyDischarged }
+        val performBodyFnRow = constraintResults.values
+            .overlayAll { it.performBodyFnRow }
         // Per-lambda solved param types. Substitution-applied here for the same
         // reason doBindingSolvedTypes is: the local incremental solve may have left
         // a variable open that the module solve pinned.
@@ -1085,6 +1089,7 @@ class TypeChecker(
             expectedTypeAt = expectedTypeAt,
             doBindingSolvedTypes = doBindingSolvedTypes,
             performFullyDischarged = performFullyDischarged,
+            performBodyFnRow = performBodyFnRow,
             lambdaParamTypes = lambdaParamTypes,
             lambdaRowInstances = lambdaRowInstances,
         )

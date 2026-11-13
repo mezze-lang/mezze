@@ -230,4 +230,59 @@ class EffectNoLaunderSpecTest : VariantSpecBase() {
                 "another; the new one is the caller's to account for.",
         )
     }
+
+    // ───────────────────────────────── out of a perform block: NOT a launder
+
+    @Test fun `a closure the perform block RETURNS carries the handler with it`() {
+        accepts(
+            """
+            use std::int
+            $eff
+            pub let leak: {} -> Int <*> = {} -> do
+              let f = perform Ticker in {} -> Tick.tick {}
+              f {}
+            $MAIN
+            """,
+            "Looks like the launder family and is NOT one. `perform H in f` where " +
+                "the body evaluates TO a function discharges H from that " +
+                "function's own arrow — and the RUNTIME makes it true: " +
+                "`HandlerBoundFunction` snapshots the live chain and re-installs " +
+                "it per call, because \"the type system discharges the effect from " +
+                "the function's type and 19 tests pin that, so the value has to " +
+                "carry the handler to make the type true\".\n" +
+                "It was genuinely broken for a BARE LAMBDA though: the handler-bind " +
+                "is gated on the body's type being a function whose row carries a " +
+                "handled effect, and that was re-derived post-solve from " +
+                "`body.type` — which `removeEffectsFromType` had already stripped, " +
+                "and a lambda's type variable gets unified with that stripped " +
+                "result. A function REFERENCE escaped it because its annotated type " +
+                "is concrete. Measured: reference gave 1, bare lambda gave a " +
+                "MezzeSuspend out of a binding declared Int, and ANNOTATING the " +
+                "lambda fixed it — the tell that inference was at fault. Now the " +
+                "row is recorded pre-strip (ConstraintResult.performBodyFnRow).\n" +
+                "Runtime behaviour is asserted in PerformReturnedClosureTest; this " +
+                "only pins that it type-checks.",
+        )
+    }
+
+    @Test fun `a closure inside a RECORD the block returns keeps its row`() {
+        tracked(
+            """
+            use std::int
+            $eff
+            pub let leak: {} -> Int <*> = {} -> do
+              let box = perform Ticker in do
+                let f = {} -> Tick.tick {}
+                { go = f }
+              box.go {}
+            $MAIN
+            """,
+            "The deliberate other half. Only a body whose type IS a function gets " +
+                "handler-bound, so a function reached through a record field is NOT " +
+                "bound — and therefore its row must NOT be discharged. Refusing " +
+                "here and accepting above is one coherent rule, not an " +
+                "inconsistency: the value either carries the handler and loses the " +
+                "effect, or keeps the effect and stays answerable for it.",
+        )
+    }
 }

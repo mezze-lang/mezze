@@ -46,6 +46,7 @@ class ConstraintCollectorTest {
         doBindingEffects = listOf(ConstraintResult.DoBindingEffect(MezzeType.IntType, setOf("Log"))),
         doBindingSolvedTypes = mapOf(loc to MezzeType.IntType),
         performFullyDischarged = mapOf(loc to true),
+        performBodyFnRow = mapOf(loc to setOf("Tick")),
         lambdaParamTypes = mapOf(other to mapOf("p" to MezzeType.IntType)),
         lambdaRowInstances = mapOf(other to setOf(MezzeType.EffectInstance("Exception", emptyMap()))),
     )
