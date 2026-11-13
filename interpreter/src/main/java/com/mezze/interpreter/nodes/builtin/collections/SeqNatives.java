@@ -2047,12 +2047,30 @@ public final class SeqNatives {
         return MezzeDeque.fromIterable(java.util.Arrays.asList(seq.toArray()));
     }
 
+    /**
+     * ORDERED BY THE ELEMENT'S `Ord`, which the caller supplies.
+     *
+     * <p>TWO BUGS LIVED HERE. It built through a bare `empty()`, so a
+     * hand-written `Ord` was ignored and the result came out naturally ordered
+     * — measured as `1, 3, 5` for a descending newtype, with `contains`
+     * finding one element of three.
+     *
+     * <p>And it cast: `add((Comparable) seq.get(i))`. {@code add(A)} is
+     * UNBOUNDED and delegates to {@code addObject}, so the cast bought nothing
+     * and reintroduced at this call site the very checkcast
+     * `MezzeSortedSet`'s class comment records removing — "ClassCastException
+     * for any Mezze record or variant, so a sorted set of user values could not
+     * even be iterated". A fix to the container's type parameter, undone by one
+     * of its callers. Confirmed by running it, not read off the source.
+     *
+     * <p>The newtype-over-Int case survived that cast because a boxed Long IS
+     * Comparable, which is why only record and variant elements crashed.
+     */
     @TruffleBoundary
-    @SuppressWarnings("unchecked")
-    public static MezzeSortedSet toSortedSet(MezzeSeq seq) {
-        MezzeSortedSet result = MezzeSortedSet.empty();
+    public static MezzeSortedSet toSortedSet(MezzeSeq seq, MezzeFunction cmpFn) {
+        MezzeSortedSet result = MezzeSortedSet.empty(ElementComparator.of(cmpFn));
         for (int i = 0; i < seq.size(); i++) {
-            result = result.add((Comparable) seq.get(i));
+            result = result.addObject(seq.get(i));
         }
         return result;
     }
@@ -2071,9 +2089,10 @@ public final class SeqNatives {
         return result;
     }
 
+    /** See {@link #toSortedSet}: the key's `Ord` comes from the caller. */
     @TruffleBoundary
-    public static MezzeSortedMap toSortedMap(MezzeSeq seq) {
-        MezzeSortedMap result = MezzeSortedMap.empty();
+    public static MezzeSortedMap toSortedMap(MezzeSeq seq, MezzeFunction cmpFn) {
+        MezzeSortedMap result = MezzeSortedMap.empty(ElementComparator.of(cmpFn));
         for (int i = 0; i < seq.size(); i++) {
             Object elem = seq.get(i);
             if (elem instanceof MezzeRecord rec) {

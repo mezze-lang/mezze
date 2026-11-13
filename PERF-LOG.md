@@ -15382,3 +15382,48 @@ evidence route. So a hand-written `Eq` is IGNORED there, which is the soundness
 hole `seq::unique` closed this session. `seq::unique` and `list::unique` now
 disagree about what a duplicate is. Widening it is the same user-facing decision
 `seq::unique`'s was, so it is recorded rather than taken.
+
+
+## How a module gets swept — correctness AND cost, and what "done" means
+
+Not a fix. The method this session arrived at, written down because the two
+rankings that look like they should drive the work do not.
+
+**DONE, per module, is: every operation has a NUMBER, and every number is
+either at its own shape's ceiling or has a recorded reason it is not.** Not
+"everything is fast" — most operations have nothing to win. `map::insert` and
+`remove` were ranked 106x and 145x and are AT the trie's own cost; `flat_map`'s
+213.9x is really ~10x. Three of the top four entries in the table were closed by
+twenty minutes of ceiling measurement.
+
+**NEITHER COLUMN THAT LOOKS AUTHORITATIVE IS.** `cover` counts CALL SITES, so
+`seq::sort` read as covered for months while paying a guest lambda per
+comparison — the harness itself called it. `vs floor` compares every operation
+against one FLAT fused loop, which overstates anything whose shape costs more
+than that. Read `numbered`, and read the ceiling before believing a ratio.
+
+**WHAT ACTUALLY FINDS THINGS: reading the module while benching it.** Every
+significant find this session came from the source, not from a number:
+
+  - `seq::unique`'s own comment admitted the quadratic — 400x.
+  - `__native_seq_sort` and `__native_list_sort` were registered in TWO places
+    and called from nowhere, each with a comparator ending `return 0`.
+  - Fifteen places where a container decided an ORDER it was never handed, in
+    three distinct forms — a type-based shortcut, an unthreaded or merely
+    declared constraint, and a reintroduced checkcast. The ratio table found
+    NONE of them: `sorted_set` and `sorted_map` had 0 and 1 numbers between 84
+    operations.
+
+**SO A SWEEP IS BOTH AT ONCE.** Write the surface bench, take a number for every
+operation, and read the implementation as you go — correctness defects and cost
+defects surface from the same reading, and the dark modules hold both. Order by
+darkness, largest first.
+
+**THE TELLS WORTH READING FOR**, all observed this session:
+  - a comment admitting a cost ("O(n^2) in the worst case because...")
+  - a native registered in `NativeDispatch` and called from no stdlib site
+  - a constraint DECLARED and never threaded, or stated in prose instead
+  - a native that decides an order, hash or equality without being handed one
+  - `instanceof` on a primitive where a newtype would be that primitive
+  - a sibling pair where only one was fixed (`take`/`drop` vs six others;
+    `from_list` vs `from_set`; `seq::sort` vs `list::sort`)

@@ -3383,6 +3383,10 @@ class TypedASTCompiler(
         "__native_sorted_set_from_seq" to "__native_sorted_set_from_seq",
         "__native_sorted_set_from_set" to "__native_sorted_set_from_set",
         "__native_set_to_sorted_set" to "__native_set_to_sorted_set",
+        "__native_seq_to_sorted_set" to "__native_seq_to_sorted_set",
+        "__native_seq_to_sorted_map" to "__native_seq_to_sorted_map",
+        "__native_deque_to_sorted_set" to "__native_deque_to_sorted_set",
+        "__native_deque_to_sorted_map" to "__native_deque_to_sorted_map",
         // `sorted_map::map_keys` and `invert` produce keys of a NEW type, so
         // the order is the target's and is threaded; dropped where that key
         // is directly comparable. Their natives previously set it to null

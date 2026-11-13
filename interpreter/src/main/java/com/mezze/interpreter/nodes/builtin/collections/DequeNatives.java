@@ -742,8 +742,9 @@ public final class DequeNatives {
 
     @TruffleBoundary
     @SuppressWarnings({"unchecked", "rawtypes"})
-    public static MezzeSortedSet toSortedSet(MezzeDeque deque) {
-        MezzeSortedSet result = MezzeSortedSet.empty();
+    public static MezzeSortedSet toSortedSet(MezzeDeque deque, MezzeFunction cmpFn) {
+        // The order comes from the caller — see SeqNatives.toSortedSet.
+        MezzeSortedSet result = MezzeSortedSet.empty(ElementComparator.of(cmpFn));
         for (Object elem : deque) {
             result = result.addObject(elem);
         }
@@ -767,9 +768,9 @@ public final class DequeNatives {
     }
 
     @TruffleBoundary
-    public static MezzeSortedMap toSortedMap(MezzeDeque deque) {
+    public static MezzeSortedMap toSortedMap(MezzeDeque deque, MezzeFunction cmpFn) {
         // Expects deque of {k, v} records.
-        MezzeSortedMap result = MezzeSortedMap.empty();
+        MezzeSortedMap result = MezzeSortedMap.empty(ElementComparator.of(cmpFn));
         for (Object elem : deque) {
             if (elem instanceof MezzeRecord rec) {
                 int keyIdx = rec.getFieldIndex("k");

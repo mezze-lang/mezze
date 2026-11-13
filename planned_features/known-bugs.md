@@ -4731,11 +4731,38 @@ TWO FOUND BY GREPPING FOR THE TELL, after the nine:
     map has no instanceof fast paths, so there is no natural-order flag to
     preserve. Same-looking fix, opposite choice, for a container-specific reason.
 
-STILL OPEN, four of the same shape in the conversions INTO a sorted container,
-each needing a public constraint it does not have: `seq::to_sorted_set`,
+FOUR CONVERSIONS INTO a sorted container, FIXED: `seq::to_sorted_set`,
 `seq::to_sorted_map`, `deque::to_sorted_set`, `deque::to_sorted_map`. All four
-build through a bare `empty()` and none declares an `Ord`, which is
-`set::to_sorted_set`'s defect in four more places.
+built through a bare `empty()` and none declared an `Ord` — `set::to_sorted_set`'s
+defect in four more places. Measured broken: `1, 3, 5` for a descending newtype,
+`contains` finding one element of three.
+
+AND A SECOND, DIFFERENT BUG IN ONE OF THEM, which is the only CRASH in this
+family. `SeqNatives.toSortedSet` called
+
+    result = result.add((Comparable) seq.get(i));
+
+`add(A)` is UNBOUNDED and delegates straight to `addObject`, so the cast bought
+nothing — and it reintroduced at the call site the very checkcast
+`MezzeSortedSet`'s class comment records removing: "ClassCastException for any
+Mezze record or variant, so a sorted set of user values could not even be
+iterated". A fix to the container's type parameter, undone by one of its
+callers. Confirmed by running it:
+
+    ClassCastException: MezzeRecord cannot be cast to java.lang.Comparable
+
+IT SURVIVED BECAUSE OF WHAT THE OTHER TESTS USED: a `newtype` over Int is a
+boxed Long, which IS `Comparable`, so only record and variant elements ever
+crashed — and nothing converted those. The probe that found the ordering bug
+used a newtype over Int and sailed straight past this one.
+
+Guarded by `SortedConversionOrderTest`; reverting either defect fails three of
+its five.
+
+SO THE FAMILY HAS THREE DISTINCT FORMS, all one root cause — a container
+deciding something about element types that only the element's own instances can
+answer: a type-based shortcut (BUG 44's fast path), an unthreaded or merely
+declared constraint (most of BUG 45), and a reintroduced checkcast (this).
 
 THE RUNNING COUNT OF THIS ONE MISTAKE, in a single session: `seq::sort`,
 `list::sort`, `sorted_set`'s fast path (BUG 44), its six comparator-less

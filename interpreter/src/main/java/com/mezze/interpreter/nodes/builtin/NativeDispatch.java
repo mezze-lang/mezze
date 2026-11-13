@@ -947,11 +947,11 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_seq_to_deque", (r, c) ->
             SeqNatives.toDeque(getSeq(r, "xs")));
         HANDLERS.put("__native_seq_to_sorted_set", (r, c) ->
-            SeqNatives.toSortedSet(getSeq(r, "xs")));
+            SeqNatives.toSortedSet(getSeq(r, "xs"), getFunctionOrNull(r, "cmp")));
         HANDLERS.put("__native_seq_to_map", (r, c) ->
             SeqNatives.toMap(getSeq(r, "xs")));
         HANDLERS.put("__native_seq_to_sorted_map", (r, c) ->
-            SeqNatives.toSortedMap(getSeq(r, "xs")));
+            SeqNatives.toSortedMap(getSeq(r, "xs"), getFunctionOrNull(r, "cmp")));
         HANDLERS.put("__native_seq_from_list", (r, c) ->
             SeqNatives.fromList(getList(r, "xs")));
         HANDLERS.put("__native_seq_from_set", (r, c) ->
@@ -1967,11 +1967,11 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_deque_to_set", (r, c) ->
             DequeNatives.toSet(getDeque(r, "d")));
         HANDLERS.put("__native_deque_to_sorted_set", (r, c) ->
-            DequeNatives.toSortedSet(getDeque(r, "d")));
+            DequeNatives.toSortedSet(getDeque(r, "d"), getFunctionOrNull(r, "cmp")));
         HANDLERS.put("__native_deque_to_map", (r, c) ->
             DequeNatives.toMap(getDeque(r, "d")));
         HANDLERS.put("__native_deque_to_sorted_map", (r, c) ->
-            DequeNatives.toSortedMap(getDeque(r, "d")));
+            DequeNatives.toSortedMap(getDeque(r, "d"), getFunctionOrNull(r, "cmp")));
         HANDLERS.put("__native_deque_from_set", (r, c) ->
             DequeNatives.fromSet(getSet(r, "s")));
         HANDLERS.put("__native_deque_from_sorted_set", (r, c) ->
