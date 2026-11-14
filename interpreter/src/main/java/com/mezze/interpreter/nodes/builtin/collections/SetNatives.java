@@ -210,6 +210,33 @@ public final class SetNatives {
         return MezzeSet.fromElements(out, n[0]);
     }
 
+    /**
+     * `map` that collapses by the TARGET's equality.
+     *
+     * <p>The plain {@link #map} rebuilds through the structural `fromElements`,
+     * so two results a hand-written `Eq` calls equal stayed apart: mapping the
+     * distinct Ints 10 and 11 to a newtype equal BY TENS gave a set of two
+     * where the author's `Eq` says one. Its sibling `sorted_set::map` already
+     * carries `with Ord 'b` for the same reason — the result's elements are
+     * `'b`, so the SOURCE's instance says nothing about them.
+     *
+     * <p>Reached only when `'b`'s `hash` and `eq` are hand-written; the plain
+     * form stays the default, so a set of Int keeps its specialised storage.
+     */
+    @TruffleBoundary
+    public static MezzeSet mapWithEvidence(MezzeSet set, MezzeFunction mapper,
+                                           MezzeFunction hashFn, MezzeFunction eqFn,
+                                           com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(mapper, "val");
+        int size = set.size();
+        Object[] out = new Object[size];
+        int[] n = {0};
+        set.walkElems(e -> out[n[0]++] = ctx.call1(callNode, e));
+        ElementHashing hashing = ClosureHashing.of(hashFn, eqFn);
+        if (hashing == null) return MezzeSet.fromElements(out, size);
+        return MezzeSet.fromStorage(EvidenceSetStorage.fromElements(out, hashing));
+    }
+
     public static MezzeSet map(MezzeSet set, MezzeFunction mapper,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(mapper, "val");

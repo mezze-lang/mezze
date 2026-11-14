@@ -1310,6 +1310,9 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_set_remove_with_evidence", (r, c) ->
             SetNatives.removeWithEvidence(getSet(r, "s"), getField(r, "x"),
                 getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_set_map_with_evidence", (r, c) ->
+            SetNatives.mapWithEvidence(getSet(r, "s"), getFunction(r, "f"),
+                getFunction(r, "hash"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_set_from_seq_with_evidence", (r, c) ->
             SetNatives.fromArrayWithEvidence(getArray(r, "xs"),
                 getFunction(r, "hash"), getFunction(r, "eq")));

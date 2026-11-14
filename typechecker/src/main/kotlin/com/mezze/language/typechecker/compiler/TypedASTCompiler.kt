@@ -3250,6 +3250,10 @@ class TypedASTCompiler(
      */
     private val evidenceNativeForm: Map<String, String> = mapOf(
         "__native_set_from_seq" to "__native_set_from_seq_with_evidence",
+        // `set::map` collapses by the TARGET's equality — its result's elements
+        // are `'b`. Structurally it kept two values a hand-written `Eq` calls
+        // one element.
+        "__native_set_map" to "__native_set_map_with_evidence",
         "__native_set_insert" to "__native_set_insert_with_evidence",
         "__native_set_contains" to "__native_set_contains_with_evidence",
         "__native_set_remove" to "__native_set_remove_with_evidence",

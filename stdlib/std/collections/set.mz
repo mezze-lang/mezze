@@ -118,6 +118,11 @@ pub let remove_with_evidence:
   { s: Set 'a, x: 'a, hash: { it: 'a } -> Int, eq: { it: 'a, r: 'a } -> Bool } -> Set 'a =
   { s, x, hash, eq } -> __native_set_remove_with_evidence { s = s, x = x, hash = hash, eq = eq }
 
+pub let map_with_evidence:
+  { s: Set 'a, f: { val: 'a } -> 'b <...>,
+    hash: { it: 'b } -> Int, eq: { it: 'b, r: 'b } -> Bool } -> Set 'b <...> =
+  { s, f, hash, eq } -> __native_set_map_with_evidence { s = s, f = f, hash = hash, eq = eq }
+
 pub let from_seq_with_evidence:
   { xs: ['a], hash: { it: 'a } -> Int, eq: { it: 'a, r: 'a } -> Bool } -> Set 'a =
   { xs, hash, eq } -> __native_set_from_seq_with_evidence { xs = xs, hash = hash, eq = eq }
@@ -133,7 +138,12 @@ pub let filter: { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Set 'a <...> = { 
   __native_set_filter { s = s, p = p }
 
 ## Transforms each element using f.
-pub let map: { s: Set 'a, f: { val: 'a } -> 'b <...> } -> Set 'b <...> = { s, f } ->
+## `Eq 'b, Hash 'b`, NOT the source's: the result's elements are `'b`, so the
+## SOURCE's equality says nothing about which of them are the same element.
+## Without it the result collapsed by REPRESENTATION — mapping the distinct Ints
+## 10 and 11 to a newtype equal by tens gave a set of two where the author's
+## `Eq` says one. `sorted_set::map` carries `with Ord 'b` for the same reason.
+pub let map: { s: Set 'a, f: { val: 'a } -> 'b <...> } with Eq 'b, Hash 'b -> Set 'b <...> = { s, f } ->
   __native_set_map { s = s, f = f }
 
 ## Folds over all elements with an accumulator.

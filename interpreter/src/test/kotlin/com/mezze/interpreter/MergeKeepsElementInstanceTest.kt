@@ -150,6 +150,49 @@ class MergeKeepsElementInstanceTest {
         ),
     )
 
+    /**
+     * `set::map` COLLAPSES BY THE TARGET'S EQUALITY, which it could not do
+     * because it declared no constraint at all: `{ s: Set 'a, f } -> Set 'b`.
+     * Its sibling `sorted_set::map` already carried `with Ord 'b` for exactly
+     * this reason — the result's elements are `'b`, so the SOURCE's instance
+     * says nothing about which of them are the same element.
+     *
+     * The distinct Ints 10 and 11 map to one element under `P`'s by-tens `Eq`.
+     * Structurally they are two, and two is what it answered.
+     *
+     * Found while fixing BUG 46's fusion half, by asking what `set::map` does
+     * about identity at all — not from a report.
+     */
+    @Test
+    fun `set map collapses by the target's Eq`() = assertEquals(
+        1L,
+        eval(
+            """
+            $byTens
+            set::size { s = set::map {
+              s = set::from_seq { xs = [10, 11] },
+              f = { val } -> P.(val),
+            } }
+            """,
+        ),
+        "2 means the map collapsed by representation and ignored the target's Eq",
+    )
+
+    /** And the mapped set must still bucket by that instance afterwards. */
+    @Test
+    fun `the mapped set still buckets by the target's Eq`() = assertEquals(
+        1L,
+        eval(
+            """
+            $byTens
+            set::size { s = set::insert {
+              s = set::map { s = set::from_seq { xs = [10, 11] }, f = { val } -> P.(val) },
+              x = P.(19),
+            } }
+            """,
+        ),
+    )
+
     /** Plain Int keys and elements are untouched: with no hand-written
      *  instance there is no evidence storage and the structural rebuild is
      *  exactly right. */
