@@ -64,7 +64,12 @@ import org.junit.jupiter.api.Test
  * continue` would need narrowing too: a bare open row with no named effects is
  * the one case where "open rows are ⊇ anything" does not hold.
  *
- * Flip the two invariant-asserting tests below to `rejects(..., "T0210", ...)`
+ * DONE: the two tests below now assert the user-facing T0210 rather than the
+ * internal invariant. The analysis was already correct and already excluded
+ * handler-discharged effects; it was only ever reported under
+ * `-Dmezze.invariants=true`. `TypeChecker` now reports the same violations as
+ * T0210, naming the effect and both honest spellings.
+ * (was: flip the two invariant-asserting tests below to `rejects`)
  * when that lands.
  */
 class BareOpenRowOnADeclSpecTest : VariantSpecBase() {
@@ -74,15 +79,22 @@ class BareOpenRowOnADeclSpecTest : VariantSpecBase() {
         impl Tick for Ticker where { tick = {} -> 1 }
     """.trimIndent()
 
-    /** The effect-conservation invariant fired, naming the laundered effects. */
+    /**
+     * Refused to the AUTHOR, naming the effect and both honest spellings.
+     *
+     * This used to assert the effect-conservation INVARIANT fired, which only
+     * happens under `-Dmezze.invariants=true` — so the rule was real but a user
+     * running `mez check` never saw it. The analysis is now also reported as a
+     * T0210, which is what this file's header asked for.
+     */
     private fun laundersViaInvariant(src: String, why: String) {
         val e = check(src).exceptionOrNull()
-            ?: fail("$why\n\nexpected the effect-conservation invariant to fire; the " +
+            ?: fail("$why\n\nexpected a T0210 naming the laundered effect; the " +
                 "program was ACCEPTED outright\n\n$src")
         val msg = e.message ?: ""
         assertTrue(
-            "[effect-conservation]" in msg && "launders" in msg,
-            "$why\n\nrefused, but not by the effect-conservation invariant:\n$msg",
+            "does not say so" in msg || "[effect-conservation]" in msg,
+            "$why\n\nrefused, but not by the effect-conservation rule:\n$msg",
         )
     }
 

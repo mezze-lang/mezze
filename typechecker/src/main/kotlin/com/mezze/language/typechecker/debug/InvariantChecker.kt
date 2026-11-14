@@ -127,6 +127,71 @@ object InvariantChecker {
      * rather than flagged — the invariant reports only effects it can prove are
      * both performed and absent from a concrete emitted row.
      */
+    /**
+     * One decl whose emitted row does not cover what its body performs.
+     *
+     * Returned as DATA so the same analysis can serve two readers: the
+     * invariant below (throws, CI only) and `TypeChecker`, which reports it to
+     * the author as a T0210. Before that split a real soundness rule fired only
+     * under `-Dmezze.invariants=true`.
+     */
+    data class EffectConservationViolation(
+        val declName: String,
+        val missing: List<String>,
+        val performed: List<String>,
+        val emitted: List<String>,
+        val loc: com.mezze.language.parsedast.Loc?,
+    )
+
+    /** [checkEffectConservation]'s analysis, without the gate or the throw. */
+    fun findEffectConservationViolations(module: TypedModule): List<EffectConservationViolation> {
+        val out = mutableListOf<EffectConservationViolation>()
+        val hashToName = HashMap<Hash, String>()
+        for (ed in module.effectDecls) hashToName[ed.hash] = ed.name
+        collectRowHashNames(module, hashToName)
+
+        for (decl in module.decls) {
+            if (decl !is TypedLetDecl) continue
+            val lambda = decl.value as? TypedLambda ?: continue
+
+            val emittedNames = mutableSetOf<String>()
+            var anyOpen = false
+            var innermostBody: TypedExpr = lambda.body
+            var cursor: TypedExpr? = lambda
+            while (cursor is TypedLambda) {
+                val fnType = cursor.type as? MezzeType.FunctionType
+                val row = fnType?.effects
+                if (row != null) {
+                    if (row.isOpen) anyOpen = true
+                    emittedNames += row.allEffectNames
+                }
+                innermostBody = cursor.body
+                cursor = cursor.body as? TypedLambda
+            }
+            // An open tail really is ⊇ anything for the effects it NAMES, and
+            // measured: `<Tick, ...>` over a body performing Beep prints
+            // `<Beep, Tick>` — the tail absorbs it and the signature stays
+            // honest. The bare-`<...>` case does not reach here as open at all;
+            // its row erases to nothing, so `isOpen` is false.
+            if (anyOpen) continue
+
+            val performed = collectPerformedNotDischarged(innermostBody, hashToName)
+            val missing = performed - emittedNames
+            if (missing.isNotEmpty()) {
+                out.add(
+                    EffectConservationViolation(
+                        declName = decl.name,
+                        missing = missing.sorted(),
+                        performed = performed.sorted(),
+                        emitted = emittedNames.sorted(),
+                        loc = decl.loc,
+                    )
+                )
+            }
+        }
+        return out
+    }
+
     fun checkEffectConservation(module: TypedModule) {
         if (!enabled) return
 
@@ -142,6 +207,15 @@ object InvariantChecker {
 
             // Union of every arrow's row down the curried chain. If any arrow is
             // open (polymorphic effect tail), the decl is ⊇ anything → satisfied.
+            //
+            // MEASURED 2026-11-13, because dropping this escape looked like the
+            // bare-`<...>` fix and is not: `pub f: {} -> Int <Tick, ...>` with a
+            // body performing BEEP prints `{} -> Int <Beep, Tick>` — the open
+            // tail ABSORBS the effect and the signature stays honest, so there is
+            // nothing to catch. The bare-`<...>` case never reaches this escape
+            // anyway: its row erases to nothing (`pub g : {} -> Int`), so
+            // `row.isOpen` is false and the invariant already runs. Removing the
+            // escape caught no new program.
             val emittedNames = mutableSetOf<String>()
             var anyOpen = false
             var innermostBody: TypedExpr = lambda.body

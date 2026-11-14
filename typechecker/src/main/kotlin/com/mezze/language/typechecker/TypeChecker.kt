@@ -951,6 +951,43 @@ class TypeChecker(
                 // invariant), never silent.
                 emitResult.typedModule?.let { InvariantChecker.checkEffectConservation(it) }
 
+                // The same analysis, reported to the AUTHOR rather than only to
+                // CI. A bare `<...>` on a decl erases the row — `pub let g: {} ->
+                // Int <...> = {} -> Tick.tick {}` prints `pub g : {} -> Int` — so
+                // Tick leaves the signature and a pure caller of `g` cannot be
+                // stopped. The type side already refuses the analogue (`let f: {}
+                // -> 'a = {} -> 5` is T0210, "implementation forces it to concrete
+                // type 'Int'"), so this was the row side missing a rule the type
+                // side has.
+                //
+                // Safe to surface: both gates run with invariants ENABLED and are
+                // green, so across the stdlib and both suites this never fires on
+                // legitimate code. Handler-discharged effects are excluded by the
+                // walk, which is what keeps `reader.mz`'s `with_reader` legal.
+                emitResult.typedModule?.let { typed ->
+                    for (v in InvariantChecker.findEffectConservationViolations(typed)) {
+                        collectedErrors.add(
+                            TypeCheckError(
+                                phase = "EffectConservation",
+                                message = "'${v.declName}' performs " +
+                                    v.missing.joinToString(", ") { "`$it`" } +
+                                    " but its type does not say so" +
+                                    (if (v.emitted.isEmpty()) " — the declared row is empty"
+                                     else " — the declared row is only " +
+                                         v.emitted.joinToString(", ") { "`$it`" }) +
+                                    ".\nA bare `<...>` is a row VARIABLE standing for what a " +
+                                    "CALLER's callbacks bring; it cannot stand for an effect this " +
+                                    "body performs itself.\nName it: `<" +
+                                    (v.emitted + v.missing).joinToString(", ") +
+                                    ">`, or `<" + (v.emitted + v.missing).joinToString(", ") +
+                                    ", ...>` to stay open to a caller's.",
+                                loc = v.loc,
+                                code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                            )
+                        )
+                    }
+                }
+
                 val validationResult = validator.validate(parsedModule, globallyResolvedConstraintResults, substitution, emitResult.typedModule)
                 val validationWarnings = mutableListOf<TypeCheckWarning>()
                 collectValidationResult(validationResult, collectedErrors, validationWarnings)
