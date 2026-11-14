@@ -283,6 +283,61 @@ object AbilityValidator {
                 )
             }
 
+            // An un-annotated impl op adopts the DECLARATION's param type three
+            // lines below (`implOp.paramType ?: expectedParamType`), so the names
+            // it actually BINDS were never compared against it. Mezze matches
+            // record fields by name, so a name the declaration does not list can
+            // never be supplied — the body binds a field that will not arrive.
+            //
+            // Measured, not supposed: `impl Eq for P where { eq = { it, other }
+            // -> ... }` against `eq: { it: 'a, r: 'a } -> Bool` passed `mez
+            // check` and built. At runtime the op was handed `{it, r}`, the
+            // unsatisfied `other` left it a PARTIAL APPLICATION instead of a
+            // Bool, and a `set` of two P values that `eq` calls equal kept both
+            // (`size=2`). An explicit `Eq.eq { it, other }` call was rejected at
+            // the same time, so the impl was being held to a signature nothing
+            // could call. The one shape that reported anything at all was a
+            // `ClassCastException: MezzeFunction cannot be cast to Boolean`.
+            //
+            // Only UNKNOWN names are an error. Binding FEWER than declared is
+            // fine — ignoring a parameter is legitimate — and `{ it, ... }` keeps
+            // its spread; the explicitly named part is still checked.
+            //
+            // `it` is exempt, because the DECLARATION is not what supplies it:
+            // `Keywords.IT` is the implicit receiver and `x.method {…}` desugars
+            // into `method({it = x, …})`, so it arrives whether or not the op's
+            // record lists it. `ability Into2 'b for 'a where { conv2: {} -> 'b }`
+            // with `impl … { conv2 = { it } -> … }` is the shape, and
+            // UndeterminedClassArgTest is five tests over it.
+            val declaredParamNames = (declOp.paramType as ParsedRecordType).entries.map { it.name }.toSet()
+            val boundParamNames: List<Pair<String, Loc?>> =
+                when (val ps = (implOp.implementation as ParsedLambda).params) {
+                    is ParsedLambdaParams.Untyped -> ps.names.mapIndexed { i, n ->
+                        n to ps.nameLocs.getOrNull(i)
+                    }
+                    is ParsedLambdaParams.Typed -> ps.fields.map { it.name to it.loc }
+                }
+            val unknownParams = boundParamNames.filter { (n, _) ->
+                n !in declaredParamNames && n != Keywords.IT
+            }
+            if (unknownParams.isNotEmpty()) {
+                val names = unknownParams.joinToString(", ") { (n, _) -> "'$n'" }
+                val declared = declaredParamNames.joinToString(", ")
+                throw TypeCheckError(
+                    "Operation '${implOp.name}' in impl ${impl.abilityName} binds " +
+                        "${if (unknownParams.size == 1) "parameter" else "parameters"} $names, " +
+                        "which '${abilityDeclaration.name}.${declOp.name}' does not declare. " +
+                        "It declares: ${if (declared.isEmpty()) "no parameters" else declared}. " +
+                        "Arguments are matched by NAME, so a parameter the ability does not " +
+                        "declare is never supplied.",
+                    unknownParams.first().second ?: opSourceLocation,
+                    code = ErrorCode.V0422_IMPL_OP_UNKNOWN_PARAM,
+                    hints = listOf(
+                        "rename it to one of: ${if (declared.isEmpty()) "(none)" else declared}"
+                    ),
+                )
+            }
+
             val expectedParamType = substituteTypeParameters(declOp.paramType, substitution)
             val expectedReturnType = substituteTypeParameters(declOp.returnType, substitution)
 

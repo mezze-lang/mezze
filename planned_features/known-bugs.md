@@ -5102,3 +5102,51 @@ program sits under `main` and always took the working path — so no shipped
 program was affected. The defect was in the typechecker, not in the containers,
 and the fix makes both paths agree.
 
+## BUG 49 — FIXED: an impl operation could bind a parameter name the ability never declares
+
+**FIXED** 2026-11-14, found by making the mistake. Pinned by
+`ImplOpParamNamesTest` (8 tests; disabling the one new check turns exactly the 5
+rejection tests red and leaves the 3 acceptance tests green).
+
+`Eq.eq` is declared `{ it: 'a, r: 'a } -> Bool`. This was ACCEPTED:
+
+    impl Eq for P where {
+      eq  = { it, other } -> cls { v = it } == cls { v = other },
+      neq = { it, other } -> …,
+    }
+
+`mez check` printed "Check passed". `mez build` produced a binary. It ran. And
+`set::size` over two P values that P's own `eq` calls equal printed **2**.
+Arguments are records matched BY NAME, so the op was handed `{it, r}`, the
+unsatisfied `other` left it a PARTIAL APPLICATION instead of a Bool, and the
+container compared the resulting `MezzeFunction`s. The one shape that reported
+anything at all was `ClassCastException: MezzeFunction cannot be cast to
+Boolean`. Meanwhile an explicit `Eq.eq { it = …, other = … }` call WAS rejected
+("record fields don't match: missing 'r'; unexpected 'other'") — so the impl was
+being held to a signature nothing could call.
+
+**THE CAUSE, a fallback.** `AbilityValidator.validateOperationSignatures` reads
+
+    val actualParamType = implOp.paramType ?: expectedParamType
+
+An un-annotated impl op has no `paramType`, so it ADOPTS the declaration's — and
+then unifying the two is vacuous. The names the lambda actually binds were never
+compared with anything. The signature check could not fail for the one input
+that was wrong.
+
+**THE FIX.** Compare the lambda's bound names against the ability op's declared
+record, before that adoption. Only UNKNOWN names are refused: binding FEWER than
+declared is legitimate (ignoring a parameter), `{ it, ... }` keeps its spread,
+and `it` is EXEMPT because the declaration is not what supplies it —
+`Keywords.IT` is the implicit receiver and `x.method {…}` desugars into
+`method({it = x, …})`. That last exemption is not a guess: without it
+`UndeterminedClassArgTest`'s five tests over `ability Into2 'b for 'a where {
+conv2: {} -> 'b }` with `impl … { conv2 = { it } -> … }` go red, which is how it
+was found. New code V0422, with the offending name under the caret.
+
+**HOW IT WAS FOUND, worth keeping.** Not by auditing the validator — by writing
+the bug while building a probe for something else, reading `size=2` where the
+written `Eq` said 1, and chasing MY OWN wrong answer instead of assuming the
+probe was fine. The stdlib's 158 files and 1858 functions compile unchanged
+under the new check, so nothing in-tree depended on the hole.
+
