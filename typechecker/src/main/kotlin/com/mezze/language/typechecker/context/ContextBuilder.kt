@@ -31,6 +31,8 @@ class ContextBuilder {
         val performerToEffect: Map<String, String>,
         val performerToEffectHash: Map<Hash, Hash> = emptyMap(),
         val performerAddedEffects: Map<String, Set<String>> = emptyMap(),
+        /** Performers declaring `initialize_scope` — see C7. */
+        val scopedPerformers: Set<String> = emptySet(),
         val implDeclarations: Map<String, ParsedPerformerDecl> = emptyMap(),
         val resolvedModule: ParsedModule? = null,
     )
@@ -318,6 +320,21 @@ class ContextBuilder {
             }.toSet()
         }.filterValues { it.isNotEmpty() }
 
+        // Performers that declare `initialize_scope`, so their ops read a
+        // `scope` that `finalize_scope` tears down when the perform block exits.
+        //
+        // Built HERE, from every performer, rather than carried on
+        // `PerformerTypeInfo`: `addEffectPerformer` skips a performer with no
+        // associated types and no parameters entirely, which is the shape of a
+        // plain scoped handler, so that record does not exist for the ones this
+        // is about.
+        val scopedPerformerNames = (resolvedParsedPerformerDecls + importedImpls.values)
+            .filter { perf ->
+                perf.operations.any { it.name == ScopedEffectConstants.INITIALIZE_SCOPE }
+            }
+            .map { it.performerName }
+            .toSet()
+
         val implDeclarationsMap: Map<String, ParsedPerformerDecl> = resolvedParsedPerformerDecls.associateBy { it.performerName } +
             importedImpls
 
@@ -342,6 +359,7 @@ class ContextBuilder {
             performerToEffect = performerToEffectMap,
             performerToEffectHash = performerToEffectHashMap,
             performerAddedEffects = performerAddedEffectsMap,
+            scopedPerformers = scopedPerformerNames,
             implDeclarations = implDeclarationsMap,
             resolvedModule = resolvedMod,
         )
@@ -938,7 +956,10 @@ class ContextBuilder {
             associatedTypes = performerType,
             performerFields = performerFieldsType,
             suspensionType = suspensionType,
-            contentHash = contentHash
+            contentHash = contentHash,
+            isScoped = implDecl.operations.any {
+                it.name == ScopedEffectConstants.INITIALIZE_SCOPE
+            },
         )
         return ctx.extendWithPerformerTypeInfo(contentHash, performerInfo)
     }

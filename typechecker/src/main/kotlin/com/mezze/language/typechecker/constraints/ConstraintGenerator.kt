@@ -50,6 +50,7 @@ class ConstraintGenerator(
     private val registry: DeclarationRegistry = DeclarationRegistry.EMPTY,
     private val performerToEffect: Map<String, String> = emptyMap(),
     initialPerformerAddedEffects: Map<String, Set<String>> = emptyMap(),
+    private val scopedPerformers: Set<String> = emptySet(),
     private val abilityNames: Set<String> = emptySet(),
     private val effectNames: Set<String> = emptySet(),
     // Caller-owned codec-impl registry shared with the module-level solver, so
@@ -186,7 +187,7 @@ class ConstraintGenerator(
                         recordLiteralBindings.add((item.pattern as ParsedVariablePattern).name)
                     }
 
-                    val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, performerAddedEffects = performerAddedEffects, abilityNames = abilityNames, effectNames = effectNames, effectDeclarations = registry.effectDeclarations, abilityDeclarations = registry.abilityDeclarations, typeDeclarations = registry.typeDeclarations)
+                    val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, performerAddedEffects = performerAddedEffects, scopedPerformers = scopedPerformers, abilityNames = abilityNames, effectNames = effectNames, effectDeclarations = registry.effectDeclarations, abilityDeclarations = registry.abilityDeclarations, typeDeclarations = registry.typeDeclarations)
                     val patternResult = patternGenerator.generate(
                         item.pattern,
                         result.type,
@@ -666,7 +667,7 @@ class ConstraintGenerator(
                     collectedTypeCheckErrors.add(if (e.loc == null) TypeCheckError(e.message ?: "Type error", item.loc, e.errorType, e.metadata, code = e.code, hints = e.hints, fixHints = e.fixHints) else e)
                 }
                 is ParsedTopLevelExpr -> {
-                    val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, performerAddedEffects = performerAddedEffects, abilityNames = abilityNames, effectNames = effectNames, effectDeclarations = registry.effectDeclarations, abilityDeclarations = registry.abilityDeclarations, typeDeclarations = registry.typeDeclarations)
+                    val constraintContext = ConstraintContext(currentContext, performerToEffect = performerToEffect, performerAddedEffects = performerAddedEffects, scopedPerformers = scopedPerformers, abilityNames = abilityNames, effectNames = effectNames, effectDeclarations = registry.effectDeclarations, abilityDeclarations = registry.abilityDeclarations, typeDeclarations = registry.typeDeclarations)
                     val result = expressionGenerator.generate(
                         item.expression,
                         constraintContext
@@ -1414,7 +1415,7 @@ class ConstraintGenerator(
                 bodyContext,
                 expectedType = null,
                 performerToEffect = performerToEffect,
-                performerAddedEffects = performerAddedEffects,
+                performerAddedEffects = performerAddedEffects, scopedPerformers = scopedPerformers,
                 abilityNames = abilityNames,
                 effectNames = effectNames,
                 effectDeclarations = registry.effectDeclarations,
@@ -1526,7 +1527,7 @@ class ConstraintGenerator(
             context,
             expectedType = expectedType,
             performerToEffect = performerToEffect,
-            performerAddedEffects = performerAddedEffects,
+            performerAddedEffects = performerAddedEffects, scopedPerformers = scopedPerformers,
             abilityNames = abilityNames,
             effectNames = effectNames,
             effectDeclarations = registry.effectDeclarations,
@@ -1997,6 +1998,7 @@ class ConstraintGenerator(
             registry: DeclarationRegistry = DeclarationRegistry.EMPTY,
             performerToEffect: Map<String, String> = emptyMap(),
             performerAddedEffects: Map<String, Set<String>> = emptyMap(),
+            scopedPerformers: Set<String> = emptySet(),
             abilityNames: Set<String> = emptySet(),
             effectNames: Set<String> = emptySet(),
             isStdlibModule: Boolean = false,
@@ -2007,15 +2009,18 @@ class ConstraintGenerator(
             expressionGen.isStdlibModule = isStdlibModule
             val patternGen = PatternConstraintGenerator()
 
+            // Named, not positional: a parameter added in the middle silently
+            // reassigns every argument after it otherwise.
             val generator = ConstraintGenerator(
-                expressionGen,
-                patternGen,
-                registry,
-                performerToEffect,
-                performerAddedEffects,
-                abilityNames,
-                effectNames,
-                sharedGeneratedCodecImpls,
+                expressionGenerator = expressionGen,
+                patternGenerator = patternGen,
+                registry = registry,
+                performerToEffect = performerToEffect,
+                initialPerformerAddedEffects = performerAddedEffects,
+                scopedPerformers = scopedPerformers,
+                abilityNames = abilityNames,
+                effectNames = effectNames,
+                sharedGeneratedCodecImpls = sharedGeneratedCodecImpls,
             )
             // S1.3: route the do-block `let` path through the SAME bindLet the
             // top-level path uses. bindLet needs ConstraintGenerator's private

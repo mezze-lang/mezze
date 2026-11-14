@@ -47,7 +47,7 @@ class ConstraintCollectorTest {
         doBindingSolvedTypes = mapOf(loc to MezzeType.IntType),
         performFullyDischarged = mapOf(loc to true),
         performBodyFnRow = mapOf(loc to setOf("Tick")),
-        performSiteExpectation = mapOf(loc to listOf("Ticker" to MezzeType.IntType)),
+        performSiteExpectation = mapOf(loc to listOf(PerformSiteHandler("Ticker", MezzeType.IntType, false))),
         lambdaParamTypes = mapOf(other to mapOf("p" to MezzeType.IntType)),
         lambdaRowInstances = mapOf(other to setOf(MezzeType.EffectInstance("Exception", emptyMap()))),
     )

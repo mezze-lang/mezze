@@ -558,6 +558,7 @@ class TypeChecker(
             // imported performer has no body validated here); this module's own
             // performers come from validating their bodies, and win.
             performerAddedEffects = importsPerformerEffects.byName + buildResult.performerAddedEffects,
+            scopedPerformers = buildResult.scopedPerformers,
             abilityNames = abilityNames,
             effectNames = effectNames,
             // `isStdlibModule` here doubles as the "may reference `__native_*`
@@ -1254,11 +1255,35 @@ class TypeChecker(
         abortPayloadVars: Map<String, MezzeType>,
         substitution: Substitution,
     ): List<TypeChecker.TypeCheckError> {
-        if (abortPayloadVars.isEmpty()) return emptyList()
         val errors = mutableListOf<TypeChecker.TypeCheckError>()
         for (result in constraintResults.values) {
             for ((loc, handled) in result.performSiteExpectation) {
-                for ((performerName, blockType) in handled) {
+                for (site in handled) {
+                    val performerName = site.performerName
+                    val blockType = site.blockType
+                    // C7: a handler-bound function escaping a SCOPED perform.
+                    // Decided here because a bare lambda's type is still a
+                    // VARIABLE during constraint generation — the attempt there
+                    // never fired for exactly that reason.
+                    if (site.performerIsScoped &&
+                        substitution.apply(blockType) is MezzeType.FunctionType
+                    ) {
+                        errors.add(
+                            TypeChecker.TypeCheckError(
+                                phase = "ScopedHandlerEscape",
+                                message = "This `perform $performerName` yields a function, and " +
+                                    "`$performerName` is scoped — it declares `initialize_scope`, so " +
+                                    "`finalize_scope` tears its `scope` down when the block exits.\n" +
+                                    "The returned function carries these handlers, so calling it later " +
+                                    "runs `$performerName`'s operations against a finalized scope.\n" +
+                                    "Call it inside the block, or return its RESULT rather than the " +
+                                    "function itself.",
+                                loc = loc,
+                                code = ErrorCode.V0511_SCOPED_HANDLER_ESCAPES,
+                            )
+                        )
+                        continue
+                    }
                     val payloadVar = abortPayloadVars[performerName] ?: continue
                     val payload = substitution.apply(payloadVar)
                     val expected = substitution.apply(blockType)

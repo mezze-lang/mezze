@@ -176,7 +176,7 @@ class ExpressionConstraintGenerator {
         val performFullyDischarged = mutableMapOf<Loc, Boolean>()
         // Merged up the same way, for the same reason — see the field's doc.
         val performBodyFnRow = mutableMapOf<Loc, Set<String>>()
-        val performSiteExpectation = mutableMapOf<Loc, List<Pair<String, MezzeType>>>()
+        val performSiteExpectation = mutableMapOf<Loc, List<PerformSiteHandler>>()
         // Per-lambda solved param types, merged up like callReturnTypes so a
         // lambda nested anywhere reaches the top-level decl's ConstraintResult.
         val lambdaParamTypes = mutableMapOf<Loc, Map<String, MezzeType>>()

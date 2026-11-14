@@ -525,6 +525,7 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
     // and for a bare lambda the body's own type variable ends up unified with the
     // result, so by emit time the row is gone. See ConstraintResult.performBodyFnRow.
     val bodyFnRow = (baseType as? MezzeType.FunctionType)?.effects?.allEffectNames
+
     val resultType = removeEffectsFromType(baseType, handledEffects)
 
     val addedEffects = handlerEffects.flatMap { (handlerName, _) ->
@@ -620,7 +621,13 @@ internal fun ExpressionConstraintGenerator.generatePerform(expr: ParsedPerform, 
         // the payload's real type is only known after the op-body solve and a
         // site may precede the impl in the file.
         performSiteExpectation = exprResult.performSiteExpectation +
-            mapOf(expr.loc to expr.handlers.map { it.performer.localName to resultType }),
+            mapOf(expr.loc to expr.handlers.map { h ->
+                PerformSiteHandler(
+                    performerName = h.performer.localName,
+                    blockType = resultType,
+                    performerIsScoped = h.performer.localName in context.scopedPerformers,
+                )
+            }),
         // BUG 3: a nested perform's dead handlers must be unioned, not replaced.
         unusedHandlers = exprResult.unusedHandlers + deadHandlers,
     )

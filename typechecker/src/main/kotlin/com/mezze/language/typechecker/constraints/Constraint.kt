@@ -50,6 +50,21 @@ sealed class ErrorContext {
     data class StringInterpolation(val expressionIndex: Int) : ErrorContext()
 }
 
+/**
+ * One handler at one `perform` site, with what that site resolved to.
+ *
+ * Both post-solve effect checks read this: the computed-abort-payload
+ * comparison needs [blockType], and C7 — a handler-bound function escaping a
+ * SCOPED perform — needs [performerIsScoped] alongside it. Neither can be
+ * decided during constraint generation: the payload's type comes from the
+ * op-body solve, and a bare lambda's type is still a variable there.
+ */
+data class PerformSiteHandler(
+    val performerName: String,
+    val blockType: MezzeType,
+    val performerIsScoped: Boolean,
+)
+
 sealed interface Constraint {
     val loc: Loc?
     val context: String?
@@ -517,7 +532,7 @@ data class ConstraintResult(
      * file, so it cannot be fed forward. Both ends are therefore recorded and
      * compared after solving.
      */
-    val performSiteExpectation: Map<Loc, List<Pair<String, MezzeType>>> = emptyMap(),
+    val performSiteExpectation: Map<Loc, List<PerformSiteHandler>> = emptyMap(),
     // Per-lambda solved PARAMETER types, keyed by the lambda's Loc. A lambda that
     // is an argument to a callee whose type nothing declares — the comparator in
     // `__native_seq_sort_by { xs = xs, cmp = { a, b } -> … }` — gets no expected
@@ -762,6 +777,9 @@ data class ConstraintContext(
     val currentFunction: String? = null,
     val performerToEffect: Map<String, String> = emptyMap(),
     val performerAddedEffects: Map<String, Set<String>> = emptyMap(),
+    /** Performers declaring `initialize_scope` — a handler-bound function may
+     *  not escape a `perform` over one of these (C7). */
+    val scopedPerformers: Set<String> = emptySet(),
     val abilityNames: Set<String> = emptySet(),
     val effectNames: Set<String> = emptySet(),
     val effectDeclarations: Map<String, ParsedEffectDecl> = emptyMap(),

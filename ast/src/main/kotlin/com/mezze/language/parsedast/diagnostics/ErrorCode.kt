@@ -139,6 +139,11 @@ enum class ErrorCode {
     V0508_HANDLER_ON_PURE_EXPR,
     V0509_HANDLER_EFFECT_MISMATCH,
     V0510_HANDLER_UNNECESSARY,
+    /** A handler-bound function escapes a SCOPED `perform`. The performer
+     *  declares `initialize_scope`, so `finalize_scope` tears its `scope` down
+     *  when the block exits — and the escaped function's ops would then run
+     *  against a finalized scope. */
+    V0511_SCOPED_HANDLER_ESCAPES,
 
     // ─── Validator: patterns (V06xx) ─────────────────────────────────────
     V0601_NON_EXHAUSTIVE_MATCH,

@@ -811,6 +811,16 @@ fun ErrorCode.explain(): String = when (this) {
         "into a real `Result`, and a coercion such as `.as_int{}` or `.str{}` turns " +
         "it into a concrete primitive `Result`."
 
+    ErrorCode.V0511_SCOPED_HANDLER_ESCAPES ->
+        "A `perform` over a SCOPED performer yielded a function. A scoped performer " +
+        "declares `initialize_scope`, and the matching `finalize_scope` tears its " +
+        "`scope` down when the block exits — `PooledHttpClient` closes its connection " +
+        "pool there. A function returned out of the block carries these handlers, so " +
+        "calling it afterwards runs the performer's operations against a scope that " +
+        "has already been finalized. Call it inside the block, or return its RESULT " +
+        "instead of the function. Returning a function from an UNSCOPED `perform` is " +
+        "fine: there is no finalizer for it to outlive."
+
     ErrorCode.I0001_UNKNOWN_TYPECHECK_FAILURE ->
         "An unexpected internal error occurred during type checking. " +
         "This is a compiler bug — please report it."

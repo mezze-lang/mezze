@@ -25,7 +25,7 @@ SEPARATELY, `--no-daemon`.
 
 ---
 
-## C7 — OPEN: a scoped handler's `scope` outlives `finalize_scope`
+## C7 — FIXED: a handler-bound function may no longer escape a scoped `perform`
 
 Found 2026-11-13 probing scope rules. **Repro, and it runs today:**
 
@@ -61,12 +61,50 @@ two lines. **UNPROVEN** against `HttpClient` specifically: the ordering is
 measured, the use-after-close is inferred from it, and no live HTTP repro has
 been run. Run one before acting.
 
-**Candidate fixes, none free:**
-- refuse the escape from a SCOPED handler — narrowest, and the typechecker can
-  already see that a performer declares `initialize_scope`
-- tie the scope's lifetime to the bound function's, so finalize waits for the
-  last holder (needs ownership the language does not have)
-- make a late call fail loudly rather than read a finalized scope
+### FIXED 2026-11-13 — the first candidate, and the harm is no longer UNPROVEN
+
+**The harm, measured.** This entry said the use-after-close was "inferred from
+[the ordering], and no live HTTP repro has been run". With the scope holding a
+flag a finalizer marks closed:
+
+```mezze
+initialize_scope = {} -> { live = bool_to_mut { b = True } },
+finalize_scope   = {} -> write_bool { b = scope.live, v = False },
+use_it           = {} -> read_bool { b = scope.live }
+
+let f = perform Scoped in {} -> Res.use_it {}
+f {}    ->  "escaped op saw: CLOSED — used a finalized resource"
+```
+
+A genuine use-after-close, not a harmless read of stale data.
+
+**The fix** is the first candidate — refuse the escape from a scoped handler —
+now `V0511`. Two things about WHERE it had to go, both of which cost an attempt:
+
+- **Not at constraint generation.** `ExprPerformConstraints` already computes
+  `bodyFnRow`, which marks a perform whose result is a function, so that looked
+  like the home. At generation time a bare lambda's type is still a VARIABLE, so
+  `baseType as? FunctionType` is null and the test never fires. Proved by making
+  the guard unconditional: the stdlib build then broke, so the site IS reached
+  and the condition simply never held. It is decided POST-SOLVE instead, in the
+  same pass as the computed-abort-payload check, where the type is resolved.
+- **Not on `PerformerTypeInfo`.** `addEffectPerformer` returns early for a
+  performer with no associated types and no parameters — exactly the shape of a
+  plain scoped handler — so that record does not exist for the performers this
+  is about. `isScoped` travels on `ConstraintContext.scopedPerformers`, built
+  from every performer beside `performerAddedEffects`.
+
+**What stays legal**, all pinned in `ScopedHandlerEscapeSpecTest`: an UNSCOPED
+perform returning a function (the deliberate behaviour of 986bf38b3 — measured
+at runtime as 42), and a scoped perform yielding a value or a record.
+
+**KNOWN GAP:** a record OF FUNCTIONS escaping a scoped perform is the same
+hazard in a shape this does not catch. The rule tests whether the resolved
+result IS a function; a record whose fields are closures still carries the
+chain. Deliberately left, and the spec test says so.
+
+The other two candidates — tying the scope's lifetime to the bound function, or
+failing loudly on a late call — were not needed.
 
 ## C1 — FIXED: a dropped effect now FAILS the run it happened in
 

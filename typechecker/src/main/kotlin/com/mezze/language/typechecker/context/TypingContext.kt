@@ -113,7 +113,16 @@ data class TypingContext(
         val associatedTypes: MezzeType,
         val performerFields: MezzeType? = null,
         val suspensionType: MezzeType? = null,
-        val contentHash: Hash? = null
+        val contentHash: Hash? = null,
+        /**
+         * The performer declares `initialize_scope`, so its ops read a `scope`
+         * that `finalize_scope` tears down when the perform block exits.
+         *
+         * Carried here because a `perform` site has to know it: a handler-bound
+         * function that escapes such a block can still run its ops afterwards,
+         * against a finalized scope — measured as a use-after-close, see C7.
+         */
+        val isScoped: Boolean = false
     )
 
     data class InherentMethodInfo(

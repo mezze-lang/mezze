@@ -1,6 +1,8 @@
 package com.mezze.interpreter
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
@@ -126,20 +128,39 @@ class PerformOnFunctionValueTest {
      * escaping-closure lifetime problem — binding does not create it.
      */
     @Test
-    fun `a scoped performer's scope travels with the binding`() {
-        assertEquals(42L, MezzeTestHelper.asLong(MezzeTestHelper.run("""
-            effect Beep where { beep: {} -> Int <Beep> }
+    fun `a SCOPED performer may not hand its binding out — V0511`() {
+        // This used to assert 42, i.e. that a scoped performer's scope "travels
+        // with the binding". It travelled, but only because `{ n = 42 }` is
+        // plain data that got snapshotted — `finalize_scope` had already run by
+        // the time `beep` read it. For a scope holding a resource that is a
+        // use-after-close (`PooledHttpClient` closes its pool there), so it is
+        // now refused.
+        //
+        // Not a loss of S-20: desugared, a scoped handler is
+        //     let scope = initialize_scope {}; <ops>; finalize_scope {}
+        // so the scope's lifetime IS the block and there is no live scope for a
+        // returned function to carry. S-20 remains in force for every UNSCOPED
+        // performer — see the tests above.
+        val e = assertThrows(Throwable::class.java) {
+            MezzeTestHelper.run("""
+                effect Beep where { beep: {} -> Int <Beep> }
 
-            impl Beep for Beeper where {
-              initialize_scope = {} -> { n = 42 },
-              finalize_scope = {} -> {},
-              beep = {} -> scope.n
-            }
+                impl Beep for Beeper where {
+                  initialize_scope = {} -> { n = 42 },
+                  finalize_scope = {} -> {},
+                  beep = {} -> scope.n
+                }
 
-            let use_beep: {} -> Int <Beep> = {} -> Beep.beep {}
-            let bound = perform Beeper in use_beep
-            bound {}
-        """.trimIndent())))
+                let use_beep: {} -> Int <Beep> = {} -> Beep.beep {}
+                let bound = perform Beeper in use_beep
+                bound {}
+            """.trimIndent())
+        }
+        val message = e.message ?: ""
+        assertTrue(
+            message.contains("is scoped") || message.contains("V0511"),
+            "expected the V0511 refusal, got: $message",
+        )
     }
 
     /**
