@@ -5144,6 +5144,15 @@ and `it` is EXEMPT because the declaration is not what supplies it —
 conv2: {} -> 'b }` with `impl … { conv2 = { it } -> … }` go red, which is how it
 was found. New code V0422, with the offending name under the caret.
 
+**THE SWEEP, closed negative.** `?: expected`-shaped adoption occurs at exactly
+two places, both in this one function, and the RETURN side is sound: `implOp
+.returnType ?: expectedReturnType` adopts the declared return and the BODY is
+then checked against it, which is ordinary bidirectional checking. Probed rather
+than argued — `eq = { it, r } -> un { v = it } / 10` (an Int where Bool belongs)
+is rejected with T0201 under the caret. The parameter side had no equivalent
+check because the names a lambda binds are its only evidence, and nothing read
+them.
+
 **HOW IT WAS FOUND, worth keeping.** Not by auditing the validator — by writing
 the bug while building a probe for something else, reading `size=2` where the
 written `Eq` said 1, and chasing MY OWN wrong answer instead of assuming the
