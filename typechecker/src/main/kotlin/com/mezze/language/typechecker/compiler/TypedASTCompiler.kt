@@ -110,6 +110,12 @@ class TypedASTCompiler(
          *  the whole question. Carried here so dispatch never has to guess what
          *  the co-operand parameter is called. */
         val params: List<TypedParam> = emptyList(),
+        /** BUG 39: what this impl's operation RETURNS. `Into 'b for 'a` puts the
+         *  class param in the RETURN, so the arg record is `{}` and no supplied
+         *  argument can tell `Into Str for Int` from `Into Float for Int`. The
+         *  type the call PRODUCES is then the only thing that distinguishes
+         *  them, and the typed AST carries it at the call site. */
+        val returnType: MezzeType? = null,
     )
     /**
      * The operation names of the `Hash` ability specifically. `Hash` is DERIVED for
@@ -321,6 +327,7 @@ class TypedASTCompiler(
                     AbilityOp(
                         impl.hash, impl.targetTypes, opHash, impl.abilityHash,
                         params = (opBody as? TypedLambda)?.params ?: emptyList(),
+                        returnType = (opBody.type as? FunctionType)?.returnType,
                     )
                 )
                 // Codec decoder index — keyed by ABILITY CONTENT HASH
@@ -1498,6 +1505,9 @@ class TypedASTCompiler(
                 else tryResolveAbilityOp(
                     methodName, receiverType, expr.arg,
                     abilityHash = (fn as? TypedFieldAccess)?.abilityHash,
+                    // BUG 39: a return-driven class param (`Into 'b for 'a`) is
+                    // only separable by what the call produces.
+                    expectedResultType = expr.type,
                 )
             val opHash = opHashConcrete
                 ?: if (receiverType is VarType) {
@@ -3621,6 +3631,11 @@ class TypedASTCompiler(
          *  DECISION ALREADY MADE is not name dispatch; it is the opposite, and
          *  it is what C.3 generalizes. */
         abilityHash: Hash? = null,
+        /** BUG 39: the type this call PRODUCES, when the caller knows it. For an
+         *  ability whose class param is in the RETURN — `Into 'b for 'a`, where
+         *  `Int` has three impls — this is the only thing that separates the
+         *  candidates, since the arg record is `{}`. */
+        expectedResultType: MezzeType? = null,
     ): Hash? {
         // A receiver the compiler never determined resolves NOTHING here.
         // `typeMatchesTarget` answers true for a type variable against any target,
@@ -3699,6 +3714,28 @@ class TypedASTCompiler(
                 }
                 val byTupleHashes = byCoOperand.map { it.opHash }.distinct()
                 if (byTupleHashes.size == 1) return byTupleHashes.first()
+            }
+        }
+        // BUG 39: the class param may be in the RETURN, where no argument can
+        // reach it — `ability Into 'b for 'a where { into: { it: 'a } -> 'b }`,
+        // with `Into Str for Int`, `Into Float for Int` and `Into Frac for Int`
+        // all live in the stdlib. The arg record is `{}`, so everything above
+        // declines and `firstOrNull()` below handed every Int receiver whichever
+        // impl registered first: `let f: Float = (5).into {}` returned the STRING
+        // "5" and died casting it to Double. One impl in the program was enough.
+        //
+        // The type the call PRODUCES is what the author wrote, and the typed AST
+        // has it. This is the same content question as the signature match above,
+        // asked about the other end of the arrow. A `VarType` expectation says
+        // nothing, so it does not take part.
+        if (receiverMatches.size > 1 && expectedResultType != null) {
+            val expected = substitution.apply(expectedResultType)
+            if (expected !is VarType) {
+                val byReturn = receiverMatches.filter { op ->
+                    op.returnType?.let { typeMatchesTarget(expected, it) } ?: false
+                }
+                val uniqueHashes = byReturn.map { it.opHash }.distinct()
+                if (uniqueHashes.size == 1) return uniqueHashes.first()
             }
         }
         val match = receiverMatches.firstOrNull()

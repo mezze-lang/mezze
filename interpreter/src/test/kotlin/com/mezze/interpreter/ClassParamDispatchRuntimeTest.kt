@@ -86,6 +86,93 @@ main {}
         )
     }
 
+    /** BUG 39 — the class param in the RETURN, where no argument reaches it.
+     *
+     *      ability Into 'b for 'a where { into: { it: 'a } -> 'b }
+     *
+     *  The arg record is `{}`, so the signature match above has nothing to
+     *  compare and the class-arg tuple is not in the arguments either. Dispatch
+     *  fell to "first receiver match wins", and `Into Str for Int` is first:
+     *
+     *      let f: Float = (5).into {}
+     *      -> error[I0004]: class java.lang.String cannot be cast to class java.lang.Double
+     *
+     *  ONE impl in the program was enough — unlike BUG 38, this needed no second
+     *  call. `Int` has three impls (Str, Float, Frac), `Nat` three, `Char` and
+     *  `Frac` two each, so every target but the first was unreachable. Dispatch
+     *  now also asks which candidate's operation RETURNS what the call produces.
+     *
+     *  This is the stdlib half; the user-ability half is the test after it. */
+    @Test
+    fun `each stdlib Into target for Int arrives`() {
+        val out = MezzeTestHelper.runWithOutput(
+            """
+            use std::effects::log::{ println, Console }
+            use std::int
+            use std::str
+            use std::float
+            use std::frac
+            use std::abilities::convert::{ Into }
+
+            let main = {} -> perform Console in do
+              let s: Str = (5).into {}
+              let f: Float = (5).into {}
+              let q: Frac = (5).into {}
+              println { msg = "S=${'$'}(s.to_dbg {})" }
+              println { msg = "F=${'$'}(f.to_dbg {})" }
+              println { msg = "Q=${'$'}(q.to_dbg {})" }
+            main {}
+            """.trimIndent(),
+        ).output
+        val tags = listOf("S", "F", "Q")
+        assertEquals(
+            listOf("S=\"5\"", "F=5.0", "Q=5//1"),
+            out.lines().map { it.trim() }.filter { ln -> tags.any { ln.startsWith("$it=") } },
+            "each `Into` target must reach its own impl. Before the fix the Float " +
+                "and Frac lines each died casting the STRING \"5\":\n$out",
+        )
+    }
+
+    /** The same shape in a user ability, with values that name the impl rather
+     *  than types that merely differ — so a wrong answer is visible even when
+     *  both impls happen to agree on representation. */
+    @Test
+    fun `a user ability's return-position class param selects its impl`() {
+        val out = MezzeTestHelper.runWithOutput(
+            """
+            use std::effects::log::{ println, Console }
+            use std::int
+            use std::str
+
+            ability Make 'b for 'a where { make: { it: 'a } -> 'b }
+            type Src = { n: Int }
+            impl Make Int for Src where {
+              make: { it: Src } -> Int = { it } -> 111
+            }
+            impl Make Str for Src where {
+              make: { it: Src } -> Str = { it } -> "222"
+            }
+
+            pub let as_int: {} -> Int = {} -> do
+              let s: Src = { n = 1 }
+              s.make {}
+            pub let as_str: {} -> Str = {} -> do
+              let s: Src = { n = 1 }
+              s.make {}
+
+            let main = {} -> perform Console in do
+              println { msg = "I=${'$'}(as_int {}.to_dbg {})" }
+              println { msg = "T=${'$'}(as_str {}.to_dbg {})" }
+            main {}
+            """.trimIndent(),
+        ).output
+        assertEquals(
+            listOf("I=111", "T=\"222\""),
+            out.lines().map { it.trim() }.filter { it.startsWith("I=") || it.startsWith("T=") },
+            "the ANNOTATION is the only thing separating these two impls:\n$out",
+        )
+    }
+
     /** The STDLIB shape the disambiguator was written for, and the one the `r`
      *  name match happened to cover. `Instant - Duration` is an Instant and
      *  `Instant - Instant` is a Duration, so the receiver cannot choose and the

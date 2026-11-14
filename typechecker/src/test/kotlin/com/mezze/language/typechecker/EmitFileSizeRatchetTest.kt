@@ -97,7 +97,14 @@ class EmitFileSizeRatchetTest {
             // `datetime`'s unannotated params still need; the decision has to sit
             // beside `receiverMatches`, where the candidates are, so the bound
             // moves rather than the code.
-            C + "TypedASTCompiler.kt" to 4418,   // was 5,580; +2 for carrying a `...spread` through ability-op receiver injection
+            // +37 for BUG 39, the other end of the same arrow: a class param in
+            // the RETURN (`Into 'b for 'a`) is reachable from no argument, so
+            // dispatch also asks which candidate RETURNS what the call produces.
+            // The stdlib's `Into` was broken for every target but the
+            // first-registered one — `let f: Float = (5).into {}` returned the
+            // STRING "5" — so this is not an edge the file can be spared. Same
+            // placement argument as BUG 38 above.
+            C + "TypedASTCompiler.kt" to 4455,   // was 5,580; +2 for carrying a `...spread` through ability-op receiver injection
             // +42 for `contextRowWithBodyAssocTypes`: an INLINE lambda was stamped
             // with the row from the pushed CONTEXT, so a callback's associated
             // type was the CALLEE's variable rather than what the body threw, and

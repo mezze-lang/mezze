@@ -29,6 +29,12 @@ import org.junit.jupiter.api.Test
  * These tests pin the TYPE-LEVEL behaviour, which was correct throughout and
  * must stay so. That is the point of keeping them: the type side is what makes
  * a wrong runtime answer a dispatch bug rather than a typing one.
+ *
+ * The second half of the file covers BUG 39, the same ability shape with the
+ * class param in the RETURN — `Into 'b for 'a`, where the stdlib ships three
+ * impls for `Int`. There the type side's refusals are the load-bearing part:
+ * they are what guarantee every call reaching the compiler has a determined
+ * result type for it to dispatch on.
  */
 class ClassParamDispatchSpecTest : VariantSpecBase() {
 
@@ -131,6 +137,106 @@ class ClassParamDispatchSpecTest : VariantSpecBase() {
             "Coherence holds in the class-param slot too: a blanket `'r` already " +
                 "covers every concrete instance, so a specific `B` alongside it is " +
                 "an overlap.",
+        )
+    }
+
+    // ───────────────────────────── the class param in the RETURN (BUG 39)
+    //
+    // `ability Into 'b for 'a where { into: { it: 'a } -> 'b }` — the arg record
+    // is `{}`, so nothing supplied can separate `Into Str for Int` from
+    // `Into Float for Int`. The TYPE side resolves it from the annotation, and
+    // refuses a target with no impl (V0402); the compiler was the half that lost
+    // the answer — see `ClassParamDispatchRuntimeTest`.
+    //
+    // An unpinned target is T0215 only when the obligation escapes to a
+    // signature that cannot hold it; the last test here pins the shape where it
+    // does not, which I had predicted wrongly.
+
+    private val returnImpls = """
+        use std::int
+        use std::str
+        ability Make 'b for 'a where { make: { it: 'a } -> 'b }
+        type Src = { n: Int }
+        impl Make Int for Src where {
+          make: { it: Src } -> Int = { it } -> 111
+        }
+        impl Make Str for Src where {
+          make: { it: Src } -> Str = { it } -> "222"
+        }
+    """.trimIndent()
+
+    @Test fun `a return-position class param resolves from the annotation`() {
+        accepts(
+            """
+            $returnImpls
+            pub let as_int: {} -> Int = {} -> do
+              let s: Src = { n = 1 }
+              s.make {}
+            pub let as_str: {} -> Str = {} -> do
+              let s: Src = { n = 1 }
+              s.make {}
+            $MAIN
+            """,
+            "Both resolve, from the ANNOTATION alone — the two calls are " +
+                "character-for-character identical. At runtime `as_str` used to " +
+                "return `as_int`'s 111 (BUG 39), which is why the runtime half of " +
+                "this pair is an :interpreter test.",
+        )
+    }
+
+    @Test fun `a return target with no impl is refused`() {
+        rejects(
+            """
+            $returnImpls
+            pub let bad: {} -> Bool = {} -> do
+              let s: Src = { n = 1 }
+              s.make {}
+            $MAIN
+            """,
+            "V0402",
+            "There is no `Make Bool for Src`, and the message names the whole " +
+                "tuple the way the receiver-position case does — \"Bool, Src does " +
+                "not implement 'Make'\". The stdlib form reads \"Bool, Int does not " +
+                "implement 'Into'\".",
+        )
+    }
+
+    @Test fun `a return target nothing pins escapes to the signature`() {
+        rejects(
+            """
+            $returnImpls
+            let main = {} -> do
+              let s: Src = { n = 1 }
+              let v = s.make {}
+              7
+            """,
+            "T0215",
+            "With no annotation and no use the target is undetermined, and rather " +
+                "than pick one the obligation escapes to the enclosing signature, " +
+                "where it has nothing to attach to: \"'Make' is needed at a type " +
+                "`main` does not mention: the body chooses\". Same family as " +
+                "[[project_phantom_constraint_decl_typeparams]].",
+        )
+    }
+
+    @Test fun `an unpinned target inside an ANNOTATED decl is accepted`() {
+        accepts(
+            """
+            $returnImpls
+            pub let unpinned: {} -> Int = {} -> do
+              let s: Src = { n = 1 }
+              let v = s.make {}
+              7
+            $MAIN
+            """,
+            "THE LIMIT OF THE REFUSAL ABOVE, measured rather than assumed — I " +
+                "expected T0215 here too. The decl's own annotation absorbs the " +
+                "result, so nothing escapes and the obligation is discharged " +
+                "against whichever impl the solver reached. So a call whose target " +
+                "is genuinely undetermined DOES reach the compiler; it is harmless " +
+                "only because the value is discarded. Runs and returns 7. A shape " +
+                "where the arbitrary choice is observable — impls that differ by " +
+                "effect rather than by value — is worth probing and has not been.",
         )
     }
 

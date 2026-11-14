@@ -4582,3 +4582,87 @@ the impls, so it took running the program with both functions reachable. The
 same note that records the earlier fix also records WHY it was never exercised:
 `tryInlineOp` folds Int/Float arithmetic before dispatch, so the stdlib's own
 numeric impls never reach this code.
+
+## BUG 39 — FIXED: a class param in the RETURN was unreachable, and `Into` was broken for every target but one
+
+Found 2026-11-14, immediately after BUG 38 and in the same family: probing
+whether that fix covered a class param the ARGUMENTS cannot reach. It did not.
+**Soundness hole: a function typed `-> Float` returned a `Str`.** Pinned by
+`ClassParamDispatchRuntimeTest`; `ClassParamDispatchSpecTest` pins the type
+side, which is correct.
+
+```mezze
+## stdlib, std/abilities/convert.mz
+ability Into 'b for 'a where { into: { it: 'a } -> 'b }
+```
+
+The class param is the RETURN, so the argument record is `{}`. Nothing supplied
+distinguishes `Into Str for Int` from `Into Float for Int`, and the stdlib ships
+three impls for `Int` (Str, Float, Frac), three for `Nat`, two each for `Char`
+and `Frac`.
+
+```
+let s: Str   = (5).into {}   ->  "5"
+let f: Float = (5).into {}   ->  error[I0004]: class java.lang.String cannot be cast to class java.lang.Double
+let q: Frac  = (5).into {}   ->  error[I0004]: class java.lang.String cannot be cast to class MezzeRecord
+```
+
+**ONE impl in the program was enough.** Unlike BUG 38, this needed no second
+call and no second impl at the call site: `Into Str for Int` is registered
+first, so every `Int` receiver got it and every target but that one was
+unreachable. A documented stdlib conversion ability was broken for two thirds of
+its own instances.
+
+### The cause is the same sentence read the other way
+
+BUG 38's fix asks which candidate's OPERATION accepts the arguments supplied.
+With `{}` there is nothing to ask about, the class-arg tuple is not in the
+arguments either, and dispatch fell through to `receiverMatches.firstOrNull()`.
+
+The typed AST does carry the ability per call site
+(`TypedFieldAccess.dispatchedAbility`) and its comment states the assumption
+this breaks:
+
+> with the receiver's type it names the impl (one per ability and type)
+
+One ability plus one receiver type is TWO impls as soon as the class param
+differs, so the evidence the node carries cannot name the impl. The resolution
+the typechecker did perform — `as_str` really is typed `Str` — lives in the
+solver, not on the node.
+
+### The fix: the type the call PRODUCES
+
+`AbilityOp` now carries the impl operation's return type, and when the receiver
+leaves several candidates, dispatch asks which one returns what this call
+produces. `expr.type` at the call site is exactly that, and it is the same
+content question as the signature match, asked about the other end of the arrow.
+A `VarType` expectation says nothing and does not take part.
+
+Verified both directions: all three `Into` targets for `Int` arrive (`"5"`,
+`5.0`, `5//1`) in either order, a user ability with the class param in the
+return selects correctly, and BUG 38's argument-position case plus `datetime`'s
+five impls still hold.
+
+### What the type side already guarantees, and one thing it does not
+
+- a target with no impl is V0402, naming the whole tuple: "Bool, Int does not
+  implement 'Into'";
+- an unpinned target whose obligation escapes to a signature that cannot hold it
+  is T0215: "'Make' is needed at a type `main` does not mention: the body
+  chooses" — the compiler is never asked to guess there.
+
+**But that refusal is narrower than I predicted.** Inside an ANNOTATED decl
+whose own result does not involve the target, an unpinned call is ACCEPTED:
+
+```mezze
+pub let unpinned: {} -> Int = {} -> do
+  let s: Src = { n = 1 }
+  let v = s.make {}     ## target undetermined — accepted
+  7
+```
+
+It runs and returns 7, so the arbitrary choice is harmless *here* only because
+the value is discarded. A shape where the choice is observable — two impls
+differing by EFFECT rather than by value — has not been probed. The last test in
+`ClassParamDispatchSpecTest` pins the accepted shape and says so, since I
+predicted T0215 and measured otherwise.
