@@ -5084,6 +5084,35 @@ practical impact is nil today — but the same limit will bite any future
 constraint whose variable is reached only through a constructor, which is why it
 has a number.
 
-**WHERE TO LOOK.** Not at the dictionary sites. At whatever populates
-`specAbilityImpls` during monomorphisation, and what it does with a constraint
-whose variable is not the callback's return type itself.
+**THE FIX, located.** `MonoDriver.resolveAbilityConstraintsOf` builds
+`nameToConcrete` POSITIONALLY from the spec's `typeArgs` against
+`typeParamNames`, then substitutes the constraint's own type args through it:
+
+    val concreteArgs = constraint.typeArgs.map { ta ->
+        if (ta is MezzeType.VarType) nameToConcrete[ta.variable.name] ?: ta else ta
+    }
+    ...
+    if (concreteArgs.any { it is MezzeType.VarType } && abilityImplsForHash.size != 1) continue
+
+For `set::filter_map` the params are `['a, 'b]` and `'b` is NOT solved — it
+appears only inside `Option 'b` in the callback's return — so `concreteArgs`
+still holds a `VarType`, the guard declines, and no impl is recorded.
+
+**THAT GUARD IS CORRECT AND IS NOT THE BUG.** Its own comment says why: an
+unbound constraint variable must not pick an impl, because a `VarType` matches
+every target and `firstOrNull` then hands back whatever came first — which is
+how `impl Eq for Box 'a` once supplied Box's own `eq` to its payload. Loosening
+it reintroduces a silently-wrong-impl bug.
+
+The fix belongs UPSTREAM, in how a spec's `typeArgs` are derived: unify the
+callee's declared PARAMETER types against the ACTUAL argument types
+structurally, so a variable reachable only through a constructor (`Option 'b`
+against `Option P`) is solved. With `'b := P` arriving concrete, every stage
+below works untouched.
+
+**THE TRADE, stated rather than taken quietly.** That derivation is on the path
+every specialisation takes, and the demonstrated user-facing impact today is
+NIL — no `mez build` program can reach the shape, because everything in a
+program sits under `main` and takes the working path. So this is a correctness
+debt with a known cause and no known victim, which is why it is recorded here
+precisely instead of fixed in a hurry.
