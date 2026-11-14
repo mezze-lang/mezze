@@ -1310,6 +1310,9 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_set_remove_with_evidence", (r, c) ->
             SetNatives.removeWithEvidence(getSet(r, "s"), getField(r, "x"),
                 getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_set_filter_map_with_evidence", (r, c) ->
+            SetNatives.filterMapWithEvidence(getSet(r, "set"), getFunction(r, "f"),
+                getFunction(r, "hash"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_set_map_with_evidence", (r, c) ->
             SetNatives.mapWithEvidence(getSet(r, "s"), getFunction(r, "f"),
                 getFunction(r, "hash"), getFunction(r, "eq"), c));
@@ -1616,6 +1619,9 @@ public final class NativeDispatch extends MezzeNode {
         // back a value whose runtime shape was not its declared type.
         HANDLERS.put("__native_map_from_seq", (r, c) ->
             MapNatives.fromSeq(getSeq(r, "xs")));
+        HANDLERS.put("__native_map_map_keys_with_evidence", (r, c) ->
+            MapNatives.mapKeysWithEvidence(getMap(r, "m"), getFunction(r, "f"),
+                getFunction(r, "hash"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_map_from_seq_with_evidence", (r, c) ->
             MapNatives.fromSeqWithEvidence(getSeq(r, "xs"),
                 getFunction(r, "hash"), getFunction(r, "eq")));

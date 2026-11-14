@@ -711,6 +711,31 @@ public final class MapNatives {
 
     // ==================== Task #29: Key Operations ====================
 
+    /**
+     * `map_keys` that buckets by the TARGET key's equality.
+     *
+     * <p>The plain {@link #mapKeys} rebuilds through the structural
+     * `fromEntries`, so two keys a hand-written `Eq` calls one key stayed
+     * apart: mapping the distinct Int keys 10 and 11 to a newtype equal BY
+     * TENS gave a map of two. The result's keys are `'k2` and the SOURCE's
+     * instance says nothing about them — the same reasoning as `set::map`.
+     *
+     * <p>"The later entry wins" is preserved: entries are installed in walk
+     * order into a map that already carries the key's instance.
+     */
+    @TruffleBoundary
+    public static MezzeMap mapKeysWithEvidence(MezzeMap map, MezzeFunction f,
+                                               MezzeFunction hashFn, MezzeFunction eqFn,
+                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(f, "val");
+        ElementHashing hashing = ClosureHashing.of(hashFn, eqFn);
+        if (hashing == null) return mapKeys(map, f, callNode);
+        MezzeMap result = withHashing(MezzeMap.empty(), hashing);
+        var acc = new MezzeMap[]{result};
+        map.walkEntries((k, v) -> acc[0] = acc[0].put(ctx.call1(callNode, k), v));
+        return acc[0];
+    }
+
     public static MezzeMap mapKeys(MezzeMap map, MezzeFunction f,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");

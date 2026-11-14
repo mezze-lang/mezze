@@ -3254,6 +3254,10 @@ class TypedASTCompiler(
         // are `'b`. Structurally it kept two values a hand-written `Eq` calls
         // one element.
         "__native_set_map" to "__native_set_map_with_evidence",
+        // Same shape, same reason: both produce a container whose elements or
+        // keys are the TARGET type, and collapsed by representation without it.
+        "__native_set_filter_map" to "__native_set_filter_map_with_evidence",
+        "__native_map_map_keys" to "__native_map_map_keys_with_evidence",
         "__native_set_insert" to "__native_set_insert_with_evidence",
         "__native_set_contains" to "__native_set_contains_with_evidence",
         "__native_set_remove" to "__native_set_remove_with_evidence",

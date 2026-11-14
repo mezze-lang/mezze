@@ -270,8 +270,20 @@ pub let group_by_value: { m: Map 'k 'v } -> Map 'v (List 'k) = { m } ->
   __native_map_group_by_value { m = m }
 
 ## Transforms all keys using f.
-pub let map_keys: { m: Map 'k 'v, f: { val: 'k } -> 'k2 <...> } -> Map 'k2 'v <...> = { m, f } ->
+## `Eq 'k2, Hash 'k2`, NOT the source key's: the result's keys are `'k2`, so
+## the source's equality says nothing about which of them are the same key.
+## Without it the result bucketed by REPRESENTATION — mapping the distinct Int
+## keys 10 and 11 to a newtype equal by tens gave a map of two.
+pub let map_keys
+  : { m: Map 'k 'v, f: { val: 'k } -> 'k2 <...> } with Eq 'k2, Hash 'k2
+  -> Map 'k2 'v <...> = { m, f } ->
   __native_map_map_keys { m = m, f = f }
+
+pub let map_keys_with_evidence:
+  { m: Map 'k 'v, f: { val: 'k } -> 'k2 <...>,
+    hash: { it: 'k2 } -> Int, eq: { it: 'k2, r: 'k2 } -> Bool } -> Map 'k2 'v <...> =
+  { m, f, hash, eq } ->
+    __native_map_map_keys_with_evidence { m = m, f = f, hash = hash, eq = eq }
 
 ## Keeps only entries where the key matches the predicate.
 pub let filter_keys

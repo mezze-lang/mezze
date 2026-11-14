@@ -541,6 +541,32 @@ public final class SetNatives {
      * Apply a function that returns Option to each element and collect only the Some values.
      * Similar to flatMap but specifically for Option-returning functions.
      */
+    /**
+     * `filter_map` that collapses by the TARGET's equality — same reasoning as
+     * {@link #mapWithEvidence}: the result's elements are `'b`, so the SOURCE's
+     * instance says nothing about which of them are the same element.
+     */
+    @TruffleBoundary
+    public static MezzeSet filterMapWithEvidence(MezzeSet set, MezzeFunction f,
+                                                 MezzeFunction hashFn, MezzeFunction eqFn,
+                                                 com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(f, "val");
+        Object[] out = new Object[set.size()];
+        int[] n = {0};
+        set.walkElems(e -> {
+            Object mapped = ctx.call1(callNode, e);
+            if (mapped instanceof MezzeVariant v && v.isSome()) {
+                out[n[0]++] = v.getPayloadFieldByName("val");
+            }
+        });
+        ElementHashing hashing = ClosureHashing.of(hashFn, eqFn);
+        if (hashing == null) return MezzeSet.fromElements(out, n[0]);
+        // Only the filled prefix is the result, so the array is trimmed before
+        // the storage buckets it — `fromElements` takes a count, this does not.
+        Object[] kept = java.util.Arrays.copyOf(out, n[0]);
+        return MezzeSet.fromStorage(EvidenceSetStorage.fromElements(kept, hashing));
+    }
+
     public static MezzeSet filterMap(MezzeSet set, MezzeFunction f,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");

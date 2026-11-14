@@ -118,6 +118,12 @@ pub let remove_with_evidence:
   { s: Set 'a, x: 'a, hash: { it: 'a } -> Int, eq: { it: 'a, r: 'a } -> Bool } -> Set 'a =
   { s, x, hash, eq } -> __native_set_remove_with_evidence { s = s, x = x, hash = hash, eq = eq }
 
+pub let filter_map_with_evidence:
+  { set: Set 'a, f: { val: 'a } -> Option 'b <...>,
+    hash: { it: 'b } -> Int, eq: { it: 'b, r: 'b } -> Bool } -> Set 'b <...> =
+  { set, f, hash, eq } ->
+    __native_set_filter_map_with_evidence { set = set, f = f, hash = hash, eq = eq }
+
 pub let map_with_evidence:
   { s: Set 'a, f: { val: 'a } -> 'b <...>,
     hash: { it: 'b } -> Int, eq: { it: 'b, r: 'b } -> Bool } -> Set 'b <...> =
@@ -254,8 +260,10 @@ pub let symmetric_difference: { s1: Set 'a, s2: Set 'a } with Eq 'a -> Set 'a = 
   __native_set_symmetric_difference { s1 = s1, s2 = s2 }
 
 ## Maps elements with f, collecting only Some results into a Set.
+## `Eq 'b, Hash 'b` for the same reason as `map` above: the kept elements are
+## `'b`, so the source's equality says nothing about which are the same element.
 pub let filter_map
-  : { set: Set 'a, f: { val: 'a } -> Option 'b <...> }
+  : { set: Set 'a, f: { val: 'a } -> Option 'b <...> } with Eq 'b, Hash 'b
   -> Set 'b <...>
   = { set, f } -> __native_set_filter_map { set = set, f = f }
 

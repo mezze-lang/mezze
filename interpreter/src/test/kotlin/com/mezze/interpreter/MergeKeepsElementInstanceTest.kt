@@ -193,6 +193,87 @@ class MergeKeepsElementInstanceTest {
         ),
     )
 
+    /**
+     * THE SAME SHAPE IN TWO MORE OPERATIONS, found by asking which others
+     * produce a container whose elements or keys are the TARGET type and
+     * declare nothing about it. Both did, and both collapsed by
+     * representation. `sorted_set::filter_map` already carried `with Ord 'b`,
+     * which is what showed the pattern was known and these two had been
+     * missed.
+     */
+    @Test
+    fun `set filter_map collapses by the target's Eq`() = assertEquals(
+        1L,
+        eval(
+            """
+            $byTens
+            let go = { } -> set::size { s = set::filter_map {
+              set = set::from_seq { xs = [10, 11] },
+              f = { val } -> Some { val = P.(val) },
+            } }
+            go {}
+            """,
+        ),
+        "2 means the kept elements collapsed by representation",
+    )
+
+    /** THE SAME CALL AS A TOP-LEVEL EXPRESSION, which is NOT the same question.
+     *  A real program has everything under `main`, and the in-function form
+     *  above is what it compiles. This one is recorded because it behaves
+     *  differently — the constraint on `'b` inside `Option 'b` is reached in
+     *  one path and not the other — and that asymmetry is worth a name rather
+     *  than a quietly-passing suite. */
+    @Test
+    fun `set filter_map at top level still collapses structurally`() = assertEquals(
+        2L,
+        eval(
+            """
+            $byTens
+            set::size { s = set::filter_map {
+              set = set::from_seq { xs = [10, 11] },
+              f = { val } -> Some { val = P.(val) },
+            } }
+            """,
+        ),
+        "1 would mean the top-level path now reaches the constraint too",
+    )
+
+    @Test
+    fun `map map_keys buckets by the target key's Eq`() = assertEquals(
+        1L,
+        eval(
+            """
+            $byTens
+            map::size { m = map::map_keys {
+              m = map::of { of = [{ k = 10, v = 1 }, { k = 11, v = 2 }] },
+              f = { val } -> P.(val),
+            } }
+            """,
+        ),
+        "2 means the new keys bucketed by representation",
+    )
+
+    /** `map_keys` keeps "the later entry wins", which a fix that collapsed
+     *  correctly but kept the first value would pass the size test above. */
+    @Test
+    fun `map_keys keeps the later entry's value`() = assertEquals(
+        2L,
+        eval(
+            """
+            $byTens
+            match map::get {
+              m = map::map_keys {
+                m = map::of { of = [{ k = 10, v = 1 }, { k = 11, v = 2 }] },
+                f = { val } -> P.(val),
+              },
+              k = P.(19),
+            } is
+              Some { val } -> val
+              None -> 0 - 1
+            """,
+        ),
+    )
+
     /** Plain Int keys and elements are untouched: with no hand-written
      *  instance there is no evidence storage and the structural rebuild is
      *  exactly right. */
