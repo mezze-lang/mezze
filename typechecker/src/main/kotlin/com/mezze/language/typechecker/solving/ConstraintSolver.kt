@@ -1428,8 +1428,16 @@ class ConstraintSolver(
                     )
                 }
             }
+            // Same reasoning as the catch-all below: name the shape and the way in.
+            // A variant's fields live on a CONSTRUCTOR'S PAYLOAD, so the step the
+            // reader is missing is the match, not a different field name. The
+            // single-constructor case already recursed into the payload above, so
+            // anything arriving here really does need to choose a constructor.
+            val variantShown = prettyPrintType(recordType)
             return ConstraintResult.Failure(
-                "Cannot access field '$fieldName' on variant type: ${prettyPrintType(recordType)}",
+                "Field access '.$fieldName' on the variant `$variantShown`: a variant has no " +
+                    "fields of its own — only a constructor's PAYLOAD does. Match a " +
+                    "constructor first: `match x is Ctor { $fieldName } -> ...`.",
                 code = ErrorCode.T0205_FIELD_NOT_FOUND,
             )
         }
@@ -1558,8 +1566,32 @@ class ConstraintSolver(
             }
         }
 
+        // NAME WHAT THE RECEIVER IS, not what it is not. "non-record type: Frac"
+        // answered with a negative, and for the one shape a reader is most likely
+        // to hit — a primitive like `Frac`, whose parts really do exist but are
+        // reached by other means — it read as if the field were merely missing.
+        // The newtype branch above is the model: say what the value is, why the
+        // field cannot resolve, and what to do instead.
+        //
+        // Safe to reword: `ImplValidator`'s swallow of this diagnostic was moved
+        // off the message text onto the constraint's shape precisely so that this
+        // could change (its comment says so), and no test asserts the old string.
+        val shown = prettyPrintType(recordType)
+        val primitiveName = PrimitiveTypes.toName(recordType)
         return ConstraintResult.Failure(
-            "Cannot access field '$fieldName' on non-record type: ${prettyPrintType(recordType)}",
+            when {
+                primitiveName != null ->
+                    "Field access '.$fieldName' on '$primitiveName': a primitive type has no " +
+                        "fields. Its operations are functions and ability methods, not fields " +
+                        "— e.g. `x.to_str {}`, or a function from the module that defines them."
+                recordType is MezzeType.FunctionType ->
+                    "Field access '.$fieldName' on a function, `$shown`: a function has no " +
+                        "fields. Call it first, then read the field off the result " +
+                        "— `f { … }.$fieldName`."
+                else ->
+                    "Field access '.$fieldName' on `$shown`, which is not a record and has no " +
+                        "fields."
+            },
             code = ErrorCode.T0205_FIELD_NOT_FOUND,
         )
     }
