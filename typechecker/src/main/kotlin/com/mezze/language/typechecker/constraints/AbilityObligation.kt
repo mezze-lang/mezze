@@ -74,6 +74,11 @@ internal fun abilityObligationAtCallSite(
         // hand over the whole tuple when the variable sits anywhere but the head:
         // it already fills the arity, and the tracker passes it through untouched.
         typeArgs = if (varIndex == 0) constraint.typeArgs.drop(1) else constraint.typeArgs,
+        // WHERE the primary sat, which is what the split above loses. With it the
+        // reconstruction puts it back where it came from instead of guessing the
+        // head; without it a `Decode JsonC 'a` obligation (primary = the TARGET,
+        // at index 1) was rebuilt as `['a, JsonC, 'a]`.
+        primaryIndex = varIndex,
         context = context,
         loc = loc,
     )
@@ -99,8 +104,28 @@ internal fun abilityClassArgs(
     primary: MezzeType,
     typeArgs: List<MezzeType>,
     arity: Int?,
-): List<MezzeType> =
-    if (arity != null && typeArgs.size >= arity) typeArgs else listOf(primary) + typeArgs
+    /**
+     * WHERE THE PRIMARY CAME FROM — the index it occupied in the obligation's own
+     * tuple, recorded by [abilityObligationAtCallSite] when it split them apart.
+     * That is the one fact the `(typeVar, typeArgs)` split destroys, and the
+     * reconstruction needs exactly it.
+     *
+     * Null for an obligation built elsewhere, which keeps the historical
+     * behaviour: insert at the HEAD.
+     *
+     * DO NOT substitute "the receiver's declared slot" for this. The primary is
+     * whichever parameter the obligation is ABOUT — `abilityObligationAtCallSite`
+     * takes the first type VARIABLE, which for `Decode 'config 'a for 'in` is the
+     * TARGET, not the receiver. Putting it at the receiver's slot reverses the
+     * tuple: measured as `V0402: Str, { name: Str } does not implement 'FromJson'`
+     * against `impl FromJson 'a for Str`, target and receiver swapped.
+     */
+    primaryIndex: Int? = null,
+): List<MezzeType> {
+    if (arity != null && typeArgs.size >= arity) return typeArgs
+    val slot = (primaryIndex ?: 0).coerceIn(0, typeArgs.size)
+    return typeArgs.subList(0, slot) + primary + typeArgs.subList(slot, typeArgs.size)
+}
 
 /*
  * WHY THE `arity == null` FALLBACK STAYS, for now.

@@ -217,6 +217,7 @@ class AbilityChecker internal constructor(
             arity = registry.lookupAbility(abilityName)?.typeParams?.size
                 ?: com.mezze.language.typechecker.context.AbilityArityTable
                     .of(abilityName, constraint.abilityHash),
+            primaryIndex = constraint.primaryIndex,
         )
         val fromAnnotation = constraint.context?.startsWith("Type annotation on ") == true
         val trackedEntry = TrackedAbilityConstraint(abilityName, constraint.abilityHash, trackingArgs, constraint.loc, fromAnnotation)

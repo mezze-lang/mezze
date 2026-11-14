@@ -1742,6 +1742,7 @@ class ConstraintGenerator(
                             MezzeType.VarType(matchingTypeVar) else solvedTypeVar,
                         typeArgs = substitutedArgs,
                         arity = arity,
+                        primaryIndex = constraint.primaryIndex,
                     )
                     MezzeType.FunctionAbilityConstraint(
                         abilityName = constraint.abilityName,

@@ -111,6 +111,14 @@ sealed interface Constraint {
         val abilityName: String,
         val abilityHash: Hash? = null,
         val typeArgs: List<MezzeType> = emptyList(),
+        /**
+         * The index [typeVar] occupied in the obligation's ORIGINAL positional
+         * tuple, when the producer knew it. The split into `typeVar` + `typeArgs`
+         * does not otherwise record it, and every site that rebuilds the full
+         * tuple needs it — see `abilityClassArgs`. Null means "not recorded",
+         * which reconstructs at the head as it always did.
+         */
+        val primaryIndex: Int? = null,
         override val context: String? = null,
         override val loc: Loc? = null
     ) : Constraint {
