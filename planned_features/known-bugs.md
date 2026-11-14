@@ -5010,6 +5010,43 @@ the constraint), and whether `DecodeTargetResolver`'s per-site stamp can still b
 DELIVERED to an op whose parameter list changed shape. Six hypotheses about
 dispatch have now failed; the next one should be about delivery.
 
+**THE TUPLE-ORDER THEORY IS WRONG — tested 2026-11-14, 72 failures.** Worth
+recording because it is the obvious theory and it reads convincingly from the
+code.
+
+The theory: `abilityClassArgs` PREPENDS the primary, while an impl's own tuple is
+`abilityTypeArgs + targetTypes` with the receiver LAST, so reconstruction and
+impl disagree at every slot of a class-param ability — identical for a
+one-parameter ability, which would explain why only class-param abilities break.
+`AbilityObligation`'s own comment supports it ("POSITION IS THE MEANING here, and
+`AbilityRequired` splits the tuple … without recording where the split
+happened"), and `AbilityChecker` already derives the receiver's slot properly
+(`decl.typeParams.indexOf(decl.receiverTypeParam)`) while the reconstruction
+assumes 0.
+
+Acting on it — inserting the primary at the DECLARED slot in both reconstruction
+sites (`abilityClassArgs` and `ExprFunctionConstraints`' inferred path) — fails
+**72 typechecker tests**, all genuine (no NoClassDefFoundError, no timeouts):
+`CodecAbilityShapeTest` broadly, `AbilityMethodCallTest > ability with multiple
+type parameters`, the numeric error snapshots, `ExceptionAssocTypeInferenceTest`,
+`StoredConstraintResolutionTest`.
+
+And one failure contradicts the theory directly:
+
+    expected: <{ x: 'a, y: 'b } with NumAdd 'b 'a having 'out = 'c -> 'c>
+
+For `ability NumAdd 'r for 'l` that is `r='b, l='a` — RECEIVER LAST, declaration
+order, which the suite already expected BEFORE the change. So the pipeline is not
+uniformly prepend-shaped, the two conventions are not cleanly split between
+"reconstructed" and "declared", and moving the slot breaks paths that were
+already right.
+
+WHAT THIS DOES ESTABLISH: the representation change cannot be made incrementally.
+72 tests is the cost of changing two of the ~15 sites that read a constraint's
+shape; a correct change has to move all of them at once, with the suite as the
+oracle. That is a dedicated piece of work, not a patch — and it is the honest
+reason this is still open.
+
 **THIS IS THE SAME ROOT CAUSE AS (i).** Both are the constraint tuple having two
 orders and two lengths in play, reconstructed per consumer from a representation
 that does not record where the primary sat. The fix for either is the fix for
