@@ -313,7 +313,7 @@ class TypedASTCompiler(
      *  — stdlib from_json/from_json_with, http's inherent from_json, or a user
      *  codec's entry op. Lazy: needs declIndex, which callers set just before
      *  [compile]; first read happens during compilation. */
-    private val decodeEntryOpNames: Set<String> by lazy {
+    internal val decodeEntryOpNames: Set<String> by lazy {
         com.mezze.language.typechecker.emit.DecodeTargetResolver
             .entryPointOps(abilityImpls, declIndex?.values?.toList() ?: emptyList()).first
     }
@@ -1404,8 +1404,10 @@ class TypedASTCompiler(
             // receiver type, so from_json resolves and dispatch proceeds exactly as
             // for a directly-typed receiver. Keyed on structure (the decoder's input
             // type), never on names.
+            // ... but NEVER over the solver's own answer — see [entryOpDictIsHeld].
             val fromJsonInputType: MezzeType? =
-                if (rawReceiverType is VarType && methodName in decodeEntryOpNames)
+                if (rawReceiverType is VarType && methodName in decodeEntryOpNames &&
+                    !entryOpDictIsHeld(methodName, rawReceiverType, (fn as? TypedFieldAccess)?.abilityHash?.hex))
                     decodeOpBySite[expr.loc]
                         ?.let { decodeImplByOpHash[it] }
                         ?.targetTypes?.lastOrNull()

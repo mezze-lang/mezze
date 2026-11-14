@@ -268,7 +268,26 @@ object DecodeTargetResolver {
                 it.abilityHash != null &&
                     (it.abilityHash in decodeAbilityHashes || it.abilityHash in entryAbilityHashes)
             }
-            ?.forEach { c -> c.typeArgs.firstOrNull()?.let { constraintTargets.add(it) } }
+            ?.forEach { c ->
+                // THE SAME SLOT THE IMPL SIDE READS. A decode-flavoured ability
+                // is `Decode 'config 'a for 'in` — config, target, receiver — so
+                // its target is index 1, which is exactly what `targetTypes[1]`
+                // means a few lines down. An ENTRY ability is `FromJson 'a for
+                // 'in`, target first. The two sets are already distinguished
+                // here, so the index follows from the distinction rather than
+                // from a guess.
+                //
+                // This read `typeArgs.first()`, which is the target only for a
+                // tuple whose primary happened to land at the head. It survived
+                // because the reconstruction used to prepend: with
+                // `with Decode JsonC 'a` the primary IS the target, so the head
+                // was it. Now that the primary goes back where it came from
+                // (`AbilityRequired.primaryIndex`), index 1 is the target under
+                // BOTH the under-supplied and the fully-written spelling —
+                // `[JsonC, 'a, 'a]` and `[JsonC, 'a, Json]` agree there.
+                val targetIdx = if (c.abilityHash in decodeAbilityHashes) 1 else 0
+                c.typeArgs.getOrNull(targetIdx)?.let { constraintTargets.add(it) }
+            }
 
         // AUTHORITATIVE per-call target read straight off the Ok-arm binder (robust
         // to == / arg / match usage). Positional constraint/recon targets are the

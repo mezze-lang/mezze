@@ -114,7 +114,16 @@ class EmitFileSizeRatchetTest {
             // reverted (it broke `x + 100` on an unsolved pattern binding). That
             // note is worth its lines: it is the obvious next fix and it does not
             // work.
-            C + "TypedASTCompiler.kt" to 4505,   // was 5,580; +2 for carrying a `...spread` through ability-op receiver injection
+            // +2 for asking [entryOpDictIsHeld] before recovering a var-typed
+            // `from_json` receiver from the pinned decoder's input type. The
+            // reasoning moved OUT, to `DictEvidence.kt` beside the dictionary
+            // lookup it is about; what stayed is the two lines of condition that
+            // have to sit in this expression, since it is the recovery being
+            // guarded. The decoder's input is always `Json` and the entry impl's
+            // receiver is `Str` when the text is parsed first, so the recovery was
+            // running `impl FromJson 'a for Json` on a `Str` and the raw JSON text
+            // reached `decode_record_field`.
+            C + "TypedASTCompiler.kt" to 4507,   // was 5,580; +2 for carrying a `...spread` through ability-op receiver injection
             // +42 for `contextRowWithBodyAssocTypes`: an INLINE lambda was stamped
             // with the row from the pushed CONTEXT, so a callback's associated
             // type was the CALLEE's variable rather than what the body threw, and

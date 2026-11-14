@@ -506,6 +506,45 @@ internal fun TypedASTCompiler.plainSlotForQualifiedRequest(method: String, typeV
 internal fun TypedASTCompiler.enclosingDictSlot(method: String, typeVar: String?, abilityHash: String? = null): String? =
     enclosingDictSlotIn(currentParamNames, currentCaptureNames, method, typeVar, abilityHash)
 
+/**
+ * Does the enclosing function already hold the dictionary for a DECODE ENTRY op
+ * (`from_json` and friends) called here on a receiver whose type never solved?
+ *
+ * If it does, the op's impl was NOT chosen here — the constraint
+ * (`with FromJson 'a 'in`) was left to the caller, and the caller discharged it
+ * where the receiver was concrete. That dictionary IS the choice.
+ *
+ * Which matters because the compiler has a structural recovery for exactly this
+ * shape: a var-typed `from_json` receiver is recovered from the decode impl
+ * `DecodeTargetResolver` pinned for the site, by reading that impl's `for 'in`.
+ * The two inputs are NOT the same type. A decoder's input is always `Json`; the
+ * ENTRY impl's receiver is `Str` for `"{…}".from_json {}`, which PARSES and then
+ * decodes, and `Json` for `json.from_json {}`, which decodes directly. They
+ * coincide only in the second case.
+ *
+ * MEASURED: with the receiver recovered as `Json`, `let dec = { s } -> s.from_json {}`
+ * ran `impl FromJson 'a for Json` on a `Str` — no parse — so the raw JSON TEXT
+ * reached `decode_record_field` and died in `json_type_name` with
+ * "Non-exhaustive match: no variant tag matched". It had been invisible because
+ * the stdlib wrote `with Decode JsonC 'a`, one argument short of `Decode`'s
+ * three: the derived decoder was itself built `for Str`, so the recovery copied
+ * that error back and the two cancelled. Completing the constraint to
+ * `with Decode JsonC 'a Json` removed the first and exposed the second.
+ *
+ * So: when the dict is held, stand down. The receiver stays a var, and the
+ * dict-param path dispatches through the caller's evidence instead of a shape —
+ * the same principle as `viaEnclosingDecodeDict` at the concrete-receiver end
+ * ("when the enclosing function holds this method's dict, that dict IS the
+ * choice").
+ */
+internal fun TypedASTCompiler.entryOpDictIsHeld(
+    methodName: String,
+    receiverType: MezzeType,
+    abilityHash: String?,
+): Boolean =
+    methodName in decodeEntryOpNames &&
+        enclosingDictSlot(methodName, (receiverType as? VarType)?.variable?.name, abilityHash) != null
+
 /** Bind an op's impl type variables from the instance head: the impl whose op
  *  is [opHash] has target `T 'a 'e…`; unify it against each of [types] (the
  *  receiver / arg types at the site) and collect `'a → …`. Empty when the op
