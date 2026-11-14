@@ -525,6 +525,6 @@ ability FromJvm 'a for 'in where {
 }
 
 impl FromJvm 'a for JvmForeign where {
-  from_jvm:      { it: JvmForeign }                with Decode JvmC 'a -> Result 'a DecodeError = { it }         -> it.decode { config = jvm_default },
-  from_jvm_with: { it: JvmForeign, config: JvmC }  with Decode JvmC 'a -> Result 'a DecodeError = { it, config } -> it.decode { config = config },
+  from_jvm:      { it: JvmForeign }                with Decode JvmC 'a JvmForeign -> Result 'a DecodeError = { it }         -> it.decode { config = jvm_default },
+  from_jvm_with: { it: JvmForeign, config: JvmC }  with Decode JvmC 'a JvmForeign -> Result 'a DecodeError = { it, config } -> it.decode { config = config },
 }

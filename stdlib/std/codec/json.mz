@@ -556,17 +556,17 @@ ability FromJson 'a for 'in where {
 ##   "{\"code\":\"1\"}".from_json {}         # Result { code: Str } DecodeError
 ##
 impl FromJson 'a for Str where {
-  from_json: { it: Str } with Decode JsonC 'a -> Result 'a DecodeError = { it } ->
+  from_json: { it: Str } with Decode JsonC 'a Json -> Result 'a DecodeError = { it } ->
     match parse_str { s = it } is
       Ok { val } -> val.decode { config = json_default }
       Err { error } -> Err { error = { path = error.path, message = error.reason, expected = "valid JSON", found = error.input_ref } },
-  from_json_with: { it: Str, config: JsonC } with Decode JsonC 'a -> Result 'a DecodeError = { it, config } ->
+  from_json_with: { it: Str, config: JsonC } with Decode JsonC 'a Json -> Result 'a DecodeError = { it, config } ->
     match parse_str { s = it } is
       Ok { val } -> val.decode { config = config }
       Err { error } -> Err { error = { path = error.path, message = error.reason, expected = "valid JSON", found = error.input_ref } },
 }
 
 impl FromJson 'a for Json where {
-  from_json:      { it: Json }                with Decode JsonC 'a -> Result 'a DecodeError = { it }         -> it.decode { config = json_default },
-  from_json_with: { it: Json, config: JsonC } with Decode JsonC 'a -> Result 'a DecodeError = { it, config } -> it.decode { config = config },
+  from_json:      { it: Json }                with Decode JsonC 'a Json -> Result 'a DecodeError = { it }         -> it.decode { config = json_default },
+  from_json_with: { it: Json, config: JsonC } with Decode JsonC 'a Json -> Result 'a DecodeError = { it, config } -> it.decode { config = config },
 }

@@ -206,6 +206,6 @@ ability FromUrl 'a for 'in where {
 }
 
 impl FromUrl 'a for Str where {
-  from_url:      { it: Str }               with Decode UrlC 'a -> Result 'a DecodeError = { it }         -> it.decode { config = url_default },
-  from_url_with: { it: Str, config: UrlC } with Decode UrlC 'a -> Result 'a DecodeError = { it, config } -> it.decode { config = config },
+  from_url:      { it: Str }               with Decode UrlC 'a Str -> Result 'a DecodeError = { it }         -> it.decode { config = url_default },
+  from_url_with: { it: Str, config: UrlC } with Decode UrlC 'a Str -> Result 'a DecodeError = { it, config } -> it.decode { config = config },
 }
