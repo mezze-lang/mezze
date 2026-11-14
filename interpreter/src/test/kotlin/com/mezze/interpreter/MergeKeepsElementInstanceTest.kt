@@ -50,6 +50,7 @@ class MergeKeepsElementInstanceTest {
         use std::collections::list
         use std::collections::deque
         use std::collections::sorted_set
+        use std::collections::sorted_map
         use std::abilities::compare::{ Eq, Ord, Hash }
         newtype P = Int
         let un: { v: P } -> Int = { v } -> match v is
@@ -343,6 +344,89 @@ class MergeKeepsElementInstanceTest {
         eval("$byTens\nset::size { s = deque::to_set { d = deque::from_seq { xs = [P.(10), P.(11)] } } }"),
         "2 means it bucketed by representation",
     )
+
+    /** Inverting keys the result BY the old VALUES, so the pair that matters is
+     *  `Eq 'v, Hash 'v` — the one constraint in this family that is not on the
+     *  obvious type parameter. `map::invert`'s own comment promised "duplicate
+     *  values keep one arbitrary key", behaviour it never reached for a type
+     *  with a written Eq, because the duplicates were never recognised. */
+    @Test
+    fun `map invert keys the result by the value's own Eq`() = assertEquals(
+        1L,
+        eval(
+            """
+            $byTens
+            map::size { m = map::invert {
+              m = map::of { of = [{ k = 1, v = P.(10) }, { k = 2, v = P.(11) }] },
+            } }
+            """,
+        ),
+        "2 means invert bucketed the new keys by representation",
+    )
+
+    /** `sorted_map::to_map` LEAVES a comparator-ordered container for a HASHED
+     *  one, so the key's equality becomes the question and `Ord` stops being it.
+     *  The SOURCE legitimately holds two under P's deliberately finer raw Ord —
+     *  asserted first, so a regression that collapses the source cannot make the
+     *  conversion look right and pass. */
+    @Test
+    fun `sorted_map to_map buckets keys by the written Eq`() {
+        assertEquals(
+            2L,
+            eval(
+                """
+                $byTens
+                sorted_map::size { m = sorted_map::from_list {
+                  xs = list::from_seq { xs = [{ k = P.(10), v = 1 }, { k = P.(11), v = 2 }] },
+                } }
+                """,
+            ),
+            "the sorted source must still hold two under the finer Ord",
+        )
+        assertEquals(
+            1L,
+            eval(
+                """
+                $byTens
+                map::size { m = sorted_map::to_map { m = sorted_map::from_list {
+                  xs = list::from_seq { xs = [{ k = P.(10), v = 1 }, { k = P.(11), v = 2 }] },
+                } } }
+                """,
+            ),
+            "2 means to_map bucketed by representation",
+        )
+    }
+
+    /** `unique` was the one evidence-dependent operation in `deque` that
+     *  declared nothing, de-duplicating through a Java `LinkedHashSet`. Its
+     *  `list` and `seq` siblings already carried `Eq`/`Hash` — the sibling-pair
+     *  tell, and the last outlier of this family. */
+    @Test
+    fun `deque unique keeps one element per the written Eq`() = assertEquals(
+        1L,
+        eval("$byTens\ndeque::size { d = deque::unique { d = deque::from_seq { xs = [P.(10), P.(11)] } } }"),
+        "2 means unique de-duplicated by representation",
+    )
+
+    /** The siblings, asserted beside it so the three cannot drift apart again. */
+    @Test
+    fun `list and seq unique agree with deque`() {
+        assertEquals(
+            1L,
+            eval("$byTens\nlist::size { xs = list::unique { xs = list::from_seq { xs = [P.(10), P.(11)] } } }"),
+            "list::unique de-duplicated by representation",
+        )
+        assertEquals(
+            1L,
+            eval("$byTens\nseq::size { xs = seq::unique { xs = [P.(10), P.(11)] } }"),
+            "seq::unique de-duplicated by representation",
+        )
+        assertEquals(
+            1L,
+            eval("$byTens\nlist::size { xs = list::distinct { xs = list::from_seq { xs = [P.(10), P.(11)] } } }"),
+            "list::distinct de-duplicated by representation",
+        )
+    }
 
     @Test
     fun `sorted_set to_set buckets by the element instance`() = assertEquals(

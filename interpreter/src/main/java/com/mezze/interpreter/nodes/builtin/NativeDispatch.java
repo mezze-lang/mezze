@@ -1669,6 +1669,9 @@ public final class NativeDispatch extends MezzeNode {
             MapNatives.minValue(getMap(r, "m"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_map_max_value", (r, c) ->
             MapNatives.maxValue(getMap(r, "m"), getFunction(r, "cmp"), c));
+        HANDLERS.put("__native_map_invert_with_evidence", (r, c) ->
+            MapNatives.invertWithEvidence(getMap(r, "m"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
         HANDLERS.put("__native_map_invert", (r, c) ->
             MapNatives.invert(getMap(r, "m")));
 
@@ -1748,6 +1751,9 @@ public final class NativeDispatch extends MezzeNode {
             SortedMapNatives.minEntry(getSortedMap(r, "m")));
         HANDLERS.put("__native_sorted_map_max_entry", (r, c) ->
             SortedMapNatives.maxEntry(getSortedMap(r, "m")));
+        HANDLERS.put("__native_sorted_map_to_map_with_evidence", (r, c) ->
+            SortedMapNatives.toMapWithEvidence(getSortedMap(r, "m"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
         HANDLERS.put("__native_sorted_map_to_map", (r, c) ->
             SortedMapNatives.toMap(getSortedMap(r, "m")));
 
@@ -1909,6 +1915,9 @@ public final class NativeDispatch extends MezzeNode {
             DequeNatives.take(getDeque(r, "d"), getLong(r, "n")));
         HANDLERS.put("__native_deque_drop", (r, c) ->
             DequeNatives.drop(getDeque(r, "d"), getLong(r, "n")));
+        HANDLERS.put("__native_deque_unique_with_evidence", (r, c) ->
+            DequeNatives.uniqueWithEvidence(getDeque(r, "d"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
         HANDLERS.put("__native_deque_unique", (r, c) ->
             DequeNatives.unique(getDeque(r, "d")));
         HANDLERS.put("__native_deque_sort", (r, c) ->

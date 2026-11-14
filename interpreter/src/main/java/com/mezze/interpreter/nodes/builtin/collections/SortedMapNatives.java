@@ -3,6 +3,8 @@ package com.mezze.interpreter.nodes.builtin.collections;
 import com.mezze.datastructures.map.MezzeMap;
 import com.mezze.datastructures.list.MezzeList;
 import com.mezze.datastructures.seq.MezzeSeq;
+import com.mezze.datastructures.map.EvidenceMapStorage;
+import com.mezze.datastructures.set.ElementHashing;
 import com.mezze.datastructures.sorted.MezzeSortedMap;
 import com.mezze.interpreter.values.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -247,6 +249,31 @@ public final class SortedMapNatives {
             new String[]{"k", "v"},
             new Object[]{map.maxKey(), map.maxValue()}
         ));
+    }
+
+    /**
+     * `to_map` under the KEY's own hash and equality.
+     *
+     * <p>This leaves a comparator-ordered container for a HASHED one, so the
+     * sorted map's `Ord` stops being the right question and the key's
+     * `Eq`/`Hash` becomes it. The plain {@link #toMap} below builds through a
+     * bare {@code MezzeMap.empty()}, which buckets structurally — a sorted map
+     * holding two keys an author's finer `Ord` separates must collapse to one
+     * when that author's `Eq` calls them equal, and it did not.
+     * `fromMap` one method down already took its comparator.
+     */
+    @TruffleBoundary
+    public static MezzeMap toMapWithEvidence(MezzeSortedMap sortedMap, MezzeFunction hashFn,
+                                             MezzeFunction eqFn) {
+        ElementHashing hashing = ClosureHashing.of(hashFn, eqFn);
+        if (hashing == null) return toMap(sortedMap);
+        MezzeMap result = MezzeMap.fromStorage(
+            EvidenceMapStorage.fromEntries(new Object[0], new Object[0], hashing));
+        for (Object entryObj : sortedMap.rawEntries()) {
+            MezzeSortedMap.RawEntry entry = (MezzeSortedMap.RawEntry) entryObj;
+            result = result.put(entry.key(), entry.value());
+        }
+        return result;
     }
 
     @TruffleBoundary

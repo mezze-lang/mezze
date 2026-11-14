@@ -4,6 +4,7 @@ import com.mezze.datastructures.deque.MezzeDeque;
 import com.mezze.datastructures.map.MezzeMap;
 import com.mezze.datastructures.list.MezzeList;
 import com.mezze.datastructures.seq.MezzeSeq;
+import com.mezze.datastructures.set.ElementHashing;
 import com.mezze.datastructures.set.MezzeSet;
 import com.mezze.datastructures.sorted.MezzeSortedMap;
 import com.mezze.datastructures.sorted.MezzeSortedSet;
@@ -377,6 +378,71 @@ public final class DequeNatives {
     @TruffleBoundary
     public static MezzeDeque drop(MezzeDeque deque, long n) {
         return deque.drop((int) n);
+    }
+
+    /**
+     * `unique` under the ELEMENT's own hash and equality.
+     *
+     * <p>The plain {@link #unique} below de-duplicates through a
+     * {@code LinkedHashSet}, i.e. by Java {@code hashCode}/{@code equals}. For a
+     * newtype or record whose `Eq` the author wrote, that is the wrong question:
+     * two values that author calls one element are represented differently, so
+     * structural bucketing never puts them in the same bucket to compare, and
+     * both survive. `list::unique` and `seq::unique` were already fixed this
+     * way; this is their sibling, and it was the only one left.
+     *
+     * <p>{@link ClosureHashing} supplies the pair or nothing: null means the
+     * instances are derived and the structural walk below is already right.
+     *
+     * <p>An open-addressed table of INDICES rather than a wrapper per element,
+     * so the author's `hash` runs once per element and the author's `eq` only
+     * when two land in the same slot. Same shape as
+     * {@code ListNatives.uniqueWithEvidence}.
+     */
+    @TruffleBoundary
+    public static MezzeDeque uniqueWithEvidence(MezzeDeque deque, MezzeFunction hashFn,
+                                                MezzeFunction eqFn) {
+        ElementHashing hashing = ClosureHashing.of(hashFn, eqFn);
+        if (hashing == null) return unique(deque);
+
+        Object[] src = deque.toArray();
+        int n = src.length;
+        if (n <= 1) return deque;
+
+        int cap = Integer.highestOneBit(Math.max(4, n)) << 2;   // load factor <= 0.5
+        int mask = cap - 1;
+        int[] slots = new int[cap];          // 0 = empty, else 1 + index into out
+        int[] hashes = new int[n];
+        Object[] out = new Object[n];
+        int kept = 0;
+
+        for (int i = 0; i < n; i++) {
+            Object elem = src[i];
+            int h = hashing.hashOf(elem);
+            int slot = (h ^ (h >>> 16)) & mask;
+            boolean duplicate = false;
+            while (slots[slot] != 0) {
+                int at = slots[slot] - 1;
+                // The stored hash is checked first so the author's `eq` runs
+                // only for a genuine collision, not for every probe.
+                if (hashes[at] == h && hashing.eq(out[at], elem)) {
+                    duplicate = true;
+                    break;
+                }
+                slot = (slot + 1) & mask;
+            }
+            if (!duplicate) {
+                hashes[kept] = h;
+                out[kept] = elem;
+                slots[slot] = kept + 1;
+                kept++;
+            }
+        }
+
+        if (kept == n) return deque;
+        MezzeDeque result = MezzeDeque.empty();
+        for (int i = 0; i < kept; i++) result = result.pushBack(out[i]);
+        return result;
     }
 
     @TruffleBoundary

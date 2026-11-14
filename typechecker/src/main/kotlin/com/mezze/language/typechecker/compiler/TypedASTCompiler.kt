@@ -3302,6 +3302,9 @@ class TypedASTCompiler(
         // hand-written `Eq` was ignored and the two `unique`s disagreed
         // about what a duplicate is.
         "__native_list_unique" to "__native_list_unique_with_evidence",
+        "__native_deque_unique" to "__native_deque_unique_with_evidence",
+        "__native_map_invert" to "__native_map_invert_with_evidence",
+        "__native_sorted_map_to_map" to "__native_sorted_map_to_map_with_evidence",
     )
 
     /**

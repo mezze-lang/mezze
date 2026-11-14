@@ -635,6 +635,31 @@ public final class MapNatives {
         return MezzeVariant.some(maxVal);
     }
 
+    /**
+     * `invert` under the VALUE's own hash and equality.
+     *
+     * <p>Inverting keys a new map by the old map's VALUES, so the evidence that
+     * matters is the value type's, not the key type's — `Eq 'v, Hash 'v`. The
+     * plain {@link #invert} below hands `fromEntries` the raw arrays, which
+     * buckets structurally: two values a hand-written `Eq` calls one key both
+     * survived as separate keys. "Duplicate values keep one arbitrary key" was
+     * the documented behaviour, and it was not reached at all for such a type.
+     */
+    @TruffleBoundary
+    public static MezzeMap invertWithEvidence(MezzeMap map, MezzeFunction hashFn,
+                                              MezzeFunction eqFn) {
+        ElementHashing hashing = ClosureHashing.of(hashFn, eqFn);
+        if (hashing == null) return invert(map);
+        MezzeMap result = withHashing(MezzeMap.empty(), hashing);
+        Object[] keys = map.storage().keys();
+        Object[] values = map.storage().values();
+        // Later entry wins, exactly as the structural form's puts did.
+        for (int i = 0; i < map.size(); i++) {
+            result = result.put(values[i], keys[i]);
+        }
+        return result;
+    }
+
     @TruffleBoundary
     public static MezzeMap invert(MezzeMap map) {
         // Values become keys, so two entries may collide: the later wins, as

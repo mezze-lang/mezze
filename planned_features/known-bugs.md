@@ -5159,3 +5159,63 @@ written `Eq` said 1, and chasing MY OWN wrong answer instead of assuming the
 probe was fine. The stdlib's 158 files and 1858 functions compile unchanged
 under the new check, so nothing in-tree depended on the hole.
 
+## BUG 50 — three more containers decided equality they were never handed; `group_by` still does
+
+**THREE FIXED, THREE OPEN-AND-MEASURED**, 2026-11-14. Same family as BUG 44/45/47
+and found the way the perf log says to find things: by reading the module, not by
+reading a ratio. The signature sweep is one grep — every evidence-dependent
+operation in every collection module, keeping the ones with no `with` clause —
+and it took four minutes.
+
+| operation | declared | got | should be | state |
+|---|---|---|---|---|
+| `deque::unique` | NOTHING | 2 | 1 | FIXED |
+| `map::invert` | NOTHING | 2 | 1 | FIXED |
+| `sorted_map::to_map` | NOTHING | 2 | 1 | FIXED |
+| `seq::group_by` | NOTHING | 2 | 1 | **OPEN** |
+| `list::group_by` | NOTHING | 2 | 1 | **OPEN** |
+| `set::group_by` | NOTHING | — | — | **OPEN** (same source shape) |
+
+Measured with a newtype `P` whose `Eq`/`Hash` bucket by `un/10`, so `P.(10)` and
+`P.(11)` are ONE element/key. Every row above must answer 1.
+
+**EACH ONE IS THE SIBLING TELL.** `deque::unique` was the only
+evidence-dependent operation in its own module declaring nothing, while
+`list::unique` and `seq::unique` both already carried `Eq`/`Hash` — the identical
+fix, already written twice. `sorted_map::to_map` sits ONE LINE BELOW
+`sorted_map::from_map`, which always carried its `Ord`. `map::invert`'s own
+comment documents "duplicate values keep one arbitrary key" — behaviour it never
+reached for such a type, because the duplicates were never recognised.
+
+**THE MECHANISM, read at the source in every case.** A Java collection keyed by
+the raw value:
+
+  - `DequeNatives.unique` — `java.util.LinkedHashSet<Object>`
+  - `MapNatives.invert` — `MezzeMap.fromEntries(values, keys, size)`
+  - `SortedMapNatives.toMap` — a bare `MezzeMap.empty()` and `putObject`
+  - `SeqNatives.groupBy` — `LinkedHashMap<Object, ArrayList>.computeIfAbsent(key, …)`
+
+All four bucket by Java `hashCode`/`equals`, so two values a hand-written `Eq`
+calls equal never land in the same bucket to be compared, and both survive.
+
+**WHY `invert` NEEDS THE VALUE'S EVIDENCE, not the key's.** Inverting keys the
+result BY the old values, so the pair that matters is `Eq 'v, Hash 'v`. That is
+the one in this family whose constraint is not on the obvious type parameter, and
+the reason to state it here rather than leave it to be re-derived.
+
+**WHY `sorted_map::to_map` IS NOT COVERED BY `Ord`.** It LEAVES a
+comparator-ordered container for a HASHED one, so the key's own equality becomes
+the question and the comparator stops being it. The probe makes the two visible
+at once: the sorted map correctly still holds 2 under a deliberately finer raw
+`Ord`, and the hash map it converts to must hold 1.
+
+**`group_by` IS LEFT OPEN ON PURPOSE.** It is the same mechanical fix a fourth,
+fifth and sixth time, but it needs a keyed accumulation under the author's
+hash/eq that preserves INSERTION ORDER (what `LinkedHashMap` was providing), in
+three classes with three different result shapes (`[{key, values: [..]}]`,
+`List {key, values: List}`, `List {key, values: Set}`). Stacking three more
+unverified changes while the machine could not run a gate was the wrong trade;
+the measurement is recorded so the next session starts from the answer rather
+than the search. The constraint to add is `Eq 'k, Hash 'k` on the KEY FUNCTION's
+return.
+

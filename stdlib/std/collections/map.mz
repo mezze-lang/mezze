@@ -249,7 +249,16 @@ pub let max_value: { m: Map 'k 'v } with Ord 'v -> Option 'v = { m } ->
   max_value_with_cmp { m = m, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
 
 ## Swaps keys and values. Duplicate values keep one arbitrary key.
-pub let invert: { m: Map 'k 'v } -> Map 'v 'k = { m } -> __native_map_invert { m = m }
+## `Eq 'v, Hash 'v` — on the VALUE, because inverting keys the result BY the
+## values. Without it the new map bucketed structurally, so "duplicate values
+## keep one arbitrary key" was never reached for a type whose `Eq` the author
+## wrote: two such values both survived as separate keys.
+pub let invert: { m: Map 'k 'v } with Eq 'v, Hash 'v -> Map 'v 'k = { m } ->
+  __native_map_invert { m = m }
+
+pub let invert_with_evidence:
+  { m: Map 'k 'v, hash: { it: 'v } -> Int, eq: { it: 'v, r: 'v } -> Bool } -> Map 'v 'k =
+  { m, hash, eq } -> __native_map_invert_with_evidence { m = m, hash = hash, eq = eq }
 
 ## Keeps only the specified keys.
 pub let select_keys: { m: Map 'k 'v, ks: ['k] } with Eq 'k -> Map 'k 'v = { m, ks } ->

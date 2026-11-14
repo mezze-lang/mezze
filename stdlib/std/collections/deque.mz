@@ -321,7 +321,17 @@ pub let partition
   = { d, p } -> __native_deque_partition { d = d, p = p }
 
 ## Removes duplicate elements, keeping the first occurrence.
-pub let unique: { d: Deque 'a } -> Deque 'a = { d } -> __native_deque_unique { d = d }
+## `Eq 'a, Hash 'a` IS PART OF THE CONTRACT, matching `list::unique` and
+## `seq::unique`. This was the one evidence-dependent operation in this module
+## that declared nothing: it de-duplicated through a Java `LinkedHashSet`, so a
+## type whose `Eq` the author wrote was ignored and two values that author calls
+## one element both survived. Measured 2 where every sibling said 1.
+pub let unique: { d: Deque 'a } with Eq 'a, Hash 'a -> Deque 'a = { d } ->
+  __native_deque_unique { d = d }
+
+pub let unique_with_evidence:
+  { d: Deque 'a, hash: { it: 'a } -> Int, eq: { it: 'a, r: 'a } -> Bool } -> Deque 'a =
+  { d, hash, eq } -> __native_deque_unique_with_evidence { d = d, hash = hash, eq = eq }
 
 ## Sorts elements in ascending order.
 pub let sort: { d: Deque 'a } with Ord 'a -> Deque 'a = { d } ->
