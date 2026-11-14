@@ -764,6 +764,39 @@ class ConstraintGenerator(
                         // pinned by the equalities, never ran for exactly the programs
                         // that needed it.
                         val solveResult = solver.solve(result.constraints + abilityObligations)
+                        if (solveResult is ConstraintSolver.SolveResult.Success) {
+                            // ...and its ANSWERS are kept, not just its complaints.
+                            // The paragraph above says why this solve has to exist:
+                            // the global solve strips HasConstructor/HasField, so a
+                            // var those constraints pin is never pinned there. That
+                            // cuts both ways. This solve is the only one that binds
+                            // `'b` in `set::filter_map`'s `with Eq 'b, Hash 'b` for
+                            // a bare trailing expression whose callback RETURNS a
+                            // constructor (`{ val } -> Some { val = P.(val) }`) —
+                            // `'b` lives inside `Option 'b`, so only the stripped
+                            // HasConstructor reaches it. Reading the failures and
+                            // dropping the substitution meant a program the ability
+                            // check had ALREADY resolved (a `P` without `Eq` is
+                            // rejected here, so `'b` really is solved) still reached
+                            // emit with `'b` open: the per-site arrow was discarded
+                            // as unresolved, mono seeded no spec, and the call fell
+                            // back to a STRUCTURAL hash container — two elements
+                            // P's own Eq calls equal. The identical call `let`-bound
+                            // was correct. That is the fourth instance of this one
+                            // top-level-vs-bound asymmetry in this block, and the
+                            // first where the asymmetry is silently WRONG CODE
+                            // rather than a missing diagnostic.
+                            //
+                            // Safe to compose: TypeVar ids are globally unique and
+                            // `perBindingSubstitution` is the LOWER-precedence side
+                            // of the merge in TypeChecker (`solveResult
+                            // .compose(perBindingSubstitution)` keeps the receiver's
+                            // mappings), so the global solve stays authoritative
+                            // wherever the two meet — this only ADDS bindings for
+                            // variables it left open. Same argument as
+                            // `implOpSubstitution` beside it.
+                            perBindingSubstitution = solveResult.substitution.compose(perBindingSubstitution)
+                        }
                         if (solveResult is ConstraintSolver.SolveResult.Failure) {
                             // Keep only genuine ability failures — both the directly
                             // solved obligation and the deferred validateAbilityConstraints

@@ -5041,78 +5041,64 @@ Related: BUG 44 (a type-based fast path overriding the element's own `Ord`) and
 BUG 45 (a constraint declared and never threaded). Same family, third form:
 a REBUILD that drops the instance the collection was carrying.
 
-## BUG 48 — the evidence rewrite declines when the constrained variable is only NESTED
+## BUG 48 — the top-level re-solve read its failures and threw its answers away
 
-**OPEN**, diagnosed 2026-11-14, with the mechanism measured rather than
-guessed. Pinned by `MergeKeepsElementInstanceTest`'s
-`set filter_map at top level still collapses structurally`, which asserts the
-broken answer on purpose.
+**FIXED** 2026-11-14. Pinned by `MergeKeepsElementInstanceTest`'s
+`set filter_map at top level collapses by the target's Eq`, which asserted the
+BROKEN answer (2) while this was open and asserts 1 now. Verified by disabling
+the one changed line: that test, and only that test, goes red with
+`expected: <1> but was: <2>`.
 
-`set::filter_map` declares `with Eq 'b, Hash 'b` and is routed through
-`evidenceNativeForm` exactly as `set::map` is. It works INSIDE A FUNCTION and
-declines for a TOP-LEVEL EXPRESSION, where it collapses by representation.
+`set::filter_map` declares `with Eq 'b, Hash 'b`. It worked INSIDE A FUNCTION
+and, for a BARE TOP-LEVEL EXPRESSION, built the result set under STRUCTURAL
+identity — so two elements P's own `Eq` calls equal survived as two.
 
-**THE MECHANISM.** `evidenceNativeCall` fires only when
-`specEvidenceOpHash` answers, and that reads `specAbilityImpls` — "the impls the
-MONOMORPHIZER recorded as discharging this spec's constraints". Instrumented at
-the gate, printing that set for every call:
+**THE CAUSE.** `ConstraintGenerator`'s `ParsedTopLevelExpr` branch re-solves the
+expression's FULL constraint set. Its own comment says why it must: the global
+solve strips `HasConstructor`/`HasField` before its ability check, so a variable
+those constraints pin is never pinned there. It then read only
+`SolveResult.Failure` — keeping the ability, unknown-constructor and
+field-not-found diagnostics — and dropped the `Success` substitution on the
+floor. That solve is the only one that binds `'b` for a callback whose body
+RETURNS a constructor (`{ val } -> Some { val = P.(val) }`), because `'b` lives
+inside `Option 'b` and only the stripped `HasConstructor` reaches it. So `'b`
+reached emit still open, `resolvedCallSiteArrows` discarded the per-site arrow
+as unresolved (`holdsTypeVar`), mono seeded no spec, `specAbilityImpls` was
+empty, and `evidenceNativeCall` correctly declined — leaving the plain
+structural native.
 
-    __native_set_filter_map   specImpls=2 handWritten=2   -> fires    (in a function)
-    __native_set_filter_map   specImpls=0 handWritten=0   -> declines (top level)
-    __native_set_map          specImpls=2 handWritten=2   -> fires    (top level)
+The fix is one line beside the structural solve that already does exactly this,
+composing into `perBindingSubstitution`. Safe because TypeVar ids are globally
+unique and that substitution is the LOWER-precedence side of the merge in
+`TypeChecker` (`solveResult.compose(perBindingSubstitution)` keeps the
+receiver's mappings), so the global solve stays authoritative wherever the two
+meet and this only ADDS bindings for variables it left open — the same argument
+`implOpSubstitution` is composed under, three lines further down.
 
-So the monomorphizer records nothing when the constrained variable appears only
-NESTED inside another constructor. `set::map`'s `'b` IS the callback's return
-type and is recorded; `set::filter_map`'s `'b` sits inside `Option 'b` and is
-not. With nothing recorded, all three gates fail and the plain native runs.
+This is the FOURTH instance of one top-level-vs-bound asymmetry in that single
+block (abilities, unknown constructor, missing field, and now this), and the
+first where the asymmetry produced silently WRONG CODE rather than a missing
+diagnostic.
 
-**WHY IT IS NOT A DICTIONARY-SITE BUG.** Three suppliers were instrumented and
-none fires for this call: `injectDictFields`' per-var branch (`keyVar` is null
-for operator- and callback-derived constraints), its concrete-types fallback,
-and `abilityOpDictSlot`. The decision is made earlier, at the rewrite.
+**WHAT THE FIRST DIAGNOSIS GOT WRONG, so the eliminations are not re-walked.**
+It read the nesting as the cause — "the monomorphizer records nothing when the
+constrained variable appears only NESTED inside another constructor" — and
+located the fix in `MonoDriver.resolveAbilityConstraintsOf`'s positional
+`nameToConcrete`. The nesting is real and the guard quoted there IS correct, but
+the solver already binds `'b` through the nested payload. The decisive probe: a
+newtype with NO `Eq` impl, in exactly this top-level shape, is REJECTED with
+V0402 `Q does not implement 'Eq'`. A vacuously-discharged constraint cannot
+reject anything, so `'b` was solved all along — the binding simply never left
+that discarded substitution. One cheap experiment ("does the check still bite?")
+settled what four rounds of reading the monomorphizer could not.
 
-**A WORKAROUND THAT DOES NOT WORK, so no one tries it twice.** Expressing it as
-`from_seq { xs = collect_seq { set, f } }` — where `from_seq`'s constraint is on
-a seq's element, i.e. `'b` UN-NESTED, and which does work at top level on its
-own — still declines. The nesting is UPSTREAM of both calls, so the
-monomorphizer has no more to record there than it did before. Tried, measured,
-reverted.
+Also eliminated and still true: no dictionary-site supplier fires for this call
+(`injectDictFields`' per-var branch — `keyVar` is null for callback-derived
+constraints — its concrete-types fallback, and `abilityOpDictSlot`), and
+re-spelling it as `from_seq { xs = collect_seq { set, f } }` does not help.
 
-**SCOPE.** In-function code is every real program: everything sits under `main`,
-and a top-level bare expression is a test-harness and `eval` shape. So the
-practical impact is nil today — but the same limit will bite any future
-constraint whose variable is reached only through a constructor, which is why it
-has a number.
+**SCOPE.** A bare top-level expression is a test-harness/`eval` shape — a real
+program sits under `main` and always took the working path — so no shipped
+program was affected. The defect was in the typechecker, not in the containers,
+and the fix makes both paths agree.
 
-**THE FIX, located.** `MonoDriver.resolveAbilityConstraintsOf` builds
-`nameToConcrete` POSITIONALLY from the spec's `typeArgs` against
-`typeParamNames`, then substitutes the constraint's own type args through it:
-
-    val concreteArgs = constraint.typeArgs.map { ta ->
-        if (ta is MezzeType.VarType) nameToConcrete[ta.variable.name] ?: ta else ta
-    }
-    ...
-    if (concreteArgs.any { it is MezzeType.VarType } && abilityImplsForHash.size != 1) continue
-
-For `set::filter_map` the params are `['a, 'b]` and `'b` is NOT solved — it
-appears only inside `Option 'b` in the callback's return — so `concreteArgs`
-still holds a `VarType`, the guard declines, and no impl is recorded.
-
-**THAT GUARD IS CORRECT AND IS NOT THE BUG.** Its own comment says why: an
-unbound constraint variable must not pick an impl, because a `VarType` matches
-every target and `firstOrNull` then hands back whatever came first — which is
-how `impl Eq for Box 'a` once supplied Box's own `eq` to its payload. Loosening
-it reintroduces a silently-wrong-impl bug.
-
-The fix belongs UPSTREAM, in how a spec's `typeArgs` are derived: unify the
-callee's declared PARAMETER types against the ACTUAL argument types
-structurally, so a variable reachable only through a constructor (`Option 'b`
-against `Option P`) is solved. With `'b := P` arriving concrete, every stage
-below works untouched.
-
-**THE TRADE, stated rather than taken quietly.** That derivation is on the path
-every specialisation takes, and the demonstrated user-facing impact today is
-NIL — no `mez build` program can reach the shape, because everything in a
-program sits under `main` and takes the working path. So this is a correctness
-debt with a known cause and no known victim, which is why it is recorded here
-precisely instead of fixed in a hurry.

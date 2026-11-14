@@ -232,15 +232,33 @@ class MergeKeepsElementInstanceTest {
         "2 means the kept elements collapsed by representation",
     )
 
-    /** THE SAME CALL AS A TOP-LEVEL EXPRESSION, which is NOT the same question.
-     *  A real program has everything under `main`, and the in-function form
-     *  above is what it compiles. This one is recorded because it behaves
-     *  differently — the constraint on `'b` inside `Option 'b` is reached in
-     *  one path and not the other — and that asymmetry is worth a name rather
-     *  than a quietly-passing suite. */
+    /** PROBE: the same top-level call with the callback's return ANNOTATED, so
+     *  `'b` is concrete from the start rather than inferred through
+     *  `Option 'b`. If this collapses where the inferred version does not, the
+     *  fault is the call site's recorded type, not the constraint. */
     @Test
-    fun `set filter_map at top level still collapses structurally`() = assertEquals(
-        2L,
+    fun `probe — top level with an annotated callback`() = assertEquals(
+        1L,
+        eval(
+            """
+            $byTens
+            let toP: { val: Int } -> Option P = { val } -> Some { val = P.(val) }
+            set::size { s = set::filter_map { set = set::from_seq { xs = [10, 11] }, f = toP } }
+            """,
+        ),
+    )
+
+    /** THE SAME CALL AS A BARE TOP-LEVEL EXPRESSION (BUG 48). The global solve
+     *  strips HasConstructor before its ability check, so `'b` inside
+     *  `Option 'b` is pinned only by the top-level re-solve in
+     *  `ConstraintGenerator` — which used to read that solve's failures and
+     *  throw its substitution away. `'b` then reached emit open, the per-site
+     *  arrow was discarded as unresolved, mono seeded no spec, and the set was
+     *  built under STRUCTURAL identity: 2, where P's own Eq says 1. The
+     *  `let`-bound form above was always correct. */
+    @Test
+    fun `set filter_map at top level collapses by the target's Eq`() = assertEquals(
+        1L,
         eval(
             """
             $byTens
@@ -250,7 +268,7 @@ class MergeKeepsElementInstanceTest {
             } }
             """,
         ),
-        "1 would mean the top-level path now reaches the constraint too",
+        "2 means the top-level path still never pinned 'b to P",
     )
 
     @Test
