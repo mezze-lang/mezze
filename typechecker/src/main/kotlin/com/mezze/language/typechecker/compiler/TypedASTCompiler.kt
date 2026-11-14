@@ -2323,7 +2323,7 @@ class TypedASTCompiler(
         // Callee type var → type at this site (instance head / declared arrow
         // unified against the actuals); serves the per-var dict slots.
         varBindings: Map<String, MezzeType> = emptyMap(),
-        methodOwnType: Map<String, Pair<MezzeType, Hash?>> = emptyMap(),  // ownTypePerMethod
+        methodOwnType: Map<String, OwnConstraintTypes> = emptyMap(),  // ownTypePerMethod
     ): NodeIR {
         // Collect concrete types from the argument record as fallback. Refresh
         // each field's type against the final substitution and, for a nullary
@@ -2544,6 +2544,40 @@ class TypedASTCompiler(
         // asked the question.
         is VariantType -> type.typeArgs.lastOrNull { it !is VarType }
         else -> null
+    }
+
+    /**
+     * BUG 40: the impl whose CLASS-ARG TUPLE is exactly [tuple], or null.
+     *
+     * [resolveOpHashFromConcreteTypes] takes a LIST of candidate types and tries
+     * each one as a RECEIVER, returning the first impl that claims any of them.
+     * That is the right question for a single-parameter ability and the wrong
+     * one for a class-param ability, where no single arg identifies the impl:
+     * `[Str, Src]` has to select `Make Str for Src`, but asking "is there an
+     * impl for receiver Str?" says no and "for receiver Src?" says yes, twice.
+     *
+     * So this asks positionally instead, against the same `targetTypes` that
+     * direct dispatch matches — content comparison, no names. A unique winner
+     * wins; anything else declines and leaves the existing passes to answer, so
+     * a call site that resolves today keeps resolving to the same impl.
+     */
+    internal fun tryResolveAbilityOpByTuple(
+        methodName: String,
+        tuple: List<MezzeType>,
+        abilityHash: Hash? = null,
+    ): Hash? {
+        if (tuple.size < 2 || tuple.any { it is VarType }) return null
+        val all = abilityOpIndex[methodName] ?: return null
+        val candidates =
+            if (abilityHash != null) all.filter { it.abilityHash == abilityHash }.ifEmpty { all }
+            else all
+        val matching = candidates.filter { op ->
+            op.targetTypes.size == tuple.size &&
+                op.targetTypes.zip(tuple).all { (target, actual) ->
+                    typeMatchesTarget(adoptBareRecord(actual), target)
+                }
+        }
+        return matching.map { it.opHash }.distinct().singleOrNull()
     }
 
     internal fun resolveOpHashFromConcreteTypes(
@@ -3738,6 +3772,22 @@ class TypedASTCompiler(
                 if (uniqueHashes.size == 1) return uniqueHashes.first()
             }
         }
+        // Everything above has declined, so nothing here determines the answer
+        // and this is a GUESS — which is how BUG 40 did its damage: the dict
+        // prescan reads a non-null result as "this op resolves", so a guess here
+        // told it no dictionary was needed and a generic function was compiled
+        // without one.
+        //
+        // Declining instead (`distinct().singleOrNull()`) was tried and REVERTED.
+        // With a type-variable receiver every candidate "matches" —
+        // `typeMatchesTarget` accepts a var against any target — so declining
+        // there is declining on ignorance, and it stopped `x + 100` resolving
+        // `add` at all where `x` came from `[Some { val = x }, ...rest]` with the
+        // payload unsolved: `expected: <105> but was: <function add>`
+        // (RefutableConsHeadTest). Narrowing the decline to a CONCRETE receiver
+        // did not fix that case either, so the guess is load-bearing by a route
+        // not yet understood. BUG 40 is fixed at the dict layer instead, where
+        // the whole class-arg tuple is available; this line is left as it was.
         val match = receiverMatches.firstOrNull()
         if (match != null) return match.opHash
         // Fallback: if there's exactly one candidate and the receiver is a variant/type-application,

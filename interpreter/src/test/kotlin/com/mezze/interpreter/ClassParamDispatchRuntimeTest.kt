@@ -174,52 +174,59 @@ main {}
     }
 
     /**
-     * BUG 40 — BREAK TEST, asserting the CURRENT WRONG BEHAVIOUR.
-     *
-     * The same return-position class param, reached through a GENERIC function:
+     * BUG 40 — FIXED. The same return-position class param, reached through a
+     * GENERIC function, where the result type at the inner call is a VARIABLE:
      *
      *     pub let via: { x: 'a } with Make 'b 'a -> 'b = { x } -> x.make {}
      *     let t: Str = via { x = s }
      *     -> error[I0004]: class java.lang.Long cannot be cast to class java.lang.String
      *
-     * BUG 39's fix reads the type the call PRODUCES, which works at a
-     * monomorphic site. Inside `via` that type is a VARIABLE, so the caller's
-     * evidence has to carry the choice, and it does not.
+     * BUG 39's fix reads the type a call PRODUCES, which settles a monomorphic
+     * site. One hop puts a variable there, so the caller's evidence has to carry
+     * the choice.
      *
-     * NARROWED (predicted two causes, measured which):
-     *   - both impls, `Str` call ONLY            -> crashes
-     *   - both impls, either call ORDER          -> the Str one crashes
+     * NARROWED (two causes were plausible; measured which):
+     *   - both impls, `Str` call ONLY            -> crashed
+     *   - both impls, either ORDER               -> the Str one crashed
      *   - ONE impl only, `Str` call              -> "222", correct
      *   - the same two impls called DIRECTLY     -> both correct
      *
-     * So it is FIRST-MATCH, not "one specialization served both": a single call
-     * is enough, order is irrelevant, and it takes two impls EXISTING rather
-     * than two call sites. That distinguishes it from BUG 38, which needed both
-     * to be reachable, and from BUG 39, which the direct-call row confirms fixed.
+     * FIRST-MATCH, then: one call was enough, order was irrelevant, and it took
+     * two impls EXISTING rather than two call sites.
      *
-     * LIKELY SITE, not yet confirmed by a trace — `MonoDriver`:
+     * THE CAUSE, traced rather than inferred. I first guessed `MonoDriver`'s
+     * "unbound constraint variable must not pick an impl" guard; that was WRONG.
+     * A trace at the moment of the wrong choice showed `tryResolveAbilityOp`
+     * reached with `expected=null arg=null` and candidates `[Int, Src]` and
+     * `[Str, Src]`, and the only caller that got there was the dict PRESCAN —
+     * `scanExprForDictFunctionCalls`, asking whether `make` resolves from the
+     * ARGUMENT types alone (`[Src]`). It uses the answer only as a boolean, so
+     * first-match said "resolvable", the prescan concluded no dictionary was
+     * needed, and `via` was compiled WITH NO DICT PARAM. A second trace
+     * confirmed the call site never even attempted to inject one.
      *
-     *     if (concreteArgs.any { it is VarType } && abilityImplsForHash.size != 1) continue
+     * THE FIX is in the dict layer: `ownTypePerMethod` reduced a constraint's
+     * whole tuple to its FIRST resolvable arg and took its bindings from the
+     * ARGUMENTS only, so `'b` was never determined. It now carries the complete
+     * tuple and `dictEnrichedArg` also harvests from the type the call produces,
+     * so `tryResolveAbilityOpByTuple` matches `[Str, Src]` positionally and
+     * names one impl.
      *
-     * whose own comment says "Leave the call for the compiler, which binds the
-     * variable through the instance head at spec-compile time. Only an ability
-     * with a single instance is not a guess." The compiler then guesses, and
-     * silently. `concreteArgs` is substituted from the call's harvested type
-     * args; `'b` is reachable only from the RETURN, so if the harvest derives
-     * bindings from the ARGUMENTS it stays a var and the ref is dropped. Mono's
-     * own matching already zips the full tuple correctly, so the defect is
-     * upstream of it.
-     *
-     * THIS TEST MUST BE INVERTED when the bug is fixed — it exists so the defect
-     * is recorded and the gate stays honest, which is how BUG 37 was pinned.
+     * Making the ambiguous tail of `tryResolveAbilityOp` DECLINE instead of
+     * guessing is the more obvious fix and was tried and REVERTED: with a
+     * type-variable receiver every candidate "matches", so it declines on
+     * ignorance and stops `x + 100` resolving `add` where the pattern-bound
+     * payload never solved — `RefutableConsHeadTest` is the guard. See
+     * known-bugs BUG 40.
      */
     @Test
-    fun `BUG 40 break - a generic hop loses the return-position class param`() {
-        // The wrong value reaches `to_dbg`, which throws out of the interpreter
-        // rather than printing — the stack lands in `InspectNatives.renderScalar`
-        // with "Long cannot be cast to String", i.e. the Int impl's 111 standing
-        // where a Str was promised. So the break is recorded as "the correct
-        // value never arrives", by whichever route.
+    fun `a generic hop carries the return-position class param`() {
+        // Before the fix the wrong value reached `to_dbg` and threw out of the
+        // interpreter rather than printing — the stack landed in
+        // `InspectNatives.renderScalar` with "Long cannot be cast to String",
+        // the Int impl's 111 standing where a Str was promised. `runProgram`
+        // still captures a throw, so a regression reads as a failed assertion
+        // here rather than an error escaping the test.
         val out = runProgram(
             """
             use std::effects::log::{ println, Console }
@@ -245,16 +252,18 @@ main {}
             """.trimIndent(),
         )
         assertEquals(
-            false,
+            true,
             out.contains("T=\"222\""),
-            "BUG 40 IS FIXED — `via` asked at Str now reaches `Make Str for Src`. " +
-                "Invert this test: assert the correct value, drop the break " +
-                "framing, and move the known-bugs entry to FIXED.\n$out",
+            "`via` asked at Str must reach `Make Str for Src`. Inside `via` the " +
+                "result type is a VARIABLE, so the caller's evidence carries the " +
+                "choice — the dict is resolved from the whole class-arg tuple " +
+                "[Str, Src], with `'b` learned from the type the call PRODUCES.\n$out",
         )
     }
 
-    /** The program's output, or the failure it died with — a break test has to
-     *  be able to record either. */
+    /** The program's output, or the failure it died with. Keeping the catch
+     *  means a regression to BUG 40 fails the assertion with the output in the
+     *  message, instead of a ClassCastException escaping from `to_dbg`. */
     private fun runProgram(src: String): String = try {
         MezzeTestHelper.runWithOutput(src).output
     } catch (e: Throwable) {

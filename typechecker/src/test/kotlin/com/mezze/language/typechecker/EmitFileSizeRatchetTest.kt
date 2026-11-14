@@ -104,7 +104,17 @@ class EmitFileSizeRatchetTest {
             // first-registered one — `let f: Float = (5).into {}` returned the
             // STRING "5" — so this is not an edge the file can be spared. Same
             // placement argument as BUG 38 above.
-            C + "TypedASTCompiler.kt" to 4455,   // was 5,580; +2 for carrying a `...spread` through ability-op receiver injection
+            // +50 for BUG 40, the third of the class-param family:
+            // `tryResolveAbilityOpByTuple`, which asks which impl a whole
+            // class-arg TUPLE names — the dict path had only a list of candidate
+            // receivers to try one at a time, which is the right question for a
+            // single-parameter ability and the wrong one here. Most of the growth
+            // is the comment on the ambiguous tail of `tryResolveAbilityOp`,
+            // recording that making it DECLINE instead of guessing was tried and
+            // reverted (it broke `x + 100` on an unsolved pattern binding). That
+            // note is worth its lines: it is the obvious next fix and it does not
+            // work.
+            C + "TypedASTCompiler.kt" to 4505,   // was 5,580; +2 for carrying a `...spread` through ability-op receiver injection
             // +42 for `contextRowWithBodyAssocTypes`: an INLINE lambda was stamped
             // with the row from the pushed CONTEXT, so a callback's associated
             // type was the CALLEE's variable rather than what the body threw, and

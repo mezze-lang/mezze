@@ -4667,7 +4667,7 @@ differing by EFFECT rather than by value — has not been probed. The last test 
 `ClassParamDispatchSpecTest` pins the accepted shape and says so, since I
 predicted T0215 and measured otherwise.
 
-## BUG 40 — OPEN: one generic hop loses a return-position class param
+## BUG 40 — FIXED: one generic hop lost a return-position class param
 
 Found 2026-11-14 immediately after BUG 39, by asking what that fix does NOT
 cover. **Soundness hole: a function typed `-> 'b`, called at `Str`, returns the
@@ -4708,45 +4708,70 @@ call is enough, the order is irrelevant, and it takes two impls EXISTING rather
 than two sites. That is what distinguishes it from BUG 38 (needed both
 reachable) and confirms BUG 39 stays fixed on the direct route.
 
-### LIKELY SITE — a hypothesis, NOT confirmed by a trace
+### THE CAUSE, traced — and my first hypothesis was WRONG
 
-`MonoDriver`, in the walk that builds a call's `AbilityImplRef`s:
+I guessed `MonoDriver`'s "an UNBOUND constraint variable must not pick an impl"
+guard, on the reasoning that `'b` is reachable only from the RETURN so the
+harvest would leave it a var. **That was not it.** Two traces settled it:
 
-```kotlin
-val concreteArgs = constraint.typeArgs.map { ta ->
-    if (ta is MezzeType.VarType) nameToConcrete[ta.variable.name] ?: ta else ta
-}
-...
-// An UNBOUND constraint variable must not pick an impl: a VarType matches
-// every target, so `firstOrNull` handed back whatever impl came first ...
-// Leave the call for the compiler, which binds the variable through the
-// instance head at spec-compile time. Only an ability with a single instance
-// is not a guess.
-if (concreteArgs.any { it is MezzeType.VarType } && abilityImplsForHash.size != 1) continue
-```
+1. At the moment of the wrong choice, `tryResolveAbilityOp` is reached with
+   `expected=null arg=null` and candidates `[Int, Src]` / `[Str, Src]`, and
+   picks the first. The ONLY caller that gets there for `make` is the dict
+   PRESCAN — `scanExprForDictFunctionCalls`, asking whether the op resolves from
+   the ARGUMENT types alone (`[Src]`).
+2. The prescan uses that answer only as a boolean. First-match said
+   "resolvable", so the prescan concluded no dictionary was needed and **`via`
+   was compiled with no dict param at all**. A second trace at `dictEnrichedArg`
+   confirmed the call site never even attempted to inject one.
 
-The guard is right about its own concern and says what it is deferring to — and
-the compiler then guesses, silently, which is the bug. `nameToConcrete` is built
-from the CALLEE'S TYPE PARAMS zipped with the call's harvested type args, and
-`'b` is reachable only from the RETURN. If the harvest derives bindings from the
-ARGUMENTS, `'b` stays a var, the ref is dropped, and dispatch falls back to the
-first receiver match. Mono's own matching already zips the FULL tuple correctly
-(`impl.targetTypes.zip(concreteArgs)`), so the defect is upstream of it.
+So the guess did the damage by being non-null, not by being wrong — a caller
+reads "not null" as "this resolves".
 
-Consistent with the single-impl row passing: with one impl, `size != 1` is false
-and the guard does not fire.
+### THE FIX: the dict layer gets the whole tuple
 
-### FIX SHAPE, and why it is bigger than BUGS 38/39
+`ownTypePerMethod` reduced a constraint's whole tuple to its FIRST resolvable
+type arg — `Str`, which matches no `Make _ for Str` — and drew its bindings from
+the ARGUMENTS only, so `'b` was never determined at all. Two changes:
 
-Bind a callee's type params from the call's EXPECTED RESULT TYPE as well as from
-its arguments, so a param that appears only in the return reaches
-`nameToConcrete`. Mono's existing tuple match then does the rest.
+- `OwnConstraintTypes.tuple` carries EVERY type arg in the ability's declaration
+  order, present only when all of them are determined (one hole and every impl
+  would agree at that slot);
+- `dictEnrichedArg` additionally harvests bindings from the type the call
+  PRODUCES, which is the only place `'b` is visible. Kept separate from
+  `calleeVarBindings` so only the per-constraint path sees it.
 
-That is a change in instantiation harvesting, a layer with recorded history:
-[[project_ambiguous_dict_rule]] measured **176 false hits** when a related
-judgement was moved from emit to solve, and records two structural refinements
-(RECURSION, CARRIED) that were needed before it was sound. So this wants its own
-pass with the full dict suites, not a quick edit.
+`tryResolveAbilityOpByTuple` then matches `[Str, Src]` positionally against each
+impl's `targetTypes` — the same content comparison BUG 38 gave direct dispatch —
+and declines unless exactly one impl matches, so no call site that already
+resolved changes what it resolves to.
+
+Verified: all five narrowing rows correct, the `generic receiver and target` row
+of the round-2 matrix correct, BUG 38/39's direct rows and `datetime`'s five
+impls unchanged.
+
+### A FIX I TRIED AND REVERTED, recorded because it is the obvious one
+
+The guess in `tryResolveAbilityOp`'s ambiguous tail is what let the damage
+happen — the prescan reads non-null as "this resolves" — so making it DECLINE
+(`distinct().singleOrNull()`) looks like the root fix, and it is what
+[[feedback_no_fallbacks]] asks for. It works, in the sense that BUG 40's silent
+wrong value becomes a loud "no dictionary was supplied for ability operation
+`make`". It also breaks this:
+
+    let f = { xs } -> match xs is
+      [Some { val = x }, ...rest] -> x + 100
+      other -> 0
+    -> expected: <105> but was: <function add>
+
+With a type-VARIABLE receiver every candidate "matches", because
+`typeMatchesTarget` accepts a var against any target — so declining there is
+declining on ignorance, and `add` stopped resolving at all. Narrowing the
+decline to a CONCRETE receiver did NOT fix that case either, and the failure
+reproduces only through the in-process test harness, not the launcher, so the
+route is not yet understood. Reverted; the guess stays, and BUG 40 is fixed at
+the dict layer where the tuple is actually available.
+
+`RefutableConsHeadTest` is the guard for anyone who tries this again.
 
 ### A SECOND, SEPARATE FINDING from the same probe
 
