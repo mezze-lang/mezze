@@ -3258,6 +3258,20 @@ class TypedASTCompiler(
         // keys are the TARGET type, and collapsed by representation without it.
         "__native_set_filter_map" to "__native_set_filter_map_with_evidence",
         "__native_map_map_keys" to "__native_map_map_keys_with_evidence",
+        // THE CONVERSIONS INTO A HASH CONTAINER, which create one and so must
+        // bucket by the element's own instance. The SORTED conversions were
+        // fixed under BUG 45; these are their hash twins and were missed.
+        "__native_seq_to_set" to "__native_seq_to_set_with_evidence",
+        "__native_list_to_set" to "__native_list_to_set_with_evidence",
+        "__native_deque_to_set" to "__native_deque_to_set_with_evidence",
+        "__native_sorted_set_to_set" to "__native_sorted_set_to_set_with_evidence",
+        // The map side of the same family. Its constraint sits on a key INSIDE
+        // a record element type, which is the shape that did not reach the
+        // constraint for `set::filter_map`'s `Option 'b` at top level — so
+        // whether it arrives here is a question for the probe, not the reader.
+        "__native_seq_to_map" to "__native_seq_to_map_with_evidence",
+        "__native_list_to_map" to "__native_list_to_map_with_evidence",
+        "__native_deque_to_map" to "__native_deque_to_map_with_evidence",
         "__native_set_insert" to "__native_set_insert_with_evidence",
         "__native_set_contains" to "__native_set_contains_with_evidence",
         "__native_set_remove" to "__native_set_remove_with_evidence",

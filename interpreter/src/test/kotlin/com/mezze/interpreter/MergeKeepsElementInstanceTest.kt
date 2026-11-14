@@ -46,7 +46,11 @@ class MergeKeepsElementInstanceTest {
     private val byTens = """
         use std::collections::set
         use std::collections::map
-        use std::abilities::compare::{ Eq, Hash }
+        use std::collections::seq
+        use std::collections::list
+        use std::collections::deque
+        use std::collections::sorted_set
+        use std::abilities::compare::{ Eq, Ord, Hash }
         newtype P = Int
         let un: { v: P } -> Int = { v } -> match v is
           P.(n) -> n
@@ -57,6 +61,17 @@ class MergeKeepsElementInstanceTest {
         }
         impl Hash for P where {
           hash = { it } -> cls { v = it }
+        }
+        ## ORD ON THE RAW VALUE, deliberately finer than the Eq. A SortedSet of
+        ## P(10) and P(11) then holds TWO elements — they differ in order — and
+        ## converting it to a hash Set must collapse them to ONE, because they
+        ## are the same element under the Eq. A class-wide Ord would make the
+        ## source hold one already and the test would prove nothing.
+        impl Ord for P where {
+          lt = { it, r } -> un { v = it } < un { v = r },
+          le = { it, r } -> un { v = it } <= un { v = r },
+          gt = { it, r } -> un { v = it } > un { v = r },
+          ge = { it, r } -> un { v = it } >= un { v = r },
         }
     """
 
@@ -272,6 +287,71 @@ class MergeKeepsElementInstanceTest {
               None -> 0 - 1
             """,
         ),
+    )
+
+    /**
+     * EVERY CONVERSION INTO A HASH CONTAINER, which creates one and so must
+     * bucket by the element's or key's own instance. None of the seven
+     * declared anything about it, so all seven bucketed by REPRESENTATION.
+     *
+     * THIS IS A GAP IN THE EARLIER SWEEP, not a new family. The SORTED
+     * conversions were fixed the same day under BUG 45 — `seq::to_sorted_set`,
+     * `seq::to_sorted_map` and the deque pair, each of which declared no `Ord`
+     * — and their hash twins were never checked. `set::from_seq` is the same
+     * operation spelled from the other side and always carried
+     * `with Eq 'a, Hash 'a`; that asymmetry is what found these.
+     *
+     * `sorted_set::to_set` is in here too: converting OUT of an ordered
+     * container into a hashed one still needs the element's equality, and the
+     * source's comparator says nothing about it.
+     */
+    @Test
+    fun `seq to_set buckets by the element instance`() = assertEquals(
+        1L,
+        eval("$byTens\nset::size { s = seq::to_set { xs = [P.(10), P.(11)] } }"),
+        "2 means it bucketed by representation",
+    )
+
+    @Test
+    fun `list to_set buckets by the element instance`() = assertEquals(
+        1L,
+        eval("$byTens\nset::size { s = list::to_set { xs = list::from_seq { xs = [P.(10), P.(11)] } } }"),
+        "2 means it bucketed by representation",
+    )
+
+    @Test
+    fun `deque to_set buckets by the element instance`() = assertEquals(
+        1L,
+        eval("$byTens\nset::size { s = deque::to_set { d = deque::from_seq { xs = [P.(10), P.(11)] } } }"),
+        "2 means it bucketed by representation",
+    )
+
+    @Test
+    fun `sorted_set to_set buckets by the element instance`() = assertEquals(
+        1L,
+        eval("$byTens\nset::size { s = sorted_set::to_set { s = sorted_set::from_seq { xs = [P.(10), P.(11)] } } }"),
+        "2 means it bucketed by representation",
+    )
+
+    @Test
+    fun `seq to_map buckets by the element instance`() = assertEquals(
+        1L,
+        eval("$byTens\nmap::size { m = seq::to_map { xs = [{ k = P.(10), v = 1 }, { k = P.(11), v = 2 }] } }"),
+        "2 means it bucketed by representation",
+    )
+
+    @Test
+    fun `list to_map buckets by the element instance`() = assertEquals(
+        1L,
+        eval("$byTens\nmap::size { m = list::to_map { xs = list::from_seq { xs = [{ k = P.(10), v = 1 }, { k = P.(11), v = 2 }] } } }"),
+        "2 means it bucketed by representation",
+    )
+
+    @Test
+    fun `deque to_map buckets by the element instance`() = assertEquals(
+        1L,
+        eval("$byTens\nmap::size { m = deque::to_map { d = deque::from_seq { xs = [{ k = P.(10), v = 1 }, { k = P.(11), v = 2 }] } } }"),
+        "2 means it bucketed by representation",
     )
 
     /** Plain Int keys and elements are untouched: with no hand-written

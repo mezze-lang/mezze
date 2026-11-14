@@ -70,6 +70,25 @@ public final class SetNatives {
         return MezzeSet.fromStorage(EvidenceSetStorage.fromElements(arr, hashing));
     }
 
+    /**
+     * A conversion INTO a set, bucketed by the element's own instance.
+     *
+     * <p>`seq::to_set`, `list::to_set`, `deque::to_set` and
+     * `sorted_set::to_set` all CREATE a hash set and declared nothing about
+     * its elements, so they bucketed by representation: two values a
+     * hand-written `Eq` calls one element stayed apart. `set::from_seq` is the
+     * same operation spelled from the other side and always carried the
+     * constraint — the asymmetry is what found these.
+     *
+     * <p>Takes the elements already collected, so one method serves every
+     * source container.
+     */
+    @TruffleBoundary
+    public static MezzeSet toSetWithEvidence(Object[] elems, MezzeFunction hashFn,
+                                             MezzeFunction eqFn) {
+        return fromArrayWithEvidence(elems, hashFn, eqFn);
+    }
+
     // ==================== Factory Operations ====================
 
     public static MezzeSet empty() {

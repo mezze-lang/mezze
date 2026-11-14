@@ -1310,6 +1310,32 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_set_remove_with_evidence", (r, c) ->
             SetNatives.removeWithEvidence(getSet(r, "s"), getField(r, "x"),
                 getFunction(r, "hash"), getFunction(r, "eq")));
+        // THE CONVERSIONS INTO A HASH CONTAINER. Each collects its source to
+        // an array and hands it to the builder that already installs an
+        // element instance — see SetNatives.toSetWithEvidence.
+        HANDLERS.put("__native_seq_to_set_with_evidence", (r, c) ->
+            SetNatives.toSetWithEvidence(getSeq(r, "xs").toArray(),
+                getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_list_to_set_with_evidence", (r, c) ->
+            SetNatives.toSetWithEvidence(getList(r, "xs").toArray(),
+                getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_deque_to_set_with_evidence", (r, c) ->
+            SetNatives.toSetWithEvidence(getDeque(r, "d").toArray(),
+                getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_sorted_set_to_set_with_evidence", (r, c) ->
+            SetNatives.toSetWithEvidence(getSortedSet(r, "s").toArray(),
+                getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_seq_to_map_with_evidence", (r, c) ->
+            MapNatives.fromSeqWithEvidence(getSeq(r, "xs"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_list_to_map_with_evidence", (r, c) ->
+            MapNatives.fromSeqWithEvidence(
+                com.mezze.datastructures.seq.MezzeSeq.fromArray(getList(r, "xs").toArray()),
+                getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_deque_to_map_with_evidence", (r, c) ->
+            MapNatives.fromSeqWithEvidence(
+                com.mezze.datastructures.seq.MezzeSeq.fromArray(getDeque(r, "d").toArray()),
+                getFunction(r, "hash"), getFunction(r, "eq")));
         HANDLERS.put("__native_set_filter_map_with_evidence", (r, c) ->
             SetNatives.filterMapWithEvidence(getSet(r, "set"), getFunction(r, "f"),
                 getFunction(r, "hash"), getFunction(r, "eq"), c));
