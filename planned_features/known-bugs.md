@@ -4666,3 +4666,100 @@ the value is discarded. A shape where the choice is observable — two impls
 differing by EFFECT rather than by value — has not been probed. The last test in
 `ClassParamDispatchSpecTest` pins the accepted shape and says so, since I
 predicted T0215 and measured otherwise.
+
+## BUG 40 — OPEN: one generic hop loses a return-position class param
+
+Found 2026-11-14 immediately after BUG 39, by asking what that fix does NOT
+cover. **Soundness hole: a function typed `-> 'b`, called at `Str`, returns the
+Int impl's value.** Pinned by the BREAK test in
+`ClassParamDispatchRuntimeTest`, which asserts the current wrong behaviour.
+
+```mezze
+ability Make 'b for 'a where { make: { it: 'a } -> 'b }
+type Src = { n: Int }
+impl Make Int for Src where { make: { it: Src } -> Int = { it } -> 111 }
+impl Make Str for Src where { make: { it: Src } -> Str = { it } -> "222" }
+
+## A GENERIC hop. Inside `via` the result type is a VARIABLE, so nothing at
+## that call site can choose the impl — the caller's evidence must.
+pub let via: { x: 'a } with Make 'b 'a -> 'b = { x } -> x.make {}
+
+let t: Str = via { x = s }
+## -> error[I0004]: class java.lang.Long cannot be cast to class java.lang.String
+##    thrown from InspectNatives.renderScalar — the Int impl's 111 standing
+##    where a Str was promised
+```
+
+BUG 39's fix reads the type the call PRODUCES, which settles a monomorphic site.
+One generic hop puts a type variable there instead.
+
+### NARROWED: two causes were plausible, the measurement picked one
+
+| probe | result |
+|---|---|
+| both impls, `Str` call ONLY | crashes |
+| both impls, `Str` first then `Int` | the Str one crashes |
+| both impls, `Int` first then `Str` | the Str one crashes |
+| **ONE** impl only, `Str` call | `"222"` — correct |
+| the same two impls called DIRECTLY | both correct |
+
+So it is FIRST-MATCH, not "one specialization served both call sites": a single
+call is enough, the order is irrelevant, and it takes two impls EXISTING rather
+than two sites. That is what distinguishes it from BUG 38 (needed both
+reachable) and confirms BUG 39 stays fixed on the direct route.
+
+### LIKELY SITE — a hypothesis, NOT confirmed by a trace
+
+`MonoDriver`, in the walk that builds a call's `AbilityImplRef`s:
+
+```kotlin
+val concreteArgs = constraint.typeArgs.map { ta ->
+    if (ta is MezzeType.VarType) nameToConcrete[ta.variable.name] ?: ta else ta
+}
+...
+// An UNBOUND constraint variable must not pick an impl: a VarType matches
+// every target, so `firstOrNull` handed back whatever impl came first ...
+// Leave the call for the compiler, which binds the variable through the
+// instance head at spec-compile time. Only an ability with a single instance
+// is not a guess.
+if (concreteArgs.any { it is MezzeType.VarType } && abilityImplsForHash.size != 1) continue
+```
+
+The guard is right about its own concern and says what it is deferring to — and
+the compiler then guesses, silently, which is the bug. `nameToConcrete` is built
+from the CALLEE'S TYPE PARAMS zipped with the call's harvested type args, and
+`'b` is reachable only from the RETURN. If the harvest derives bindings from the
+ARGUMENTS, `'b` stays a var, the ref is dropped, and dispatch falls back to the
+first receiver match. Mono's own matching already zips the FULL tuple correctly
+(`impl.targetTypes.zip(concreteArgs)`), so the defect is upstream of it.
+
+Consistent with the single-impl row passing: with one impl, `size != 1` is false
+and the guard does not fire.
+
+### FIX SHAPE, and why it is bigger than BUGS 38/39
+
+Bind a callee's type params from the call's EXPECTED RESULT TYPE as well as from
+its arguments, so a param that appears only in the return reaches
+`nameToConcrete`. Mono's existing tuple match then does the rest.
+
+That is a change in instantiation harvesting, a layer with recorded history:
+[[project_ambiguous_dict_rule]] measured **176 false hits** when a related
+judgement was moved from emit to solve, and records two structural refinements
+(RECURSION, CARRIED) that were needed before it was sound. So this wants its own
+pass with the full dict suites, not a quick edit.
+
+### A SECOND, SEPARATE FINDING from the same probe
+
+`with Make 'b` — one arg for a 2-param ability — is ACCEPTED and binds BOTH
+slots to the same variable, giving "Int, Int does not implement 'Make'". The
+spelling that works is `with Make 'b 'a`, naming every param including the
+receiver. Compare `std/codec/query.mz`'s `with Decode QueryC 'a`, which supplies
+2 args for a 3-param ability and is fine, so the arity rule is not simply "all
+params".
+
+Same family as [[project_type_application_arity_and_namespace]], where "V0705
+was DEAD for annotations: `Option Int Str`/`Int Str` accepted, surplus args
+RETAINED so a typo minted a distinct type". An under-supplied `with` constraint
+should be an arity error naming the ability's parameters, not a silent duplicate
+binding — and until it is, a typo in a constraint reads as a missing impl.
+UNPROBED: the over-supplied direction, and what the real arity rule is.

@@ -173,6 +173,94 @@ main {}
         )
     }
 
+    /**
+     * BUG 40 — BREAK TEST, asserting the CURRENT WRONG BEHAVIOUR.
+     *
+     * The same return-position class param, reached through a GENERIC function:
+     *
+     *     pub let via: { x: 'a } with Make 'b 'a -> 'b = { x } -> x.make {}
+     *     let t: Str = via { x = s }
+     *     -> error[I0004]: class java.lang.Long cannot be cast to class java.lang.String
+     *
+     * BUG 39's fix reads the type the call PRODUCES, which works at a
+     * monomorphic site. Inside `via` that type is a VARIABLE, so the caller's
+     * evidence has to carry the choice, and it does not.
+     *
+     * NARROWED (predicted two causes, measured which):
+     *   - both impls, `Str` call ONLY            -> crashes
+     *   - both impls, either call ORDER          -> the Str one crashes
+     *   - ONE impl only, `Str` call              -> "222", correct
+     *   - the same two impls called DIRECTLY     -> both correct
+     *
+     * So it is FIRST-MATCH, not "one specialization served both": a single call
+     * is enough, order is irrelevant, and it takes two impls EXISTING rather
+     * than two call sites. That distinguishes it from BUG 38, which needed both
+     * to be reachable, and from BUG 39, which the direct-call row confirms fixed.
+     *
+     * LIKELY SITE, not yet confirmed by a trace — `MonoDriver`:
+     *
+     *     if (concreteArgs.any { it is VarType } && abilityImplsForHash.size != 1) continue
+     *
+     * whose own comment says "Leave the call for the compiler, which binds the
+     * variable through the instance head at spec-compile time. Only an ability
+     * with a single instance is not a guess." The compiler then guesses, and
+     * silently. `concreteArgs` is substituted from the call's harvested type
+     * args; `'b` is reachable only from the RETURN, so if the harvest derives
+     * bindings from the ARGUMENTS it stays a var and the ref is dropped. Mono's
+     * own matching already zips the full tuple correctly, so the defect is
+     * upstream of it.
+     *
+     * THIS TEST MUST BE INVERTED when the bug is fixed — it exists so the defect
+     * is recorded and the gate stays honest, which is how BUG 37 was pinned.
+     */
+    @Test
+    fun `BUG 40 break - a generic hop loses the return-position class param`() {
+        // The wrong value reaches `to_dbg`, which throws out of the interpreter
+        // rather than printing — the stack lands in `InspectNatives.renderScalar`
+        // with "Long cannot be cast to String", i.e. the Int impl's 111 standing
+        // where a Str was promised. So the break is recorded as "the correct
+        // value never arrives", by whichever route.
+        val out = runProgram(
+            """
+            use std::effects::log::{ println, Console }
+            use std::int
+            use std::str
+
+            ability Make 'b for 'a where { make: { it: 'a } -> 'b }
+            type Src = { n: Int }
+            impl Make Int for Src where {
+              make: { it: Src } -> Int = { it } -> 111
+            }
+            impl Make Str for Src where {
+              make: { it: Src } -> Str = { it } -> "222"
+            }
+
+            pub let via: { x: 'a } with Make 'b 'a -> 'b = { x } -> x.make {}
+
+            let main = {} -> perform Console in do
+              let s: Src = { n = 1 }
+              let t: Str = via { x = s }
+              println { msg = "T=${'$'}(t.to_dbg {})" }
+            main {}
+            """.trimIndent(),
+        )
+        assertEquals(
+            false,
+            out.contains("T=\"222\""),
+            "BUG 40 IS FIXED — `via` asked at Str now reaches `Make Str for Src`. " +
+                "Invert this test: assert the correct value, drop the break " +
+                "framing, and move the known-bugs entry to FIXED.\n$out",
+        )
+    }
+
+    /** The program's output, or the failure it died with — a break test has to
+     *  be able to record either. */
+    private fun runProgram(src: String): String = try {
+        MezzeTestHelper.runWithOutput(src).output
+    } catch (e: Throwable) {
+        "${e::class.simpleName}: ${e.message}"
+    }
+
     /** The STDLIB shape the disambiguator was written for, and the one the `r`
      *  name match happened to cover. `Instant - Duration` is an Instant and
      *  `Instant - Instant` is a Duration, so the receiver cannot choose and the
