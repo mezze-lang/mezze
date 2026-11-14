@@ -5040,3 +5040,50 @@ were already collapsed when that side was built.
 Related: BUG 44 (a type-based fast path overriding the element's own `Ord`) and
 BUG 45 (a constraint declared and never threaded). Same family, third form:
 a REBUILD that drops the instance the collection was carrying.
+
+## BUG 48 — the evidence rewrite declines when the constrained variable is only NESTED
+
+**OPEN**, diagnosed 2026-11-14, with the mechanism measured rather than
+guessed. Pinned by `MergeKeepsElementInstanceTest`'s
+`set filter_map at top level still collapses structurally`, which asserts the
+broken answer on purpose.
+
+`set::filter_map` declares `with Eq 'b, Hash 'b` and is routed through
+`evidenceNativeForm` exactly as `set::map` is. It works INSIDE A FUNCTION and
+declines for a TOP-LEVEL EXPRESSION, where it collapses by representation.
+
+**THE MECHANISM.** `evidenceNativeCall` fires only when
+`specEvidenceOpHash` answers, and that reads `specAbilityImpls` — "the impls the
+MONOMORPHIZER recorded as discharging this spec's constraints". Instrumented at
+the gate, printing that set for every call:
+
+    __native_set_filter_map   specImpls=2 handWritten=2   -> fires    (in a function)
+    __native_set_filter_map   specImpls=0 handWritten=0   -> declines (top level)
+    __native_set_map          specImpls=2 handWritten=2   -> fires    (top level)
+
+So the monomorphizer records nothing when the constrained variable appears only
+NESTED inside another constructor. `set::map`'s `'b` IS the callback's return
+type and is recorded; `set::filter_map`'s `'b` sits inside `Option 'b` and is
+not. With nothing recorded, all three gates fail and the plain native runs.
+
+**WHY IT IS NOT A DICTIONARY-SITE BUG.** Three suppliers were instrumented and
+none fires for this call: `injectDictFields`' per-var branch (`keyVar` is null
+for operator- and callback-derived constraints), its concrete-types fallback,
+and `abilityOpDictSlot`. The decision is made earlier, at the rewrite.
+
+**A WORKAROUND THAT DOES NOT WORK, so no one tries it twice.** Expressing it as
+`from_seq { xs = collect_seq { set, f } }` — where `from_seq`'s constraint is on
+a seq's element, i.e. `'b` UN-NESTED, and which does work at top level on its
+own — still declines. The nesting is UPSTREAM of both calls, so the
+monomorphizer has no more to record there than it did before. Tried, measured,
+reverted.
+
+**SCOPE.** In-function code is every real program: everything sits under `main`,
+and a top-level bare expression is a test-harness and `eval` shape. So the
+practical impact is nil today — but the same limit will bite any future
+constraint whose variable is reached only through a constructor, which is why it
+has a number.
+
+**WHERE TO LOOK.** Not at the dictionary sites. At whatever populates
+`specAbilityImpls` during monomorphisation, and what it does with a constraint
+whose variable is not the callback's return type itself.
