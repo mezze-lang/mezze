@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test
  * | dimension | ability impl | effect performer |
  * |---|---|---|
  * | param type | INVARIANT — T0201 | INVARIANT — T0201/V0901 |
- * | param NAME | INVARIANT — T0201 | **UNCHECKED — BUG 37** |
+ * | param NAME | INVARIANT — T0201 | INVARIANT — T0201 (was BUG 37) |
  * | param arity | INVARIANT — T0201 | — |
  * | return type | COVARIANT: narrower yes, wider T0201 | must match — T0201 |
  * | effects | may be NARROWED; widening is V0421+V0510 | may be WIDENED, and the perform site answers for it (T0210) |
@@ -23,8 +23,10 @@ import org.junit.jupiter.api.Test
  * performer may **add** effects its op's declaration does not mention; they are
  * tracked, and a `perform` site that does not handle them is T0210.
  *
- * The one gap is the parameter NAME on a performer's op — see BUG 37 and the
- * break test below.
+ * The gap this file was written to pin — the parameter NAME on a performer's op,
+ * BUG 37 — is closed, along with the two variance shapes the same probe found.
+ * The tests kept their measurements, because what a check USED to accept is the
+ * only record of what it is now load-bearing for.
  */
 class ImplSignatureRulesSpecTest : VariantSpecBase() {
 
@@ -218,7 +220,7 @@ class ImplSignatureRulesSpecTest : VariantSpecBase() {
             $MAIN
             """,
             "T0201",
-            "The param TYPE is checked — which is what makes the unchecked NAME " +
+            "The param TYPE was always checked — which is what made the NAME " +
                 "below a gap rather than a decision.",
         )
     }

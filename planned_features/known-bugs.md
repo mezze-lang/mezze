@@ -4353,7 +4353,7 @@ the DUPLICATE (same effect, same performer name) is clearly wrong.
 
 ---
 
-## BUG 37 — OPEN: a performer's op signature is barely checked against the effect's declaration
+## BUG 37 — FIXED: a performer's op signature was barely checked against the effect's declaration
 
 Found 2026-11-13 mapping what an impl is allowed to change. **Soundness hole:
 a declared `Int` comes back as a function.** Pinned by
@@ -4454,3 +4454,131 @@ direction open — the last test in the spec file pins a performer accepting MOR
 than the op promises, which must stay legal. Alternatively, exhaustiveness-check
 an op body against the declared param type, which would catch the narrowing half
 with machinery that already exists.
+
+**WHAT LANDED** (both halves, since the three shapes needed both):
+
+- `ImplValidator` now compares the DESTRUCTURED PARAM NAMES against the
+  declaration and names both sides — what is unbound and what is unexpected.
+  The cause was `expectedParamType.fields[name] ?: VarType(fresh())`: a name the
+  declaration lacks got a fresh variable, which means "any type is fine", not
+  "unknown" — the same mistake as [[project_fresh_var_means_anything_not_unknown]].
+- `closedVariantSetsDisagree` / `rejectVariantSetMismatch` compare constructor
+  SETS, and only for CLOSED rows, which is the subset question unification will
+  not ask. Open rows are left alone, so the contravariant direction stays legal.
+- `TypeValidator` now walks a performer's op BODIES for pattern coverage,
+  mirroring the `ParsedImplAbilityDecl` branch directly above it — the branch
+  whose own comment records the symptom it was written for ("a missing one
+  reached the interpreter as `no variant tag matched`"). The performer branch
+  beside it had never been given the same walk, which is why the UNANNOTATED
+  narrowing escaped the type-level check as well.
+
+Each of the six dimensions now has a test in `ImplSignatureRulesSpecTest`, and
+its header carries the table.
+
+## BUG 38 — FIXED: class-param dispatch disambiguated on a parameter NAME
+
+Found 2026-11-14 probing class-param abilities — `ability C 'r for 'l`, which
+has a parameter BEFORE `for` (the co-operand) as well as the receiver after it.
+**Soundness hole: a function typed `{} -> Str` returned an Int.** Pinned by
+`ClassParamDispatchRuntimeTest`; `ClassParamDispatchSpecTest` pins the type
+side, which was correct throughout.
+
+```mezze
+ability Combine 'r for 'l having 'out where {
+  combine: { it: 'l, other: 'r } -> out
+}
+type A = { a: Int }
+type B = { b: Int }
+
+## Same receiver A; only the class param differs. Legal — V0407 fires on the
+## full tuple, not the receiver alone.
+impl Combine B for A having 'out = Int where {
+  combine: { it: A, other: B } -> Int = { it, other } -> 111
+}
+impl Combine A for A having 'out = Str where {
+  combine: { it: A, other: A } -> Str = { it, other } -> "222"
+}
+
+pub let with_b: {} -> Int = {} -> do
+  let x: A = { a = 1 }
+  let y: B = { b = 2 }
+  x.combine { other = y }
+
+pub let with_a: {} -> Str = {} -> do
+  let x: A = { a = 1 }
+  let z: A = { a = 3 }
+  x.combine { other = z }
+```
+
+Measured with BOTH called:
+
+```
+A+B expect 111 -> 111
+error[I0004]: class java.lang.Long cannot be cast to class java.lang.String
+```
+
+`with_a` ran `Combine B for A`'s body and returned its 111. Calling `with_b`
+alone works, so it takes both impls being reachable.
+
+### THE CAUSE: a hardcoded field name
+
+`TypedASTCompiler.tryResolveAbilityOp` matches the receiver against the
+receiver POSITION of each impl's class-arg tuple. When several impls share a
+receiver it then disambiguated on the co-operand — by looking for an argument
+field named literally `r`:
+
+```kotlin
+val coOperandType = argRecord.entries
+    .filterIsInstance<TypedRecordEntry.Field>()
+    .firstOrNull { it.name == Keywords.R }      // <-- the name
+```
+
+Every numeric ability in the stdlib spells its co-operand `r`
+(`add: { it: 'l, r: 'r } -> out`), so `datetime`'s `NumSub Duration for Instant`
+vs `NumSub Instant for Instant` — the pair
+[[project_classparam_runtime_dispatch_tuple]] records as FIXED — kept working
+and nothing noticed. An ability that names its co-operand anything else fell
+through to `receiverMatches.firstOrNull()`, i.e. whichever impl the index
+registered first.
+
+**THIS IS THE PATTERN THE REPO'S OWN INVARIANT FORBIDS**
+([[project_no_name_based_dispatch]], and that same tuple note: *never key
+hot-path dispatch on `Loc` or on string names*). The earlier fix replaced a
+receiver-keyed index with the full class-arg tuple and was right about the
+index; the tie-break it added underneath reintroduced a name.
+
+### THE FIX: ask which impl's OPERATION accepts the arguments
+
+An impl's op parameters are the ability's parameters substituted with that
+impl's class args — `ImplValidator` enforces it. So the signature already
+says what the co-operand is called and what type it must have, and dispatch
+can ask the question directly:
+
+```kotlin
+op.params.all { param ->
+    val supplied = suppliedTypes[param.name] ?: return@all true
+    typeMatchesTarget(supplied, param.type)
+}
+```
+
+A unique accepting impl wins. Only resolved, concrete argument types take
+part: a `VarType` matches every target, so including one would make every
+impl agree. A param an impl declares polymorphically is itself a `VarType`,
+so a blanket impl stays a candidate and the ambiguity falls through rather
+than resolving to a coin flip.
+
+The class-arg tuple comparison is kept as a SECOND attempt, for impls whose
+params are unannotated or generic while their tuple is concrete — which is
+exactly `datetime`'s shape (`sub = { it, r } -> …`, no annotations). Both
+paths are now covered by tests: the user-ability case by the signature match,
+the five `datetime` impls by the tuple fallback.
+
+### What made it findable
+
+Nothing in the suite could see it. The type side is entirely correct —
+`with_b : {} -> Int`, `with_a : {} -> Str`, and asking for the wrong result
+type is a clean T0201 naming the associated type. Only a VALUE distinguishes
+the impls, so it took running the program with both functions reachable. The
+same note that records the earlier fix also records WHY it was never exercised:
+`tryInlineOp` folds Int/Float arithmetic before dispatch, so the stdlib's own
+numeric impls never reach this code.

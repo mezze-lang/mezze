@@ -88,7 +88,16 @@ class EmitFileSizeRatchetTest {
             // top-level `n` used to die with `FrameSlotTypeException … got
             // Illegal`. The edit belongs where the slot is allocated, so the bound
             // moves rather than the code.
-            C + "TypedASTCompiler.kt" to 4380,   // was 5,580; +2 for carrying a `...spread` through ability-op receiver injection
+            // +38 for BUG 38: when several impls of a class-param ability share a
+            // receiver, dispatch asks which one's OPERATION accepts the arguments
+            // supplied, instead of hunting an argument field named literally `r` —
+            // the stdlib's spelling, which is why `datetime` worked and a user
+            // ability silently ran the wrong impl's body. Most of it is the
+            // `VarType` reasoning and the class-arg-tuple fallback that
+            // `datetime`'s unannotated params still need; the decision has to sit
+            // beside `receiverMatches`, where the candidates are, so the bound
+            // moves rather than the code.
+            C + "TypedASTCompiler.kt" to 4418,   // was 5,580; +2 for carrying a `...spread` through ability-op receiver injection
             // +42 for `contextRowWithBodyAssocTypes`: an INLINE lambda was stamped
             // with the row from the pushed CONTEXT, so a callback's associated
             // type was the CALLEE's variable rather than what the body threw, and

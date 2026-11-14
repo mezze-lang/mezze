@@ -100,7 +100,16 @@ class TypedASTCompiler(
          *  already decided the ability per call site
          *  ([ConstraintResult.MethodCallInfo.abilityName]); carrying it here is
          *  what lets the compiler USE that decision instead of re-deriving one. */
-        val abilityHash: Hash?
+        val abilityHash: Hash?,
+        /** BUG 38: this impl's own declared parameters for the operation. Two
+         *  impls of a class-param ability can share a receiver and differ only
+         *  in the class param (`Combine B for A` vs `Combine A for A`), and the
+         *  receiver alone cannot tell them apart. The impl's SIGNATURE can: its
+         *  params are the ability's, substituted with this impl's class args,
+         *  so asking which impl's operation accepts the supplied arguments is
+         *  the whole question. Carried here so dispatch never has to guess what
+         *  the co-operand parameter is called. */
+        val params: List<TypedParam> = emptyList(),
     )
     /**
      * The operation names of the `Hash` ability specifically. `Hash` is DERIVED for
@@ -306,10 +315,13 @@ class TypedASTCompiler(
     init {
         // Build ability operation index
         for (impl in abilityImpls) {
-            for ((opName, _) in impl.operations) {
+            for ((opName, opBody) in impl.operations) {
                 val opHash = computeOpHash(impl.hash, opName)
                 abilityOpIndex.getOrPut(opName) { mutableListOf() }.add(
-                    AbilityOp(impl.hash, impl.targetTypes, opHash, impl.abilityHash)
+                    AbilityOp(
+                        impl.hash, impl.targetTypes, opHash, impl.abilityHash,
+                        params = (opBody as? TypedLambda)?.params ?: emptyList(),
+                    )
                 )
                 // Codec decoder index — keyed by ABILITY CONTENT HASH
                 // (WellKnownHashConstants decode-flavored set), shared with
@@ -3642,25 +3654,51 @@ class TypedASTCompiler(
         }
         // Several impls share the receiver — a class-param ability like `NumSub 'r for
         // 'l` with both `NumSub Duration for Instant` and `NumSub Instant for Instant`.
-        // The receiver alone can't disambiguate; pick the impl whose CO-OPERAND (the
-        // tuple slot before the receiver) matches the arg's `r` field type. Content
-        // comparison only — no positions-as-identity, no Loc, no strings.
+        // The receiver alone can't disambiguate, so ask which candidate's OPERATION
+        // accepts the arguments supplied. An impl's params are the ability's params
+        // substituted with that impl's class args (ImplValidator enforces it), so the
+        // signature already says what the co-operand is called and what it must be.
+        //
+        // BUG 38: this used to hunt for a field named literally `r`. The stdlib's
+        // numeric abilities all spell it that way, so `datetime` worked and nothing
+        // noticed; any other ability fell through to `firstOrNull()` below and got
+        // whichever impl registered first — `Combine A for A`, typed `-> Str`, ran
+        // `Combine B for A`'s body and returned its Int as a ClassCastException. A
+        // parameter NAME is what project_no_name_based_dispatch forbids keying on.
         if (receiverMatches.size > 1 && argRecord is TypedRecord) {
-            val coOperandType = argRecord.entries
+            // Only resolved, concrete argument types carry information: a `VarType`
+            // matches every target, so one would make every impl agree.
+            val suppliedTypes = argRecord.entries
                 .filterIsInstance<TypedRecordEntry.Field>()
-                .firstOrNull { it.name == Keywords.R }
-                ?.let { substitution.apply(it.value.type) }
-                ?.takeIf { it !is VarType }
-            if (coOperandType != null) {
+                .mapNotNull { field ->
+                    val argType = substitution.apply(field.value.type)
+                    if (argType is VarType) null else field.name to argType
+                }
+                .toMap()
+            if (suppliedTypes.isNotEmpty()) {
+                // A param an impl declares polymorphically is itself a `VarType`, which
+                // accepts anything — so a blanket impl stays a candidate and ambiguity
+                // falls through below rather than resolving to a coin flip. Dedup by
+                // opHash: the index may register one impl twice across module-load
+                // passes, and a unique WINNING impl is what matters, not a unique entry.
+                val accepting = receiverMatches.filter { op ->
+                    op.params.all { param ->
+                        val supplied = suppliedTypes[param.name] ?: return@all true
+                        typeMatchesTarget(supplied, param.type)
+                    }
+                }
+                val uniqueHashes = accepting.map { it.opHash }.distinct()
+                if (uniqueHashes.size == 1) return uniqueHashes.first()
+                // The signature could not single one out — params unannotated or
+                // generic, while the class-arg TUPLE may still be concrete, which is
+                // `datetime`'s shape (`sub = { it, r } -> …`). Ask the co-operand slot,
+                // the ability's own position for the class param.
                 val byCoOperand = receiverMatches.filter { op ->
                     val coTarget = op.targetTypes.getOrNull(op.targetTypes.size - 2)
-                    coTarget != null && typeMatchesTarget(coOperandType, coTarget)
+                    coTarget != null && suppliedTypes.values.any { typeMatchesTarget(it, coTarget) }
                 }
-                // Dedup by resolved impl (opHash): the index may register the same impl
-                // more than once (e.g. across module-load passes). A unique WINNING
-                // impl is what matters, not a unique index entry.
-                val uniqueHashes = byCoOperand.map { it.opHash }.distinct()
-                if (uniqueHashes.size == 1) return uniqueHashes.first()
+                val byTupleHashes = byCoOperand.map { it.opHash }.distinct()
+                if (byTupleHashes.size == 1) return byTupleHashes.first()
             }
         }
         val match = receiverMatches.firstOrNull()
