@@ -4788,3 +4788,80 @@ RETAINED so a typo minted a distinct type". An under-supplied `with` constraint
 should be an arity error naming the ability's parameters, not a silent duplicate
 binding — and until it is, a typo in a constraint reads as a missing impl.
 UNPROBED: the over-supplied direction, and what the real arity rule is.
+
+## BUG 41 — OPEN: the class-param family, three cases BUG 40's fix does not cover
+
+Found 2026-11-14 by probing the arity of a `with` constraint after BUG 40
+landed. All three are measured; none is fixed.
+
+### (i) A generic hop still mis-dispatches at THREE class params
+
+BUG 40's fix is complete for a 2-param ability and NOT for a 3-param one:
+
+```mezze
+ability Conv 'cfg 'b for 'a where { conv: { it: 'a, cfg: 'cfg } -> 'b }
+impl Conv Cfg Int for Src where { … -> 111 }
+impl Conv Cfg Str for Src where { … -> "222" }
+
+pub let go: { x: 'a, c: Cfg } with Conv Cfg 'b 'a -> 'b = { x, c } -> x.conv { cfg = c }
+let t: Str = go { x = s, c = c }
+## -> error[I0004]: class java.lang.Long cannot be cast to class java.lang.String
+```
+
+| | direct call | generic hop |
+|---|---|---|
+| 2 class-arg params | correct (BUGS 38/39) | correct (BUG 40) |
+| 3 class-arg params | **correct** | **WRONG** |
+
+The direct-call row matters: it says BUGS 38/39 handle arity 3 fine, so this is
+BUG 40's dict-layer fix being incomplete, not a gap in direct dispatch.
+
+By reading, the tuple ought to be complete at that call — `Cfg` is concrete,
+`'b` comes from the return bindings `dictEnrichedArg` now harvests, `'a` from
+the argument harvest — so `tryResolveAbilityOpByTuple([Cfg, Str, Src])` should
+name `Conv Cfg Str for Src` uniquely. It does not fire, and WHY is not yet
+traced. Do not assume the tuple is the problem; instrument
+`resolveDictOp` / `ownTypePerMethod` on this program first.
+
+### (ii) An UNDER-SUPPLIED `with` constraint mis-binds the omitted slot
+
+Omitting the trailing receiver is the stdlib's own idiom —
+`std/codec/query.mz` writes `with Decode QueryC 'a` for
+`ability Decode 'config 'a for 'in`, 2 args for 3 params. Applied to a user
+ability and CALLED, the omitted slot gets a COPY of another arg rather than a
+fresh variable:
+
+```
+with Make 'b         (1 of 2)  ->  V0402 "Int, Int does not implement 'Make'"
+with Conv Cfg 'b     (2 of 3)  ->  V0402 "Int, Cfg, Int does not implement 'Conv'"
+```
+
+Both reported tuples are impossible: `Make`'s receiver is `Src`, never `Int`,
+and `Conv`'s three slots are `[cfg, b, a]` = `[Cfg, Str, Src]`, not
+`[Int, Cfg, Int]` — the args appear SHIFTED as well as duplicated. A typo in a
+constraint therefore reads as a missing impl for a tuple the author never wrote.
+
+DECLARING any of these is accepted; only a CALL surfaces it. Same family as
+[[project_type_application_arity_and_namespace]], where "V0705 was DEAD for
+annotations … surplus args RETAINED so a typo minted a distinct type".
+
+Whether under-supply should be LEGAL (the stdlib relies on it) or refused with
+an arity error is a design question for the author. What is not in question is
+that silently copying another slot's binding is wrong either way.
+
+### (iii) `with <Ability>` with NO type args is accepted at the declaration
+
+```mezze
+pub let via: { x: Src } with Make -> Int = { x } -> x.make {}
+```
+
+Accepted when only declared; T0210 once called. A constraint naming no type
+cannot constrain anything, so the declaration is the place to say so.
+
+### Why these are recorded rather than fixed
+
+The session fixed BUGS 38, 39 and 40 (arity 2) in this family, each confirmed by
+RUNNING a program because the type side is correct throughout. (i) needs another
+tracing round in the dict layer; (ii) needs the author's decision on whether
+under-supply is legal before a rule can be written. Both are worth doing, and
+the measurements above are where the next pass should start.

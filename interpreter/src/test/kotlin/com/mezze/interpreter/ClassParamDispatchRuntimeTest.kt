@@ -270,6 +270,105 @@ main {}
         "${e::class.simpleName}: ${e.message}"
     }
 
+    /**
+     * BUG 41 (i) — BREAK TEST: the same generic hop at THREE class params is
+     * still wrong, so BUG 40's fix is complete only for two.
+     *
+     *     ability Conv 'cfg 'b for 'a where { conv: { it: 'a, cfg: 'cfg } -> 'b }
+     *     pub let go: { x: 'a, c: Cfg } with Conv Cfg 'b 'a -> 'b = …
+     *     let t: Str = go { x = s, c = c }
+     *     -> error[I0004]: class java.lang.Long cannot be cast to class java.lang.String
+     *
+     * Measured against the DIRECT call, which is correct at arity 3 — so BUGS
+     * 38/39 cover the tuple size and this is the dict layer, not dispatch:
+     *
+     *     | params | direct | generic hop |
+     *     |--------|--------|-------------|
+     *     | 2      | ok     | ok          |
+     *     | 3      | ok     | WRONG       |
+     *
+     * By reading, the tuple ought to be complete here (`Cfg` concrete, `'b` from
+     * the return bindings, `'a` from the argument harvest), so why
+     * `tryResolveAbilityOpByTuple` does not fire is NOT yet traced — instrument
+     * before assuming. ASSERTS THE CURRENT WRONG BEHAVIOUR, like BUG 37's and
+     * BUG 40's break tests did; its message says to invert it.
+     */
+    @Test
+    fun `BUG 41 break - three class params still lose the target through a hop`() {
+        val out = runProgram(
+            """
+            use std::effects::log::{ println, Console }
+            use std::int
+            use std::str
+
+            ability Conv 'cfg 'b for 'a where { conv: { it: 'a, cfg: 'cfg } -> 'b }
+            type Src = { n: Int }
+            type Cfg = { mode: Int }
+            impl Conv Cfg Int for Src where {
+              conv: { it: Src, cfg: Cfg } -> Int = { it, cfg } -> 111
+            }
+            impl Conv Cfg Str for Src where {
+              conv: { it: Src, cfg: Cfg } -> Str = { it, cfg } -> "222"
+            }
+
+            pub let go: { x: 'a, c: Cfg } with Conv Cfg 'b 'a -> 'b = { x, c } ->
+              x.conv { cfg = c }
+
+            let main = {} -> perform Console in do
+              let s: Src = { n = 1 }
+              let c: Cfg = { mode = 0 }
+              let t: Str = go { x = s, c = c }
+              println { msg = "T=${'$'}(t.to_dbg {})" }
+            main {}
+            """.trimIndent(),
+        )
+        assertEquals(
+            false,
+            out.contains("T=\"222\""),
+            "BUG 41 (i) IS FIXED — a 3-param class ability now carries its target " +
+                "through a generic hop. Invert this test and move the known-bugs " +
+                "entry.\n$out",
+        )
+    }
+
+    /** The direct call at three class params, which IS correct — the comparison
+     *  that makes the break above a dict-layer defect rather than a dispatch one.
+     *  If this ever fails, BUGS 38/39 have regressed and that is the real news. */
+    @Test
+    fun `three class params dispatch correctly on a direct call`() {
+        val out = runProgram(
+            """
+            use std::effects::log::{ println, Console }
+            use std::int
+            use std::str
+
+            ability Conv 'cfg 'b for 'a where { conv: { it: 'a, cfg: 'cfg } -> 'b }
+            type Src = { n: Int }
+            type Cfg = { mode: Int }
+            impl Conv Cfg Int for Src where {
+              conv: { it: Src, cfg: Cfg } -> Int = { it, cfg } -> 111
+            }
+            impl Conv Cfg Str for Src where {
+              conv: { it: Src, cfg: Cfg } -> Str = { it, cfg } -> "222"
+            }
+
+            let main = {} -> perform Console in do
+              let s: Src = { n = 1 }
+              let c: Cfg = { mode = 0 }
+              let i: Int = s.conv { cfg = c }
+              let t: Str = s.conv { cfg = c }
+              println { msg = "I=${'$'}(i.to_dbg {})" }
+              println { msg = "T=${'$'}(t.to_dbg {})" }
+            main {}
+            """.trimIndent(),
+        )
+        assertEquals(
+            listOf("I=111", "T=\"222\""),
+            out.lines().map { it.trim() }.filter { it.startsWith("I=") || it.startsWith("T=") },
+            "a 3-param class ability must dispatch correctly on a direct call:\n$out",
+        )
+    }
+
     /** The STDLIB shape the disambiguator was written for, and the one the `r`
      *  name match happened to cover. `Instant - Duration` is an Instant and
      *  `Instant - Instant` is a Duration, so the receiver cannot choose and the
