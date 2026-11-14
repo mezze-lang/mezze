@@ -951,6 +951,15 @@ class TypeChecker(
                 // invariant), never silent.
                 emitResult.typedModule?.let { InvariantChecker.checkEffectConservation(it) }
 
+                // CENSUS (own flag, prints only): which ability constraints do not
+                // fill their ability's parameters. The oracle for the class-param
+                // family — see InvariantChecker.censusConstraintArity.
+                emitResult.typedModule?.let { tm ->
+                    InvariantChecker.censusConstraintArity(tm) { name, hash ->
+                        registry.lookupAbility(name, hash)?.typeParams?.size
+                    }
+                }
+
                 // The same analysis, reported to the AUTHOR rather than only to
                 // CI. A bare `<...>` on a decl erases the row — `pub let g: {} ->
                 // Int <...> = {} -> Tick.tick {}` prints `pub g : {} -> Int` — so

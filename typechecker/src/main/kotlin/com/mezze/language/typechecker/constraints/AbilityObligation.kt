@@ -101,3 +101,31 @@ internal fun abilityClassArgs(
     arity: Int?,
 ): List<MezzeType> =
     if (arity != null && typeArgs.size >= arity) typeArgs else listOf(primary) + typeArgs
+
+/*
+ * WHY THE `arity == null` FALLBACK STAYS, for now.
+ *
+ * Prepending when the arity is unknown FABRICATES an argument, and the
+ * constraint census (`MEZZE_CONSTRAINT_CENSUS=1`) counts the result: 138 emitted
+ * constraints in the stdlib alone whose argument count does not match their
+ * ability's, the commonest being `with Ord has 2 args, ability declares 1` —
+ * which a one-parameter ability cannot legitimately carry.
+ *
+ * Removing the fallback costs 17 typechecker tests, all one failure: DUPLICATE
+ * constraints (`expected: <1> but was: <2>`, `got: [NumAdd, NumAdd]`). The
+ * downstream dedup collapses the malformed `NumAdd 'a 'a` against the correct
+ * `NumAdd 'b 'a` because their DISTINCT identity sets match; stop producing the
+ * malformed one and two genuinely different constraints remain, and nothing
+ * collapses them.
+ *
+ * So the prepend is doing two jobs at once — completing a genuinely short tuple
+ * (legitimate) and fabricating onto a complete one (the bug) — and it cannot
+ * tell them apart precisely because the arity is unknown. The fix is to make the
+ * arity KNOWN rather than to remove the fallback: carry it on the constraint from
+ * where the ability was resolved, since `registry.lookupAbility` answers in early
+ * passes and returns null later (measured). See known-bugs BUG 41.
+ *
+ * An EARLIER revert of this same change was made on a run reporting 3624
+ * failures, which was 3787 lines of NoClassDefFoundError — the real cost is 17.
+ * Classify before concluding: [[project_noclassdef_stale_tests]].
+ */

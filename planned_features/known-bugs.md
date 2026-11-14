@@ -5047,6 +5047,55 @@ shape; a correct change has to move all of them at once, with the suite as the
 oracle. That is a dedicated piece of work, not a patch — and it is the honest
 reason this is still open.
 
+**THE ORACLE EXISTS NOW, AND IT NAMES THE CAUSE — 2026-11-14.**
+
+`InvariantChecker.censusConstraintArity`, gated on `MEZZE_CONSTRAINT_CENSUS=1`
+(an ENV VAR, because a `-D` does not reach the JVM that emits the module — a
+property-gated first version reported ZERO on a stdlib with twelve known
+violations). It prints every emitted ability constraint whose argument count
+differs from its ability's declared parameter count:
+
+    env MEZZE_CONSTRAINT_CENSUS=1 ./gradlew compileStdlib --rerun-tasks --no-daemon
+
+**138 violations in the stdlib alone**, and the shape is the finding:
+
+    with Ord      has 2 args, ability declares 1    <- many, across sorted_set / sorted_map
+    with ToQuery  has 2 args, ability declares 1
+    with FromJson has 3 args, ability declares 2
+    with Decode   has 2 args, ability declares 3    <- the 12 written that way
+
+A ONE-parameter ability cannot legitimately carry two arguments. Those are
+`abilityClassArgs` prepending onto a list that was ALREADY complete, because the
+arity came back null and its guard could not fire. So the malformation is
+systemic, not a property of the twelve `Decode` constraints — those are the only
+ones a reader can SEE, which is why this looked like a codec problem.
+
+**AND THE EARLIER REVERT WAS WRONG.** Removing the `arity == null` prepend
+fallback costs **17** typechecker tests, not the 3624 that caused me to revert it
+— that run was 3787 lines of `NoClassDefFoundError`. All 17 are ONE failure:
+DUPLICATE constraints (`expected: <1> but was: <2>`, `got: [NumAdd, NumAdd]`).
+The downstream dedup collapses the malformed `NumAdd 'a 'a` against the correct
+`NumAdd 'b 'a` because their DISTINCT identity sets match; stop producing the
+malformed one and two genuinely different constraints remain with nothing to
+collapse them.
+
+**So the prepend does TWO jobs** — completing a genuinely short tuple
+(legitimate) and fabricating onto a complete one (the bug) — and it cannot tell
+them apart precisely because the arity is unknown. **The fix is to make the arity
+KNOWN, not to remove the fallback.** Carry it on the constraint from where the
+ability was resolved: `registry.lookupAbility` answers in early passes and
+returns null later (measured), so a lookup at use time cannot be trusted.
+`TypeAnnotationConverter.ConversionConfig` already takes a
+`resolveAbilityHash` hook that an arity hook can ride, and
+`TypedModuleEmitter` already builds a by-hash ability table from a
+snapshot-aware source set (`wrapped.abilityDecls + stdlibTypedModules +
+loadedModules + cached`) — that is the source an arity table should come from,
+since a plain registry lookup cannot see snapshot-loaded stdlib abilities.
+
+Once the arity is reliable, the prepend fires exactly when it should, the 138
+malformed tuples stop existing, and (i)/(ii)/(iii) all become reachable — the
+census is then the check that it worked.
+
 **THIS IS THE SAME ROOT CAUSE AS (i).** Both are the constraint tuple having two
 orders and two lengths in play, reconstructed per consumer from a representation
 that does not record where the primary sat. The fix for either is the fix for

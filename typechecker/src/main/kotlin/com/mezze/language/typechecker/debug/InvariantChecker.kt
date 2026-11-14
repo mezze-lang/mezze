@@ -192,6 +192,54 @@ object InvariantChecker {
         return out
     }
 
+    /**
+     * CENSUS: every ability constraint on an emitted type whose argument count
+     * does not equal its ability's declared parameter count.
+     *
+     * An ability's parameters are positional, so a constraint that does not fill
+     * them is a tuple nobody can read reliably — and the whole class-param family
+     * (BUGS 38-41) is consumers reconstructing that tuple and disagreeing. The
+     * point of counting them HERE is that the stdlib and both suites become the
+     * oracle: "which constraints are malformed, everywhere" is a question the
+     * compiler can answer in one run, where reading the code answers it one wrong
+     * guess at a time (see known-bugs BUG 41 for the tally of those).
+     *
+     * PRINTS rather than throws, and is gated on its own flag
+     * (`mezze.constraint.census`) rather than `mezze.invariants`, because its
+     * first job is to produce a complete list — a throw would stop at the first
+     * one and the gates would go red before the list existed.
+     */
+    fun censusConstraintArity(module: TypedModule, arityOf: (String, Hash?) -> Int?) {
+        // An ENV VAR, not a system property: the census has to reach whatever JVM
+        // actually emits the module (gradle forks, the launcher spawns), and a
+        // `-D` on the outer process does not. Measured — a property-gated version
+        // reported ZERO on a stdlib that had twelve known violations.
+        if (System.getenv("MEZZE_CONSTRAINT_CENSUS") == null) return
+
+        fun walk(where: String, type: MezzeType?) {
+            val fn = type as? MezzeType.FunctionType ?: return
+            for (c in fn.abilityConstraints) {
+                val want = arityOf(c.abilityName, c.abilityHash) ?: continue
+                if (c.typeArgs.size != want) {
+                    System.err.println(
+                        "[census] ${module.path}::$where  with ${c.abilityName} " +
+                            "has ${c.typeArgs.size} args, ability declares $want  " +
+                            "args=${c.typeArgs}"
+                    )
+                }
+            }
+            walk(where, fn.paramType)
+            walk(where, fn.returnType)
+        }
+
+        for (decl in module.decls) {
+            if (decl is TypedLetDecl) walk(decl.name, decl.value.type)
+        }
+        for (impl in module.abilityImpls) {
+            for (entry in impl.operations) walk("impl::" + entry.key, entry.value.type)
+        }
+    }
+
     fun checkEffectConservation(module: TypedModule) {
         if (!enabled) return
 
