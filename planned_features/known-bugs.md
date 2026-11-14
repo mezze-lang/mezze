@@ -4962,6 +4962,29 @@ without instrumenting `resolveDictOp` / `DecodeTargetResolver` on
 `FromJsonWrapperTest`, and note that [[project_classparam_runtime_dispatch_tuple]]
 records three wrong guesses about this same machinery already.
 
+**WHERE THE CODEC BREAKAGE IS *NOT* — three instrumented iterations, 2026-11-14.**
+Narrowing, so the next attempt does not re-cover this ground:
+
+- NOT `DecodeTargetResolver`'s target choice. It IS entered for the failing
+  program (`[decode-top] decl=dec entryOps=[from_json, from_json_with] impls=1`),
+  and with one derived decoder in scope its FAST PATH resolves the target from
+  `impl.targetTypes[1]` and returns — correct either way.
+- NOT entry-op detection. `entryOps` is `[from_json, from_json_with]` with the
+  full-arity spelling, same as before.
+- NOT the dict-liveness test. `concreteReceiverStillNeedsDict` asks whether a
+  constraint `typeArgs.any { containsVarType(...) }`; `'a` is a variable in
+  `[JsonC, 'a]` and in `[JsonC, 'a, Json]` alike, so both spellings pass it.
+- A FIX THAT DID NOT WORK: changing the constraint-side target from
+  `typeArgs.first()` to `typeArgs[size - 2]` (uniform with the impl side's
+  `targetTypes[1]`, and right in principle for declaration order). Reverted — it
+  changes behaviour on the under-supplied path, where `first()` lands on the
+  PREPENDED primary, so it cannot be landed before the prepend is gone.
+
+So the divergence is further down the dict path than any of these. The repro is
+`FromJsonWrapperTest`'s first case, which runs in ~30s via
+`just test-class interpreter 'com.mezze.interpreter.codec.FromJsonWrapperTest'`
+— use that loop, not the launcher.
+
 **THIS IS THE SAME ROOT CAUSE AS (i).** Both are the constraint tuple having two
 orders and two lengths in play, reconstructed per consumer from a representation
 that does not record where the primary sat. The fix for either is the fix for
