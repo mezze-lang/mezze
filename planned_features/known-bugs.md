@@ -4907,6 +4907,89 @@ Whether under-supply should be LEGAL (the stdlib relies on it) or refused with
 an arity error is a design question for the author. What is not in question is
 that silently copying another slot's binding is wrong either way.
 
+### (ii) THE RULE IS DECIDED, AND IT CANNOT LAND YET — measured 2026-11-14
+
+**USER RULE: a `with` constraint must supply EVERY parameter of its ability,
+otherwise it is a type error.** Decided after the measurements above.
+
+The rule itself is written and works. `WithConstraintArityValidator` runs in
+`TypeValidator.validateAsWritten` (before the solver, so the error lands at the
+constraint rather than at a use site), walks let annotations, lambda `with`
+clauses, ability ops AND impl ops — impl ops matter, that is where all twelve
+stdlib `with Decode …` constraints live — and reports V0705:
+
+    with Make 'b 'a      (2 of 2)  ACCEPT
+    with Make 'b         (1 of 2)  "names only 1 of 2 type arguments"
+    with Make            (0 of 2)  "names no type arguments"
+    with Make 'b 'a 'c   (3 of 2)  "names 3 type arguments, but takes 2"
+    with Conv Cfg 'b     (2 of 3)  "names only 2 of 3"
+    with Conv Cfg 'b 'a  (3 of 3)  ACCEPT
+    with Weigh 'a        (1 of 1)  ACCEPT
+
+`:typechecker:test` 5240 passed, 0 failed with the rule in (7 of those are its
+own spec file). The work is parked as a patch, NOT in the tree.
+
+**WHY IT CANNOT LAND: making the stdlib comply BREAKS CODEC DECODING.**
+
+Completing the twelve `Decode` constraints — `with Decode JsonC 'a` ->
+`with Decode JsonC 'a Json` — fails 7 interpreter tests:
+
+    FromJsonWrapperTest          3 tests, all 3 fail
+    HelidonHttpServerTest        a record through a query round-trip
+    HttpRouterTest               decoding a whole query into a typed record
+    HttpTypedInputTest           a query that does not fit must be a 400
+
+with `java.lang.RuntimeException: Non-exhaustive match: no variant tag matched —
+typechecker exhaustiveness guarantee violated`, the signature of a WRONG IMPL
+being dispatched.
+
+MEASURED BOTH WAYS, which is what makes this a cause and not a correlation:
+reverting only the stdlib spelling (validator disabled, nothing else changed)
+turns all 7 green — `FromJsonWrapperTest` 3/3, `HttpRouterTest` 25/25,
+`HttpTypedInputTest` 6/6 — and completing them again breaks them again.
+
+**So the under-supply was LOAD-BEARING, not sloppiness.** The two spellings do
+not differ only in completeness. With 2 of 3 arguments `abilityClassArgs`
+PREPENDS the primary, so the tuple dispatch sees is `[receiver, config, target]`;
+with 3 of 3 it is the declaration order `[config, target, receiver]`. Different
+length AND different order. The codec machinery was built against the first.
+`DecodeTargetResolver` reads `impl.targetTypes[1]` for the decode target, which
+is declaration order on the IMPL side — so the two sides already disagree, and
+the under-supplied constraint is what happened to line them up.
+
+NOT YET TRACED: exactly which comparison flips. Do not assume it is the order
+without instrumenting `resolveDictOp` / `DecodeTargetResolver` on
+`FromJsonWrapperTest`, and note that [[project_classparam_runtime_dispatch_tuple]]
+records three wrong guesses about this same machinery already.
+
+**THIS IS THE SAME ROOT CAUSE AS (i).** Both are the constraint tuple having two
+orders and two lengths in play, reconstructed per consumer from a representation
+that does not record where the primary sat. The fix for either is the fix for
+both: carry the complete positional tuple on `Constraint.AbilityRequired` — the
+way `Constraint.AssociatedTypeResolution` ALREADY carries `classArgTypeVars`,
+ten lines below it in the same file, with a comment describing the identical
+failure ("matching the receiver alone picks the wrong impl"). Then delete
+`abilityClassArgs` and its four reconstruction sites, and nothing downstream
+reconstructs anything.
+
+**ORDER OF WORK for whoever picks this up:**
+
+1. Add the well-formedness INVARIANT first (`InvariantChecker`, gated on
+   `-Dmezze.invariants=true`, which both test gates already set): an ability
+   constraint's `typeArgs.size` must equal its ability's declared arity. That
+   makes every subsequent step verifiable against the stdlib and 12,500 tests
+   instead of one program at a time, and it would have found (i), (ii) and (iii)
+   in one run.
+2. Carry the tuple on `AbilityRequired`; delete the reconstruction.
+3. THEN land the arity rule and complete the stdlib's twelve constraints — at
+   that point it is a no-op refactor, which is what it was wrongly assumed to be
+   here.
+
+The rule's code is parked at
+`scratchpad/with_arity_rule.patch` (validator, wiring, 7 spec tests, and the two
+`AnnotationTypeCheckingTest` cases that assert `with NumSub 'a` and must become
+`with NumSub 'a 'a`).
+
 ### (iii) `with <Ability>` with NO type args is accepted at the declaration
 
 ```mezze
