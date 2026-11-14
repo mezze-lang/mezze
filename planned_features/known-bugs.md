@@ -4823,6 +4823,64 @@ name `Conv Cfg Str for Src` uniquely. It does not fire, and WHY is not yet
 traced. Do not assume the tuple is the problem; instrument
 `resolveDictOp` / `ownTypePerMethod` on this program first.
 
+### (i) ROOT-CAUSED 2026-11-14, and four attempted fixes all FAILED
+
+Traced rather than reasoned, because reasoning about this was wrong three times.
+
+**The chain, each step measured:**
+
+1. `resolveDictOp` is reached for `conv` but with `own=null`, so the tuple match
+   added for BUG 40 never runs.
+2. `own` is empty because `go` carries **two** `Conv` constraints where the
+   author wrote one, and `ownTypePerMethod` declines when two constraints for one
+   op disagree — which it should.
+3. The second constraint is malformed: `['b, Cfg, 'b, Src]`, four args for a
+   three-param ability. Built at `ConstraintGenerator.addAbilityConstraintsToFunctionType`
+   via `abilityClassArgs`, which prepends the primary when the declared ARITY is
+   unknown.
+4. The arity is unknown because `registry.lookupAbility("Conv")` **answers in the
+   early passes and returns null in a later one** — measured directly:
+
+       [arity] Conv lookup=3    typeArgs=2  decl=['cfg, 'b, 'a]
+       [arity] Conv lookup=3    typeArgs=3  decl=['cfg, 'b, 'a]
+       [arity] Conv lookup=null typeArgs=3  decl=null        <- later pass
+       [classArgs] arity=null in=3 out=4                     <- the malformed tuple
+
+5. The same invisibility nulls the constraint's `abilityHash` (the annotation
+   path resolves it by NAME:
+   `context.abilityDeclarations[name]?.contentHash ?: registry?.resolveAbilityHash(name)`),
+   and `ownTypePerMethod`'s first line is
+   `val ops = c.abilityHash?.let { abilityOpNames[it] } ?: continue` — so with no
+   hash it contributes nothing at all.
+
+**SO THE ROOT CAUSE IS ONE THING: a locally-declared ability is not visible in
+the registry during a later pass.** Everything keyed on its name or hash then
+degrades quietly — arity, the constraint's identity, the dict slot's ability
+qualifier. `ParsedAbilityDecl.contentHash` is nullable and its own comment says
+"stamped by [DeclIdentity] once names are resolved, never by the parser", so a
+pass that runs against an unstamped or absent declaration has nothing to key on.
+
+**FOUR FIXES TRIED, ALL REVERTED. Do not repeat these:**
+
+| attempt | result |
+|---|---|
+| pass `constraint.abilityHash` to `lookupAbility(name, hash)` at both arity sites | no effect — the hash is null there too |
+| `abilityClassArgs`: stop prepending when the arity is unknown | **3624 of 5231 typechecker tests failed.** The prepend-on-unknown-arity path is load-bearing across the whole suite |
+| `ownTypePerMethod`: let a COMPLETE tuple outrank an incomplete one | no effect — with a null hash no entry is produced at all |
+| (from BUG 40) make the ambiguous dispatch tail DECLINE | breaks `RefutableConsHeadTest`; see BUG 40's entry |
+
+The second row is the important one: `abilityClassArgs`' fallback LOOKS like an
+unjustified guess — its own doc says the arity "decides, and decides exactly" —
+and removing it collapses the suite. So the guess is load-bearing, and the fix
+cannot be at that line. It has to be upstream, by making the declaration
+visible, or the arity must be carried on the constraint rather than looked up.
+
+**Where a next pass should start:** why `registry.lookupAbility` loses a
+locally-declared ability between passes, and which pass that is
+(`TypeChecker.checkParsedModuleInner` calls
+`addAbilityConstraintsToFunctionType` — the failing calls come from there). Fix
+that and steps 3-5 resolve themselves; nothing downstream needs changing.
+
 ### (ii) An UNDER-SUPPLIED `with` constraint mis-binds the omitted slot
 
 Omitting the trailing receiver is the stdlib's own idiom —
