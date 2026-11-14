@@ -4985,6 +4985,31 @@ So the divergence is further down the dict path than any of these. The repro is
 `just test-class interpreter 'com.mezze.interpreter.codec.FromJsonWrapperTest'`
 — use that loop, not the launcher.
 
+**A SECOND ATTEMPT, ALSO FAILED — and the one fact that reframes it.** With the
+author's go-ahead to break and fix the 7 codec tests, I tried again and got no
+further. What the instrumentation DID establish, which changes what the next
+attempt should look for:
+
+- `injectDictFields` is NEVER called with a `decode` method for the failing
+  program — zero traces. So the caller injects no decode dictionary at all, and
+  the hypothesis that it injects a WRONG one is dead.
+- `resolveDecl` reports `impls=1` for that program: exactly ONE derived decoder
+  is in scope. With one candidate, dispatch cannot pick the wrong impl, so
+  "Non-exhaustive match" is not a dispatch choice going wrong.
+- A fix based on that dead hypothesis — declining a receiver that claims several
+  impls, inside `resolveOpHashFromConcreteTypes` only (the DICT path, leaving
+  direct dispatch and `RefutableConsHeadTest` alone) — changed nothing. Reverted.
+- `mez dev --verbose` produces no Mezze-level frame for an I0004, so the cheap
+  way to localise this does not exist today. That is its own small finding.
+
+So with one decoder in scope and no dictionary injected, the difference the
+spelling makes is NOT in choosing an impl. Look instead at what the constraint's
+ARITY changes about the stdlib op itself — whether `from_json` still takes the
+same dict PARAM and slot name (`declaredDictMethods` / `ownDictMethodsOf` read
+the constraint), and whether `DecodeTargetResolver`'s per-site stamp can still be
+DELIVERED to an op whose parameter list changed shape. Six hypotheses about
+dispatch have now failed; the next one should be about delivery.
+
 **THIS IS THE SAME ROOT CAUSE AS (i).** Both are the constraint tuple having two
 orders and two lengths in play, reconstructed per consumer from a representation
 that does not record where the primary sat. The fix for either is the fix for
