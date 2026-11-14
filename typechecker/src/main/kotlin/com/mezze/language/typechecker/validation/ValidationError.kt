@@ -463,14 +463,39 @@ sealed interface ValidationError {
         val bindingName: String,
         val annotatedType: MezzeType,
         val inferredType: MezzeType,
-        val loc: Loc? = null
+        val loc: Loc? = null,
+        /**
+         * What differs, when the two sides PRINT THE SAME.
+         *
+         * The equality here is `alphaEquivalent`, which compares a function's
+         * effects and its ability constraints as well as its parameter and
+         * return types — and `prettyPrintType` shows neither constraint list.
+         * So a genuine mismatch could render as
+         *
+         *     annotation says {} -> Int, but inferred {} -> Int
+         *
+         * which is the one message that cannot possibly help: it asserts a
+         * difference and then shows none. The comparison lives in
+         * `TypeValidator`, so the producer names the difference and passes it
+         * here rather than this message trying to re-derive it.
+         */
+        val difference: String? = null,
     ) : ValidationError {
         override val code: ErrorCode = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH
 
         override fun message(): String = buildString {
+            val shownAnnotated = prettyPrintType(annotatedType)
+            val shownInferred = prettyPrintType(inferredType)
             append("Type annotation for '$bindingName' doesn't match inferred type: ")
-            append("annotation says ${prettyPrintType(annotatedType)}, ")
-            append("but inferred ${prettyPrintType(inferredType)}")
+            if (shownAnnotated == shownInferred && difference != null) {
+                // Printing the same type twice would be noise; the difference IS
+                // the message.
+                append("both read as $shownAnnotated, but $difference")
+            } else {
+                append("annotation says $shownAnnotated, ")
+                append("but inferred $shownInferred")
+                if (difference != null) append(" ($difference)")
+            }
         }
 
         override fun location() = loc

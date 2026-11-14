@@ -603,9 +603,60 @@ class TypeValidator(
             return listOf(ValidationError.AnnotationMismatch(
                 bindingName = decl.variableName, annotatedType = annotatedType,
                 inferredType = finalType, loc = decl.loc,
+                difference = describeDifference(annotatedType, finalType),
             ))
         }
         return emptyList()
+    }
+
+    /**
+     * Which of [alphaEquivalent]'s tests failed, in words — for the cases the
+     * PRINTER DOES NOT SHOW.
+     *
+     * `prettyPrintType` renders a function's parameter and return types, so a
+     * difference there speaks for itself. It does not render the ability
+     * constraint list, which `abilityNamesMatch` compares, so a mismatch in it
+     * printed as "annotation says {} -> Int, but inferred {} -> Int" — a message
+     * asserting a difference while showing none. Reached from a body whose own
+     * error left an unresolved constraint behind, which is exactly when a reader
+     * is least able to guess.
+     *
+     * Null when the difference is already visible in the printed types; the
+     * message then keeps its original wording. Only the OUTERMOST arrow is
+     * examined, because that is where an invisible difference can arise without
+     * the printed forms diverging — a nested one changes what is printed.
+     */
+    private fun describeDifference(annotated: MezzeType, inferred: MezzeType): String? {
+        if (annotated !is MezzeType.FunctionType || inferred !is MezzeType.FunctionType) return null
+
+        fun constraintNames(c: List<MezzeType.FunctionAbilityConstraint>) =
+            c.filter { it.abilityName != "Inspect" }.map { it.abilityName }.distinct().sorted()
+
+        if (!abilityNamesMatch(annotated.abilityConstraints, inferred.abilityConstraints)) {
+            val want = constraintNames(annotated.abilityConstraints)
+            val got = constraintNames(inferred.abilityConstraints)
+            val extra = got - want.toSet()
+            val missing = want - got.toSet()
+            return when {
+                // The common shape: the body needs an ability the signature never
+                // promised the caller would supply.
+                extra.isNotEmpty() && missing.isEmpty() ->
+                    "the body needs `with ${extra.joinToString(", ")}`, which the annotation " +
+                        "does not declare"
+                missing.isNotEmpty() && extra.isEmpty() ->
+                    "the annotation declares `with ${missing.joinToString(", ")}`, which the " +
+                        "body does not need"
+                else ->
+                    "they demand different abilities — annotation ${want.ifEmpty { listOf("none") }}, " +
+                        "body ${got.ifEmpty { listOf("none") }}"
+            }
+        }
+        if (!effectsMatch(annotated.effects, inferred.effects)) {
+            fun row(e: MezzeType.EffectRow?) = if (e == null) "no effects" else prettyPrintType(e)
+            return "their effect rows differ — annotation ${row(annotated.effects)}, " +
+                "body ${row(inferred.effects)}"
+        }
+        return null
     }
 
     private fun validateParsedTopLevelEffects(
