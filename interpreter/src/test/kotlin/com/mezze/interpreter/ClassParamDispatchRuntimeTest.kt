@@ -271,8 +271,8 @@ main {}
     }
 
     /**
-     * BUG 41 (i) — BREAK TEST: the same generic hop at THREE class params is
-     * still wrong, so BUG 40's fix is complete only for two.
+     * BUG 41 (i) — FIXED. The same generic hop at THREE class params, which
+     * BUG 40's fix did not reach.
      *
      *     ability Conv 'cfg 'b for 'a where { conv: { it: 'a, cfg: 'cfg } -> 'b }
      *     pub let go: { x: 'a, c: Cfg } with Conv Cfg 'b 'a -> 'b = …
@@ -287,14 +287,17 @@ main {}
      *     | 2      | ok     | ok          |
      *     | 3      | ok     | WRONG       |
      *
-     * By reading, the tuple ought to be complete here (`Cfg` concrete, `'b` from
-     * the return bindings, `'a` from the argument harvest), so why
-     * `tryResolveAbilityOpByTuple` does not fire is NOT yet traced — instrument
-     * before assuming. ASSERTS THE CURRENT WRONG BEHAVIOUR, like BUG 37's and
-     * BUG 40's break tests did; its message says to invert it.
+     * THE CAUSE was upstream of dispatch entirely: `abilityClassArgs` prepends
+     * the primary when the ability's declared arity is unknown, and that lookup
+     * answers early and returns null later — so a COMPLETE `[Cfg, 'b, Src]`
+     * became `['b, Cfg, 'b, Src]`, two constraints for one op disagreed, and
+     * `ownTypePerMethod` correctly declined, leaving no dictionary. The arity is
+     * now remembered by content hash ([AbilityArityTable]), which the constraint
+     * census measured: 138 malformed constraints in the stdlib before, 12 after,
+     * and those 12 are the only ones actually WRITTEN under-supplied.
      */
     @Test
-    fun `BUG 41 break - three class params still lose the target through a hop`() {
+    fun `three class params carry the target through a generic hop`() {
         val out = runProgram(
             """
             use std::effects::log::{ println, Console }
@@ -323,11 +326,15 @@ main {}
             """.trimIndent(),
         )
         assertEquals(
-            false,
+            true,
             out.contains("T=\"222\""),
-            "BUG 41 (i) IS FIXED — a 3-param class ability now carries its target " +
-                "through a generic hop. Invert this test and move the known-bugs " +
-                "entry.\n$out",
+            "a 3-param class ability must carry its target through a generic hop. " +
+                "Fixed by [AbilityArityTable]: the tuple reconstruction prepended " +
+                "the primary onto an ALREADY-COMPLETE tuple whenever the ability's " +
+                "declared arity could not be looked up, and that lookup answers in " +
+                "an early pass and returns null in a later one. Remembering the " +
+                "arity by content hash makes the guard decidable, so the malformed " +
+                "4-argument `Conv` constraint is never built.\n$out",
         )
     }
 

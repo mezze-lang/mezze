@@ -4789,12 +4789,12 @@ should be an arity error naming the ability's parameters, not a silent duplicate
 binding — and until it is, a typo in a constraint reads as a missing impl.
 UNPROBED: the over-supplied direction, and what the real arity rule is.
 
-## BUG 41 — OPEN: the class-param family, three cases BUG 40's fix does not cover
+## BUG 41 — (i) FIXED, (ii)/(iii) OPEN: the class-param family after BUG 40
 
 Found 2026-11-14 by probing the arity of a `with` constraint after BUG 40
 landed. All three are measured; none is fixed.
 
-### (i) A generic hop still mis-dispatches at THREE class params
+### (i) FIXED by [[AbilityArityTable]] — a generic hop at THREE class params
 
 BUG 40's fix is complete for a 2-param ability and NOT for a 3-param one:
 
@@ -5046,6 +5046,33 @@ WHAT THIS DOES ESTABLISH: the representation change cannot be made incrementally
 shape; a correct change has to move all of them at once, with the suite as the
 oracle. That is a dedicated piece of work, not a patch — and it is the honest
 reason this is still open.
+
+**(i) IS FIXED, and the census is how. 2026-11-14.**
+
+`AbilityArityTable` remembers each ability's declared parameter count by CONTENT
+HASH, populated in `DeclarationRegistry`'s init (where the declarations are
+visible) and consulted by both tuple-reconstruction sites as a fallback. The
+arity is a pure function of the declaration — the same hash always declares the
+same parameters, because the hash is computed from them — so a remembered entry
+can never be stale, which is what makes a shared table sound here where
+[[project_cross_context_static_state_leaks]] warns it usually is not.
+
+MEASURED, which is the point of having built the census first:
+
+    stdlib constraints whose arg count != their ability's arity
+      before: 138     (mostly `with Ord has 2 args, ability declares 1`)
+      after:   12     (exactly the `with Decode` ones WRITTEN under-supplied)
+
+So 126 of the 138 were FABRICATED by the prepend firing on already-complete
+tuples, and they are simply gone. `:typechecker:test` 5231 passed 0 failed;
+`:interpreter:test` 7348 with ONE failure — BUG 41(i)'s own BREAK test, failing
+because the behaviour became correct. Inverted; it now asserts the right value.
+
+(i)'s mechanism in full, for the record: a complete `[Cfg, 'b, Src]` became
+`['b, Cfg, 'b, Src]`, so `go` carried TWO `Conv` constraints that disagreed,
+`ownTypePerMethod` declined (correctly), no dictionary was resolved, and dispatch
+fell back to the first impl. Six earlier hypotheses were all about DISPATCH; the
+cause was one lookup, upstream.
 
 **THE ORACLE EXISTS NOW, AND IT NAMES THE CAUSE — 2026-11-14.**
 

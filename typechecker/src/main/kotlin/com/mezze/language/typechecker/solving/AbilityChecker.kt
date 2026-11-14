@@ -212,7 +212,11 @@ class AbilityChecker internal constructor(
         val trackingArgs = com.mezze.language.typechecker.constraints.abilityClassArgs(
             primary = MezzeType.VarType(constraint.typeVar),
             typeArgs = typeArgs,
-            arity = registry.lookupAbility(abilityName)?.typeParams?.size,
+            // Same fallback as the sibling call in ConstraintGenerator — see
+            // [AbilityArityTable] for why a lookup here cannot be trusted.
+            arity = registry.lookupAbility(abilityName)?.typeParams?.size
+                ?: com.mezze.language.typechecker.context.AbilityArityTable
+                    .of(abilityName, constraint.abilityHash),
         )
         val fromAnnotation = constraint.context?.startsWith("Type annotation on ") == true
         val trackedEntry = TrackedAbilityConstraint(abilityName, constraint.abilityHash, trackingArgs, constraint.loc, fromAnnotation)

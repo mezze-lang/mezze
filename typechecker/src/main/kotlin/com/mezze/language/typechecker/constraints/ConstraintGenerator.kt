@@ -1728,7 +1728,14 @@ class ConstraintGenerator(
                     // receiver followed by the substituted class-args — prepending the
                     // matched (class-arg) var would drop the concrete receiver (`Int`) and
                     // print `NumAdd 'a 'a`. So use the solved receiver as the lead.
+                    // The table is the FALLBACK that makes this decidable: this
+                    // same lookup answers in an early pass and returns null in a
+                    // later one (measured), and a null arity sends
+                    // `abilityClassArgs` to its prepend, fabricating an argument
+                    // onto an already-complete tuple. See [AbilityArityTable].
                     val arity = registry.lookupAbility(constraint.abilityName)?.typeParams?.size
+                        ?: com.mezze.language.typechecker.context.AbilityArityTable
+                            .of(constraint.abilityName, constraint.abilityHash)
                     val substitutedArgs = constraint.typeArgs.map { substitution.apply(it) }
                     val leadArgs: List<MezzeType> = abilityClassArgs(
                         primary = if (solvedTypeVar is MezzeType.VarType)

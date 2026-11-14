@@ -19,6 +19,14 @@ class DeclarationRegistry(
     // unchanged, but a cross-module ability-op type can later resolve by hash.
     private val allTypeHashesByName: Map<String, Hash> = emptyMap(),
 ) {
+    init {
+        // Remember every ability's declared arity while we can see it. A later
+        // pass asks `lookupAbility` and gets null — measured — and the tuple
+        // reconstruction then fabricates an argument. See [AbilityArityTable].
+        AbilityArityTable.rememberAll(abilitiesByName.values)
+        AbilityArityTable.rememberAll(abilitiesByHash.values)
+    }
+
     /**
      * Every variant constructor by name, with the type declaring it — including
      * transitive and auto-imported types: a value's type identity flows with it
