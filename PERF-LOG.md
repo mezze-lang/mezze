@@ -15656,3 +15656,54 @@ darkness, largest first.
   - `instanceof` on a primitive where a newtype would be that primitive
   - a sibling pair where only one was fixed (`take`/`drop` vs six others;
     `from_list` vs `from_set`; `seq::sort` vs `list::sort`)
+
+---
+
+## OPEN, measured 2026-11-15: correct `resume` typing costs 24% on effectsurface kernel 4
+
+Found while merging `worktree-type-soundness` into this branch
+(`integration/all-three`, `91a99f9a7`). A TYPE fix on the soundness side costs
+time on the explicit-resume kernel, and the two cannot both be had without work
+in emit.
+
+**What changed.** `EffectHandlerBindings.resumeType` returned `performReturn` —
+abort's payload variable — so a handler whose tail is `resume { val = … }`
+unified the perform BLOCK's type with the OP's return type and reported an abort
+nobody wrote (known-bugs BUG 44). Resume is IDENTITY: its result is the OP's
+return type. Fixed by returning `opReturn`.
+
+**What it costs.** `bench/cases/effectsurface`, one kernel per process, min of 3,
+two builds from IDENTICAL source with only that one line toggled:
+
+| kernel | correct typing (`opReturn`) | old typing (`performReturn`) |
+|---|---|---|
+| 1 control | 217 ps | 220 ps |
+| 4 op + EXPLICIT resume | **1046 ps** | **842 ps** |
+
+The control is flat (1.4%), so the 24% is real. For scale, the pre-merge perf
+branch read 913 ps on kernel 4 — so trunk's own commits take it to 842 and this
+fix pushes it to 1046.
+
+**Why it is not simply reverted.** The old typing rejects correct programs:
+
+    effect Ask where { ask: {} -> Str <Ask> }
+    impl Ask for Fixed where { ask = {} -> resume { val = "hi" } }
+    perform Fixed in go { i = 1000, acc = 0 }      # block yields Int
+    ## -> Performer 'Fixed' aborts with Str, but this `perform` block is used as Int
+
+and under V0503 (`resume` is tail-only, so its result IS the handler body's
+type) `performReturn` is always unified with the op's return anyway — the old
+type was wrong and only survived because nothing checked it.
+
+**Where to look.** The kernel's own note says the gap there "is the indirect call
+and nothing about `resume` itself", and `ResumeFallThroughSemanticsTest`
+documents the fast path as `CallIndirectScalar1.doFallThroughResume` returning
+the argument instead of calling the fall-through singleton. The hypothesis to
+test first is that a CONCRETE result type on the resume call changes which call
+shape emit picks, so the scalar fall-through no longer fires. That is an emit
+question, not a typing one — the type is now right.
+
+**Repro.** `bench/cases/effectsurface`, kernel 4; toggle
+`resumeType`'s return between `opReturn` and `performReturn`; rebuild the CLI
+(`:cli:installDist`), rebuild the case, compare min-of-3 with kernel 1 as the
+control.
