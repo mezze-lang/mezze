@@ -1,6 +1,7 @@
 package com.mezze.language.typechecker
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.ast.prettyPrintType
 import org.junit.jupiter.api.Test
 import kotlin.test.assertTrue
 
@@ -101,19 +102,34 @@ class WithConstraintSweepSpecTest : VariantSpecBase() {
         """
         val tyAB = typeOfP(ab) as MezzeType.FunctionType
         val tyBA = typeOfP(ba) as MezzeType.FunctionType
+
+        // Compared through `prettyPrintType`, which NORMALIZES type-variable
+        // names, and by the SET of constraints. Comparing the types with `==`
+        // instead reports a difference for every pair of programs, because each
+        // solve mints its own variables ('g6 vs 'g7) — the first version of this
+        // test did exactly that and "failed" on alpha-equivalence, which is not a
+        // difference anyone can observe. The printed form is also what the author
+        // sees from `mez check`.
+        fun constraintSet(t: MezzeType.FunctionType) =
+            t.abilityConstraints.map { c ->
+                c.abilityName + " " + c.typeArgs.joinToString(" ") { prettyPrintType(it) }
+            }.toSet()
+
         assertTrue(
-            tyAB.abilityConstraints.map { it.abilityName }.toSet() ==
-                tyBA.abilityConstraints.map { it.abilityName }.toSet(),
+            constraintSet(tyAB) == constraintSet(tyBA),
             "the two orders must carry the SAME constraints, and they do not:\n" +
-                "  as written A,B: ${tyAB.abilityConstraints.map { it.abilityName }}\n" +
-                "  as written B,A: ${tyBA.abilityConstraints.map { it.abilityName }}\n" +
-                "Dict slots are collected from a set and sorted, so order is not " +
-                "supposed to reach the type — but that is an invariant, not a given.",
+                "  as written A,B: ${constraintSet(tyAB)}\n" +
+                "  as written B,A: ${constraintSet(tyBA)}\n" +
+                "Dict slots are collected from a set and sorted, so the written " +
+                "order is not supposed to reach the type — but that is an " +
+                "invariant, not a given.",
         )
         assertTrue(
-            tyAB.paramType == tyBA.paramType && tyAB.returnType == tyBA.returnType,
-            "same clause, two orders, different arrow: ${tyAB.paramType} -> ${tyAB.returnType} " +
-                "vs ${tyBA.paramType} -> ${tyBA.returnType}",
+            prettyPrintType(tyAB.paramType) == prettyPrintType(tyBA.paramType) &&
+                prettyPrintType(tyAB.returnType) == prettyPrintType(tyBA.returnType),
+            "same clause, two orders, different arrow:\n" +
+                "  A,B: ${prettyPrintType(tyAB.paramType)} -> ${prettyPrintType(tyAB.returnType)}\n" +
+                "  B,A: ${prettyPrintType(tyBA.paramType)} -> ${prettyPrintType(tyBA.returnType)}",
         )
     }
 

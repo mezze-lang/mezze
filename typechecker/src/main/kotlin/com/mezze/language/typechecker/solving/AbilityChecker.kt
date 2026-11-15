@@ -113,6 +113,40 @@ class AbilityChecker internal constructor(
     }
 
     internal fun validateAbilityConstraints(substitution: Substitution): AbilityFailure? {
+        // Every type variable this declaration's own ANNOTATION quantifies.
+        //
+        // These may not be pinned by impl-uniqueness below. The variable is the
+        // right granularity, not the constraint: `pub let p: { x: 'a } with Make
+        // Int 'a -> Int = { x } -> x.make {}` raises the obligation TWICE — once
+        // from the annotation and once from the body's `x.make {}` — on the SAME
+        // `'a`. Skipping just the annotation-sourced copy leaves the body's copy
+        // to pin it, which is measured and is what made the first attempt here
+        // fail.
+        val annotationVars: Set<TypeVar> = typeVarAbilityConstraints.values
+            .asSequence()
+            .flatten()
+            .filter { it.fromAnnotation }
+            .flatMap { tracked ->
+                tracked.typeArgs.asSequence().flatMap {
+                    com.mezze.language.ast.solving.collectFreeTypeVars(it).asSequence()
+                }
+            }
+            .toSet()
+        // ...and each one's REPRESENTATIVE under the current substitution.
+        //
+        // The variable an inference would pin is rarely the annotation's own. A
+        // method call mints a FRESH variable for the op's `it` and unifies the
+        // receiver with it (`solveEquality: 'a = 'e4 (Method call receiver binds
+        // it)`), so the obligation that reaches the inference below is about
+        // `'e4` while the author wrote `'a`. Pinning `'e4` pins `'a` through the
+        // substitution. Comparing against the written variables alone therefore
+        // catches nothing — measured, and it is why the first two attempts at
+        // this did not move the test.
+        val writtenVars: Set<TypeVar> = annotationVars +
+            annotationVars.mapNotNull { w ->
+                (substitution.apply(MezzeType.VarType(w)) as? MezzeType.VarType)?.variable
+            }
+
         for ((typeVar, abilityConstraints) in typeVarAbilityConstraints) {
             val varType = MezzeType.VarType(typeVar)
             val boundType = substitution.apply(varType)
@@ -174,9 +208,37 @@ class AbilityChecker internal constructor(
                     } else {
                         val inferredSubst = tryBidirectionalInference(abilityName, closedTypeArgs, tracked.abilityHash)
                         if (inferredSubst != null) {
-                            deferredInference.putAll(inferredSubst.mappings)
+                            deferredInference.putAll(
+                                inferredSubst.mappings.filterKeys { it !in writtenVars }
+                            )
                         }
                     }
+                    // ... and NOT for a constraint the author WROTE.
+                    //
+                    // `tryBidirectionalInference` asks "is there exactly one impl
+                    // concrete enough to PIN a variable" and then reads the answer
+                    // out of that impl. For an obligation INFERRED from a body that
+                    // is inference doing its job. For one written in an annotation
+                    // it overrules the declaration: the author quantified `'a`, and
+                    // a unique impl is a fact about what happens to be IN SCOPE, not
+                    // about the signature.
+                    //
+                    // MEASURED, two programs differing only in an unrelated impl:
+                    //
+                    //   impl Make Int for Src
+                    //   pub let p: { x: 'a } with Make Int 'a -> Int = …
+                    //   ## -> pub p : { x: Src } -> Int        the written 'a GONE
+                    //
+                    //   impl Make Int for Src ; impl Make Int for Other
+                    //   ## -> pub p : { x: 'a } with Make Int 'a -> Int   as written
+                    //
+                    // So adding an impl for a type the declaration never mentions
+                    // WIDENED a published signature — and a published signature is
+                    // content-addressed, so its hash moved with it. Within one
+                    // module the pin is unobservable (with one impl there is no
+                    // other type to call it at), which is why it went unnoticed; the
+                    // consequence is across modules, where the narrowed type is what
+                    // callers see.
                 }
             }
         }
