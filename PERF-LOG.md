@@ -15707,3 +15707,41 @@ question, not a typing one — the type is now right.
 `resumeType`'s return between `opReturn` and `performReturn`; rebuild the CLI
 (`:cli:installDist`), rebuild the case, compare min-of-3 with kernel 1 as the
 control.
+
+### …and the first hypothesis above is WRONG — measured, same day
+
+The guess was that a concrete result type stops the scalar fall-through
+(`doFallThroughResume`) from firing. **It is not that.** Two builds from
+identical source, one line toggled, min of 3, using the case's own tier
+controls:
+
+| kernel | handler body | old typing | correct typing |
+|---|---|---|---|
+| 3 | a bare value `1` | 857 ps | 874 ps |
+| 4 | `resume { val = 1 }` | 850 ps | **1015 ps** |
+| 8 | `ident_one { val = 1 }` — a DIRECT call, no resume | 828 ps | **909 ps** |
+
+Kernel 8 contains NO `resume` and NO `abort`
+(`one = {} -> ident_one { val = 1 }`), and it moved 10%. A fast path for resume
+cannot explain a kernel that never resumes. Kernel 3, whose handler is a bare
+value and makes no call at all, did NOT move.
+
+So the pattern is: **handlers whose body is a CALL got slower; a handler whose
+body is a value did not.** Nothing about the resume fast path.
+
+WHAT IS LEFT, and it is the uncomfortable reading: the old typing was handing
+emit INFORMATION, and the information happened to be true in these programs even
+though the rule producing it was wrong. `resume` returning `performReturn`
+unified the perform BLOCK's type with the OP's return type, so the block's type
+was pinned early — early enough for specialisation to use it. The correct typing
+severs that link, and the block's type now has to arrive from the block's own
+expression, later or by a longer chain.
+
+If that is right, the fix is to give the block's type to emit SOONDLY — it is
+determinable from the block, `go_i { i = n, acc = 0 }` is plainly Int — and not
+to restore a rule that rejected correct programs. The next step is to compare
+what the two builds emit for kernel 8, the simpler of the two, since it isolates
+the effect without resume in the picture at all.
+
+NOT a lost optimisation: nothing in the perf work broke. This is the cost of
+REMOVING an unsound unification that emit had been benefiting from.
