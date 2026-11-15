@@ -290,7 +290,7 @@ class ExpressionConstraintGenerator {
 
     internal fun instantiateTypeWithFreshVars(type: MezzeType): MezzeType {
         val freeVars = getFreeTypeVariables(type)
-        val hasRowVars = anyRowVarIn(type)
+        val hasRowVars = com.mezze.language.typechecker.solving.anyRowVar(type, includeEffects = true)
         if (freeVars.isEmpty() && !hasRowVars) return type
 
         // #183: Use freshWithName for associated type vars (starting with ') so each
@@ -305,46 +305,9 @@ class ExpressionConstraintGenerator {
         // polymorphic fn should get its OWN row var. Sharing the same row
         // var across call sites means binding one locks the other. This
         // walk gives every RowVar in `type` a fresh copy per instantiation.
-        return refreshRowVarsIn(afterTypeVars, mutableMapOf())
-    }
-
-    private fun anyRowVarIn(type: MezzeType): Boolean = when (type) {
-        is MezzeType.FunctionType -> (type.effects?.rowVar != null)
-            || anyRowVarIn(type.paramType) || anyRowVarIn(type.returnType)
-        is MezzeType.RecordType -> type.rowVar != null || type.fields.values.any { anyRowVarIn(it) }
-        is MezzeType.VariantType -> type.rowVar != null || type.constructors.values.any { it != null && anyRowVarIn(it) }
-        is MezzeType.TypeApplication -> type.args.any { anyRowVarIn(it) }
-        is MezzeType.NewtypeType -> anyRowVarIn(type.wrappedType)
-        else -> false
-    }
-
-    private fun refreshRowVarsIn(type: MezzeType, mapping: MutableMap<RowVar, RowVar>): MezzeType {
-        fun freshFor(rv: RowVar?): RowVar? {
-            if (rv == null) return null
-            return mapping.getOrPut(rv) { if (rv.isUserSpecified()) RowVar.userOpen() else RowVar.fresh() }
-        }
-        return when (type) {
-            is MezzeType.FunctionType -> {
-                val newEff = type.effects?.let { r -> r.copy(rowVar = freshFor(r.rowVar)) }
-                MezzeType.FunctionType(
-                    paramType = refreshRowVarsIn(type.paramType, mapping),
-                    returnType = refreshRowVarsIn(type.returnType, mapping),
-                    effects = newEff,
-                    abilityConstraints = type.abilityConstraints
-                )
-            }
-            is MezzeType.RecordType -> type.copy(
-                fields = type.fields.mapValues { (_, v) -> refreshRowVarsIn(v, mapping) },
-                rowVar = freshFor(type.rowVar)
-            )
-            is MezzeType.VariantType -> type.copy(
-                constructors = type.constructors.mapValues { (_, v) -> v?.let { refreshRowVarsIn(it, mapping) } },
-                rowVar = freshFor(type.rowVar)
-            )
-            is MezzeType.TypeApplication -> type.copy(args = type.args.map { refreshRowVarsIn(it, mapping) })
-            is MezzeType.NewtypeType -> type.copy(wrappedType = refreshRowVarsIn(type.wrappedType, mapping))
-            else -> type
-        }
+        return com.mezze.language.typechecker.solving.refreshRowVars(
+            afterTypeVars, mutableMapOf(), includeEffects = true,
+        )
     }
 
     internal fun instantiateTypeWithFreshVarsPreservingAssociatedWithMapping(

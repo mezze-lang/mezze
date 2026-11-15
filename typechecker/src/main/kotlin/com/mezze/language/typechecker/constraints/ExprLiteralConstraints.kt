@@ -143,7 +143,23 @@ internal fun ExpressionConstraintGenerator.generateIdentifier(expr: ParsedIdenti
         is TypingContext.LookupResult.Found -> {
             when (val binding = result.binding) {
                 is TypingContext.Binding.Monomorphic -> {
-                    val type = binding.type
+                    // Rows are freshened per REFERENCE, exactly as the polymorphic
+                    // branch below freshens type variables. A monomorphic binding
+                    // quantifies nothing and can still carry a row variable, and
+                    // sharing one means the first reference to bind it answers for
+                    // every other:
+                    //
+                    //     let promote = { r } -> { ...r, tls = True }
+                    //     pub let a: Int = (promote { r = { host = "h", port = 1, tls = False } }).port
+                    //     pub let b: Str = (promote { r = { name = "n", tls = False } }).name
+                    //
+                    // `a` bound `promote`'s own row and `b` was then refused
+                    // against `{ tls, host, port }` — a type no one wrote. See
+                    // [refreshRowVars]; `TypeScheme.instantiate` says the same
+                    // thing about a `having` binding's variable.
+                    val type = com.mezze.language.typechecker.solving.refreshRowVars(
+                        binding.type, mutableMapOf(), includeEffects = false,
+                    )
                     val referencedBinding = DefinitionRef.ByName(binding.sourceModule, lookupKeyString)
                     ConstraintResult(
                         type = type,

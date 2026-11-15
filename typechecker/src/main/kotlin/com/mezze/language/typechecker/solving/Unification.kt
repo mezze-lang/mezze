@@ -994,7 +994,7 @@ private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType,
             }
         }
 
-        return unifyMemberPayloads(
+        val payloads = unifyMemberPayloads(
             keys = allFields,
             member1 = { rec1.fields[it] },
             member2 = { rec2.fields[it] },
@@ -1003,6 +1003,54 @@ private fun unifyRecords(rec1: MezzeType.RecordType, rec2: MezzeType.RecordType,
             outer2 = rec2,
             mismatchMessage = { name, a1, a2, inner -> formatFieldMismatch(name, a2, a1, inner) },
         )
+        if (payloads !is UnificationResult.Success) return payloads
+
+        // PIN THE OPEN SIDE'S ROW WHEN THE OTHER SIDE IS CLOSED. Without this the
+        // branch above checks which fields are present, unifies the shared ones,
+        // and returns — leaving the row variable BOUND TO NOTHING. An inferred
+        // open record that met a fully known one therefore stayed open for good,
+        // and `solveHasField` extends an open record with whatever field is asked
+        // of it:
+        //
+        //     pub let pass = { r } -> if r.x > 0 then r else r
+        //     pub let p = {} -> (pass { r = { x = 1 } }).zzz     ## read `'a`
+        //
+        // across a module boundary, while the printed signature said `{ x: Int }`
+        // — the printer closes rows for display, so nothing showed it.
+        //
+        // The closed side is the whole truth about the value, so the row's content
+        // is exactly the fields it adds, and its tail is CLOSED: `apply` splices
+        // the extension and takes the extension's own tail, so a null one ends the
+        // record. The open side's declared fields are already unified above and
+        // win on overlap, so only the genuinely extra names go in.
+        //
+        // This is where the close belongs, and the measured alternative says why:
+        // closing these rows at GENERALIZATION instead pins a parameter before its
+        // call site can contribute, which took out `FnReturnSpreadFieldTest` —
+        // `{ r } -> { ...r, tls = True }` reads none of `r`'s other fields, so
+        // `.port` on the result resolves only because `{ r = base }` supplied it.
+        // A row must stay open while it is being learned and close once something
+        // concrete says what it is.
+        //
+        // A USER-WRITTEN `...` is left alone: `{ x: Int, ... }` is open because the
+        // author said so, and binding it would overrule a declaration. Both sides
+        // open is the #11 hole named above and not this change.
+        val openRow = rec1.rowVar ?: rec2.rowVar
+        val closedSide = if (rec1.rowVar == null) rec1 else if (rec2.rowVar == null) rec2 else null
+        val openSide = if (rec1.rowVar == null) rec2 else rec1
+        if (closedSide != null && openRow != null && !openRow.isUserSpecified()) {
+            val extra = closedSide.fields.filterKeys { it !in openSide.fields }
+            return UnificationResult.Success(
+                payloads.substitution.compose(
+                    Substitution(
+                        recordRowMappings = mapOf(
+                            openRow to MezzeType.RecordType(fields = extra, rowVar = null)
+                        )
+                    )
+                )
+            )
+        }
+        return payloads
     }
 
     if (fields1 != fields2) {

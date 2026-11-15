@@ -27,8 +27,14 @@ data class TypeScheme(
                     concreteReceiver = constraint.concreteReceiver
                 )
             }
+            // Rows are freshened even here. A MONOMORPHIC scheme quantifies no
+            // type variable and still carries row variables, and sharing one
+            // across call sites is what let a same-module caller's width reach
+            // every other caller — see [refreshRowVars].
             return InstantiationResult(
-                type = type,
+                type = com.mezze.language.typechecker.solving.refreshRowVars(
+                    type, mutableMapOf(), includeEffects = false,
+                ),
                 substitution = emptyMap(),
                 freshConstraints = monoConstraints
             )
@@ -63,7 +69,13 @@ data class TypeScheme(
             MezzeType.VarType(TypeVar.freshWithName(it.name))
         }
 
-        val instantiatedType = applySubstitutionToType(type, substitution)
+        // Type variables are freshened above; ROWS are freshened too, and for the
+        // same reason this function already gives for a `having` binding's
+        // variable. Record and variant rows only — effect rows have their own
+        // instantiation path. See [refreshRowVars].
+        val instantiatedType = com.mezze.language.typechecker.solving.refreshRowVars(
+            applySubstitutionToType(type, substitution), mutableMapOf(), includeEffects = false,
+        )
 
         // L-08/L-09: a scheme constraint names its type variable by SPELLING
         // (`AbilityConstraint.typeParam` is a String), and the map below resolves
