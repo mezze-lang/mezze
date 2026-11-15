@@ -7281,6 +7281,23 @@ keyed on a name does not just offend taste: it silently covers the cases it is
 wrong for, and waits for an argument that exposes it.** See
 [[feedback_registration_time_policy_not_name_matching]].
 
+### NEGATIVE RESULT: `box_list` / `box_dict` are NOT affected
+
+I predicted they would be — they take a `lang` STRING, so they build their guest
+value through the thread's ambient context, and a sandboxed call taking a list
+argument looked like the same cross-context shape. MEASURED, and it is not:
+
+    ambient list: ok 42    sandbox list: ok 42
+    ambient dict: ok 42    sandbox dict: ok 42
+
+(`type('C', (), {'g': lambda self, xs: sum(xs)})()` called with a `py_list`, and
+the dict equivalent, under `GraalPy` and `GraalPyWith`.)
+
+So passing a guest CONTAINER across contexts is fine; what needed its context
+entered was INVOKING A FUNCTION. The distinction is worth keeping: it narrows
+this bug class to "guest code executing", not "guest values moving", and it
+means the `lang`-string box ops are not a latent instance of it.
+
 ### The original report follows
 
 ## BUG 46 — the provider's guest HELPER was built in the caller's context

@@ -1,6 +1,47 @@
 # Generic Ability Operations — an operation with its own type parameter
 
-## The Problem
+## STATUS: IMPLEMENTED 2026-11-15. This document is the record of what it cost.
+
+The declaration below is accepted, implementable, and dispatches correctly —
+directly and through forwarding, on the interpreter AND the monomorphised build.
+`GenericAbilityOpRuntimeTest` and `GenericAbilityOpForwardingTest` pin it.
+
+Measured on `mez dev` and on a built jar, identical output both ways:
+
+| program | result |
+|---|---|
+| `a.uno { x = a/b/c }` — three instantiations of one op-own param | 1000 / 2000 / 3000 |
+| `a.both { x = c, y = b }` — two own params, two different bounds | 23 |
+| `a.fwd { x = b }` — forwarding to another such op | 2007 |
+| `a.fwd2 { x = b }` — the same forward one level deeper | 4014 |
+
+**The five monomorphisation concerns below did not materialise — except one, and
+it was not in mono at all.** The dictionary SLOT (#3) was the real gap, and in a
+place this document did not predict:
+
+- `dictMethodsForHash` for an impl op came from SCANNING THE BODY for method
+  calls on a VarType receiver. An op that calls the constrained op directly
+  (`x.show {}`) is found; one that FORWARDS (`it.direct { x = x }`, concrete
+  receiver) is not, so it compiled with no dict parameter to forward. Phase 2
+  does not rescue it: it matches `BindingRef.ByHash` callees and an ability-op
+  method call is not one. A DECLARED `with` is a requirement whatever the body
+  does with it, so the declared set now decides parameters too.
+- and the call site had to PREFER that slot over the concrete pile. Forwarding
+  was the last resort, reached only when nothing resolved — but the pile holds
+  the receiver, so `show` always resolved, to the receiver's impl. The pile
+  cannot see what the caller's type variable is bound to; only the slot can.
+
+Symptom before the fix: `a.fwd { x = b }` answered 1 (`Show A`, the receiver)
+where 2 (`Show B`) is correct — silently wrong, and type-checking cleanly either
+way, which is why both tests are RUNTIME tests.
+
+The identity (#2), ABI (#4) and op-type (#5) concerns cost nothing: one impl op
+hash per impl still suffices, because the op's own parameter is passed as
+EVIDENCE rather than specialised into a distinct body. That is the finding worth
+keeping from this whole document — **an operation parameter needs a dictionary,
+not a specialisation.**
+
+## The Problem (as originally written)
 
 This declaration is accepted today:
 

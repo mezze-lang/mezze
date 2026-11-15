@@ -136,7 +136,28 @@ internal fun TypedASTCompiler.prescanForDictMethods(modules: List<TypedModule>) 
             implOpBodies.add(opHash to bodyExpr)
             declaredOpTypeByHash[opHash] = opBody.type
             val constrained = arrowHasAbilityConstraint(opBody.type)
-            val methods = scanExprForVarTypeMethodCalls(bodyExpr, constrained, opBody.type)
+            // A DECLARED `with` IS A REQUIREMENT, whether or not the body happens to
+            // call the op on the variable itself. The scan below asks what the body
+            // USES; it finds `x.show {}` and misses an op that FORWARDS instead:
+            //
+            //   direct: { it: A, x: 'p } with Show 'p -> Int = { it, x } -> x.show {}
+            //   fwd:    { it: A, x: 'p } with Show 'p -> Int = { it, x } -> it.direct { x = x }
+            //
+            // `fwd`'s receiver is concrete, so no VarType method call is there to
+            // find, and `fwd` compiled with `params=[it, x]` — NO `__dict_show` to
+            // forward. Phase 2 does not rescue it either: it matches `BindingRef.ByHash`
+            // callees, and an ability-op method call is not one. So `a.fwd { x = b }`
+            // resolved `show` from the only thing in reach — the RECEIVER — and
+            // answered 1 (`Show A`) where 2 (`Show B`) is correct, on both the
+            // interpreter and the monomorphised build.
+            //
+            // The declared set is already computed just below for
+            // `declaredDictMethodsForHash`; this unions it into the set that decides
+            // PARAMETERS. For an op whose body does call the constrained op directly
+            // the two sets agree and nothing changes — it only adds a slot where the
+            // scan was blind, which is exactly the forwarding shape.
+            val methods = scanExprForVarTypeMethodCalls(bodyExpr, constrained, opBody.type) +
+                declaredDictMethods(opBody.type)
             if (methods.isNotEmpty()) {
                 dictMethodsForHash[opHash] = methods
             }
@@ -1712,4 +1733,50 @@ internal fun TypedASTCompiler.adoptBareRecord(type: MezzeType): MezzeType {
         Triple(name, hash, rec.fields)
     }.distinctBy { (_, hash, _) -> hash }
     return com.mezze.language.ast.adoptRecordAlias(record, aliases)
+}
+
+/**
+ * The slot to forward for an operation's OWN type parameter, or null when
+ * something at the call site genuinely determined the dictionary.
+ *
+ * **This has to be asked BEFORE the concrete pile**, and that ordering is the
+ * whole fix. The pile (`concreteTypesForDict`) holds the receiver and the
+ * arguments; it cannot see what the CALLER's type variable is bound to. So for an
+ * operation carrying its own parameter it always resolves, and always to the
+ * receiver's impl:
+ *
+ *     direct: { it: A, x: 'p } with Show 'p -> Int = { it, x } -> x.show {}
+ *     fwd:    { it: A, x: 'p } with Show 'p -> Int = { it, x } -> it.direct { x = x }
+ *
+ *     a.direct { x = b }   ## 2  — correct, `Show B`
+ *     a.fwd    { x = b }   ## 1  — WRONG, `Show A`: the receiver's
+ *
+ * Forwarding used to be the LAST resort, reached only when nothing resolved — so
+ * it never ran here. It is not a fallback for this shape; it is the specific
+ * answer, and the receiver-is-a-VarType path already applied the same rule
+ * ("bound to one of the caller's own variables → forward the caller's slot").
+ *
+ * Returns null when [fromObligation] answered, when a per-site decode pins the
+ * slot, or when [perVarBound] bound the variable to a concrete type here — in all
+ * three something more specific than a forward is known. Also null when the
+ * enclosing function holds no such slot, which is the ordinary case for an op
+ * whose constraint belongs to its ability rather than to itself.
+ */
+internal fun TypedASTCompiler.ownParamDictForward(
+    dictMethodName: String,
+    dictMethod: String,
+    dictParamName: String,
+    src: SourceInfo,
+    perVarBound: MezzeType?,
+    fromObligation: Hash?,
+    perSiteMatchesSlot: Boolean,
+): FieldIR? {
+    if (fromObligation != null || perSiteMatchesSlot || perVarBound != null) return null
+    val slot = enclosingDictSlot(
+        dictMethod, com.mezze.language.ast.MagicParams.typeVarOfKey(dictMethodName),
+    ) ?: return null
+    val idx = currentParamNames.indexOf(slot)
+    if (idx >= 0) return FieldIR(dictParamName, ReadLocalIR(currentCaptureCount + idx, SlotKind.OBJECT, src))
+    val cap = currentCaptureNames[slot] ?: return null
+    return FieldIR(dictParamName, ReadCaptureIR(cap, SlotKind.OBJECT, src))
 }

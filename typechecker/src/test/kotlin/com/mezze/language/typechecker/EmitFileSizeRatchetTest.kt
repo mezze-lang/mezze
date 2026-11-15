@@ -271,7 +271,14 @@ class EmitFileSizeRatchetTest {
             // at 4511 and the perf branch at 4910, and the merged file is 5042 —
             // both sides grew it, in different places, and both sets of reasons are
             // kept above. The number is the measured merged size, not a slackening.
-            C + "TypedASTCompiler.kt" to 5042,   // was 5,580 before the split
+            // 5042 -> 5050: the call site of [ownParamDictForward], which fills an
+            // ability operation's OWN type parameter's dictionary by forwarding the
+            // enclosing function's slot instead of resolving from the receiver pile
+            // (BUG 42's forwarding half — `a.fwd { x = b }` answered the receiver's
+            // impl). THE DECISION ITSELF WENT TO `DictEvidence.kt`, the sibling that
+            // owns dictionary evidence, which is what this test asks for; what is left
+            // here is the plumbing that reads the locals the decision needs.
+            C + "TypedASTCompiler.kt" to 5050,   // was 5,580 before the split
             // +42 for `contextRowWithBodyAssocTypes`: an INLINE lambda was stamped
             // with the row from the pushed CONTEXT, so a callback's associated
             // type was the CALLEE's variable rather than what the body threw, and

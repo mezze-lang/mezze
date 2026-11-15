@@ -1860,14 +1860,22 @@ class TypedASTCompiler(
                         val fromObligation = obligationTypes.firstNotNullOfOrNull { (ability, args) ->
                             resolveOpFromObligation(dictMethod, ability, args)
                         }
-                        val resolvedHash = fromObligation
+                        // The op's own parameter's dictionary, forwarded from the
+                        // enclosing function when nothing here determined it. See
+                        // [ownParamDictForward] for why it must come BEFORE the pile.
+                        // Asked BEFORE the pile — see [ownParamDictForward].
+                        val ownForward = ownParamDictForward(dictMethodName, dictMethod,
+                            dictParamName, src, perVarBound, fromObligation, perSiteMatchesSlot)
+                        val resolvedHash = if (ownForward != null) null else fromObligation
                             ?: if (perSiteMatchesSlot) {
                                 perSiteDecode
                             } else {
                                 (perVarBound?.let { resolveOpHashFromConcreteTypes(dictMethod, listOf(it)) }
                                     ?: resolveOpHashFromConcreteTypes(dictMethod, concreteTypesForDict))
                             }
-                        if (resolvedHash != null) {
+                        if (ownForward != null) {
+                            fields.add(ownForward)
+                        } else if (resolvedHash != null) {
                             // refToDictedOp wraps the resolved op when IT needs its
                             // own dicts (nested containers: `[[[P]]]`). Seed it with the
                             // structural binding so each recursion peels exactly one
