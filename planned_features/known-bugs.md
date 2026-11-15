@@ -5264,7 +5264,7 @@ primary.
 
 ---
 
-## BUG 42 — OPEN BY DECISION: an ability operation may declare a type variable nothing can implement
+## BUG 42 — FIXED 2026-11-15: an ability operation may declare a type variable nothing can implement
 
 Found 2026-11-15 by the ability/constraint spec dive (probe `K21`).
 
@@ -5304,7 +5304,7 @@ the merge. Nothing depends on the outcome: **0 of 91 stdlib ability operations
 Until it lands, the declaration stays silent and the author learns at the first
 impl. The doc records the stopgap choice (refuse vs warn) rather than making it.
 
-## BUG 43 — OPEN, REFRAMED: `having` bindings are skipped on the QUALIFIED call path
+## BUG 43 — FIXED 2026-11-15: `having` bindings were skipped on the QUALIFIED call path
 
 Found 2026-11-15 by the same dive (probe `D1`). A DIFFERENT thing from BUG 42 —
 this one is a rule, not a missing feature.
@@ -6920,6 +6920,59 @@ the measurement is recorded so the next session starts from the answer rather
 than the search. The constraint to add is `Eq 'k, Hash 'k` on the KEY FUNCTION's
 return.
 
+
+### BOTH FIXED 2026-11-15 — and BUG 42's first half alone was worse than the bug
+
+**BUG 43** was one missing constraint. `tryGenerateStaticAbilityOpCall` equates
+the argument record with the operation's parameter type, which DOES bind the
+receiver (hence V0402 on a wrong one), and then emitted no
+`AssociatedTypeResolution`. The impl was selected and never asked what its
+`having` bindings ARE. It now emits one, with the ability's full positional
+tuple, exactly as the receiver-taking path does:
+
+    Receives.receive { target = Red, msg = Flip }   ## was `'a`, now Light
+    Receives.receive { target = Red, msg = 5 }      ## was accepted, now refused
+
+One wart recorded rather than hidden: the mismatch reports T0215 ("nothing here
+determines that type") instead of T0201 ("expected LightMsg but got Int"),
+because the bad argument breaks the solve before the receiver binds, so the
+undetermined-type check reports first. The REFUSAL is right; the message is
+worth improving.
+
+**BUG 42** needed two changes, and shipping the first alone would have been a
+regression:
+
+1. V0417's `allowedTypeVars` widened to an operation's OWN type variables, read
+   off the ABILITY's declaration — so an impl inventing a name the contract
+   never offered is still refused (pinned), which is what keeps a typo from
+   becoming a new quantified parameter.
+2. `obligationDispatchTypes` now harvests bindings from the ARGUMENTS as well as
+   the return. With only (1), dispatch was SILENTLY WRONG:
+
+       s.wrap { x = s }   ## 101   (Show Src = 100)
+       s.wrap { x = o }   ## 101   <- must be 201 (Show Other = 200)
+
+   `wrap` returns `Int`, so the return harvested nothing, the obligation
+   dispatched nothing, and resolution fell to the flattened receiver/argument
+   pile — which starts with the RECEIVER. Verified both ways: `[101, 101]`
+   without the fix, `[101, 201]` with it (`GenericAbilityOpRuntimeTest`).
+
+**T0301 was NOT relaxed, and that is deliberate.** Its own comment records why:
+a variable bound by nothing is a "magic tyvar" generalized per call — the
+pattern that bit codec's `Encode … Result 'out`. An operation introduces its own
+variable through a per-op `with` constraint, which is one of the three spellings
+T0301's message already names, and that is the form now supported end to end.
+Without a constraint the parameter is opaque anyway.
+
+So the planned-features doc's prediction — "the cost is all in mono" — was
+WRONG. The dict-passing path that the stdlib's `Decode` constraints already use
+carries an operation's own variables too; what was missing was the binding
+SOURCE, not the machinery. No `Monomorphizer`/`MonoDriver` change was needed.
+
+Gates for both: compileStdlib --rerun-tasks, :typechecker:test 5366,
+:interpreter:test 8118, zero real failures. Spec: `QualifiedAbilityCallSpecTest`
+(5 cases, both bugs and both guards) and `GenericAbilityOpRuntimeTest` (the
+dispatch, which only running can tell apart).
 
 ## BUG 44 — FIXED: `resume` and `abort` shared one type variable
 

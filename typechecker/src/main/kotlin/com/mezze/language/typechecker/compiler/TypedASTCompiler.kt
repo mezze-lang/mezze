@@ -1821,7 +1821,7 @@ class TypedASTCompiler(
                     // a real `Decode` constraint at the call site, so the concrete
                     // shape is on the call node and the dict resolves from it — the
                     // usage-recovery above is what that replaces.
-                    val obligationTypes = obligationDispatchTypes(opHash, expr.type)
+                    val obligationTypes = obligationDispatchTypes(opHash, expr.type, expr.arg.type)
                     // STRUCTURAL element binding — how Haskell/Rust resolve this.
                     // `instance Eq a => Eq [a]` peels exactly ONE constructor per step:
                     // the instance HEAD is matched against the type and `a` is bound,

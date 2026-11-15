@@ -673,11 +673,27 @@ internal fun TypedASTCompiler.entryOpDictIsHeld(
  * whose variable does not appear in the return type simply yields no pair, and
  * the caller falls through to its existing receiver/argument resolution.
  */
-internal fun TypedASTCompiler.obligationDispatchTypes(opHash: Hash, callType: MezzeType): List<Pair<Hash?, List<MezzeType>>> {
+internal fun TypedASTCompiler.obligationDispatchTypes(
+    opHash: Hash,
+    callType: MezzeType,
+    argType: MezzeType? = null,
+): List<Pair<Hash?, List<MezzeType>>> {
     val declared = declaredOpTypeByHash[opHash] as? FunctionType ?: return emptyList()
     if (declared.abilityConstraints.isEmpty()) return emptyList()
     val bindings = HashMap<String, MezzeType>()
     harvestVarBindings(declared.returnType, substitution.apply(callType), bindings)
+    // …and from the ARGUMENTS, which is where an operation's OWN type parameter
+    // binds (BUG 42). `wrap: { it: 'w, x: 'a } with Show 'a -> Int` returns `Int`,
+    // so the return harvests nothing and the obligation used to dispatch nothing;
+    // resolution then fell to the flattened receiver/argument pile, which starts
+    // with the RECEIVER and took the first impl claiming it. MEASURED: with
+    // `impl Show for Src` and `impl Show for Other` both in scope,
+    // `s.wrap { x = s }` and `s.wrap { x = o }` BOTH ran Src's `show` — 101 and
+    // 101, where the second must be 201. A silent wrong answer, which is why
+    // lifting V0417 without this would have been worse than refusing the shape.
+    if (argType != null) {
+        harvestVarBindings(declared.paramType, substitution.apply(argType), bindings)
+    }
     if (bindings.isEmpty()) return emptyList()
     return declared.abilityConstraints.mapNotNull { constraint ->
         val args = constraint.typeArgs.map { arg ->

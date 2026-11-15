@@ -60,10 +60,43 @@ internal fun ExpressionConstraintGenerator.tryGenerateStaticAbilityOpCall(
         ?: BuiltInAbilities.getAbilityMethodType(abilityName, methodName, abilityVar)
         ?: return null
     val receiverParam = decl.receiverTypeParam ?: decl.typeParams.firstOrNull() ?: return null
-    val opType = com.mezze.language.typechecker.solving.substituteTypeParamsByName(
-        declaredOpType,
-        mapOf(receiverParam to abilityVar),
-    ) as? MezzeType.FunctionType ?: return null
+
+    // BUG 43: the ability's `having` names are FRESHENED here, and the mapping is
+    // kept, so this path can resolve them against the impl the way the
+    // receiver-taking path does. Without the freshening they stayed as the
+    // DECLARATION's own variables — shared across every call site — and without
+    // the resolution they were never checked at all:
+    //
+    //     ability Receives for 'a having 'msg, 'reply where {
+    //       receive: { target: 'a, msg: 'msg } -> 'reply,
+    //     }
+    //     impl Receives for Light having 'msg = LightMsg, 'reply = Light where { … }
+    //     Receives.receive { target = Red, msg = 5 }
+    //
+    // was ACCEPTED — `msg = 5` against `'msg = LightMsg` — and produced `'a`
+    // instead of the impl's `'reply = Light`. The impl WAS selected (a wrong
+    // receiver gives V0402, because the argument record is equated with the op's
+    // param type below and that binds the receiver), so the gap was precisely the
+    // associated types: selected, then never asked what the impl says they are.
+    val (freshenedOpType, originalToFresh) =
+        instantiateTypeWithFreshVarsPreservingAssociatedWithMapping(declaredOpType, decl.associatedTypes)
+    // Substituting by NAME here does nothing: freshening has already replaced the
+    // receiver param with a fresh variable, so the declaration's name is gone.
+    // Measured — `Arbitrary.arbitrary` lost the link between its produced type and
+    // `abilityVar` and the stdlib failed with T0215 "nothing here determines that
+    // type". Map the receiver's FRESH variable instead, and keep the by-name path
+    // for a builtin whose type came from `getAbilityMethodType` (already written
+    // in terms of `abilityVar`, so nothing to freshen).
+    val receiverFresh = originalToFresh[receiverParam.removePrefix("'")]
+    val opType = (
+        if (receiverFresh != null)
+            applyTypeVarSubstitution(freshenedOpType, mapOf(receiverFresh to abilityVar.variable))
+        else
+            com.mezze.language.typechecker.solving.substituteTypeParamsByName(
+                freshenedOpType,
+                mapOf(receiverParam to abilityVar),
+            )
+        ) as? MezzeType.FunctionType ?: return null
 
     // Receiver-taking operations normally go the receiver-rewrite path (see the doc
     // comment): `Combine.combine { it = v, ... }` rewrites to `v.combine { ... }`.
@@ -97,6 +130,38 @@ internal fun ExpressionConstraintGenerator.tryGenerateStaticAbilityOpCall(
         context = "Static ability call: $abilityName.$methodName",
         loc = expr.loc,
     )
+
+    // BUG 43, the other half: ASK the impl what its `having` bindings are, keyed
+    // on the same variable the argument record pinned. `primaryTypeVar` is the
+    // ability's receiver position, which is what chooses the impl here, and
+    // `classArgTypeVars` is the whole tuple in declaration order — the same
+    // shape the receiver-taking path passes, for the same reason (two impls can
+    // share a receiver and differ in a class arg).
+    val associatedTypeVarsMap = decl.associatedTypes.mapNotNull { name ->
+        val normalized = name.removePrefix("'")
+        (originalToFresh[normalized] ?: originalToFresh[name])?.let { normalized to it }
+    }.toMap()
+    // TYPES, not vars: a position is routinely concrete, and dropping the
+    // concrete ones is what made `NumAdd Int Float` arrive as the 1-tuple
+    // `[Int]` — see this field's own comment on `AssociatedTypeResolution`.
+    val classArgTypes: List<MezzeType> = decl.typeParams.mapNotNull { paramName ->
+        val normalized = paramName.removePrefix("'")
+        if (normalized == receiverParam.removePrefix("'")) abilityVar
+        else originalToFresh[normalized]?.let { MezzeType.VarType(it) }
+    }
+    val associatedTypeConstraints: List<Constraint.AssociatedTypeResolution> =
+        if (associatedTypeVarsMap.isEmpty()) emptyList()
+        else listOf(
+            Constraint.AssociatedTypeResolution(
+                abilityName = abilityName,
+                primaryTypeVar = abilityVar.variable,
+                associatedTypeVars = associatedTypeVarsMap,
+                classArgTypes = classArgTypes,
+                abilityHash = decl.identity,
+                context = "Static ability call associated types: $abilityName.$methodName",
+                loc = expr.loc,
+            ),
+        )
 
     // `receiverFieldName = null` is the whole signal to emit: this operation has
     // no receiver, so pick the impl from the type the call produces.
@@ -139,6 +204,7 @@ internal fun ExpressionConstraintGenerator.tryGenerateStaticAbilityOpCall(
         effectRowVars = base.effectRowVars + setOfNotNull(opType.effects?.rowVar),
         performed = base.performed || (opType.effects?.performed ?: false),
         abilityConstraints = base.abilityConstraints + abilityConstraint,
+        associatedTypeConstraints = base.associatedTypeConstraints + associatedTypeConstraints,
         methodCallResolutions = base.methodCallResolutions +
             mapOf((expr.loc to methodName) to methodCallInfo),
         callReturnTypes = base.callReturnTypes + (expr.loc to resultType),

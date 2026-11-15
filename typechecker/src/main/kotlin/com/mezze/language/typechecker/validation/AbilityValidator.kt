@@ -464,6 +464,14 @@ object AbilityValidator {
         validateOperationSignatures(impl, abilityDeclaration, sourceLocation, registry)
     }
 
+    /** Every type-variable name a parsed annotation mentions, apostrophes kept. */
+    private fun collectAnnotationTypeVars(annotation: ParsedTypeAnnotation?): Set<String> {
+        annotation ?: return emptySet()
+        val here = if (annotation is ParsedNamedType && annotation.name.startsWith("'"))
+            setOf(annotation.name) else emptySet()
+        return here + annotation.children().flatMap { collectAnnotationTypeVars(it) }
+    }
+
     private fun validateOperationSignatures(
         impl: ParsedImplAbilityDecl,
         abilityDeclaration: ParsedAbilityDecl,
@@ -569,7 +577,30 @@ object AbilityValidator {
             // we can just use that. Previously this only pulled from
             // `abilityTypeArgs`, which forced the redundant leading-tyvar
             // form (`impl Ord 'a for Option 'a`) as the only working syntax.
-            val allowedTypeVars = impl.forallVars.toSet()
+            // BUG 42: an operation may carry its OWN type variables, and an impl
+            // is allowed to use them.
+            //
+            // `allowedTypeVars` was `impl.forallVars` alone — every variable the
+            // impl HEADER binds — so an operation declaring one of its own
+            //
+            //     ability Wrap for 'w where { wrap: { it: 'w, x: 'a } with Show 'a -> Int }
+            //
+            // could be DECLARED and never implemented: every impl of it was
+            // V0417. The ability was uninhabitable. This is Rust's
+            // `fn wrap<A: Show>(&self, x: A)`, and Mezze spells the quantifier
+            // implicitly: a variable in the operation's signature that neither
+            // the ability nor the impl head binds belongs to the OPERATION.
+            //
+            // Read off the ABILITY's declaration of the operation, not the
+            // impl's, so the impl cannot invent one the contract never offered —
+            // a name the ability does not mention is still refused, which is
+            // what keeps a typo from silently becoming a new parameter.
+            val abilityBoundNames = (abilityDeclaration.typeParams + abilityDeclaration.associatedTypes)
+                .map { it.removePrefix("'") }.toSet()
+            val opOwnTypeVars = (
+                collectAnnotationTypeVars(declOp.paramType) + collectAnnotationTypeVars(declOp.returnType)
+                ).filterNot { it.removePrefix("'") in abilityBoundNames }
+            val allowedTypeVars = impl.forallVars.toSet() + opOwnTypeVars
 
             if (implOp.paramType != null && hasTypeVariables(actualParamType, allowedTypeVars)) {
                 throw TypeCheckError(
