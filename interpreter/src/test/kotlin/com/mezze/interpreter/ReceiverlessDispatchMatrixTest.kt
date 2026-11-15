@@ -79,7 +79,7 @@ class ReceiverlessDispatchMatrixTest {
             impl Mk for B where { mk: {} -> B = {} -> { tag = 22, extra = "b" } }
 
             ## the hop never mentions A or B — the CALLER's annotation decides
-            pub let make: {} -> 'a with Mk 'a = {} -> Mk.mk {}
+            pub let make: {} with Mk 'a -> 'a = {} -> Mk.mk {}
 
             let viaA: A = make {}
             let viaB: B = make {}
@@ -98,21 +98,39 @@ class ReceiverlessDispatchMatrixTest {
         )
     }
 
-    /** A receiverless op whose impl body itself calls another receiverless op. */
+    /**
+     * A receiverless op whose impl body calls ANOTHER receiverless op — two
+     * nested produced-type dispatches, which is where two dictionaries can
+     * collapse onto one slot (S-11).
+     *
+     * Note what this cell cannot be written as: an inner op `seed: {} -> Int`
+     * mentions the ability's own variable NOWHERE, so nothing chooses its impl
+     * and the call is refused (T0215) — correctly, and with the message that
+     * says a parameter mentioning the type would not help either. So the inner
+     * op has to PRODUCE the type, and the body states which one it wants.
+     */
     @Test fun `a receiverless op forwards to another receiverless op`() {
         val out = runLines(
             """
             use std::effects::log::{ println, Console }
             type A = { tag: Int }
-            type B = { tag: Int }
+            type B = { tag: Int, mark: Str }
 
-            ability Seed for 'a where { seed: {} -> Int }
-            impl Seed for A where { seed: {} -> Int = {} -> 100 }
-            impl Seed for B where { seed: {} -> Int = {} -> 200 }
+            ability Seed for 'a where { seed: {} -> 'a }
+            impl Seed for A where { seed: {} -> A = {} -> { tag = 100 } }
+            impl Seed for B where { seed: {} -> B = {} -> { tag = 200, mark = "x" } }
 
             ability Mk for 'a where { mk: {} -> 'a }
-            impl Mk for A where { mk: {} -> A = {} -> { tag = Seed.seed {} + 1 } }
-            impl Mk for B where { mk: {} -> B = {} -> { tag = Seed.seed {} + 2 } }
+            impl Mk for A where {
+              mk: {} -> A = {} -> do
+                let s: A = Seed.seed {}
+                { tag = s.tag + 1 }
+            }
+            impl Mk for B where {
+              mk: {} -> B = {} -> do
+                let s: B = Seed.seed {}
+                { tag = s.tag + 2, mark = s.mark }
+            }
 
             let fromA: A = Mk.mk {}
             let fromB: B = Mk.mk {}
@@ -125,10 +143,10 @@ class ReceiverlessDispatchMatrixTest {
         )
         assertEquals(
             listOf("101", "202"), out,
-            "each `mk` body calls a DIFFERENT receiverless op, and both must reach " +
-                "their own impl: `Mk A`'s body wants `Seed A` (100+1) and `Mk B`'s wants " +
-                "`Seed B` (200+2). A shared answer here is two dictionaries collapsing " +
-                "onto one slot, which is S-11 exactly.",
+            "each `mk` body dispatches a SECOND receiverless op at its own type: " +
+                "`Mk A` wants `Seed A` (100+1) and `Mk B` wants `Seed B` (200+2). One " +
+                "shared answer is two dictionaries on one slot — S-11 exactly, and it " +
+                "type-checks.",
         )
     }
 }

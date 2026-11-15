@@ -92,14 +92,18 @@ CASE_DIR="$ROOT/bench/cases/$case_name"
 # not always the directory name.
 binary_in() {
   local d="$1" b
-  b="$(ls "$d/.build" 2>/dev/null | grep -vE '\.(jar|jsa|bat)$' | head -1)"
+  # `sed -n 1p` and not `head -1`: head EXITS after the first line, so under
+  # `pipefail` the writer takes SIGPIPE and the pipeline reports 141 (see
+  # scripts/lint-shell.sh, whose self-test measures exactly that). sed without
+  # `q` drains stdin, so the status stays 0.
+  b="$(ls "$d/.build" 2>/dev/null | grep -vE '\.(jar|jsa|bat)$' | sed -n '1p')"
   [ -n "$b" ] && echo "$d/.build/$b"
 }
 
 # Which compiler this is. The CLI's own jars are version-named, so the ast jar's
 # basename identifies the build that produced them without stamping anything.
 cli_id() {
-  basename "$(ls "$(dirname "$MEZ")/../lib/"ast-*.jar 2>/dev/null | head -1)" 2>/dev/null \
+  basename "$(ls "$(dirname "$MEZ")/../lib/"ast-*.jar 2>/dev/null | sed -n '1p')" 2>/dev/null \
     || echo unknown
 }
 
@@ -156,14 +160,14 @@ best() { # binary kernel
   local bin="$1" k="$2" b=99999999999 ps
   for _ in $(seq "$REPS"); do
     ps=$("$bin" "$k" "$N" 2>/dev/null |
-         grep -oE '[0-9]+ ps/iter' | grep -oE '^[0-9]+' | sort -n | head -1)
+         grep -oE '[0-9]+ ps/iter' | grep -oE '^[0-9]+' | sort -n | sed -n '1p')
     [ -n "$ps" ] && [ "$ps" -lt "$b" ] && b="$ps"
   done
   [ "$b" = 99999999999 ] && echo FAIL || echo "$b"
 }
 gcs() { MEZZE_JAVA_OPTS="-Xlog:gc" "$1" "$2" "$N" 2>&1 | grep -cE "Pause Young"; }
-sum() { "$1" "$2" "$N" 2>/dev/null | grep -oE 'sum=-?[0-9]+' | head -1; }
-label() { "$1" "$2" 1000 2>/dev/null | head -1 | sed -E 's/  +[0-9]+ ps.*//' | cut -c1-22; }
+sum() { "$1" "$2" "$N" 2>/dev/null | grep -oE 'sum=-?[0-9]+' | sed -n '1p'; }
+label() { "$1" "$2" 1000 2>/dev/null | sed -n '1p' | sed -E 's/  +[0-9]+ ps.*//' | cut -c1-22; }
 
 if [ "$mode" = "one" ]; then
   bin="$(binary_in "$CASE_DIR")"

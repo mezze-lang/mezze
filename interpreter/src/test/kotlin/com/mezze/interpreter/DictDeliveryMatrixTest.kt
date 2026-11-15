@@ -47,7 +47,7 @@ class DictDeliveryMatrixTest {
             """
             $shows
             pub let apply: { f: { v: 'x } -> Int, v: 'x } -> Int = { f, v } -> f { v = v }
-            pub let useA: { v: 'x } -> Int with Show 'x = { v } -> v.show {}
+            pub let useA: { v: 'x } with Show 'x -> Int = { v } -> v.show {}
 
             let main = {} -> perform Console in do
               println { msg = apply { f = useA, v = a }.to_str {} }
@@ -68,7 +68,7 @@ class DictDeliveryMatrixTest {
         val out = runLines(
             """
             $shows
-            pub let sum_shows: { xs: ['x] } -> Int with Show 'x = { xs } ->
+            pub let sum_shows: { xs: ['x] } with Show 'x -> Int = { xs } ->
               xs.fold { init = 0, f = { acc, x } -> acc + x.show {} }
 
             let main = {} -> perform Console in do
@@ -95,7 +95,7 @@ class DictDeliveryMatrixTest {
             impl Tag for A where { tag: { it: A } -> Int = { it } -> 10 }
             impl Tag for B where { tag: { it: B } -> Int = { it } -> 20 }
 
-            pub let mix: { p: 'p, q: 'q } -> Int with Show 'p, Tag 'q = { p, q } ->
+            pub let mix: { p: 'p, q: 'q } with Show 'p, Tag 'q -> Int = { p, q } ->
               p.show {} * 100 + q.tag {}
 
             let main = {} -> perform Console in do
