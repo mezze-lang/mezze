@@ -113,6 +113,54 @@ class DeclIdentityTest {
         assertNotEquals(before, after, "`caller`'s text is unchanged but what it calls is not")
     }
 
+    /**
+     * An OPERATOR is a call, so its caller depends on the impl that answers it.
+     *
+     * `BinaryOp`'s doc said the content hasher uses the symbol alone and called
+     * that "hash-stable" (#304). It is stable by being wrong: `total` kept one
+     * hash across three edits of `impl NumAdd for Money` while its lowered IR
+     * changed — the blob REPLACED under the same hash by `mez build`, left STALE
+     * by `mez index`, and `edges` growing one CALLS edge per impl version. A
+     * build re-lowers everything, so local runs looked right; what breaks is
+     * content addressing, which is what a hash is for.
+     *
+     * This is the `.method` rule applied to the spelling that hides it: `a + b`
+     * and `a.add { r = b }` are the same call and must depend on the same thing.
+     */
+    @Test
+    fun `changing an operator's impl changes its callers`() {
+        writeModule("m", """
+            use std::abilities::numeric::{ NumAdd }
+            newtype Money = Int
+
+            impl NumAdd Money for Money having 'out = Money where {
+              add: { it: Money, r: Money } -> Money = { it, r } -> Money.(1)
+            }
+
+            pub let total: { a: Money, b: Money } -> Money = { a, b } -> a + b
+        """)
+        val before = check("use m\nlet main = {} -> {}").module("m.mz").let("total")
+
+        writeModule("m", """
+            use std::abilities::numeric::{ NumAdd }
+            newtype Money = Int
+
+            impl NumAdd Money for Money having 'out = Money where {
+              add: { it: Money, r: Money } -> Money = { it, r } -> Money.(2)
+            }
+
+            pub let total: { a: Money, b: Money } -> Money = { a, b } -> a + b
+        """)
+        val after = check("use m\nlet main = {} -> {}").module("m.mz").let("total")
+
+        assertNotEquals(
+            before, after,
+            "`total`'s text is unchanged, but the `+` it calls now runs a different " +
+                "body. Hashing the operator's SYMBOL alone made these two the same " +
+                "declaration, so a store would serve one program's IR for the other.",
+        )
+    }
+
     @Test
     fun `the same code in the same environment is still one declaration`() {
         writeModule("shared", "pub let base = {} -> 1")

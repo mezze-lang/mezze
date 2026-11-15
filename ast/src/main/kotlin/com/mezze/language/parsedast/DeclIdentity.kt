@@ -709,7 +709,33 @@ private class Walker(
                 }
                 expr(expr.arguments, bound)
             }
-            is ParsedBinaryOp -> { b.append(byteArrayOf(HashTags.FUNCTION_CALL)); b.append(expr.op.symbol); expr(expr.left, bound); expr(expr.right, bound) }
+            is ParsedBinaryOp -> {
+                b.append(byteArrayOf(HashTags.FUNCTION_CALL))
+                b.append(expr.op.symbol)
+                // …AND the providers of the ability method the operator calls, the
+                // same way `.method` hashes its own (see `member`).
+                //
+                // `BinaryOp`'s doc said "the content hasher uses [symbol]
+                // (hash-stable)". It IS stable, and it is stable by being wrong: an
+                // operator is a call, so `let total = { a: Money, b: Money } -> a + b`
+                // depends on `impl NumAdd for Money` exactly as a `.method` call
+                // depends on its impl. MEASURED before this: `total` kept hash
+                // f6aa0e… across three edits of that impl while its lowered IR blob
+                // changed — the blob was REPLACED under the same hash by `mez build`
+                // and left STALE by `mez index`, and `edges` grew one CALLS edge per
+                // impl version. Local runs looked right because a build re-lowers
+                // everything; what breaks is content addressing itself, which is the
+                // one thing a hash is for: fetch-by-hash, store dedup, codebase
+                // queries.
+                //
+                // The stability that is lost is the stability of a WRONG answer. The
+                // cost is that editing an operator's impl now changes its callers'
+                // identities, which is what it should always have done.
+                com.mezze.language.ast.OperatorMapping.getBinaryOp(expr.op.symbol)
+                    ?.method?.let { member(it) }
+                expr(expr.left, bound)
+                expr(expr.right, bound)
+            }
             is ParsedParens -> expr(expr.expr, bound)
             is ParsedMatchCase -> b.append(byteArrayOf(HashTags.MATCH, 0x01))
             is ParsedIfLetGuard -> { b.append(byteArrayOf(HashTags.IF_ELSE, 0x01)); pattern(expr.pattern); expr(expr.expr, bound) }
