@@ -76,17 +76,24 @@ impl Pad3 for P3 {} where { p3 = {} -> 0 }
 
 ## READ THIS BEFORE QUOTING A NUMBER FROM THIS CASE.
 ##
-## Lifting the loops to top level (below) costs them their monomorphisation:
-## `MEZZE_TRACE_SELFTAIL` reports `go_t params=4` and `go_n params=3` where this
-## file declares TWO parameters each. The extras are `__dict_` parameters — the
-## loops are dictionary-passing generic functions, they allocate per iteration
-## (46-127 young collections against the control's 2) and they decline the fused
-## tier at `3P:update-rhs`. So every kernel from 2 onwards sits in a regime the
-## control is not in.
+## THE DICT-PASSING REGIME DESCRIBED HERE IS GONE — re-measured 2026-11-15.
+## `MEZZE_TRACE_SELFTAIL` on this very case now reports `params=2` for every loop
+## (`params=1` for the churn helpers) and no `__dict_` parameter anywhere. The
+## note below used to read `go_t params=4` and `go_n params=3`, i.e. the loops
+## were dictionary-passing generic functions allocating per iteration (46-127
+## young collections against the control's 2). The self-reference equality on a
+## recursive binding fixed that — it ties the accumulator's associated output back
+## to the accumulator, so the call site can resolve it and mono specialises the
+## loop.
 ##
-## THAT IS WHY KERNEL 2 EXISTS. Absolute numbers here are not comparable to
-## kernel 1 or to any other case; the DIFFERENCES are what this case measures,
-## between kernels that share the regime:
+## WHAT STILL HOLDS: these kernels decline the FUSED tier (`tier=not-fused`),
+## because a `perform` fails the tier's "every parameter update is arithmetic over
+## parameters" test. One loop reports FUSED — the control. So kernel 1 is still
+## not in the same regime as the rest, and KERNEL 2 IS STILL WHY: compare kernels
+## that share a tier, not kernel N against the control.
+##
+## Absolute numbers here are not comparable to any other case; the DIFFERENCES
+## are what this case measures, between kernels that share the regime:
 ##
 ##   k3 - k2  one effect operation, handler already installed
 ##   k5 - k3  installing the handler per iteration
@@ -96,13 +103,17 @@ impl Pad3 for P3 {} where { p3 = {} -> 0 }
 ## The dict-passing itself is a ledger row of its own (mono does not specialise
 ## these), not a fact about effects.
 ##
-## EVERY LOOP IS A TOP-LEVEL RECURSIVE FUNCTION, not a `let`-bound lambda.
-## BUG 35: a recursive LOCAL lambda cannot call a function that handles its own
-## effect — `go { i = i - one_installed {}, … }` is rejected because the
-## lambda's self-reference is typed without the `<*>` its body acquires, while
-## the identical loop at top level checks fine. Kernels 5 and 6 need that call,
-## and a case where some loops were local and some were not would be comparing
-## two shapes, so they are all top-level.
+## EVERY LOOP IS A TOP-LEVEL RECURSIVE FUNCTION, not a `let`-bound lambda, and
+## THE REASON NO LONGER APPLIES. It was BUG 35: a recursive LOCAL lambda could
+## not call a function that handles its own effect, because the lambda's
+## self-reference was typed without the `<*>` its body acquires. FIXED
+## 2026-11-15 — both forms now check, and both report `params=2`, so the local
+## form is no longer penalised either.
+##
+## They stay top-level anyway, deliberately: changing every kernel's shape would
+## reprice every row in one go, and a case whose numbers are its whole purpose
+## should not change shape and value in the same edit. Rewriting them as local
+## lambdas is a fair thing to do NEXT, with the old numbers kept beside the new.
 ##
 ## 1. CONTROL: a positional tail loop, on the fused tail-loop tier.
 let go_c = { i, acc } ->

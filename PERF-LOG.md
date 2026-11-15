@@ -15659,7 +15659,38 @@ darkness, largest first.
 
 ---
 
-## OPEN, measured 2026-11-15: correct `resume` typing costs 24% on effectsurface kernel 4
+## OPEN, and the 24% below NEEDS RE-MEASURING — the control has moved since
+
+Re-checked 2026-11-15 on `integration/all-three` after BUG 35 and the row work.
+Same case, same n, min of 3, one kernel per process:
+
+| kernel | recorded below | now |
+|---|---|---|
+| 1 control | 217 ps | **268 ps** |
+| 4 explicit resume | 1046 ps | 1548 ps |
+
+**THE CONTROL MOVED 23%, so nothing here may be read across the two builds.**
+That is the rule this ledger keeps for exactly this situation, and the numbers
+above are reported only to say the old pair no longer describes the current
+build. My runs were also BLOCKED (all of kernel 1, then all of kernel 4) rather
+than interleaved, which is a second reason not to trust the delta.
+
+Against its own control, kernel 4 is 5.78x now against 4.82x recorded — so the
+cost is probably still there, and "probably" is as far as this measurement goes.
+Settling it needs what the entry below did: two builds from IDENTICAL source with
+only `EffectHandlerBindings.resumeType` toggled, interleaved, control in the same
+invocation.
+
+**AND THE CASE'S OWN HEADER WAS STALE WHEN THAT 24% WAS TAKEN.** It warned that
+every kernel from 2 onwards sat in a dictionary-passing regime — `go_t params=4`,
+`go_n params=3`, 46-127 young collections. Measured today, every loop in the case
+reports `params=2` and no `__dict_` parameter at all. So the 24% was read in a
+regime the case no longer has, which is the strongest reason to re-take it rather
+than carry it forward. Header corrected in the same commit.
+
+### The original entry, measured in that regime
+
+## correct `resume` typing costs 24% on effectsurface kernel 4
 
 Found while merging `worktree-type-soundness` into this branch
 (`integration/all-three`, `91a99f9a7`). A TYPE fix on the soundness side costs
