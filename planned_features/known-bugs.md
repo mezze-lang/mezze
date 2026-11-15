@@ -6191,7 +6191,45 @@ Kotlin, not by a second Mezze pipeline, because an equality between two Mezze
 routes passes when both are wrong the same way. Removing the one-line fix fails
 the small case AND the past-threshold case.
 
-## BUG 43 — OPEN 2026-11-08: a built jar run without `jdk.incubator.vector` dies on a fused numeric pipeline
+## BUG 43 — FIXED 2026-11-15: a built jar run without `jdk.incubator.vector` dies on a fused numeric pipeline
+
+**CAUSE: the gate and the kernels were the same class.** Reading
+`FlpSimd.AVAILABLE` LINKS `FlpSimd`, and linking VERIFIES its methods — and
+`FlpSimd` also held `private static VectorMask<Long> sinkMask(LongVector v, ...)`.
+So the vector types were resolved *before* the guard could be consulted, and the
+program died at the very check that exists to protect it.
+
+The old comment stated the assumption that failed, in as many words: "when false,
+the Vector API classes in the lazy `Vectors` holder are never touched, so no
+`NoClassDefFoundError` is thrown". **A holder defers a CONSTANT, not the
+verification of the methods around it.** `SIMD_THRESHOLD` and `AVAILABLE` were
+never the problem; the signatures beside them were.
+
+**FIX:** split the class. `FlpSimd` keeps `AVAILABLE`, `SIMD_THRESHOLD` and two
+delegating entry points, and NAMES NO VECTOR TYPE; every vector-typed member moved
+to `FlpSimdKernels`, which is named only from inside a branch the gate has already
+allowed. The whole public surface was 4 members, two of them primitive-signature
+entry points, so no caller changed.
+
+MEASURED both ways on `range.map{}.fold{}` built to a jar and run with no
+`--add-modules`: `Error: java.lang.NoClassDefFoundError: jdk/incubator/vector/Vector`
+before, `20000100000` after.
+
+**GUARD: `FlpSimdGateIsVectorFreeTest`, asserted against the COMPILED CLASS** —
+the gate's constant pool must not contain `jdk/incubator/vector`, plus a control
+asserting the kernels' pool does. A behavioural test cannot catch this: the suite
+runs WITH the module on the path, so every behavioural check passes either way.
+
+### STILL UNGATED, and no failing case found: `datastructures`' `VectorOps`
+
+`VectorOps` imports the API with no availability flag of its own, and
+`DoubleSeqStorage.sumDouble` and friends call it unconditionally. Probed on the
+current build — a 5000-element `xs.sum {}` in a jar with no `--add-modules`
+returns `12497500` — so nothing links it on that path today. Left as a latent
+risk rather than refactored speculatively: a gate there needs a scalar fallback
+per entry point, which is real work and should follow a case that actually fails.
+
+### The original report follows
 
 ```
 $ java -Xmx4g -XX:+UseSerialGC --add-modules=jdk.internal.vm.ci -jar app.jar
