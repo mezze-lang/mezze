@@ -109,6 +109,36 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
                     else -> null
                 }
 
+                // A ROW IS NOT CARRIED FORWARD (V0714, author's rule). A source
+                // whose row is DECLARED open — `type Loose = { x: Int, ... }` — has
+                // fields no one can name, so no honest result type exists for
+                // spreading it: measured, `{ v: Loose } -> { ...v, x = 1 }` inferred
+                // `{ x: Int }` and SILENTLY DROPPED whatever else `v` carried.
+                //
+                // This is the only spelling the rule can refuse here. A source that
+                // is merely UNRESOLVED at this point (a lambda parameter) is a
+                // different case and stays legal: its fields are pinned by the call
+                // site, which is what makes
+                //
+                //   let go = { st } -> … go { st = { ...st, i = st.i - 1 } }
+                //   go { st = { i = n, acc = 0 } }
+                //
+                // read `{ st: { i: Int, acc: 'a } }` — closed and exact. Refusing it
+                // by its unresolvedness was MEASURED WRONG: it took out four cases
+                // whose sources were ordinary record literals.
+                val declaredOpenSource = resolvedSpreadType
+                if (declaredOpenSource != null && declaredOpenSource.rowVar != null) {
+                    throw TypeCheckError(
+                        message = "Cannot spread `${prettyPrintType(declaredOpenSource)}`: its row is " +
+                            "open, so this spread would carry fields no type can name. " +
+                            "A row is not carried forward — spread a source whose " +
+                            "fields are known.",
+                        loc = entry.expr.loc,
+                        errorType = ErrorType.TYPE_MISMATCH,
+                        code = ErrorCode.V0714_OPEN_ROW_NOT_CARRIED,
+                    )
+                }
+
                 when {
                     resolvedSpreadType != null -> {
                         for (fieldEntry in explicitFieldEntries) {
@@ -195,37 +225,42 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
         )
     }
 
-    // #335: for every spread source that was still a VarType, tie it to the result.
-    // The source must be an open record carrying the explicit override fields plus
-    // a fresh pass-through tail; the result record is opened on that same tail so
-    // the source's other (unmentioned) fields become part of the result type.
-    // Without this, `{ r } -> { ...r, x = 1 }` inferred `{ x: Int }` and dropped
-    // every field of `r` — a later `.field` access then failed to type-check.
-    val resultRowVar: RowVar? = varSpreadSources.lastOrNull()?.second
-    for ((source, tail) in varSpreadSources) {
-        collector.constraints.add(
-            Constraint.Equality(
-                left = source,
-                right = MezzeType.RecordType(fields = explicitFieldTypes.toMap(), rowVar = tail),
-                context = "Spread expression must be a record type",
-                loc = expr.loc
+    // #335/V0714: tie every still-unresolved spread source to the result.
+    //
+    // The source is constrained to an OPEN record carrying the override fields,
+    // which is what lets the body's own reads name the rest: in
+    //
+    //   let go = { st } -> if st.i <= 0 then st.acc else go { st = { ...st, i = st.i - 1 } }
+    //
+    // `i` is the only override, and `st.acc` is read — so `acc` arrives from the
+    // READ, as `{ i: Int, acc: 'a }`. The field set of an unresolved source comes
+    // from its uses, never from the override list, which is why only the source is
+    // open here and the RESULT is not (see the return below).
+    for ((source, _) in varSpreadSources) {
+        // ONE `HasField` PER OVERRIDE, not one `Equality` against a record built
+        // from the overrides. The two differ in exactly one way that matters: the
+        // record had to carry a fresh pass-through row to leave room for the
+        // source's other fields, and that row made the source — and so the result
+        // — OPEN. An open result answers for fields nobody wrote, which is how
+        // `(bump { r = { x = 1 } }).zzz` type-checked and read `'a` while the same
+        // read through a non-spreading `{ r } -> r` was T0205.
+        //
+        // A read is what puts a field on an unresolved record, and an override IS
+        // a read: `{ ...st, i = st.i - 1 }` asks for `i` the same way `st.acc`
+        // asks for `acc`. Asking through `HasField` grows the source without
+        // claiming anything about what else it has, so its field set still comes
+        // from its uses and the CALL SITE closes it.
+        for ((fieldName, fieldType) in explicitFieldTypes) {
+            collector.constraints.add(
+                Constraint.HasField(
+                    recordType = source,
+                    fieldName = fieldName,
+                    fieldType = fieldType,
+                    context = "Spread update field '$fieldName' must exist on the spread source",
+                    loc = expr.loc,
+                )
             )
-        )
-        // #403: a spread source (`{ ...r, x = 1 }`) FORWARDS its whole row into the
-        // result — `r`'s unmentioned fields flow through. That is genuine
-        // row-polymorphism (carve-out #2), so the source's pass-through tail must
-        // stay OPEN and survive the field-access-inferred-row close. Without this,
-        // closing `r`'s tail would reject a caller passing a record wider than the
-        // explicit override fields (FnReturnSpreadFieldTest). MustBeOpen pins the
-        // resolved tail into mustBeOpenRowVars, exempting it from
-        // closeGeneratedRowVars.
-        collector.constraints.add(
-            Constraint.MustBeOpen(
-                type = source,
-                context = "Spread source forwards its row; keep it open (#403)",
-                loc = expr.loc
-            )
-        )
+        }
     }
 
     for ((fieldName, fieldType) in explicitFieldTypes) {
@@ -286,12 +321,33 @@ internal fun ExpressionConstraintGenerator.generateRecordLiteral(expr: ParsedRec
         }
     }
 
-    val recordType = MezzeType.RecordType(
-        fields = fields,
-        // #335: open on the pass-through tail when a VarType spread contributed
-        // fields we can't yet name; closed otherwise (the usual case).
-        rowVar = resultRowVar
-    )
+    // 11.8 — A SPREAD'S RESULT IS ITS SOURCE'S TYPE. That is the whole rule, and
+    // it is what "a row is not carried forward" leaves once the row is gone: a
+    // spread UPDATES, so it produces a value of the shape it was handed, and #75
+    // above already pins every override to the field type it replaces.
+    //
+    // For a source still unresolved here, the result IS that type variable. It is
+    // not a record built from the overrides and it is not opened on a shared tail:
+    // both were measured wrong, in opposite directions.
+    //
+    //   - Built from the overrides, `{ ...st, i = st.i - 1 }` read `{ i: Int }` and
+    //     DROPPED `acc` (#335).
+    //   - Opened on a tail shared with the source, the result wore a row — and a
+    //     row on a RESULT answers for fields nobody wrote:
+    //     `(bump { r = { x = 1, y = 2 } }).zzz` type-checked and read `'a`, and the
+    //     wider argument was accepted where the same call WITHOUT a spread is
+    //     T0201. The row was pinned open by #403 for exactly that acceptance.
+    //
+    // Being the source's type gives both: `go` reads `{ i: Int, acc: 'a }` because
+    // the body reads both fields, and `bump`'s `r` reads `{ x: 'a }` because `.x`
+    // is all it reads — so `.zzz` is T0205 and the wider argument is T0201, from
+    // the ordinary record rules rather than from a rule about spreads.
+    val varSpreadSource = varSpreadSources.lastOrNull()?.first
+    if (varSpreadSource != null) {
+        return collector.toResult(varSpreadSource)
+    }
+
+    val recordType = MezzeType.RecordType(fields = fields, rowVar = null)
 
     return collector.toResult(adoptRecordAlias(recordType, context))
 }

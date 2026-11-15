@@ -653,6 +653,15 @@ fun ErrorCode.explain(): String = when (this) {
 
             "something, and refused when it is builtins all the way down."
 
+
+    ErrorCode.V0714_OPEN_ROW_NOT_CARRIED ->
+        "An open row is not carried forward. `{ age: Int, ... }` as a PARAMETER means " +
+        "\"at least these fields\" — a lower bound on what a caller may pass — and that is " +
+        "all it means. Nothing names the extra fields, so a RESULT cannot promise them and " +
+        "a spread of an open-row value cannot be given a type: its result would be the " +
+        "source's fields with some replaced, which only a carried row variable could " +
+        "express. Spread a record whose fields are all known instead, or build the result " +
+        "explicitly — `{ p } -> { age = p.age + 1 }` names what it returns."
     ErrorCode.V0712_NOT_A_TYPE_NAME ->
 
         "An ability or an effect was written where a type belongs. Types, " +

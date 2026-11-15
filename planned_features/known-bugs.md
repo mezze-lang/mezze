@@ -7015,3 +7015,75 @@ had never run. Three more collisions came out of the same merge — two
 implementations of BUG 40's tuple, `V0422` minted twice for different rules, and
 two diagnostics for the impl-param rule. None was textual drift; all four were
 the same problem solved twice or a gap only the pair could show.
+
+## BUG 45 — FIXED 2026-11-15: a spread's result wore the source's ROW
+
+Found while landing the author's rule that **a row is not carried forward**. Three
+versions of `{ ...r, x = … }` existed, each wrong in a different direction, and
+the point of this entry is that the middle one looked like the fix.
+
+| the result was | what it did |
+|---|---|
+| a record built from the OVERRIDES | dropped every other field: `{ ...st, i = st.i - 1 }` read `{ i: Int }` and lost `acc` (#335) |
+| opened on a row shared with the source | carried the row onto the RESULT, where it answered for fields nobody wrote (#403 pinned it open ON PURPOSE, to accept a wider caller) |
+| **the source's own type** | correct, and it is just spec 11.8: a spread UPDATES, so it produces the shape it was handed |
+
+The second was the state on trunk, and `#403`'s comment states the reason in as
+many words: "without this, closing `r`'s tail would reject a caller passing a
+record wider than the explicit override fields." Accepting a wider caller through
+a spread IS the carried row. Once the rule says rows are not carried, that reason
+is not a reason, and both the pinning and the shared tail go.
+
+### What makes it liveable, and it is not the override list
+
+    let go = { st } -> if st.i <= 0 then st.acc else go { st = { ...st, i = st.i - 1 } }
+    go { st = { i = 4, acc = 7 } }
+
+`i` is the only override and `acc` still has to be in `st`. It is, because
+**the body READS it** — an unresolved source's field set comes from its uses, and
+an override is just one more use. So the overrides are asked for with one
+`HasField` each rather than unified against a record built from them, which grows
+the source without claiming what else it has, and the call site closes it:
+`go : { st: { i: Int, acc: 'a } } -> 'a`. Exact, closed, no row.
+
+I first read the field set off the override list, concluded `acc` could only
+survive by carrying the row, and told the author the rule needed real record-row
+unification (#268 Stage 2). It needed nothing of the kind. **When a field seems
+to need carrying, check whether something READS it.**
+
+### V0714, and the one spelling that has no honest answer
+
+A source whose row is DECLARED open cannot be spread:
+
+    type Loose = { x: Int, ... }
+    pub let widen = { v: Loose } -> { ...v, x = 1 }    ## V0714
+
+Its other fields are named nowhere, so carrying the row puts a row on a result and
+closing it discards fields the value still has — which is what this DID, inferring
+`{ x: Int }` silently. `RecordSpecUpdateTest` asserted that acceptance on the
+reasoning that `Loose` "names the row, so 11.8 carries it"; the name was never the
+problem.
+
+A FIRST VERSION OF V0714 ALSO REFUSED AN UNRESOLVED SOURCE, on the reasoning that
+its fields were not known. That is a different question — not knowing a type WHERE
+THE SPREAD IS WRITTEN is ordinary bidirectional inference — and it took out four
+cases whose sources were plain record literals. Measured, not reasoned: the four
+failures were the tell.
+
+### NOT this bug: `.zzz` on the result
+
+    pub let bump = { r } -> { ...r, x = r.x + 1 }
+    pub let probe = {} -> (bump { r = { x = 1 } }).zzz     ## checks, reads 'a
+
+I attributed this to the carried row and was wrong. It survives every version
+above, and it reproduces with NO SPREAD AT ALL:
+
+    pub let pass = { r } -> if r.x > 0 then r else r
+    pub let p = {} -> (pass { r = { x = 1 } }).zzz        ## checks, reads 'a
+
+A param GROWN by a read is open, so it answers for any field; `{ r } -> r`, grown
+by nothing, is closed by the call site and gives T0205. That is the hole already
+recorded in [[project_two_holes_found_in_object_design_talk]] — an INFERRED open
+row reads a field at any type where a WRITTEN one refuses — and it governs the
+wider-argument acceptance too (`{ r } -> r.x` takes `{ x = 1, y = 2 }`). Closing
+it is a decision about usage-inferred records, not about spreads.
