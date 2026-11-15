@@ -6892,3 +6892,45 @@ the measurement is recorded so the next session starts from the answer rather
 than the search. The constraint to add is `Eq 'k, Hash 'k` on the KEY FUNCTION's
 return.
 
+
+## BUG 44 — FIXED: `resume` and `abort` shared one type variable
+
+Found 2026-11-15 by MERGING the type-soundness and perf branches, and findable
+no other way: it needs the perf branch's explicit `resume { val = X }` form
+(f8a783733) to meet the type-soundness branch's abort-payload check.
+
+```mezze
+effect Ask where { ask: {} -> Str <Ask> }
+impl Ask for Fixed where { ask = {} -> resume { val = "hi" } }
+let go = { i, acc } -> if i <= 0 then acc else go { i = i - 1, acc = acc + str::size { s = Ask.ask {} } }
+perform Fixed in go { i = 1000, acc = 0 }
+## -> Performer 'Fixed' aborts with Str, but this `perform` block is used as Int
+```
+
+Nothing aborts in that program. `EffectHandlerBindings` typed the two as
+
+    resume : { val: opReturn }     -> performReturn      <- WRONG
+    abort  : { val: performReturn } -> 'never
+
+so a handler whose TAIL is `resume { val = … }` has body type `performReturn`,
+which the op's declared return then pins — unifying the perform BLOCK's type
+with the OP's return type. `checkAbortPayloads` reads that same variable and
+reports an abort that was never written.
+
+RESUME IS IDENTITY. It hands the payload back AT THE THROW SITE and the handler
+body continues, so the call evaluates to the payload — the op's return type —
+and says nothing about what the block yields. `abort` is the one that decides
+the block, and it keeps `performReturn`. Fixed by returning `opReturn`.
+
+The suite pins the identity both ways: `resume { val = X }` must mean exactly
+`X` (13 cases in `ResumeFallThroughSemanticsTest`), and V0503 still refuses a
+`resume` whose result is used further in the handler — a DECISION, reaffirmed by
+the author during the merge, because the work after a `resume` runs BEFORE the
+resumed computation. That case is now a refusal test rather than a contradiction.
+
+WHY IT MATTERS BEYOND ITSELF: two branches each held half of this. The perf side
+had a form the type side had never typed; the type side had a check the perf side
+had never run. Three more collisions came out of the same merge — two
+implementations of BUG 40's tuple, `V0422` minted twice for different rules, and
+two diagnostics for the impl-param rule. None was textual drift; all four were
+the same problem solved twice or a gap only the pair could show.
