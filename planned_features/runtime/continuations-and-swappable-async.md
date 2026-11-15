@@ -168,7 +168,64 @@ price of the keyword-only direction.
    already reports unhandled suspended ops *"when a context closes holding
    one"*.
 
-### Step 0 if C is ever started — three measurements, one probe
+### Step 0 — MEASURED 2026-11-15. All three answered; two in our favour.
+
+Probes: `scratchpad/loomprobe/{Probe,Cycle,Aot}.java`, GraalVM CE 25.0.2,
+`--add-exports java.base/jdk.internal.vm=ALL-UNNAMED`.
+
+**1. Does `jdk.internal.vm.Continuation` work under native-image? YES.** The
+listed BIGGEST RISK, and it is not a risk. A native image built from a probe that
+parks and resumes a continuation prints
+
+    after park  : stage=1 done=false out=-1
+    after resume: stage=2 done=true  out=42
+    AOT: WORKS
+
+so park, resume, the value flowing back and `isDone` all behave as on the JVM.
+The export is still needed (nothing in the build has
+`--add-exports java.base/jdk.internal.vm` today — only `jdk.internal.vm.ci` in a
+bench script), so D7's wish to drop exports is the live tension, not capability.
+
+**2. Capture cost by stack depth — MEASURED, and it is MOSTLY A FIXED COST.** A
+full switch (freeze + thaw), min of 9, 3000 continuations per rep:
+
+| depth | JVM | native-image |
+|---|---|---|
+| 1 | ~137 ns | 97 ns |
+| 10 | 95 ns | 122 ns |
+| 50 | 116 ns | 211 ns |
+| 200 | 213 ns | 545 ns |
+
+JVM: ~100 ns floor, ~0.6 ns/frame. AOT: ~90 ns floor, **~2.3 ns/frame** — cleanly
+linear, about 4x the JVM's slope, which is what one would expect when the JIT
+cannot optimise the freeze/thaw loop. Shallow switches are if anything FASTER
+under AOT.
+
+For scale, an effect op today is ~16 ns (bare-value handler) and ~41 ns (explicit
+`resume`), so **a task switch costs roughly 6x an effect op** and stays in the
+same order to depth ~50. That is fine for IO-bound work; deep stacks suspending
+frequently are where it bites, and only on AOT.
+
+**3. BINDING A CONTINUATION IS PASSIVE — and this is the finding that shapes the
+syntax.** `Continuation.getCurrentContinuation(scope)` returns a handle, the body
+runs straight past taking it, and finishes WITHOUT unmounting:
+
+    handle obtained without yield : true
+    body continued past the take  : true
+    body finished (no unmount)    : true
+
+And a frame that yields resumes where it left off and can still produce a value
+(`stage=1 … stage=2, result=42`). So a handler may hold `cont`, carry on, and
+either fall off (resume) or park it — **there is no mode switch**, and OCaml's
+"the handler's value becomes the block's value once captured" does NOT have to be
+imported along with the mechanism. OCaml reads that way because `capture` is a
+CALL that unwinds; a BOUND name does not unwind.
+
+That is what makes `cont` the right primitive rather than `capture {}`: three
+runtime-bound names (`scope`, `resume`, `abort`) become two (`scope`, `cont`),
+and the survivor is a value.
+
+### The original Step 0, as written before the measurements
 
 1. Does `jdk.internal.vm.Continuation` work under **native-image**? Biggest
    risk, since we ship AOT. Needs `--add-exports java.base/jdk.internal.vm`,
