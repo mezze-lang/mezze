@@ -530,6 +530,49 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
         }
         val (abilityName, rawMethodType) = implFilteredAbilities.first()
         resolvedAbilityName = abilityName
+
+        // `it` IS the receiver, so an operation that declares none cannot be
+        // called with method syntax. Reaching here means the receiver is a
+        // VALUE: the qualified form is gated on the receiver NAME being an
+        // ability (`isAbilityOrEffect` in ExprFunctionConstraints) and routed to
+        // `tryGenerateStaticAbilityOpCall`, which is where a receiverless
+        // operation belongs — `NumZero.zero {}`, dispatched by what it produces.
+        //
+        // MEASURED before this existed: the receiver was accepted and then
+        // DISCARDED. It picked the impl and nothing else could see it, so
+        //
+        //     ability Pick for 'a where { pick: { r: Int } -> Int }
+        //     impl Pick for A where { … -> 101 }
+        //     impl Pick for B where { … -> 201 }
+        //     a.pick { r = 0 }   ## 101
+        //     b.pick { r = 0 }   ## 201
+        //
+        // type-checked with `'a` mentioned NOWHERE in the operation — a type
+        // annotation written in value position. The author's rule: without `it`
+        // it does not attach to a type.
+        //
+        // The four receiverless operations in the stdlib (`zero`, `one`,
+        // `default`, `arbitrary`) all take `{}` and are all called qualified, so
+        // nothing there changes.
+        val declaredOpParams =
+            ((rawMethodType as? MezzeType.FunctionType)?.paramType as? MezzeType.RecordType)?.fields
+        if (declaredOpParams != null && !declaredOpParams.containsKey(Keywords.IT)) {
+            throw TypeCheckError(
+                message = "`$methodName` on '$abilityName' declares no `it` parameter, so it " +
+                    "takes no receiver and cannot be called with method syntax.\n" +
+                    "The value before the dot would only choose the implementation and then " +
+                    "be discarded — nothing in the operation can read it.\n" +
+                    "Call it as `$abilityName.$methodName { … }` and let the type the call " +
+                    "produces choose the impl, or declare the receiver: " +
+                    "`$methodName: { it: … , … } -> …`.",
+                loc = expr.loc,
+                code = ErrorCode.V0424_RECEIVERLESS_OP_METHOD_CALL,
+                hints = listOf(
+                    "the stdlib's receiverless operations — `zero`, `one`, `default`, " +
+                        "`arbitrary` — are all called this way",
+                ),
+            )
+        }
         val abilityDecl = context.abilityDeclarations[abilityName]
         val associatedTypeNames = abilityDecl?.associatedTypes ?: emptyList()
 

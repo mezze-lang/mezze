@@ -60,6 +60,12 @@ class ShadowingAbilityNameTest {
     fun `a user ability named Default still dispatches through the method form`() {
         // The rejection is about the ACCESS form, not about the name: the same
         // ability used the way the error suggests works.
+        //
+        // `spare: {} -> 'a` is RECEIVERLESS — its result is what picks the impl —
+        // so it is called qualified, and the annotation on `q` is what chooses
+        // `P`. This read `(p.spare {}).x`, using a receiver to select the impl
+        // and then discarding it; V0424 refuses that now, because `it` is the
+        // receiver and an operation without one does not attach to a type.
         assertEquals(
             9L,
             MezzeTestHelper.run(
@@ -67,8 +73,8 @@ class ShadowingAbilityNameTest {
                 ability Default for 'a where { make: {} -> 'a, spare: {} -> 'a }
                 type P = { x: Int }
                 impl Default for P where { make = {} -> { x = 7 }, spare = {} -> { x = 9 } }
-                let p: P = { x = 1 }
-                (p.spare {}).x
+                let q: P = Default.spare {}
+                q.x
                 """.trimIndent(),
             ),
         )

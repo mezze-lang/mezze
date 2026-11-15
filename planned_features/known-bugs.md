@@ -5304,7 +5304,7 @@ the merge. Nothing depends on the outcome: **0 of 91 stdlib ability operations
 Until it lands, the declaration stays silent and the author learns at the first
 impl. The doc records the stopgap choice (refuse vs warn) rather than making it.
 
-## BUG 43 — the `for` type in a non-`it` parameter: declarable, with no working call form
+## BUG 43 — OPEN, REFRAMED: `having` bindings are skipped on the QUALIFIED call path
 
 Found 2026-11-15 by the same dive (probe `D1`). A DIFFERENT thing from BUG 42 —
 this one is a rule, not a missing feature.
@@ -5338,16 +5338,44 @@ while impl selection is not. Rather than wire the second path, the shape is
 REFUSED at the declaration (author: "this needs an `it`"), because it has no
 working call form to wire it for.
 
-The rule, measured against the whole stdlib before writing it: **if an
-operation's parameters mention the ability's `for` type, there must be a field
-named `it` carrying it.** 91 operations across 55 abilities, ZERO violations —
-and every `it` field's type is exactly the `for` type. Permitted and unaffected:
-`eq: { it: 'a, r: 'a }` (the `for` type in other fields too, `it` present),
-`decode: { it: 'in, config: 'config }` (`it` carries it, class param elsewhere),
-`zero: {} -> 'a` (receiverless — the `for` type only in the RESULT, which is
-`NumZero`/`NumOne`'s shape and is called as `NumZero.zero {}` with the produced
-type determining the impl), and `tag: { n: Int } -> Int` (the `for` type absent
-from the parameters).
+### THE RULE THIS LOOKED LIKE WAS TRIED, AND IS WRONG — 2026-11-15
+
+"If an operation's parameters mention the ability's `for` type, there must be a
+field named `it`" was implemented as V0424. It passed its own spec suite and
+compiled the stdlib clean — **91 operations across 55 abilities, zero
+violations** — and then the full typechecker suite refused **28 tests**, which
+were right:
+
+```mezze
+ability MyEq for 'a where { my_eq: { r: 'a } -> Bool }
+impl MyEq for Int where { my_eq = { r } -> True }
+let test = {} -> [1, 2].my_eq { r = [3, 4] }        ## works, and always did
+```
+
+**The receiver SELECTS THE IMPL WITHOUT BEING PASSED.** That is the
+"explicit `it`" shape [[project_ability_system_probed_2026-11-13]] already
+measured as supported — "a method declared WITHOUT an `it` param is accepted,
+and the receiver still selects the impl, two impls measured at 101 / 201" — and
+it appears around SEVENTY times across the test tree. The stdlib never writes
+it, which is exactly why `compileStdlib` said nothing and why the stdlib scan was
+not the evidence it looked like. REVERTED in full (code, explanation, check).
+
+**So the defect is narrower than the shape.** The METHOD form is not broken:
+`Red.receive { msg = Flip }` correctly refuses a missing parameter, and
+`(1).my_eq { r = 2 }` correctly dispatches. What is broken is the QUALIFIED form
+`Ability.op { … }` when the receiver arrives through an ordinary parameter: the
+impl IS selected (a wrong receiver gives V0402) but the impl's `having` bindings
+are neither CHECKED nor APPLIED — `msg = 5` passes against `'msg = LightMsg`,
+and the result escapes as a bare `'a` instead of the impl's `'reply`.
+
+The fix therefore belongs in the qualified-call path's associated-type
+resolution, not in a declaration rule. An `it`-receiving op gets its `having`
+bindings from the receiver's resolved type; the qualified form has the same
+information — the argument that carries the `for` type — and does not use it.
+
+LESSON, and it is the same one as the stdlib-scan in BUG 42: a scan of the
+stdlib proves what the STDLIB writes, not what the LANGUAGE allows. The test
+tree is the wider sample, and running the full suite is what distinguishes them.
 ## BUG 35 — OPEN 2026-11-04: a recursive LOCAL lambda cannot call a function that handles its own effect
 
 ### Symptom

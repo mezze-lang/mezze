@@ -110,7 +110,7 @@ class AbilityOperationEffectsTest {
             }
 
             ability FileReader for 'a where {
-                read_file: {path: Str} -> 'a <IO, Exception>
+                read_file: {it: 'a, path: Str} -> 'a <IO, Exception>
             }
 
             impl FileReader for Str where {

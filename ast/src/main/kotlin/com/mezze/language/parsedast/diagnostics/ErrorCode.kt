@@ -128,6 +128,7 @@ enum class ErrorCode {
     // both branches minted V0422 independently, for different rules. The one above
     // was already in origin/main, so it kept the number and this one moved.
     V0423_IMPL_OP_UNKNOWN_PARAM, // impl op binds a parameter name the ability op does not declare
+    V0424_RECEIVERLESS_OP_METHOD_CALL, // `x.op {…}` where the ability op declares no `it`: the receiver would only pick the impl and then be discarded
 
     // ─── Validator: effects (V05xx) ──────────────────────────────────────
     V0501_EFFECT_NOT_HANDLED,

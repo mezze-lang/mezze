@@ -55,7 +55,7 @@ class MethodLevelAbilityConstraintTest {
             }
 
             ability Printer for 'a where {
-                print: {item: 'b} with Show 'b -> Str
+                print: {it: 'a, item: 'b} with Show 'b -> Str
             }
 
             impl Printer for Str where {
@@ -75,7 +75,7 @@ class MethodLevelAbilityConstraintTest {
             ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
 
             ability Formatter for 'a where {
-                format: {val: 'b} with Show 'b, Same 'b -> Str
+                format: {it: 'a, val: 'b} with Show 'b, Same 'b -> Str
             }
         """.trimIndent()
 
@@ -96,9 +96,9 @@ class MethodLevelAbilityConstraintTest {
             ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
 
             ability Collection for 'c where {
-                length: {} -> Int,
-                contains: {item: 'a} with Same 'a -> Bool,
-                display: {item: 'a} with Show 'a -> Str
+                length: {it: 'c} -> Int,
+                contains: {it: 'c, item: 'a} with Same 'a -> Bool,
+                display: {it: 'c, item: 'a} with Show 'a -> Str
             }
         """.trimIndent()
 
@@ -131,7 +131,7 @@ class MethodLevelAbilityConstraintTest {
             impl Show for Int where { show = {} -> "Int" }
 
             ability Printer for 'a where {
-                print: {item: 'b} with Show 'b -> Str
+                print: {it: 'a, item: 'b} with Show 'b -> Str
             }
 
             impl Printer for Str where {
@@ -155,7 +155,7 @@ class MethodLevelAbilityConstraintTest {
             type Person = {name: Str, age: Int}
 
             ability Printer for 'a where {
-                print: {item: 'b} with Show 'b -> Str
+                print: {it: 'a, item: 'b} with Show 'b -> Str
             }
 
             impl Printer for Str where {
@@ -181,7 +181,7 @@ class MethodLevelAbilityConstraintTest {
             impl Show for Bool where { show = {} -> "Bool" }
 
             ability Formatter for 'a where {
-                format: {val: 'b} with Show 'b -> Str
+                format: {it: 'a, val: 'b} with Show 'b -> Str
             }
 
             impl Formatter for Str where {
@@ -203,7 +203,7 @@ class MethodLevelAbilityConstraintTest {
             impl Show for Str where { show = {} -> "Str" }
 
             ability Combiner for 'a where {
-                combine: {left: 'b, right: 'c} with Show 'b, Show 'c -> Str
+                combine: {it: 'a, left: 'b, right: 'c} with Show 'b, Show 'c -> Str
             }
 
             impl Combiner for Str where {
@@ -227,7 +227,7 @@ class MethodLevelAbilityConstraintTest {
             impl Same for Int where { same = {it, r} -> it == r }
 
             ability Comparable for 'a where {
-                compare: {r: 'a} with Same 'a -> Int
+                compare: {it: 'a, r: 'a} with Same 'a -> Int
             }
 
             impl Comparable for Int where {
@@ -251,7 +251,7 @@ class MethodLevelAbilityConstraintTest {
             impl MyEq for Int where { my_eq = {it, r} -> it == r }
 
             ability Comparable for 'a where {
-                compare: {r: 'a} with MyEq 'a -> Int
+                compare: {it: 'a, r: 'a} with MyEq 'a -> Int
             }
 
             impl Comparable for Wrapper where {
@@ -281,7 +281,7 @@ class MethodLevelAbilityConstraintTest {
             ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
 
             ability Ord for 'a with Same 'a where {
-                compare: {r: 'a} -> Int
+                compare: {it: 'a, r: 'a} -> Int
             }
         """.trimIndent()
 
@@ -296,7 +296,7 @@ class MethodLevelAbilityConstraintTest {
             ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
 
             ability Serializable for 'a with Show 'a, Same 'a where {
-                serialize: {} -> Str
+                serialize: {it: 'a} -> Str
             }
         """.trimIndent()
 
@@ -310,7 +310,7 @@ class MethodLevelAbilityConstraintTest {
             ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
 
             ability Ord for 'a with Same 'a where {
-                compare: {r: 'a} -> Int
+                compare: {it: 'a, r: 'a} -> Int
             }
         """.trimIndent()
 
@@ -331,8 +331,8 @@ class MethodLevelAbilityConstraintTest {
 
             ability Container for 'c having 'item where {
                 empty: {} -> 'c,
-                put: {elem: 'item} -> 'c,
-                contains: {elem: 'item} with Same 'item -> Bool
+                put: {it: 'c, elem: 'item} -> 'c,
+                contains: {it: 'c, elem: 'item} with Same 'item -> Bool
             }
         """.trimIndent()
 
@@ -354,7 +354,7 @@ class MethodLevelAbilityConstraintTest {
     fun `chained ability methods with constraints`() {
         val code = """
             ability Inner for 'a where {
-                inner: {} -> Int
+                inner: {it: 'a} -> Int
             }
 
             impl Inner for Int where {
@@ -362,7 +362,7 @@ class MethodLevelAbilityConstraintTest {
             }
 
             ability Outer for 'a where {
-                outer: {} with Inner 'a -> Int
+                outer: {it: 'a} with Inner 'a -> Int
             }
 
             impl Outer for Int where {
@@ -383,7 +383,7 @@ class MethodLevelAbilityConstraintTest {
     fun `empty constraint list is valid`() {
         val code = """
             ability Simple for 'a where {
-                op: {} -> Str
+                op: {it: 'a} -> Str
             }
 
             impl Simple for Int where {
@@ -402,7 +402,7 @@ class MethodLevelAbilityConstraintTest {
             ability Show for 'a where { show: {it: 'a} -> Str }
 
             ability Printer for 'a where {
-                print: {item: 'b} with Show 'b -> Str
+                print: {it: 'a, item: 'b} with Show 'b -> Str
             }
         """.trimIndent()
 
@@ -413,11 +413,11 @@ class MethodLevelAbilityConstraintTest {
     fun `constraint type arg is correctly parsed`() {
         val code = """
             ability Container 'elem for 'c where {
-                contains: {elem: 'elem} -> Bool
+                contains: {it: 'c, elem: 'elem} -> Bool
             }
 
             ability Searchable for 'a where {
-                search: {data: 'c, item: 'b} with Container 'b 'c -> Bool
+                search: {it: 'a, data: 'c, item: 'b} with Container 'b 'c -> Bool
             }
         """.trimIndent()
 

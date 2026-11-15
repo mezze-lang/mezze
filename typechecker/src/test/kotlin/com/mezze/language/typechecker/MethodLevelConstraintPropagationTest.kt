@@ -55,11 +55,11 @@ class MethodLevelConstraintPropagationTest {
     fun `function calling method with constraint must declare that constraint`() {
         val code = """
             ability Same for 'a where {
-                same: {r: 'a} -> Bool
+                same: {it: 'a, r: 'a} -> Bool
             }
 
             ability Ord for 'a where {
-                compare: {r: 'a} with Same 'a -> Int
+                compare: {it: 'a, r: 'a} with Same 'a -> Int
             }
 
             impl Same for Int where { same = {it, r} -> it == r }
@@ -78,11 +78,11 @@ class MethodLevelConstraintPropagationTest {
     fun `function declaring all required constraints passes`() {
         val code = """
             ability Same for 'a where {
-                same: {r: 'a} -> Bool
+                same: {it: 'a, r: 'a} -> Bool
             }
 
             ability Ord for 'a where {
-                compare: {r: 'a} with Same 'a -> Int
+                compare: {it: 'a, r: 'a} with Same 'a -> Int
             }
 
             impl Same for Int where { same = {it, r} -> it == r }
@@ -100,11 +100,11 @@ class MethodLevelConstraintPropagationTest {
     fun `concrete type call satisfies constraint without declaration`() {
         val code = """
             ability Same for 'a where {
-                same: {r: 'a} -> Bool
+                same: {it: 'a, r: 'a} -> Bool
             }
 
             ability Ord for 'a where {
-                compare: {r: 'a} with Same 'a -> Int
+                compare: {it: 'a, r: 'a} with Same 'a -> Int
             }
 
             impl Same for Int where { same = {it, r} -> it == r }
@@ -125,15 +125,15 @@ class MethodLevelConstraintPropagationTest {
     fun `multi-level constraint propagation works`() {
         val code = """
             ability Same for 'a where {
-                same: {r: 'a} -> Bool
+                same: {it: 'a, r: 'a} -> Bool
             }
 
             ability Ord for 'a where {
-                compare: {r: 'a} with Same 'a -> Int
+                compare: {it: 'a, r: 'a} with Same 'a -> Int
             }
 
             ability Sortable for 'a where {
-                sort: {items: ['a]} with Ord 'a, Same 'a -> ['a]
+                sort: {it: 'a, items: ['a]} with Ord 'a, Same 'a -> ['a]
             }
 
             impl Same for Int where { same = {it, r} -> it == r }
@@ -152,15 +152,15 @@ class MethodLevelConstraintPropagationTest {
     fun `missing transitive constraint fails`() {
         val code = """
             ability Same for 'a where {
-                same: {r: 'a} -> Bool
+                same: {it: 'a, r: 'a} -> Bool
             }
 
             ability Ord for 'a where {
-                compare: {r: 'a} with Same 'a -> Int
+                compare: {it: 'a, r: 'a} with Same 'a -> Int
             }
 
             ability Sortable for 'a where {
-                sort: {items: ['a]} with Ord 'a, Same 'a -> ['a]
+                sort: {it: 'a, items: ['a]} with Ord 'a, Same 'a -> ['a]
             }
 
             impl Same for Int where { same = {it, r} -> it == r }
@@ -187,7 +187,7 @@ class MethodLevelConstraintPropagationTest {
             ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
 
             ability Debug for 'a where {
-                debug: {} with Show 'a, Same 'a -> Str
+                debug: {it: 'a} with Show 'a, Same 'a -> Str
             }
 
             impl Show for Int where { show = {} -> "Int" }
@@ -209,7 +209,7 @@ class MethodLevelConstraintPropagationTest {
             ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
 
             ability Debug for 'a where {
-                debug: {} with Show 'a, Same 'a -> Str
+                debug: {it: 'a} with Show 'a, Same 'a -> Str
             }
 
             impl Show for Int where { show = {} -> "Int" }
@@ -237,7 +237,7 @@ class MethodLevelConstraintPropagationTest {
             impl Show for Int where { show = {} -> "Int" }
 
             ability Printer for 'a where {
-                print: {item: 'b} with Show 'b -> Str
+                print: {it: 'a, item: 'b} with Show 'b -> Str
             }
 
             impl Printer for Str where {
@@ -260,7 +260,7 @@ class MethodLevelConstraintPropagationTest {
             impl Show for Int where { show = {} -> "Int" }
 
             ability Printer for 'a where {
-                print: {item: 'b} with Show 'b -> Str
+                print: {it: 'a, item: 'b} with Show 'b -> Str
             }
 
             impl Printer for Str where {
@@ -288,7 +288,7 @@ class MethodLevelConstraintPropagationTest {
             ability Show for 'a where { show: {it: 'a} -> Str }
 
             ability Combined for 'a where {
-                process: {} with Same 'a, Ord 'a, Show 'a -> Str
+                process: {it: 'a} with Same 'a, Ord 'a, Show 'a -> Str
             }
 
             impl Same for Int where { same = {it, r} -> it == r }
@@ -314,7 +314,7 @@ class MethodLevelConstraintPropagationTest {
             ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
 
             ability Ord for 'a where {
-                compare: {r: 'a} with Same 'a -> Int
+                compare: {it: 'a, r: 'a} with Same 'a -> Int
             }
 
             impl Same for Int where { same = {it, r} -> it == r }
@@ -338,7 +338,7 @@ class MethodLevelConstraintPropagationTest {
             ability Same for 'a where { same: {it: 'a, r: 'a} -> Bool }
 
             ability Ord for 'a where {
-                compare: {r: 'a} with Same 'a -> Int
+                compare: {it: 'a, r: 'a} with Same 'a -> Int
             }
 
             impl Same for Int where { same = {it, r} -> it == r }
@@ -361,7 +361,7 @@ class MethodLevelConstraintPropagationTest {
     fun `no propagation needed when no method-level constraints`() {
         val code = """
             ability Simple for 'a where {
-                process: {} -> Str
+                process: {it: 'a} -> Str
             }
 
             impl Simple for Int where {
@@ -385,7 +385,7 @@ class MethodLevelConstraintPropagationTest {
             ability Show for 'a where { show: {it: 'a} -> Str }
 
             ability Printer for 'a where {
-                print: {item: 'b} with Show 'b -> Str
+                print: {it: 'a, item: 'b} with Show 'b -> Str
             }
 
             impl Show for Int where { show = {} -> "Int" }
@@ -411,7 +411,7 @@ class MethodLevelConstraintPropagationTest {
         // When checking Eq [Int], should match if Eq Int is satisfied
         val code = """
             ability MyEq for 'a where {
-                my_eq: {r: 'a} -> Bool
+                my_eq: {it: 'a, r: 'a} -> Bool
             }
 
             impl MyEq for Int where {
@@ -419,7 +419,7 @@ class MethodLevelConstraintPropagationTest {
             }
 
             impl MyEq for ['a] where {
-                my_eq: {r: ['a]} with MyEq 'a -> Bool = {r} -> True
+                my_eq: {it: ['a], r: ['a]} with MyEq 'a -> Bool = {r} -> True
             }
 
             let test = {} -> [1, 2].my_eq {r = [3, 4]}
@@ -436,13 +436,13 @@ class MethodLevelConstraintPropagationTest {
             type Wrapper = { val: Int }
 
             ability MyEq for 'a where {
-                my_eq: {r: 'a} -> Bool
+                my_eq: {it: 'a, r: 'a} -> Bool
             }
 
             # No impl MyEq for Wrapper!
 
             impl MyEq for ['a] where {
-                my_eq: {r: ['a]} with MyEq 'a -> Bool = {r} -> True
+                my_eq: {it: ['a], r: ['a]} with MyEq 'a -> Bool = {r} -> True
             }
 
             let w1: Wrapper = { val = 1 }
@@ -458,13 +458,13 @@ class MethodLevelConstraintPropagationTest {
     fun `generic impl for Option type`() {
         val code = """
             ability MyEq for 'a where {
-                my_eq: {r: 'a} -> Bool
+                my_eq: {it: 'a, r: 'a} -> Bool
             }
 
             impl MyEq for Int where { my_eq = {r} -> True }
 
             impl MyEq for Option 'a where {
-                my_eq: {r: Option 'a} with MyEq 'a -> Bool = {r} -> True
+                my_eq: {it: Option 'a, r: Option 'a} with MyEq 'a -> Bool = {r} -> True
             }
 
             let test = {} -> (Some {val = 42}).my_eq {r = Some {val = 43}}
@@ -478,7 +478,7 @@ class MethodLevelConstraintPropagationTest {
         // A generic impl with NO constraints should match any element type
         val code = """
             ability HasLength for 'a where {
-                len: {} -> Int
+                len: {it: 'a} -> Int
             }
 
             impl HasLength for ['a] where {

@@ -163,7 +163,7 @@ class DuplicateDeclarationExtendedTest {
             }
 
             ability Show for 'a where {
-                display: {} -> Str
+                display: {it: 'a} -> Str
             }
         """.trimIndent()
 
@@ -182,7 +182,7 @@ class DuplicateDeclarationExtendedTest {
             }
 
             ability Display for 'a where {
-                display: {} -> Str
+                display: {it: 'a} -> Str
             }
         """.trimIndent()
 
@@ -335,7 +335,7 @@ class DuplicateDeclarationExtendedTest {
     fun `test duplicate multi-parameter ability implementation should fail`() {
         val code = """
             ability Convert 'to for 'from where {
-                convert: {} -> 'to
+                convert: {it: 'from} -> 'to
             }
 
             impl Convert Int for Str where {
@@ -360,7 +360,7 @@ class DuplicateDeclarationExtendedTest {
             use std::int
 
             ability Convert 'to for 'from where {
-                convert: {} -> 'to
+                convert: {it: 'from} -> 'to
             }
 
             impl Convert Int for Str where {

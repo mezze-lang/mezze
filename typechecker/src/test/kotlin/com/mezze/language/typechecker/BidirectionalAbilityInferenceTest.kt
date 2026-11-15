@@ -36,7 +36,7 @@ class BidirectionalAbilityInferenceTest {
         // returns the for-type. Bidirectional inference resolves 'a from usage (10 + x => Int).
         val code = """
             ability Transform for 'a where {
-                apply: { src: Str } -> 'a
+                apply: {it: 'a,  src: Str } -> 'a
             }
 
             impl Transform for Int where {
@@ -71,7 +71,7 @@ class BidirectionalAbilityInferenceTest {
         // only the addition widens.
         val code = """
             ability Transform for 'a where {
-                apply: { src: Str } -> 'a
+                apply: {it: 'a,  src: Str } -> 'a
             }
 
             impl Transform for Int where {
@@ -114,7 +114,7 @@ class BidirectionalAbilityInferenceTest {
         // is Float + Int -> Float and now type-checks; y stays Int.
         val code = """
             ability Transform for 'a where {
-                apply: { src: Str } -> 'a
+                apply: {it: 'a,  src: Str } -> 'a
             }
 
             impl Transform for Int where {
@@ -159,7 +159,7 @@ class BidirectionalAbilityInferenceTest {
         // Verify that using y as Int multiple times works
         val code = """
             ability Transform for 'a where {
-                apply: { src: Str } -> 'a
+                apply: {it: 'a,  src: Str } -> 'a
             }
 
             impl Transform for Int where {
@@ -192,7 +192,7 @@ class BidirectionalAbilityInferenceTest {
         // Verify that Float receiver with Float impl works
         val code = """
             ability Transform for 'a where {
-                apply: { src: Str } -> 'a
+                apply: {it: 'a,  src: Str } -> 'a
             }
 
             impl Transform for Float where {
@@ -221,7 +221,7 @@ class BidirectionalAbilityInferenceTest {
         // Even without further usage context, the type is resolved from the receiver.
         val code = """
             ability Transform for 'a where {
-                apply: { src: Str } -> 'a
+                apply: {it: 'a,  src: Str } -> 'a
             }
 
             impl Transform for Int where {

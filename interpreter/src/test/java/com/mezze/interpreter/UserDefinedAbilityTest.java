@@ -27,7 +27,7 @@ public class UserDefinedAbilityTest {
         // Just declaring an ability should not throw
         assertDoesNotThrow(() -> MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             {}
@@ -39,7 +39,7 @@ public class UserDefinedAbilityTest {
         assertDoesNotThrow(() -> MezzeTestHelper.run("""
             ability Show for 'a where {
                 show: {it: 'a} -> Str,
-                debug: {} -> Str
+                debug: {it: 'a} -> Str
             }
 
             {}
@@ -54,7 +54,7 @@ public class UserDefinedAbilityTest {
     void testImplAbilityForInt() {
         Object result = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Int where {
@@ -70,7 +70,7 @@ public class UserDefinedAbilityTest {
     void testImplAbilityForString() {
         Object result = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Str where {
@@ -87,7 +87,7 @@ public class UserDefinedAbilityTest {
         // Test Int impl
         Object intResult = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Int where {
@@ -105,7 +105,7 @@ public class UserDefinedAbilityTest {
         // Test String impl
         Object stringResult = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Int where {
@@ -126,7 +126,7 @@ public class UserDefinedAbilityTest {
         Object result = MezzeTestHelper.run("""
             ability Show for 'a where {
                 show: {it: 'a} -> Str,
-                debug: {} -> Str
+                debug: {it: 'a} -> Str
             }
 
             impl Show for Int where {
@@ -147,7 +147,7 @@ public class UserDefinedAbilityTest {
     void testAbilityMethodCallInLet() {
         Object result = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Int where {
@@ -165,7 +165,7 @@ public class UserDefinedAbilityTest {
     void testAbilityMethodCallInFunction() {
         Object result = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Int where {
@@ -182,7 +182,7 @@ public class UserDefinedAbilityTest {
     void testAbilityMethodCallInDoBlock() {
         Object result = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Int where {
@@ -289,7 +289,7 @@ public class UserDefinedAbilityTest {
             type Point = { x: Int, y: Int }
 
             ability Stringify for 'a where {
-                to_str: {} -> Str
+                to_str: {it: 'a} -> Str
             }
 
             impl Stringify for Point where {
@@ -336,7 +336,7 @@ public class UserDefinedAbilityTest {
         // - When called with Int, the Encoder Int impl is passed as dictionary
         Object result = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Int where {
@@ -360,7 +360,7 @@ public class UserDefinedAbilityTest {
         // Test that the polymorphic function works correctly with Int
         Object resultInt = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Int where {
@@ -377,7 +377,7 @@ public class UserDefinedAbilityTest {
         // Test that the polymorphic function works correctly with String
         Object resultStr = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Str where {
@@ -398,7 +398,7 @@ public class UserDefinedAbilityTest {
         // Each constraint needs its dictionary passed
         Object result = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             ability Comparer for 'a where {
@@ -429,7 +429,7 @@ public class UserDefinedAbilityTest {
         // Dictionaries need to be propagated through the call chain
         Object result = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Int where {
@@ -452,7 +452,7 @@ public class UserDefinedAbilityTest {
         // Polymorphic function passed as argument
         Object result = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Int where {
@@ -474,7 +474,7 @@ public class UserDefinedAbilityTest {
         // Simple test: call polymorphic function once at top level
         Object result = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Int where {
@@ -494,7 +494,7 @@ public class UserDefinedAbilityTest {
         // Test: call polymorphic function once inside do block
         Object result = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Int where {
@@ -516,7 +516,7 @@ public class UserDefinedAbilityTest {
         // Test: call polymorphic function twice with same type
         Object result = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Int where {
@@ -540,7 +540,7 @@ public class UserDefinedAbilityTest {
         // Just return a simple string to check if typechecking passes
         Object result = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Int where {
@@ -568,7 +568,7 @@ public class UserDefinedAbilityTest {
         // This is the minimal failing case
         Object result = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Int where {
@@ -596,7 +596,7 @@ public class UserDefinedAbilityTest {
         // should be callable with different types in the same scope
         Object result = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Int where {
@@ -626,7 +626,7 @@ public class UserDefinedAbilityTest {
     void testMethodCallSyntaxOnUserDefinedAbility() {
         Object result = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Int where {
@@ -642,7 +642,7 @@ public class UserDefinedAbilityTest {
     void testMethodCallSyntaxWithStringReceiver() {
         Object result = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Str where {
@@ -660,7 +660,7 @@ public class UserDefinedAbilityTest {
             type Point = { x: Int, y: Int }
 
             ability Stringify for 'a where {
-                to_str: {} -> Str
+                to_str: {it: 'a} -> Str
             }
 
             impl Stringify for Point where {
@@ -677,7 +677,7 @@ public class UserDefinedAbilityTest {
     void testMethodCallSyntaxInExpression() {
         Object result = MezzeTestHelper.run("""
             ability Encoder for 'a where {
-                encode: {} -> Str
+                encode: {it: 'a} -> Str
             }
 
             impl Encoder for Int where {

@@ -50,7 +50,7 @@ class AbilityDependencyTypeCheckerTest {
     fun `ability-level constraint is rejected with helpful error`() {
         val source = """
             ability Eq for 'a where {
-                equals : {left: 'a, right: 'a} -> Bool
+                equals : {it: 'a, left: 'a, right: 'a} -> Bool
             }
 
             ability Ord for 'a with Eq 'a where {
@@ -72,11 +72,11 @@ class AbilityDependencyTypeCheckerTest {
     fun `multiple ability-level constraints are rejected`() {
         val source = """
             ability Show for 'a where {
-                show : {val: 'a} -> Str
+                show : {it: 'a, val: 'a} -> Str
             }
 
             ability Eq for 'a where {
-                equals : {left: 'a, right: 'a} -> Bool
+                equals : {it: 'a, left: 'a, right: 'a} -> Bool
             }
 
             ability Serializable for 'a with Show 'a, Eq 'a where {
@@ -131,11 +131,11 @@ class AbilityDependencyTypeCheckerTest {
     fun `method-level constraint is accepted`() {
         val source = """
             ability Eq for 'a where {
-                equals : {left: 'a, right: 'a} -> Bool
+                equals : {it: 'a, left: 'a, right: 'a} -> Bool
             }
 
             ability Ord for 'a where {
-                compare : {left: 'a, right: 'a} with Eq 'a -> Str
+                compare : {it: 'a, left: 'a, right: 'a} with Eq 'a -> Str
             }
         """.trimIndent()
 
@@ -163,15 +163,15 @@ class AbilityDependencyTypeCheckerTest {
     fun `multiple method-level constraints are accepted`() {
         val source = """
             ability Show for 'a where {
-                show : {val: 'a} -> Str
+                show : {it: 'a, val: 'a} -> Str
             }
 
             ability Eq for 'a where {
-                equals : {left: 'a, right: 'a} -> Bool
+                equals : {it: 'a, left: 'a, right: 'a} -> Bool
             }
 
             ability Serializable for 'a where {
-                serialize : {val: 'a} with Show 'a, Eq 'a -> Str
+                serialize : {it: 'a, val: 'a} with Show 'a, Eq 'a -> Str
             }
         """.trimIndent()
 
@@ -192,7 +192,7 @@ class AbilityDependencyTypeCheckerTest {
     fun `ability without constraints works`() {
         val source = """
             ability Show for 'a where {
-                show : {val: 'a} -> Str
+                show : {it: 'a, val: 'a} -> Str
             }
         """.trimIndent()
 
@@ -212,7 +212,7 @@ class AbilityDependencyTypeCheckerTest {
     fun `method-level constraint on different type param works`() {
         val source = """
             ability Show for 'a where {
-                show : {} -> Str
+                show : {it: 'a} -> Str
             }
 
             impl Show for Int where {
@@ -220,7 +220,7 @@ class AbilityDependencyTypeCheckerTest {
             }
 
             ability Printer for 'a where {
-                print : {item: 'b} with Show 'b -> Str
+                print : {it: 'a, item: 'b} with Show 'b -> Str
             }
 
             impl Printer for Str where {
@@ -241,7 +241,7 @@ class AbilityDependencyTypeCheckerTest {
     fun `method-level constraint fails when not satisfied`() {
         val source = """
             ability Show for 'a where {
-                show : {} -> Str
+                show : {it: 'a} -> Str
             }
 
             impl Show for Int where {
@@ -249,7 +249,7 @@ class AbilityDependencyTypeCheckerTest {
             }
 
             ability Printer for 'a where {
-                print : {item: 'b} with Show 'b -> Str
+                print : {it: 'a, item: 'b} with Show 'b -> Str
             }
 
             impl Printer for Str where {
@@ -274,11 +274,11 @@ class AbilityDependencyTypeCheckerTest {
     fun `impl with method-level constraints works`() {
         val source = """
             ability Eq for 'a where {
-                equals : {left: 'a, right: 'a} -> Bool
+                equals : {it: 'a, left: 'a, right: 'a} -> Bool
             }
 
             ability Ord for 'a where {
-                compare : {left: 'a, right: 'a} with Eq 'a -> Str
+                compare : {it: 'a, left: 'a, right: 'a} with Eq 'a -> Str
             }
 
             impl Eq for Int where {
@@ -303,17 +303,17 @@ class AbilityDependencyTypeCheckerTest {
     fun `different methods can have different constraints`() {
         val source = """
             ability Show for 'a where {
-                show : {val: 'a} -> Str
+                show : {it: 'a, val: 'a} -> Str
             }
 
             ability Eq for 'a where {
-                equals : {left: 'a, right: 'a} -> Bool
+                equals : {it: 'a, left: 'a, right: 'a} -> Bool
             }
 
             ability Collection for 'c where {
-                length : {col: 'c} -> Int,
-                contains : {col: 'c, item: 'a} with Eq 'a -> Bool,
-                show_all : {col: 'c, items: 'a} with Show 'a -> Str
+                length : {it: 'c, col: 'c} -> Int,
+                contains : {it: 'c, col: 'c, item: 'a} with Eq 'a -> Bool,
+                show_all : {it: 'c, col: 'c, items: 'a} with Show 'a -> Str
             }
         """.trimIndent()
 

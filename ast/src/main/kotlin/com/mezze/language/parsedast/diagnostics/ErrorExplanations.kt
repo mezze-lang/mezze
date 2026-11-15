@@ -436,6 +436,15 @@ fun ErrorCode.explain(): String = when (this) {
         "operation becomes a partial application instead of returning its declared type. " +
         "Rename the parameter to the one the ability declares (e.g. `Eq.eq` takes `{ it, r }`)."
 
+    ErrorCode.V0424_RECEIVERLESS_OP_METHOD_CALL ->
+        "An ability operation that declares no `it` parameter was called with method " +
+        "syntax. `it` IS the receiver, so an operation without it has nowhere for a " +
+        "receiver to land: the value before the dot would be evaluated, used only to " +
+        "choose the implementation, and then discarded — a type annotation smuggled into " +
+        "value position. Call it qualified instead (`Ability.op { … }`), where the type " +
+        "the call PRODUCES chooses the implementation, as `NumZero.zero {}` does. If the " +
+        "operation should take a receiver, declare it: `op: { it: 'a, … } -> …`."
+
     ErrorCode.V0501_EFFECT_NOT_HANDLED ->
         "A performed effect is not handled. " +
         "Wrap the expression in a `handle` block that provides a handler for this effect."

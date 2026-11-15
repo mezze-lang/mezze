@@ -83,7 +83,7 @@ class UndeterminedClassArgTest {
      */
     private val head = """
         ability Into2 'b for 'a where {
-          conv2: {} -> 'b
+          conv2: {it: 'a} -> 'b
         }
         impl Into2 Str for Int where {
           conv2 = { it } -> "x"
@@ -146,17 +146,28 @@ class UndeterminedClassArgTest {
 
     /**
      * The receiver's own position is a different question with a different
-     * answer, and it must not be asked of a method call. An ability whose
-     * receiver is implicit in `for` declares no `it`, which
-     * `dispatchesWithoutAValue` reads as "dispatches without a value"; asking
-     * that here refuses this program with "'Inner' is needed at `'a`".
+     * answer, and it must not be asked of a method call.
+     *
+     * REWRITTEN 2026-11-15. This declared `inner: {} -> Int` and
+     * `outer: {} with Inner 'a -> Int` — no `it` — and then called them with
+     * METHOD syntax (`5.outer {}`, `it.inner {}`), relying on the receiver being
+     * implicit in `for 'a`. That is the PRE-REDESIGN model, and the design
+     * decision that replaced it is explicit:
+     *
+     *     `it` in method params -> method syntax available (`x.method { … }`)
+     *     No `it`              -> direct call only (`Ability.method { … }`)
+     *
+     * V0424 enforces it. The operations here plainly want receivers — they
+     * return something computed FROM one — so they declare `it`, and the test
+     * keeps asking what it was written to ask: that an implicit receiver is not
+     * interrogated as an undetermined class argument.
      */
-    @Test fun `an implicit receiver on a method call is not asked about`() {
+    @Test fun `a receiver on a method call is not asked about as a class arg`() {
         assertNull(
             err("""
-                ability Inner for 'a where { inner: {} -> Int }
+                ability Inner for 'a where { inner: {it: 'a} -> Int }
                 impl Inner for Int where { inner = { it } -> it }
-                ability Outer for 'a where { outer: {} with Inner 'a -> Int }
+                ability Outer for 'a where { outer: {it: 'a} with Inner 'a -> Int }
                 impl Outer for Int where { outer = { it } -> it.inner {} + 10 }
                 let test = {} -> 5.outer {}
                 test {}

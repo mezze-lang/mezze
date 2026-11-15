@@ -305,7 +305,7 @@ class AbilityConstraintAnnotationsTest {
     fun `test mismatch between return type and ability associated type annotation fails`() {
         val code = """
             ability Container for 'c having 'item where {
-                fetch: {index: Int} -> (Option 'item),
+                fetch: {it: 'c, index: Int} -> (Option 'item),
             }
 
             impl Container for [Int] having 'item = Int where {
@@ -326,7 +326,7 @@ class AbilityConstraintAnnotationsTest {
     fun `test correct ability associated type annotation matches inferred type`() {
         val code = """
             ability Container for 'c having 'item where {
-                fetch: {index: Int} -> (Option 'item),
+                fetch: {it: 'c, index: Int} -> (Option 'item),
             }
 
             impl Container for [Int] having 'item = Int where {
@@ -350,7 +350,7 @@ class AbilityConstraintAnnotationsTest {
     fun `test error message mentions types on ability associated type mismatch`() {
         val code = """
             ability Container for 'c having 'item where {
-                fetch: {index: Int} -> (Option 'item),
+                fetch: {it: 'c, index: Int} -> (Option 'item),
             }
 
             impl Container for [Int] having 'item = Int where {

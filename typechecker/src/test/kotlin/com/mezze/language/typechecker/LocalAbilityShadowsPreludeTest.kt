@@ -42,7 +42,7 @@ class LocalAbilityShadowsPreludeTest {
         // `Ord` is also a prelude ability, with entirely different operations.
         val res = check("""
             ability Ord for 'a where {
-                compare: {r: 'a} -> Int
+                compare: {it: 'a, r: 'a} -> Int
             }
             impl Ord for Int where { compare = {r} -> 0 }
             pub let cmp: {x: 'a, y: 'a} with Ord 'a -> Int = {x, y} -> x.compare {r = y}

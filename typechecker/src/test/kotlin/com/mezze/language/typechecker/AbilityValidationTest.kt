@@ -329,7 +329,7 @@ class AbilityValidationTest {
             }
 
             impl Same for Str where {
-              same: {r: Int} -> Bool = {r} -> False
+              same: {it: Str, r: Int} -> Bool = {r} -> False
             }
 
             let areEqual = {x, y} -> x.same {r = y}
@@ -425,7 +425,7 @@ class AbilityValidationTest {
             }
 
             impl Process for Int where {
-              process: {val: Int} -> Str = {val} -> int::to_str {n = val}
+              process: {it: Int, val: Int} -> Str = {val} -> int::to_str {n = val}
             }
 
             let run = {value} -> value.process {}
@@ -771,7 +771,7 @@ class AbilityValidationTest {
             type Json = { raw: Str }
 
             ability Encode 'format for 'data where {
-              encode: {} -> 'format
+              encode: {it: 'data} -> 'format
             }
 
             impl Encode Json for Int where {
