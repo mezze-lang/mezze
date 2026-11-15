@@ -1564,8 +1564,7 @@ class ConstraintGenerator(
             val annotationAbilityConstraints = if (typeAnnotationValue is ParsedFunctionType) {
                 // Prefer the already-converted annotation FunctionType (typeArgs are
                 // MezzeType); fall back to converting the parsed annotation's args.
-                // Either way, each constraint's first type-VAR is the primary; skip
-                // constraints with no variable (nothing to require).
+                // Either way, each constraint's first type-VAR is the primary.
                 val preConvertedFnType = annotatedType as? MezzeType.FunctionType
                 val abilityTypeArgs: List<Pair<String, List<MezzeType>>> =
                     if (preConvertedFnType != null) {
@@ -1575,11 +1574,35 @@ class ConstraintGenerator(
                             c.abilityName to c.typeArgs.map { convertTypeAnnotation(it) }
                         }
                     }
-                abilityTypeArgs.mapNotNull { (abilityName, typeArgs) ->
-                    val typeVarArg = typeArgs.filterIsInstance<MezzeType.VarType>().firstOrNull()
-                        ?: return@mapNotNull null
+                abilityTypeArgs.map { (abilityName, typeArgs) ->
+                    // A constraint with NO type variable is not "nothing to
+                    // require" — it is the one case that is decidable RIGHT NOW.
+                    // `with Make Int Int` asks whether `impl Make Int for Int`
+                    // exists, and no later substitution can change the answer.
+                    // Skipping it meant `mez check` printed the signature with the
+                    // constraint silently DROPPED (measured: `pub p : { x: Int } ->
+                    // Int`, no diagnostic) while the SAME constraint carrying a
+                    // variable is checked and reports V0402. A concrete constraint
+                    // is also exactly where a typo lands — `Make Int Int` for
+                    // `Make Int Src` — which is the class V0705's arity rule
+                    // exists to catch.
+                    //
+                    // The solver already decides it: `solveAbilityRequired` tests
+                    // `allConcrete` and calls `checkAbilityImplementation`. It
+                    // simply never received one of these. The anchor variable is
+                    // only the TRACKING KEY — an annotation's `typeArgs` already
+                    // fill the ability's arity (V0705 makes that the rule), so
+                    // `abilityClassArgs` returns the written tuple unchanged and a
+                    // fresh anchor adds nothing to it. If the arity cannot be
+                    // resolved, the fresh var is prepended instead, the tuple is
+                    // no longer all-concrete, and the obligation defers exactly as
+                    // before — so an unresolvable ability cannot produce a false
+                    // rejection here.
+                    val anchor = typeArgs.filterIsInstance<MezzeType.VarType>()
+                        .firstOrNull()?.variable
+                        ?: TypeVar.fresh()
                     Constraint.AbilityRequired(
-                        typeVar = typeVarArg.variable,
+                        typeVar = anchor,
                         abilityName = abilityName,
                         abilityHash = registry.abilityDeclarations[abilityName]?.contentHash,
                         typeArgs = typeArgs,
