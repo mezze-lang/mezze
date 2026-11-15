@@ -7266,7 +7266,27 @@ object fails — the HELPER is in the wrong place, not the object.
 verb (`eval_raw` appears only in their entry points), and both pass the
 behavioural layer under sandboxed hosts. `jvm.mz` uses no helpers at all.
 
-### THE OBVIOUS FIX TRIPS A RE-ENTRANCY PROBLEM — attempted and reverted
+### THE GUEST'S OWN WORDS, and the mechanism — INSTRUMENTED, not reasoned
+
+Printing the `InteropError` instead of only its presence:
+
+    GUEST: Cannot invoke "com.oracle.graal.python.runtime.PythonContext.ownsGil()"
+           because "context" is null
+    ||| com.oracle.graal.python.runtime.GilNode$Cached.acquire(GilNode.java:88)
+
+GraalPy's GIL acquire finds NO `PythonContext`: the helper is Python code
+belonging to the OUTER context, invoked while the INNER one is entered, so that
+language instance has no context at all. Two `System.err` lines in `evalRaw` and
+`evalIn` then showed it directly (`MEZZE_TRACE_POLY`, since removed):
+
+    [poly] evalIn  delegate=Long  innerCtxId=null  src=type('C', (), {'g': …})()
+    [poly]   -> resolved cid=1 known=true
+    [poly] evalRaw threadCtxId=2                   src=lambda o, n, a: getattr(o, n)(*a)
+
+Object in context 1 (the sandbox), helper in context 2 (the thread's ambient
+one). **Three guesses cost more than these two prints did.**
+
+### THE OBVIOUS FIX IS BLOCKED BY A SECOND, DEEPER CONSTRAINT — attempted and reverted
 
 "Build the helper beside the object": let `eval_in` take ANY foreign as its
 `ctx`, not only a context handle, and have the provider pass `ctx = it`. The data
@@ -7279,10 +7299,29 @@ Implemented, and the AMBIENT path then died inside the runtime:
     error[I0004]: Cannot invoke "MezzeLanguage.getCurrentContext()" because
                   the return value of "MezzeLanguage.get(...)" is null
 
-Adding an explicit fallback to `threadContextId(lang, …)` for an untagged
-foreign did NOT help, so the null id was not the cause: entering that context
-from inside the verb is what breaks, and why needs someone who knows the
-`inInnerContext` machinery. Reverted rather than guessed at a third time.
+Adding an explicit fallback to `threadContextId(lang, …)` did not help, and the
+trace says why. The ids were RIGHT — `eval_in { ctx = it }` resolved the helper
+to `cid=1`, the receiver's own sandbox context, exactly as intended:
+
+    [poly] evalIn delegate=OtherContextGuestObject innerCtxId=1 src=lambda o, n, a: …
+
+and then died BEFORE the next line, which is the real finding:
+
+    private static InnerContexts innerContexts() {
+        return MezzeContext.get(null).nativeState(InnerContexts.class, InnerContexts::new);
+    }
+
+**`MezzeContext.get(null)` requires MEZZE's own language to be entered.** When a
+verb runs on a foreign belonging to an inner context, we are entered in THAT
+guest context, so `MezzeLanguage.get(…)` returns null and the inner-context
+registry lookup NPEs — the `I0004` seen twice. `eval_in` touches the foreign
+(its delegate is an `OtherContextGuestObject`) in a way that leaves us there;
+`eval_raw` did not, which is why it reached GraalPy and failed with the GIL error
+instead.
+
+**So the fix is neither in the provider nor in `evalIn`'s id arithmetic: the
+inner-context registry has to be reachable while entered in a guest context.**
+That is the piece to design — everything above it already works.
 
 Other candidates, both with costs: raw `invoke_member`/`read_member` instead of
 the helper loses primitive dispatch — the only reason the helper exists, and
