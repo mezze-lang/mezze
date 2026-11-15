@@ -429,7 +429,19 @@ public final class SeqNatives {
     public static long foldReduceLong(MezzeSeq seq, int opOrdinal, long init) {
         SeqStorage storage = seq.getStorage();
         if (storage instanceof LongSeqStorage longStorage) {
-            return SeqReduceLongSIMDNode.getUncached().execute(opOrdinal, init, longStorage);
+            // GATED: the node names `jdk.incubator.vector` types with no guard of
+            // its own, so reaching it on a runtime without the module is the BUG 43
+            // failure (`NoClassDefFoundError: jdk/incubator/vector/Vector`). The
+            // scalar loop below computes the same answer, and `sum` right down this
+            // file already records that it is FASTER on SVM anyway.
+            if (com.mezze.datastructures.util.VectorApi.AVAILABLE) {
+                return SeqReduceLongSIMDNode.getUncached().execute(opOrdinal, init, longStorage);
+            }
+            long accScalar = init;
+            long[] dataScalar = longStorage.getArray();
+            int nScalar = longStorage.size();
+            for (int i = 0; i < nScalar; i++) accScalar = applyLong(opOrdinal, accScalar, dataScalar[i]);
+            return accScalar;
         }
         // Boxed-storage fallback: scalar reduce so correctness matches
         // even when someone slipped a heterogeneous Seq through the pipe.
@@ -462,7 +474,15 @@ public final class SeqNatives {
     public static double foldReduceDouble(MezzeSeq seq, int opOrdinal, double init) {
         SeqStorage storage = seq.getStorage();
         if (storage instanceof DoubleSeqStorage doubleStorage) {
-            return SeqReduceDoubleSIMDNode.getUncached().execute(opOrdinal, init, doubleStorage);
+            // GATED for the same reason as `foldReduceLong` above — see BUG 43.
+            if (com.mezze.datastructures.util.VectorApi.AVAILABLE) {
+                return SeqReduceDoubleSIMDNode.getUncached().execute(opOrdinal, init, doubleStorage);
+            }
+            double accScalar = init;
+            double[] dataScalar = doubleStorage.getArray();
+            int nScalar = doubleStorage.size();
+            for (int i = 0; i < nScalar; i++) accScalar = applyDouble(opOrdinal, accScalar, dataScalar[i]);
+            return accScalar;
         }
         double acc = init;
         int n = seq.size();

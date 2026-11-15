@@ -285,7 +285,14 @@ class EmitFileSizeRatchetTest {
             // it from a post-solve type that had already been stripped. The
             // decision belongs where TypedPerform is stamped — same reason as the
             // lambda row above — and none of the siblings covers perform emit.
-            E + "TypedAstBuilder.kt" to 2395,    // was 3,107
+            // 2395 -> 2400: BUG 43's receiverless-op diagnostic. It said "nothing
+            // here determines that type" while the type sat in the call's argument
+            // (`receive { target = Red, … }`), so the reader argues with it rather
+            // than acting on it; the message now says what is true — with no `it`
+            // an argument is not a receiver, so a parameter mentioning the type
+            // chooses no impl. The file was EXACTLY at its bound, so the honest
+            // choice was this or a worse message, and the subject belongs here.
+            E + "TypedAstBuilder.kt" to 2400,    // was 3,107
         )
 
         val SPLIT_OUT = listOf(

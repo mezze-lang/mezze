@@ -36,17 +36,7 @@ final class FlpSimd {
      * simply not on the module path (e.g. {@code mez dev} without
      * {@code --add-modules}, or a built jar run plainly).
      */
-    static final boolean AVAILABLE = probeVectorApi();
-
-    private static boolean probeVectorApi() {
-        if (System.getProperty("org.graalvm.nativeimage.imagecode") != null) return false;
-        try {
-            Class.forName("jdk.incubator.vector.LongVector");
-            return true;
-        } catch (ClassNotFoundException | NoClassDefFoundError e) {
-            return false;
-        }
-    }
+    static final boolean AVAILABLE = com.mezze.datastructures.util.VectorApi.AVAILABLE;
 
     /**
      * Below this, the scalar PE-optimized loop wins on overhead; MAX_VALUE when

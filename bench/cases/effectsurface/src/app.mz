@@ -110,10 +110,14 @@ impl Pad3 for P3 {} where { p3 = {} -> 0 }
 ## 2026-11-15 — both forms now check, and both report `params=2`, so the local
 ## form is no longer penalised either.
 ##
-## They stay top-level anyway, deliberately: changing every kernel's shape would
-## reprice every row in one go, and a case whose numbers are its whole purpose
-## should not change shape and value in the same edit. Rewriting them as local
-## lambdas is a fair thing to do NEXT, with the old numbers kept beside the new.
+## THEY STAY TOP-LEVEL, AND THAT IS NOW MEASURED RATHER THAN ASSUMED. A self-A/B
+## of the two shapes — one invocation, interleaved, same checksum both ways, min
+## of 3 each — put a per-iteration-install loop at 21146 ps/iter top-level against
+## 20726 ps/iter local. Two percent, inside a run-to-run spread of 21k-34k. So the
+## shape buys nothing, while rewriting nine loops would move what several kernels
+## measure (the ones installing their handler OUTSIDE the loop would have the
+## handler land on the other side of the lambda). Not worth the churn; recorded so
+## nobody re-opens it on the strength of BUG 35 being fixed.
 ##
 ## 1. CONTROL: a positional tail loop, on the fused tail-loop tier.
 let go_c = { i, acc } ->

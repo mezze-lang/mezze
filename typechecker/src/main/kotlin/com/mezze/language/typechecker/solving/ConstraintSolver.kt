@@ -511,7 +511,13 @@ class ConstraintSolver(
                 when (result) {
                     is ConstraintResult.Success -> {
                         val newSubst = result.substitution
-                        if (newSubst.mappings.isNotEmpty() || newSubst.rowVarMappings.isNotEmpty()) {
+                        // A SUBSTITUTION CARRYING ONLY A RECORD-ROW BINDING IS STILL PROGRESS.
+                        // `recordRowMappings` was left out of this test, so a Success
+                        // whose entire content was "this row is now these fields" was
+                        // DISCARDED — and pinning an inferred row against a known
+                        // record produces exactly that when the row closes to {}.
+                        if (newSubst.mappings.isNotEmpty() || newSubst.rowVarMappings.isNotEmpty() ||
+                            newSubst.recordRowMappings.isNotEmpty()) {
                             substitution = newSubst.compose(substitution)
                             madeProgress = true
                         }
@@ -735,7 +741,8 @@ class ConstraintSolver(
                 when (result) {
                     is ConstraintResult.Success -> {
                         val newSubst = result.substitution
-                        if (newSubst.mappings.isNotEmpty() || newSubst.rowVarMappings.isNotEmpty()) {
+                        if (newSubst.mappings.isNotEmpty() || newSubst.rowVarMappings.isNotEmpty() ||
+                            newSubst.recordRowMappings.isNotEmpty()) {
                             substitution = newSubst.compose(substitution)
                             madeProgress = true
                         }
@@ -796,6 +803,11 @@ class ConstraintSolver(
         // each Success so the pinned result/return types reach emit. Success and
         // Failure both remove the constraint (so it's reported at most once);
         // only genuinely-stuck Deferred constraints survive to the sweep below.
+        // Nothing else can make progress, so row growth is permitted from here —
+        // see [rowGrowthAllowed]. The sweep re-applies the substitution before
+        // re-solving, so a row something DID pin is seen as pinned.
+        rowGrowthAllowed = true
+
         runToFixpoint(constraintWorklist.size + 2, "the deferred-constraint sweep") {
             var finalProgress = false
             val it = constraintWorklist.iterator()
@@ -808,7 +820,8 @@ class ConstraintSolver(
                 }
                 when (result) {
                     is ConstraintResult.Success -> {
-                        if (result.substitution.mappings.isNotEmpty() || result.substitution.rowVarMappings.isNotEmpty()) {
+                        if (result.substitution.mappings.isNotEmpty() || result.substitution.rowVarMappings.isNotEmpty() ||
+                            result.substitution.recordRowMappings.isNotEmpty()) {
                             substitution = result.substitution.compose(substitution)
                         }
                         finalProgress = true
@@ -919,7 +932,8 @@ class ConstraintSolver(
                 val applied = applySubstitutionToConstraint(constraint, substitution) as Constraint.InherentMethodResolve
                 when (val result = solveInherentMethodResolve(applied, substitution)) {
                     is ConstraintResult.Success -> {
-                        if (result.substitution.mappings.isNotEmpty() || result.substitution.rowVarMappings.isNotEmpty()) {
+                        if (result.substitution.mappings.isNotEmpty() || result.substitution.rowVarMappings.isNotEmpty() ||
+                            result.substitution.recordRowMappings.isNotEmpty()) {
                             substitution = result.substitution.compose(substitution)
                         }
                         progress = true
@@ -1065,7 +1079,8 @@ class ConstraintSolver(
                     }
                     when (result) {
                         is ConstraintResult.Success -> {
-                            if (result.substitution.mappings.isNotEmpty()) {
+                            if (result.substitution.mappings.isNotEmpty() ||
+                                result.substitution.recordRowMappings.isNotEmpty()) {
                                 DebugLogger.debug(Category.ConstraintSolver) {
                                     "  Composing substitution: ${result.substitution.mappings}"
                                 }
@@ -1400,6 +1415,31 @@ class ConstraintSolver(
      * The per-binding propagation leaves these alone: the shape types the call,
      * but it is not a record the program has.
      */
+    /**
+     * GROWING AN OPEN ROW IS A LAST RESORT. False for the main worklist, true
+     * once the deferred sweep runs — i.e. once nothing else can make progress.
+     *
+     * Inventing a field on an inferred open record is how `{ r } -> r.x` types at
+     * all, so it has to happen. But done EAGERLY it happens before anything can
+     * pin the row, and then it is indistinguishable from reading a field nobody
+     * has:
+     *
+     *     pub let pass = { r } -> if r.x > 0 then r else r
+     *     pub let a = {} -> (pass { r = { x = 1 } }).zzz          ## read `'a`
+     *     pub let b: { x: Int, q: Str } = pass { r = { x = 1 } }  ## ACCEPTED
+     *
+     * `b` is the sharp one: the annotation was absorbed, so `b.q` is a `Str` the
+     * value does not have. Both are accepted INLINE and both are already refused
+     * when the call is written as its own binding — the same program, differing
+     * only in what the solver happens to reach first. So the defect was never
+     * about openness; it was about growing before looking.
+     *
+     * The deferred sweep re-applies the substitution to each constraint before
+     * re-solving it, so by the time growth is permitted the argument has pinned
+     * the row and the field is either genuinely there or genuinely absent.
+     */
+    private var rowGrowthAllowed = false
+
     internal val methodGrownReceiverVars = mutableSetOf<TypeVar>()
 
     private fun solveHasField(constraint: Constraint.HasField, currentSubst: Substitution = Substitution.empty): ConstraintResult {
@@ -1420,7 +1460,23 @@ class ConstraintSolver(
                 is UnificationResult.Failure -> ConstraintResult.Deferred("completion pass: ${r.message}")
             }
         }
-        val recordType = constraint.recordType
+        // THE RECEIVER IS SUBSTITUTED, as the completion branch above already
+        // does. Taken raw, this path cannot see a row that something else has
+        // already bound — so it read the ORIGINAL open record and grew it again:
+        //
+        //     pub let pass = { r } -> if r.x > 0 then r else r
+        //     pub let p = {} -> (pass { r = { x = 1, y = 2 } }).y
+        //
+        // `.y` read `'a` and not `Int`, for a field THE ARGUMENT SUPPLIED. The
+        // call had bound the row to `{ y: Int }`; this solve never looked, minted
+        // a fresh field type and extended the row a second time. The absent-field
+        // case is the same defect wearing a worse hat — `.zzz` type-checked at
+        // ANY type (the two-holes entry, and known-bugs BUG 45's "NOT this bug").
+        //
+        // A named field was always checked (`.x` as Str is T0201) because its type
+        // is a concrete entry in the record rather than something the row invents,
+        // which is exactly why this looked like a rule about openness.
+        val recordType = currentSubst.apply(constraint.recordType)
         val fieldName = constraint.fieldName
         val expectedFieldType = constraint.fieldType
 
@@ -1464,6 +1520,18 @@ class ConstraintSolver(
         if (recordType is MezzeType.VarType) {
             if (constraint.strictFieldCheck) {
                 return ConstraintResult.Deferred("Waiting for record type to be resolved for strict field check")
+            }
+            if (!rowGrowthAllowed) {
+                // GROWING A BARE VARIABLE INTO A RECORD IS GROWTH TOO, and this is
+                // the path a CALL RESULT takes: the receiver is the instantiated
+                // return variable, so `(pass { r = { x = 1 } }).zzz` invented
+                // `{ zzz: 'a, ... }` and bound the return to it before the argument
+                // had pinned anything. Held back with the record case — see
+                // [rowGrowthAllowed].
+                return ConstraintResult.Deferred(
+                    "growing a type variable into a record carrying '$fieldName' is a " +
+                        "last resort; waiting for something to pin the receiver"
+                )
             }
 
             val recordWithField = MezzeType.RecordType(
@@ -1513,6 +1581,17 @@ class ConstraintSolver(
                 // a user-specified open row, a missing field is an error, not an
                 // invitation to invent (which let `r.zzz` read a nonexistent field).
                 val isUserOpenRow = recordType.rowVar?.isUserSpecified() == true
+                if (recordType.rowVar != null && !constraint.strictFieldCheck && !isUserOpenRow &&
+                    !rowGrowthAllowed
+                ) {
+                    // GROWTH IS A LAST RESORT — see [rowGrowthAllowed]. Held back
+                    // until nothing else can progress, so a row the argument is
+                    // about to pin is not invented over first.
+                    return ConstraintResult.Deferred(
+                        "growing an open row to supply '$fieldName' is a last resort; " +
+                            "waiting for something to pin the row"
+                    )
+                }
                 if (recordType.rowVar != null && !constraint.strictFieldCheck && !isUserOpenRow) {
                     // Record the growth AS A ROW BINDING: the row var maps to an
                     // extension carrying the new field and a fresh tail, and

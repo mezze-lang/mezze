@@ -57,6 +57,21 @@ class FlpSimdGateIsVectorFreeTest {
                 + "the API it gates.");
     }
 
+    /**
+     * The SHARED probe is the one class every gate reads, so it carries the same
+     * obligation — and more strictly, because `FlpSimd` now delegates to it and
+     * `SeqNatives` gates its SIMD-node calls on it.
+     */
+    @Test
+    void theSharedProbeNeverMentionsTheVectorPackage() throws IOException {
+        String bytes = constantPoolText(com.mezze.datastructures.util.VectorApi.class);
+        assertFalse(
+            bytes.contains("jdk/incubator/vector"),
+            "VectorApi names a jdk.incubator.vector type. Reading VectorApi.AVAILABLE links it, "
+                + "so that type is resolved before any gate can consult the flag — and every gate "
+                + "in the tree reads this one flag. The probe must stay free of the API it probes.");
+    }
+
     @Test
     void theKernelsClassIsWhereTheVectorTypesLive() throws IOException {
         String bytes = constantPoolText(FlpSimdKernels.class);

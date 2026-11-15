@@ -240,14 +240,16 @@ class TypedAstBuilder(
             // The wording the compiler's own refusal (`abilityOpDictSlot`) and the
             // static-op emit path already use, so one situation reads one way.
             val what = d.opName?.let {
-                "'${d.abilityName}.$it' takes no receiver, so the type it produces is what chooses " +
-                    "the implementation — and nothing here determines that type"
+                "'${d.abilityName}.$it' takes no receiver, so what chooses the implementation is the " +
+                    "type the call PRODUCES, and nothing here determines that type — a PARAMETER " +
+                    "mentioning it does not choose it, however concrete the argument is"
             } ?: "'${d.abilityName}' is needed at `$shown`, and nothing here determines that type"
             throw com.mezze.language.typechecker.TypeCheckError(
                 message = "$what: `$shown` holds a type variable that appears in neither the parameters " +
                     "nor the result of any enclosing function, so no caller can supply the implementation. " +
-                    "Say what the call produces (`let x: <Type> = …`), or declare the constraint on the " +
-                    "enclosing function so the caller supplies it (`{ … } with <Ability> 'a -> …`).",
+                    "Say what the call produces (`let x: <Type> = …`), give the operation an `it` " +
+                    "parameter so the receiver chooses, or declare the constraint on the enclosing " +
+                    "function so the caller supplies it (`{ … } with <Ability> 'a -> …`).",
                 loc = d.loc,
                 errorType = com.mezze.language.typechecker.ErrorType.CONSTRAINT_VIOLATION,
                 code = com.mezze.language.parsedast.diagnostics.ErrorCode.T0215_AMBIGUOUS_ABILITY_TYPE,
