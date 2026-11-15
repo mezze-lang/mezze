@@ -4779,15 +4779,18 @@ the dict layer where the tuple is actually available.
 slots to the same variable, giving "Int, Int does not implement 'Make'". The
 spelling that works is `with Make 'b 'a`, naming every param including the
 receiver. Compare `std/codec/query.mz`'s `with Decode QueryC 'a`, which supplies
-2 args for a 3-param ability and is fine, so the arity rule is not simply "all
-params".
+2 args for a 3-param ability and WAS accepted — so this looked like evidence
+that the rule is not simply "all params". It was not: that constraint was
+under-supplied too, and the slot it left empty was being filled with the entry
+impl's receiver. The rule IS "all params" (V0705, landed 2026-11-15).
 
 Same family as [[project_type_application_arity_and_namespace]], where "V0705
 was DEAD for annotations: `Option Int Str`/`Int Str` accepted, surplus args
 RETAINED so a typo minted a distinct type". An under-supplied `with` constraint
 should be an arity error naming the ability's parameters, not a silent duplicate
 binding — and until it is, a typo in a constraint reads as a missing impl.
-UNPROBED: the over-supplied direction, and what the real arity rule is.
+PROBED 2026-11-15: the over-supplied direction is refused too, and the rule is
+every parameter — see BUG 41's **THE RULE LANDED**.
 
 ## BUG 41 — ALL THREE FIXED: the class-param family after BUG 40
 
