@@ -7226,3 +7226,66 @@ binding's record rows**, the way an instantiated scheme already does. Only then 
 pinning per-site, and only then does the inline read close without costing the
 two-width case. Until that lands the inline read stays accepted, and
 `InferredParamOpenTest` guards the two-binding form that already refuses it.
+
+## BUG 46 — OPEN 2026-11-15: a provider's guest HELPER is built in the caller's context, so sandboxed objects refuse it
+
+Found after the polyglot providers dropped their `Result` mirrors (the verbs now
+live on `<Lang>Foreign` only, matching `std::polyglot::jvm`). That fix let
+`mez check` pass, which let the BEHAVIOURAL conformance layer run for the first
+time — and it immediately failed one check. **The defect was always there; it was
+invisible because `check.sh` aborted at type-check.**
+
+`mezze-python` implements `attr` / `set_attr` / `has` / `method` through Python's
+attribute protocol rather than raw interop, so they resolve on PRIMITIVES too:
+
+    method = { it, name, args } ->
+      perform Runtime in Polyglot.execute {
+        on = Polyglot.eval_raw { lang = "python", source = "lambda o, n, a: getattr(o, n)(*a)" },
+        args = [it, …],
+      }
+
+`eval_raw` builds that lambda in the CALLER's context. Under a sandboxed
+`GraalPyWith`, `it` lives in the isolated INNER context, so the call crosses
+contexts and the guest errors.
+
+MEASURED, and the pattern is the proof:
+
+| | `GraalPy` | `GraalPyWith` |
+|---|---|---|
+| `type('C', (), {'g': lambda self: 7})().g()` (no args) | ok 7 | **ERR** |
+| the same with an argument | ok 42 | **ERR** |
+| `type_name` on that same object | ok | ok |
+| `.method` on a Python `str`/`int` | ok | ok |
+
+Both arities fail, so it is NOT the argument crossing. `type_name` works, so the
+object is reachable. A `str`/`int` crosses as an interop PRIMITIVE and is not
+context-bound, which is why those two dispatch fine. Only the context-bound
+object fails — the HELPER is in the wrong place, not the object.
+
+`mezze-js` and `mezze-wasm` are unaffected: neither builds a helper inside a
+verb (`eval_raw` appears only in their entry points), and both pass the
+behavioural layer under sandboxed hosts. `jvm.mz` uses no helpers at all.
+
+### THE OBVIOUS FIX TRIPS A RE-ENTRANCY PROBLEM — attempted and reverted
+
+"Build the helper beside the object": let `eval_in` take ANY foreign as its
+`ctx`, not only a context handle, and have the provider pass `ctx = it`. The data
+is there — `evalIn` reads `(Long) handle.getDelegate()` because a context
+handle's delegate IS its id, while every foreign also carries
+`getInnerContextId()`, which `eval_raw` always sets (per-thread).
+
+Implemented, and the AMBIENT path then died inside the runtime:
+
+    error[I0004]: Cannot invoke "MezzeLanguage.getCurrentContext()" because
+                  the return value of "MezzeLanguage.get(...)" is null
+
+Adding an explicit fallback to `threadContextId(lang, …)` for an untagged
+foreign did NOT help, so the null id was not the cause: entering that context
+from inside the verb is what breaks, and why needs someone who knows the
+`inInnerContext` machinery. Reverted rather than guessed at a third time.
+
+Other candidates, both with costs: raw `invoke_member`/`read_member` instead of
+the helper loses primitive dispatch — the only reason the helper exists, and
+guarded by `mezze-python`'s own "str method dispatch" / "int method dispatch"
+checks; or try raw first and fall back to the helper, which needs a crossing to
+detect failure and so costs a round trip per call.
