@@ -5376,7 +5376,24 @@ information — the argument that carries the `for` type — and does not use it
 LESSON, and it is the same one as the stdlib-scan in BUG 42: a scan of the
 stdlib proves what the STDLIB writes, not what the LANGUAGE allows. The test
 tree is the wider sample, and running the full suite is what distinguishes them.
-## BUG 35 — OPEN 2026-11-04: a recursive LOCAL lambda cannot call a function that handles its own effect
+## BUG 35 — FIXED 2026-11-15: a recursive LOCAL lambda may call a function that handles its own effect
+
+Fixed in `5cdde74f8`. The top-level recursive binding already stripped the effect
+row from its self-reference equality — "EQUATE THE TYPES, NEVER THE ROW" — and the
+do-block `let` equated WITH the row. One site had the rule, the other did not,
+which is exactly why the bug was specific to a LOCAL lambda while the identical
+loop at top level was accepted. The rule now lives in one place,
+`selfReferenceType`, called by both.
+
+Re-verified by probe before this edit: `pub local_loop : { n: Int } -> Int <*>`.
+Tests: the repro plus the top-level control in `DoBlockRecursiveLetTest`.
+
+**THIS HEADING SAID OPEN FOR THE WHOLE SESSION AFTER THE FIX SHIPPED** — the
+commit message recorded it and the entry did not, which is the same staleness
+trap this file's own entries keep warning about (hover, BUG 36, the effectsurface
+regime note). Mark the entry in the same change as the fix.
+
+### The original report follows
 
 ### Symptom
 
