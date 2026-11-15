@@ -282,12 +282,9 @@ class ConstraintGenerator(
                         // The binding was being dropped, not the literal's type.)
                         val valueType = result.type
                         if (placeholder is MezzeType.VarType && annotationTypes[item] == null) {
-                            val rowFree = when (valueType) {
-                                is MezzeType.FunctionType ->
-                                    if (valueType.effects == null) valueType
-                                    else valueType.copy(effects = null)
-                                else -> valueType
-                            }
+                            // The rule itself is [selfReferenceType], shared with the
+                            // do-block `let` in `generateDo` — see BUG 35.
+                            val rowFree = selfReferenceType(valueType)
                             listOf(
                                 Constraint.Equality(
                                     left = placeholder,

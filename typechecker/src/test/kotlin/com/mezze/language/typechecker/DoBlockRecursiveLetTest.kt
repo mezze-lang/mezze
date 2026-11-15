@@ -81,6 +81,60 @@ class DoBlockRecursiveLetTest {
         parseAndTypeCheck(code)
     }
 
+    /**
+     * BUG 35 — a recursive LOCAL lambda calling a function that handles its own
+     * effect.
+     *
+     * `handled` closes over its own `perform`, so its type carries `<*>` —
+     * "handled here", a MARKER and not an obligation. Nothing in the loop
+     * performs an unhandled effect, and it was refused anyway:
+     *
+     *     expected { i: Int, acc: 'a } … -> 'b <*>
+     *     but got  { i: 'd, acc: 'c }  -> 'e
+     *
+     * The self-call cannot know the row its own body will need, so it builds a
+     * PURE arrow; equating that with the body's real row failed on the row while
+     * every type underneath it would have unified. The do-block `let` equated
+     * WITH the row; the top-level binding already dropped it, which is why the
+     * IDENTICAL loop at top level was accepted — the control below.
+     *
+     * One rule for both sites now: `selfReferenceType`.
+     */
+    @Test
+    fun `a recursive local lambda may call a function that handles its own effect`() {
+        val code = """
+            type H = { tag: Int }
+            effect E where { op: {} -> Int <E> }
+            impl E for H where { op = {} -> 1 }
+
+            let handled = {} -> perform H { tag = 0 } in E.op {}
+
+            let local_loop = { n } -> do
+              let go = { i, acc } ->
+                if i <= 0 then acc
+                else go { i = i - handled {}, acc = acc + i }
+              go { i = n, acc = 0 }
+        """.trimIndent()
+        parseAndTypeCheck(code)
+    }
+
+    /** THE CONTROL: the same loop at top level, which always worked. */
+    @Test
+    fun `the same loop at top level is accepted`() {
+        val code = """
+            type H = { tag: Int }
+            effect E where { op: {} -> Int <E> }
+            impl E for H where { op = {} -> 1 }
+
+            let handled = {} -> perform H { tag = 0 } in E.op {}
+
+            let go_top = { i, acc } ->
+              if i <= 0 then acc
+              else go_top { i = i - handled {}, acc = acc + i }
+        """.trimIndent()
+        parseAndTypeCheck(code)
+    }
+
     @Test
     fun `still detects undefined variables`() {
         val code = """

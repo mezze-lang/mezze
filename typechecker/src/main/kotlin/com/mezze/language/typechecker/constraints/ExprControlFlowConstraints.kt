@@ -475,7 +475,12 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                     collector.constraints.add(
                         Constraint.Equality(
                             left = preBindType,
-                            right = exprResult.type,
+                            // BUG 35: the ROW is dropped here. See [selfReferenceType]
+                            // — the same rule the top-level recursive binding uses, and
+                            // having it in only one of the two places is what made a
+                            // LOCAL recursive lambda refuse a loop the identical
+                            // top-level loop accepts.
+                            right = selfReferenceType(exprResult.type),
                             context = "Recursive let binding in do block",
                             loc = stmt.value.loc
                         )
