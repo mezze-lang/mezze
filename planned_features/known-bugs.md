@@ -7227,7 +7227,46 @@ pinning per-site, and only then does the inline read close without costing the
 two-width case. Until that lands the inline read stays accepted, and
 `InferredParamOpenTest` guards the two-binding form that already refuses it.
 
-## BUG 46 — OPEN 2026-11-15: a provider's guest HELPER is built in the caller's context, so sandboxed objects refuse it
+## BUG 46 — FIXED 2026-11-15: the context policy was decided by a NAME MATCH
+
+**THE CAUSE WAS THE BLANKET RULE, not the provider and not `evalIn`.**
+
+    for (String name : HANDLERS.keySet())
+        if (name.startsWith("__native_polyglot_"))
+            wrap in inInnerContext;
+
+That wrap means "enter the receiver's context before running this native". It was
+applied to `eval_in`, which RESOLVES AND ENTERS A CONTEXT ITSELF — so
+pre-entering one makes `eval_in`'s own registry read run with a GUEST context
+entered, and that read needs MEZZE's language (`MezzeContext.get(null)`). NPE.
+
+**It never showed because `eval_in` was only ever handed a context HANDLE**, whose
+`innerContextId` is null, so `inInnerContext` took its no-op path by luck of the
+argument. Hand it a tagged foreign and the latent miswrap fires.
+
+FIXED by stating the policy where each native is registered:
+
+    putPolyglotValueOp(name, h)    // performed ON a foreign -> enter its context
+    putPolyglotContextOp(name, h)  // manages contexts itself -> do NOT pre-enter
+
+62 registrations converted, 4 context ops, loop deleted, zero `startsWith` left.
+`evalIn` then reads its context from ANY foreign, so a provider builds its guest
+helper beside the value it is messaging. `mezze-python` 28/28 behavioural,
+sandbox included (was 13/14); interpreter 8122/0.
+
+**THE PROCESS LESSON, which cost the most here.** I diagnosed the guest symptom
+correctly (GraalPy's `ownsGil()` on a null context, helper in context 2 and
+object in context 1), then hunted the NPE three times — twice inside `evalIn`,
+once in the provider — and wrote the entry up as needing someone who knew the
+context machinery. The author looked at the surrounding code and said the name
+match was a bad pattern; the bug fell out of fixing the pattern. **A blanket rule
+keyed on a name does not just offend taste: it silently covers the cases it is
+wrong for, and waits for an argument that exposes it.** See
+[[feedback_registration_time_policy_not_name_matching]].
+
+### The original report follows
+
+## BUG 46 — the provider's guest HELPER was built in the caller's context
 
 Found after the polyglot providers dropped their `Result` mirrors (the verbs now
 live on `<Lang>Foreign` only, matching `std::polyglot::jvm`). That fix let
