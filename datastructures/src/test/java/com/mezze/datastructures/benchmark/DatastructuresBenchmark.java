@@ -1,6 +1,5 @@
 package com.mezze.datastructures.benchmark;
 
-import com.mezze.datastructures.bitset.MezzeBitSet;
 import com.mezze.datastructures.bytes.MezzeBytes;
 import com.mezze.datastructures.deque.MezzeDeque;
 import com.mezze.datastructures.list.MezzeList;
@@ -53,7 +52,6 @@ public class DatastructuresBenchmark {
         benchmarkMezzeMap();
         benchmarkMezzeSortedSet();
         benchmarkMezzeSortedMap();
-        benchmarkMezzeBitSet();
         benchmarkMezzeBytes();
         benchmarkLongSetStorage();
         benchmarkLongKeyMapStorage();
@@ -514,65 +512,6 @@ public class DatastructuresBenchmark {
 
     // ==================== MEZZE BITSET ====================
 
-    @org.junit.jupiter.api.Test
-    public void benchmarkMezzeBitSet() {
-        printHeader("MezzeBitSet (Packed Bit Set)");
-
-        // Setup
-        MezzeBitSet bitset1000 = MezzeBitSet.range(0, 1000);
-        MezzeBitSet bitset500a = MezzeBitSet.range(0, 500);
-        MezzeBitSet bitset500b = MezzeBitSet.range(250, 750);
-
-        // Add
-        benchmark("add", () -> {
-            MezzeBitSet b = MezzeBitSet.empty();
-            for (int i = 0; i < 100; i++) {
-                b = b.add(i * 10);
-            }
-            return b.size();
-        });
-
-        // Contains
-        benchmark("contains (100 lookups)", () -> {
-            int found = 0;
-            for (int i = 0; i < 100; i++) {
-                if (bitset1000.contains(i * 10)) found++;
-            }
-            return found;
-        });
-
-        // Union
-        benchmark("union (500 | 500)", () -> {
-            return bitset500a.union(bitset500b).size();
-        });
-
-        // Intersection
-        benchmark("intersect (500 & 500)", () -> {
-            return bitset500a.intersect(bitset500b).size();
-        });
-
-        // Difference
-        benchmark("difference (500 - 500)", () -> {
-            return bitset500a.difference(bitset500b).size();
-        });
-
-        // Symmetric Difference
-        benchmark("symmetricDiff (500 ^ 500)", () -> {
-            return bitset500a.symmetricDifference(bitset500b).size();
-        });
-
-        // Range creation
-        benchmark("range(0, 1000)", () -> {
-            return MezzeBitSet.range(0, 1000).size();
-        });
-
-        // Complement
-        benchmark("complement(1000)", () -> {
-            return bitset500a.complement(1000).size();
-        });
-
-        System.out.println();
-    }
 
     // ==================== MEZZE BYTES ====================
 

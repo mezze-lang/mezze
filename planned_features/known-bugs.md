@@ -5878,7 +5878,44 @@ and the first version of that test PASSED because it used a one-entry base: a
 soundness test at a size that cannot reach the code under test proves nothing.
 
 
-## BUG 39 — OPEN 2026-11-07: `MezzeBitSet.add` mutates in place, so a derivation is observable in the base
+## BUG 39 — RESOLVED BY DELETION 2026-11-15: `MezzeBitSet` is gone
+
+The maintainer's call, asked for explicitly and given: **delete it.**
+
+`MezzeBitSet` was wired to NOTHING. Measured before asking — native/interpreter
+references: `MezzeSeq` 36, `MezzeMap` 16, `MezzeSet` 13, `MezzeBitSet` **0**, and
+zero stdlib mentions. Its only five references in the tree were its own
+implementation, its own test, its soundness probe, and two benchmarks. So no
+Mezze program could construct one, and none could observe the defect.
+
+Against that: the cheap fix (always allocate) is correct and OOMs
+`:datastructures:test`, and the honest fix is words in a persistent trie — a
+rebuild of ~600 lines for a structure nothing reaches. Carrying an unreachable
+soundness defect costs more in future confusion than the code is worth, and git
+has it if a fast `Set Int` representation is ever wanted.
+
+### What was KEPT, because it outlives the structure
+
+`OwnerTokenSoundnessTest`'s five DEQUE cases all pass and pin the property that
+makes an in-place write safe, so they moved to the `deque` test package with the
+rule they demonstrate:
+
+> **Whether the structure's reads are bounded AWAY from the slot being written.**
+> A deque's reads are bounded by an explicit `[head, tail)` window; `pushBack`
+> writes at `tail` and `pushFront` at `head-1`, both outside the base's window,
+> which the base cannot address. Pops write nothing — they narrow the window,
+> share the buffer and revoke ownership.
+
+A bitset has no window: `contains(i)` reads `words[i >>> 6]` for ANY `i`, so
+there is nowhere unobservable to write. That is the same rule that made the hash
+map's in-place insert unsafe while a sorted array's append was safe, and it is
+the generalisable part of this entry.
+
+Removed: the class, its test, the two `@Disabled` BitSet probes, and the bitset
+sections of `PerformanceBenchmark` and `DatastructuresBenchmark`.
+`:datastructures:test` 807/0 after.
+
+### The original report follows
 
 The same defect as BUG 38, in the one structure that still had it. Not reachable
 from Mezze — see the severity note below — which is the only reason it is filed

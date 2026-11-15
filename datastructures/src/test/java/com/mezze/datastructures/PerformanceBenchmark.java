@@ -1,6 +1,5 @@
 package com.mezze.datastructures;
 
-import com.mezze.datastructures.bitset.MezzeBitSet;
 import com.mezze.datastructures.bytes.MezzeBytes;
 import com.mezze.datastructures.deque.MezzeDeque;
 import com.mezze.datastructures.map.LongKeyMapStorage;
@@ -30,7 +29,6 @@ public class PerformanceBenchmark {
         benchmarkMezzeBytesPatternSearch();
         benchmarkMezzeSeqMap();
         benchmarkMezzeDequeConcat();
-        benchmarkMezzeBitSetOperations();
         benchmarkLongKeyMapStorage();
     }
 
@@ -212,48 +210,6 @@ public class PerformanceBenchmark {
                 BENCHMARK_ITERATIONS, elapsed / 1_000_000.0);
     }
 
-    /**
-     * Benchmark 6: MezzeBitSet operations with inline cardinality
-     */
-    private static void benchmarkMezzeBitSetOperations() {
-        System.out.println("--- Benchmark 6: MezzeBitSet Inline Cardinality ---");
-
-        // Create bitsets with overlapping ranges
-        MezzeBitSet set1 = MezzeBitSet.range(0, 1000);
-        MezzeBitSet set2 = MezzeBitSet.range(500, 1500);
-
-        // Warmup
-        for (int i = 0; i < WARMUP_ITERATIONS; i++) {
-            set1.union(set2);
-            set1.intersect(set2);
-            set1.difference(set2);
-        }
-
-        // Benchmark union
-        long start = System.nanoTime();
-        for (int i = 0; i < BENCHMARK_ITERATIONS; i++) {
-            set1.union(set2);
-        }
-        long unionTime = System.nanoTime() - start;
-
-        // Benchmark intersection
-        start = System.nanoTime();
-        for (int i = 0; i < BENCHMARK_ITERATIONS; i++) {
-            set1.intersect(set2);
-        }
-        long intersectTime = System.nanoTime() - start;
-
-        // Benchmark difference
-        start = System.nanoTime();
-        for (int i = 0; i < BENCHMARK_ITERATIONS; i++) {
-            set1.difference(set2);
-        }
-        long diffTime = System.nanoTime() - start;
-
-        System.out.printf("  Union 1000-bit sets (%d iterations): %.2f ms%n", BENCHMARK_ITERATIONS, unionTime / 1_000_000.0);
-        System.out.printf("  Intersection (%d iterations): %.2f ms%n", BENCHMARK_ITERATIONS, intersectTime / 1_000_000.0);
-        System.out.printf("  Difference (%d iterations): %.2f ms%n%n", BENCHMARK_ITERATIONS, diffTime / 1_000_000.0);
-    }
 
     /**
      * Benchmark 7: LongKeyMapStorage binary search
