@@ -7083,7 +7083,71 @@ above, and it reproduces with NO SPREAD AT ALL:
 
 A param GROWN by a read is open, so it answers for any field; `{ r } -> r`, grown
 by nothing, is closed by the call site and gives T0205. That is the hole already
-recorded in [[project_two_holes_found_in_object_design_talk]] — an INFERRED open
-row reads a field at any type where a WRITTEN one refuses — and it governs the
-wider-argument acceptance too (`{ r } -> r.x` takes `{ x = 1, y = 2 }`). Closing
-it is a decision about usage-inferred records, not about spreads.
+recorded in [[project_two_holes_found_in_object_design_talk]].
+
+**It is a SOLVE-ORDER artifact, not openness as such.** Split the same program
+into two bindings and it is already refused:
+
+    pub let pass = { r } -> if r.x > 0 then r else r
+    pub let got = {} -> pass { r = { x = 1 } }
+    pub let p = {} -> (got {}).zzz                   ## T0205
+
+Inline, the HasField for `.zzz` is solved BEFORE the argument pins the row, so
+`solveHasField` extends the still-open record and nothing later contradicts it.
+`InferredParamOpenTest` guards the half that holds.
+
+### TWO FIXES MEASURED AND BOTH REVERTED
+
+Worth recording, because each looked right and the second looked obviously right.
+
+1. **Close the row at GENERALIZATION** (`usageInferredParamRowVars` minus the
+   rows the return mentions). Closes every spelling of the read — and pins a
+   parameter before its call site can contribute, which took out
+   `FnReturnSpreadFieldTest`:
+
+       let base = { host = "localhost", port = 8080, tls = False }
+       let promote = { r } -> { ...r, tls = True }
+       let out = promote { r = base }.port
+
+   `promote` reads NEITHER `host` nor `port`; the CALL supplies them. A row must
+   stay open while it is being learned.
+
+2. **Pin the row when it meets a CLOSED record** (bind it to the closed side's
+   extra fields, in `Unification`'s open-record branch, which today checks field
+   presence and returns WITHOUT EVER BINDING THE ROW). Keeps case 1 and closes
+   the read — and record row vars are NOT FRESHENED PER INSTANTIATION, so one
+   call site's width closes the scheme for every other:
+
+       let promote = { r } -> { ...r, tls = True }
+       pub let a: Int = (promote { r = { host = "h", port = 1, tls = False } }).port
+       pub let b: Str = (promote { r = { name = "n", tls = False } }).name
+       ## T0201 at `b`: expected { r: { tls: Bool, host: Str, port: Int } }
+
+   Both sites passed before. Patch kept at
+   `scratchpad/row-pin-at-unification.patch`.
+
+   AND THE CONTAMINATION IS NOT WHAT IT LOOKS LIKE. `instantiateTypeWithFreshVars`
+   DOES freshen record rows, and its comment gives this exact reason ("sharing the
+   same row var across call sites means binding one locks the other"). It is not
+   reached here: a SAME-MODULE call site binds the binding's OWN row, not a copy.
+   Measured on `pub` and local bindings alike, and with no spread involved:
+
+       let get = { r } -> r.tls
+       pub let a: Bool = get { r = { host = "h", tls = False } }
+       pub let b: Bool = get { r = { name = "n", tls = True } }
+       ## T0201 at `b`: expected { r: { tls: 'a, host: Str } }
+
+   So the printed `expected` is `get`'s type AFTER site `a`'s binding reached it.
+
+### THE DECISION, AND WHAT IT MAKES THE NEXT STEP
+
+Asked whether one un-annotated helper may serve two call sites of different width,
+the author's answer was **"no never annotation required"** — so yes, it may, and
+no fix may buy the read's refusal by making an annotation the way out. That rules
+out fix 2 as written.
+
+The order is therefore fixed: **make a same-module reference freshen the
+binding's record rows**, the way an instantiated scheme already does. Only then is
+pinning per-site, and only then does the inline read close without costing the
+two-width case. Until that lands the inline read stays accepted, and
+`InferredParamOpenTest` guards the two-binding form that already refuses it.
