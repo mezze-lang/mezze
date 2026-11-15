@@ -123,7 +123,12 @@ class EmitFileSizeRatchetTest {
             // receiver is `Str` when the text is parsed first, so the recovery was
             // running `impl FromJson 'a for Json` on a `Str` and the raw JSON text
             // reached `decode_record_field`.
-            C + "TypedASTCompiler.kt" to 4507,   // was 5,580; +2 for carrying a `...spread` through ability-op receiver injection
+            // +4 more for extending that same predicate to the CONCRETE-receiver
+            // end (`viaEnclosingDecodeDict`), which had tested membership of the
+            // derived-decoder table and so never fired for an entry op. The
+            // reasoning is in `DictEvidence.kt` with the lookup; what stayed here
+            // is the condition itself, which is the expression being changed.
+            C + "TypedASTCompiler.kt" to 4511,   // was 5,580; +2 for carrying a `...spread` through ability-op receiver injection
             // +42 for `contextRowWithBodyAssocTypes`: an INLINE lambda was stamped
             // with the row from the pushed CONTEXT, so a callback's associated
             // type was the CALLEE's variable rather than what the body threw, and

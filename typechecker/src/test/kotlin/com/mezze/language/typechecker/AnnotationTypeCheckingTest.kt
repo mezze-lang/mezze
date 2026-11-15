@@ -989,9 +989,17 @@ class AnnotationTypeCheckingTest {
     fun `test function with extra ability constraint in annotation is allowed`() {
         // Annotation says it requires NumSub but implementation doesn't use it - this is fine
         // Extra constraints in annotation are allowed (restricts usage, doesn't break anything)
+        //
+        // `NumSub 'a 'a` names BOTH parameters — `ability NumSub 'r for 'l` takes
+        // two, the co-operand and the receiver. This test used to write
+        // `with NumSub 'a`, which is now V0705 ("names only 1 of 2 type
+        // arguments"): a constraint must supply every parameter, because the
+        // omitted slot was being filled with a copy of a neighbour. The SUBJECT
+        // here — an extra constraint the body does not need is allowed — is
+        // unchanged and is what this still asserts.
         assertTypeChecks(
             """
-            let id: { x: 'a } with NumSub 'a -> 'a = {x} -> x
+            let id: { x: 'a } with NumSub 'a 'a -> 'a = {x} -> x
             id {x = 42}
             """.trimIndent()
         )
@@ -1035,11 +1043,12 @@ class AnnotationTypeCheckingTest {
 
     @Test
     fun `test polymorphic function with extra ability in annotation is allowed`() {
-        // Annotation declares NumSub 'a but it's not needed - this is fine
+        // Annotation declares NumSub 'a 'a but it's not needed - this is fine
         // Extra constraints in annotation are allowed (restricts usage, doesn't break anything)
+        // Both parameters named, as V0705 now requires — see the sibling test above.
         assertTypeChecks(
             """
-            let id: { x: 'a } with NumSub 'a -> 'a = {x} -> x
+            let id: { x: 'a } with NumSub 'a 'a -> 'a = {x} -> x
             id {x = 42}
             """.trimIndent()
         )

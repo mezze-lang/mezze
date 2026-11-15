@@ -381,6 +381,59 @@ sealed interface ValidationError {
         override fun location(): Loc? = loc
     }
 
+    /**
+     * A `with <Ability> …` clause that does not name every parameter.
+     *
+     * USER RULE: all of them, or it is a type error. An ability's parameters are
+     * positional — `ability Make 'b for 'a` declares `['b, 'a]`, class
+     * parameters first and the RECEIVER LAST — so a partial list leaves the rest
+     * to be guessed, and the guess was a copy of a neighbouring slot: `with Make
+     * 'b` reported "Int, Int does not implement 'Make'" for a receiver that is
+     * always `Src`. The arity is the error; the missing impl was its shadow.
+     *
+     * Says which parameters, by name, because "expects 3" does not tell an
+     * author what to write and the declaration is the only place that does.
+     */
+    data class WithConstraintArityMismatch(
+        val abilityName: String,
+        /** The ability's parameters, IN ORDER and by name — class parameters
+         *  first, the receiver last. A count alone does not tell an author what
+         *  to write, and the declaration is the only place that does. */
+        val declaredParams: List<String>,
+        val actual: Int,
+        val loc: Loc? = null,
+    ) : ValidationError {
+        override val code: ErrorCode = ErrorCode.V0705_TYPE_ARITY_MISMATCH
+
+        private val expected: Int get() = declaredParams.size
+
+        override val hints: List<String>
+            get() = listOf(
+                "an ability's parameters are positional, class parameters first and " +
+                    "the RECEIVER LAST — `ability $abilityName ${declaredParams.joinToString(" ")}`" +
+                    " is declared as `${declaredParams.dropLast(1).joinToString(" ")}" +
+                    " for ${declaredParams.lastOrNull() ?: ""}`",
+                "the receiver is a parameter like any other: naming it is what tells " +
+                    "dispatch which impl the constraint is about",
+            )
+
+        override fun message(): String = buildString {
+            append("`with $abilityName` ")
+            append(
+                when {
+                    actual == 0 -> "names no type arguments"
+                    actual < expected -> "names only $actual of $expected"
+                    else -> "names $actual type arguments, more than the $expected"
+                }
+            )
+            append(" — '$abilityName' takes ${declaredParams.joinToString(" ")}. ")
+            append("Every parameter must be supplied: ")
+            append("`with $abilityName ${declaredParams.joinToString(" ")}`.")
+        }
+
+        override fun location() = loc
+    }
+
     data class TypeArityMismatch(
         val typeName: String,
         val declared: Int,

@@ -536,6 +536,31 @@ internal fun TypedASTCompiler.enclosingDictSlot(method: String, typeVar: String?
  * the same principle as `viaEnclosingDecodeDict` at the concrete-receiver end
  * ("when the enclosing function holds this method's dict, that dict IS the
  * choice").
+ *
+ * ## The concrete-receiver end, which is the same question
+ *
+ * `viaEnclosingDecodeDict` stated that principle but tested it with
+ * `decodeImplByOpHash`, which holds only the DERIVED decoders. An ENTRY op is
+ * not one, so `from_query` failed the test however many dictionaries the frame
+ * held: the op was resolved concretely at the site, and the compiler then had
+ * to fill the CALLEE's own `decode` slot from a site where the decode target is
+ * still `'a`. With no evidence it left the slot empty, and the dispatch arrived
+ * at `__dict_fallback_decode` — "no dictionary was supplied for ability
+ * operation `decode`" — from `std/codec/query.mz`'s `from_query`.
+ *
+ * MEASURED, inside `query_decoded`: `params=[url, __dict_from_query]`,
+ * `fwdSlot=null`. The frame was holding the entry dictionary the whole time;
+ * nothing asked it. So this predicate answers for BOTH ends — a var-typed
+ * receiver (where it stops a shape overruling the dict) and a concrete one
+ * (where it routes through the dict instead of resolving past it).
+ *
+ * Why it had gone unnoticed: the under-supplied `with Decode QueryC 'a`
+ * generated the derived decoder as `impl Decode QueryC {page: Int} for Str` —
+ * `Str` being the ENTRY impl's receiver, invented for the slot the constraint
+ * left empty. `Str` is also the only concrete type at the call site, so the
+ * shape pile matched the WIRE type against a TARGET position and resolved the
+ * dictionary by accident. Completing the constraint makes the decoder correctly
+ * `for Seq { k: Str, v: Str }`, which is what removed the accident.
  */
 internal fun TypedASTCompiler.entryOpDictIsHeld(
     methodName: String,

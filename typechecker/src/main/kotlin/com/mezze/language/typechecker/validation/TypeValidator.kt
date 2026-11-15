@@ -36,6 +36,11 @@ class TypeValidator(
     private val unknownTypeValidator = UnknownTypeValidator(registry)
     private val recursiveTypeValidator = RecursiveTypeValidator()
     private val aliasEffectRowValidator = AliasEffectRowValidator()
+    // Imported abilities come from the registry; locally-declared ones the
+    // validator reads off the module itself, so a module that declares its own
+    // ability is checked even when the registry cannot see it.
+    private val withConstraintArityValidator =
+        WithConstraintArityValidator { name -> registry.lookupAbility(name)?.typeParams }
     private val codecGenerator = CodecGenerator()
 
     private val typeNameCache = mutableMapOf<MezzeType, String>()
@@ -66,7 +71,8 @@ class TypeValidator(
     fun validateAsWritten(module: ParsedModule): List<ValidationError> =
         unknownTypeValidator.validate(module) +
             recursiveTypeValidator.validate(module) +
-            aliasEffectRowValidator.validate(module)
+            aliasEffectRowValidator.validate(module) +
+            withConstraintArityValidator.validate(module)
 
     fun validate(
         module: ParsedModule,

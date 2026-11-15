@@ -4789,10 +4789,12 @@ should be an arity error naming the ability's parameters, not a silent duplicate
 binding — and until it is, a typo in a constraint reads as a missing impl.
 UNPROBED: the over-supplied direction, and what the real arity rule is.
 
-## BUG 41 — (i) FIXED, (ii)/(iii) OPEN: the class-param family after BUG 40
+## BUG 41 — ALL THREE FIXED: the class-param family after BUG 40
 
 Found 2026-11-14 by probing the arity of a `with` constraint after BUG 40
-landed. All three are measured; none is fixed.
+landed. (i) fixed 2026-11-14 by [[AbilityArityTable]]; (ii) and (iii) fixed
+2026-11-15 by the arity RULE, which is now `V0705` as-written — see
+**THE RULE LANDED** at the end of this entry.
 
 ### (i) FIXED by [[AbilityArityTable]] — a generic hop at THREE class params
 
@@ -4881,7 +4883,7 @@ locally-declared ability between passes, and which pass that is
 `addAbilityConstraintsToFunctionType` — the failing calls come from there). Fix
 that and steps 3-5 resolve themselves; nothing downstream needs changing.
 
-### (ii) An UNDER-SUPPLIED `with` constraint mis-binds the omitted slot
+### (ii) FIXED — an UNDER-SUPPLIED `with` constraint mis-binds the omitted slot
 
 Omitting the trailing receiver is the stdlib's own idiom —
 `std/codec/query.mz` writes `with Decode QueryC 'a` for
@@ -4907,7 +4909,7 @@ Whether under-supply should be LEGAL (the stdlib relies on it) or refused with
 an arity error is a design question for the author. What is not in question is
 that silently copying another slot's binding is wrong either way.
 
-### (ii) THE RULE IS DECIDED, AND IT CANNOT LAND YET — measured 2026-11-14
+### (ii) THE RULE IS DECIDED — measured 2026-11-14, LANDED 2026-11-15
 
 **USER RULE: a `with` constraint must supply EVERY parameter of its ability,
 otherwise it is a type error.** Decided after the measurements above.
@@ -5146,12 +5148,12 @@ reconstructs anything.
    that point it is a no-op refactor, which is what it was wrongly assumed to be
    here.
 
-The rule's code is parked at
-`scratchpad/with_arity_rule.patch` (validator, wiring, 7 spec tests, and the two
-`AnnotationTypeCheckingTest` cases that assert `with NumSub 'a` and must become
-`with NumSub 'a 'a`).
+LANDED 2026-11-15 (validator, wiring, 7 spec tests, and the two
+`AnnotationTypeCheckingTest` cases that asserted `with NumSub 'a` and now write
+`with NumSub 'a 'a`). It was NOT the no-op refactor step 3 predicted — see
+**THE RULE LANDED** below for the two defects completing the stdlib exposed.
 
-### (iii) `with <Ability>` with NO type args is accepted at the declaration
+### (iii) FIXED — `with <Ability>` with NO type args was accepted at the declaration
 
 ```mezze
 pub let via: { x: Src } with Make -> Int = { x } -> x.make {}
@@ -5160,10 +5162,86 @@ pub let via: { x: Src } with Make -> Int = { x } -> x.make {}
 Accepted when only declared; T0210 once called. A constraint naming no type
 cannot constrain anything, so the declaration is the place to say so.
 
-### Why these are recorded rather than fixed
+### THE RULE LANDED — 2026-11-15, and completing the stdlib found two more bugs
 
-The session fixed BUGS 38, 39 and 40 (arity 2) in this family, each confirmed by
-RUNNING a program because the type side is correct throughout. (i) needs another
-tracing round in the dict layer; (ii) needs the author's decision on whether
-under-supply is legal before a rule can be written. Both are worth doing, and
-the measurements above are where the next pass should start.
+`WithConstraintArityValidator`, run from `TypeValidator.validateAsWritten`, with
+`V0705` naming the ability's parameters BY NAME (`'$abilityName takes 'b 'a`),
+because a count does not tell an author what to write. Seven spec tests in
+`WithConstraintAritySpecTest` pin under-supply, over-supply, zero args, the
+one-parameter control and an imported ability. (ii) and (iii) are both closed by
+it: the under-supplied and the empty spellings are now refused at the
+declaration, where the mistake is, instead of surfacing as a `V0402` for a tuple
+nobody wrote or a `T0210` at the first call.
+
+`:typechecker:test` 5238 green WITH the rule, and `compileStdlib --rerun-tasks`
+green — so no stdlib constraint is under-supplied any more and the constraint
+census is **ZERO** (138 → 12 → 0).
+
+**Completing the twelve stdlib constraints was NOT the no-op it was assumed to
+be.** It removed two accidents that had been cancelling two real defects, and
+both defects then showed up as runtime crashes. Both have the same shape: the
+invented slot made a WRONG type available where dispatch happened to look.
+
+**(a) `json.mz` — the entry receiver recovered from the DECODER's input.**
+`let dec = { s } -> s.from_json {}` died with `Non-exhaustive match: no variant
+tag matched` in `json_type_name`. `TypedASTCompiler` recovers a `from_json`
+receiver that never solved by reading the pinned decode impl's `for 'in`, which
+is ALWAYS `Json`; the entry impl's receiver is `Str` for `"{…}".from_json {}`,
+which parses first. So `impl FromJson 'a for Json` ran on a `Str`, skipping
+`parse_str`, and the raw text reached `decode_record_field`. It had been
+invisible because `with Decode JsonC 'a` built the derived decoder itself `for
+Str`, so the recovery copied that mistake back.
+
+**(b) `query.mz` — the decode dictionary resolved by matching the WIRE type
+against a TARGET position.** `m.query_as {}` died with `no dictionary was
+supplied for ability operation 'decode'`. `with Decode QueryC 'a` generated
+`impl Decode QueryC { page: Int } for Str` — `Str` being the ENTRY impl's
+receiver, invented for the empty slot — and `Str` is also the only concrete type
+at the call site, so the flattened shape pile matched it and resolved the
+dictionary BY ACCIDENT. Correctly generated as `for Seq { k: Str, v: Str }`, the
+accident disappeared and the real state showed: inside `query_decoded`,
+`params=[url, __dict_from_query]`, `fwdSlot=null` — the frame held the ENTRY
+dictionary and nothing asked it.
+
+**One predicate fixes both** (`DictEvidence.entryOpDictIsHeld`): when the
+enclosing function holds the dictionary for a decode entry op, that dictionary
+is the solver's own choice, made where the receiver was concrete — so a
+var-typed receiver must not be recovered from a shape (a), and a concrete one
+must be dispatched THROUGH the dict rather than resolved past it (b). The rule
+for (b) already existed as `viaEnclosingDecodeDict` and said exactly this, but
+tested it with `decodeImplByOpHash`, which holds only the DERIVED decoders — an
+entry op is not one, so `from_query` never qualified however many dictionaries
+its frame held.
+
+`FromJsonWrapperTest` 3/3 and the four http query tests are the break tests,
+verified both ways; `:interpreter:test` 7348 green.
+
+**NOT changed, and worth knowing:** `DecodeTargetResolver` reads a constraint's
+decode target as `typeArgs.first()`, which is the target only for a tuple whose
+primary landed at the head. Reading the slot the impl side reads
+(`typeArgs[1]` for a decode-flavoured ability) was tried, and with the dict fix
+in place NO test distinguishes the two — so it was reverted rather than carried
+as an unverified change. Note that `getOrNull` at a short tuple would also
+shrink `constraintTargets`, flipping the `constraintTargets.size ==
+entryLocs.size` alignment test, so the two spellings are not interchangeable.
+This is the last positional read of a constraint tuple left in the codec path.
+
+### What this family cost, and what the method was
+
+BUGS 38, 39, 40 and 41 are one defect seen from four sides: the constraint tuple
+has two orders and two lengths in play, reconstructed per consumer from a
+representation that does not record where the primary sat. Each was confirmed by
+RUNNING a program, because the type side is correct throughout.
+
+The thing that actually moved it was the CENSUS (`MEZZE_CONSTRAINT_CENSUS=1`):
+six hypotheses about dispatch were wrong, and one oracle counting malformed
+constraints named the cause on its first run. Everything after it was measured,
+not reasoned — including the two accidents above, each of which was found by
+printing what dispatch was given rather than by reading what it should have had.
+
+Still open from the ORDER OF WORK: step 2, carrying the complete positional
+tuple on `Constraint.AbilityRequired` and deleting `abilityClassArgs` and its
+reconstruction sites. `primaryIndex` (690ff7642) records where the primary sat,
+which is most of the information; the remaining positional reads are the one in
+`DecodeTargetResolver` noted above and `ownTypePerMethod`'s `firstOrNull`
+primary.

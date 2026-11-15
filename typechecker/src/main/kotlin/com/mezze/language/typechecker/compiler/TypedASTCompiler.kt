@@ -1496,9 +1496,13 @@ class TypedASTCompiler(
             // generated decoder has receiver `Json`). When the enclosing function
             // holds this method's dict, that dict IS the choice — go through it even
             // though the receiver is typed.
+            // The same holds for a decode ENTRY op, which this test's
+            // `decodeImplByOpHash` (derived decoders only) excludes — the
+            // measured cost of leaving it out is in [entryOpDictIsHeld].
             val viaEnclosingDecodeDict = receiverType !is VarType &&
-                enclosingDictSlot(methodName, null) != null &&
-                abilityOpIndex[methodName]?.any { decodeImplByOpHash.containsKey(it.opHash) } == true
+                ((enclosingDictSlot(methodName, null) != null &&
+                    abilityOpIndex[methodName]?.any { decodeImplByOpHash.containsKey(it.opHash) } == true) ||
+                    entryOpDictIsHeld(methodName, receiverType, (fn as? TypedFieldAccess)?.abilityHash?.hex))
             // BUG 9 / C.2: pass the ability the node carries. Inside a mono spec the
             // receiver becomes concrete, so this concrete path runs — and without the
             // ability it picks whichever impl of that operation name was registered
