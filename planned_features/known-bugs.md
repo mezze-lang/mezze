@@ -5248,3 +5248,90 @@ reconstruction sites. `primaryIndex` (690ff7642) records where the primary sat,
 which is most of the information; the remaining positional reads are the one in
 `DecodeTargetResolver` noted above and `ownTypePerMethod`'s `firstOrNull`
 primary.
+
+---
+
+## BUG 42 — OPEN BY DECISION: an ability operation may declare a type variable nothing can implement
+
+Found 2026-11-15 by the ability/constraint spec dive (probe `K21`).
+
+```mezze
+ability Wrap for 'w where {
+  wrap: { it: 'w, x: 'a } with Show 'a -> Int,     ## accepted
+}
+impl Wrap for Src where {
+  wrap: { it: Src, x: 'a } with Show 'a -> Int = { it, x } -> x.show {},
+}
+## error[V0417]: Type variables not allowed in ability implementation
+```
+
+`'a` belongs to the OPERATION, not the ability — Rust's
+`fn wrap<A: Show>(&self, x: A)`. The declaration is accepted and every impl of
+it is refused, so the ability is uninhabitable.
+
+The rule actually in force (`AbilityValidator`, `allowedTypeVars =
+impl.forallVars.toSet()`) is: **a type variable in an operation must be bound by
+the ability or by the impl's own head.** Generic blanket impls are NOT this and
+are unaffected — `impl One for 'a` and `impl One for ['e]` bind their variable
+in the head, and both are accepted.
+
+**The DECISION is to support it, not to refuse it** (author, 2026-11-15): it is a
+real feature, Rust and Haskell both have it, and the type side is small. The
+cost is monomorphisation — an impl operation is one function per impl keyed by
+`computeOpHash(implHash, opName)`, which assumes the op's type is closed once
+the impl is chosen, and an operation parameter needs per-call-site
+specialisation with distinct identities instead. Five places are named, with the
+order of work, in
+`planned_features/correctness/generic-ability-operations.md`.
+
+DEFERRED because mono is being rewritten on a perf branch and this would fight
+the merge. Nothing depends on the outcome: **0 of 91 stdlib ability operations
+(55 abilities) use the shape.**
+
+Until it lands, the declaration stays silent and the author learns at the first
+impl. The doc records the stopgap choice (refuse vs warn) rather than making it.
+
+## BUG 43 — the `for` type in a non-`it` parameter: declarable, with no working call form
+
+Found 2026-11-15 by the same dive (probe `D1`). A DIFFERENT thing from BUG 42 —
+this one is a rule, not a missing feature.
+
+```mezze
+ability Receives for 'a having 'msg, 'reply where {
+  receive: { target: 'a, msg: 'msg } -> 'reply,    ## `target`, not `it`
+}
+```
+
+The field named `it` IS the receiver — that is what makes `x.receive { … }` a
+method call. Put the `for` type in any other field and there is no way to call
+the operation correctly:
+
+| call form | result |
+|---|---|
+| `Red.receive { msg = Flip }` | T0201 "record fields don't match: missing 'target'" |
+| `Receives.receive { target = Red, msg = Flip }` | ACCEPTED, and half-wired (below) |
+
+On that second path the impl IS selected correctly — a wrong receiver gives
+V0402 "Int does not implement 'Receives'" — but the impl's `having` bindings are
+neither CHECKED nor APPLIED:
+
+| with all arguments correct | via `it` | via `target` |
+|---|---|---|
+| result type | `Light` (the impl's `having 'reply`) | **`'a`** |
+| `msg = 5` where `'msg = LightMsg` | T0201 | **accepted** |
+
+So the associated-type machinery is keyed on the receiver being spelled `it`
+while impl selection is not. Rather than wire the second path, the shape is
+REFUSED at the declaration (author: "this needs an `it`"), because it has no
+working call form to wire it for.
+
+The rule, measured against the whole stdlib before writing it: **if an
+operation's parameters mention the ability's `for` type, there must be a field
+named `it` carrying it.** 91 operations across 55 abilities, ZERO violations —
+and every `it` field's type is exactly the `for` type. Permitted and unaffected:
+`eq: { it: 'a, r: 'a }` (the `for` type in other fields too, `it` present),
+`decode: { it: 'in, config: 'config }` (`it` carries it, class param elsewhere),
+`zero: {} -> 'a` (receiverless — the `for` type only in the RESULT, which is
+`NumZero`/`NumOne`'s shape and is called as `NumZero.zero {}` with the produced
+type determining the impl), and `tag: { n: Int } -> Int` (the `for` type absent
+from the parameters).
