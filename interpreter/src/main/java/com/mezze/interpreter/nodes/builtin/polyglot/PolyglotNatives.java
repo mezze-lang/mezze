@@ -469,7 +469,21 @@ public final class PolyglotNatives {
         if (handle.isErrored()) return handle;
         String source = getString(args, "source");
         String lang = handle.getSourceLanguage();
-        Long cid = (Long) handle.getDelegate();
+        // A context HANDLE's delegate IS its id, so that is read first and every
+        // existing call is unchanged. ANY OTHER FOREIGN answers with its own context
+        // tag, which is what lets a provider build a guest HELPER in the context of
+        // the value it is about to message: `mezze-python`'s `attr`/`method` go
+        // through Python's attribute protocol (`lambda o, n: getattr(o, n)`) so they
+        // resolve on primitives too, and built in the CALLER's context that lambda
+        // cannot touch a sandboxed object (known-bugs BUG 46 — GraalPy reports
+        // `PythonContext.ownsGil()` on a null context).
+        //
+        // This native is excluded from the `inInnerContext` blanket wrap in
+        // NativeDispatch for exactly this reason: it must not be pre-entered, or the
+        // registry read below runs with a guest context entered and NPEs.
+        Long cid = (handle.getDelegate() instanceof Long handleId)
+            ? handleId
+            : handle.getInnerContextId();
         com.oracle.truffle.api.TruffleContext ctx = innerContexts().byId.get(cid);
         if (ctx == null) return MezzeForeign.errored(errorTypeError("eval_in: context is closed or invalid"), lang);
         try {
@@ -495,7 +509,21 @@ public final class PolyglotNatives {
         String name = getString(args, "name");
         byte[] data = getBytes(args, "bytes");
         String lang = handle.getSourceLanguage();
-        Long cid = (Long) handle.getDelegate();
+        // A context HANDLE's delegate IS its id, so that is read first and every
+        // existing call is unchanged. ANY OTHER FOREIGN answers with its own context
+        // tag, which is what lets a provider build a guest HELPER in the context of
+        // the value it is about to message. `mezze-python`'s `attr`/`method` go
+        // through Python's attribute protocol (`lambda o, n: getattr(o, n)`) so they
+        // resolve on primitives too; built in the CALLER's context that lambda cannot
+        // touch a sandboxed object, and GraalPy reports it as
+        // `PythonContext.ownsGil()` on a null context (known-bugs BUG 46).
+        //
+        // Registered via `putPolyglotContextOp`, so this native is NOT pre-entered:
+        // the registry read below needs MEZZE's language, which a guest context does
+        // not have.
+        Long cid = (handle.getDelegate() instanceof Long handleId)
+            ? handleId
+            : handle.getInnerContextId();
         com.oracle.truffle.api.TruffleContext ctx = innerContexts().byId.get(cid);
         if (ctx == null) return MezzeForeign.errored(errorTypeError("eval_bytes_in: context is closed or invalid"), lang);
         try {

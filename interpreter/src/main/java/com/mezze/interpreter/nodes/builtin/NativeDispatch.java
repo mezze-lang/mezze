@@ -61,6 +61,33 @@ public final class NativeDispatch extends MezzeNode {
     }
 
     /**
+     * Register a polyglot VALUE op — one performed ON a foreign, so it must run
+     * with that foreign's context entered and its foreign result stays tagged (#8).
+     * A chain off an `eval_in` result keeps working because of this.
+     *
+     * The wrap used to be applied afterwards by matching every handler name
+     * against the `__native_polyglot_` PREFIX. That decided behaviour by NAME, and
+     * it decided it for natives the rule does not fit: `eval_in` resolves and
+     * enters a context ITSELF, so pre-entering one makes its own registry lookup
+     * run with a guest context entered, where `MezzeContext.get(null)` has no mezze
+     * language and NPEs. It never showed because `eval_in` only ever received a
+     * context HANDLE, whose `innerContextId` is null, so the wrapper happened to be
+     * a no-op (known-bugs BUG 46). Declaring the policy HERE, where the native is
+     * registered and its nature is known, is what stops that being luck.
+     */
+    private static void putPolyglotValueOp(String name, NativeHandler handler) {
+        HANDLERS.put(name, (r, c) -> PolyglotNatives.inInnerContext(r, c, () -> handler.handle(r, c)));
+    }
+
+    /**
+     * Register a polyglot CONTEXT op — one that resolves, opens, enters or closes a
+     * context itself. It must NOT be pre-entered; see [putPolyglotValueOp].
+     */
+    private static void putPolyglotContextOp(String name, NativeHandler handler) {
+        HANDLERS.put(name, handler);
+    }
+
+    /**
      * Replace a native handler after static init. Used by non-JVM builds (the
      * browser/WASM build) to swap host-touching natives — filesystem, stdin,
      * process, HTTP — for browser equivalents or for a clear "unsupported"
@@ -4551,116 +4578,116 @@ public final class NativeDispatch extends MezzeNode {
 
     private static void registerPolyglotHandlers() {
         // Type predicates & coercion
-        HANDLERS.put("__native_polyglot_is_null",
+        putPolyglotValueOp("__native_polyglot_is_null",
             (r, c) -> PolyglotNatives.isNull(r));
-        HANDLERS.put("__native_polyglot_is_string",
+        putPolyglotValueOp("__native_polyglot_is_string",
             (r, c) -> PolyglotNatives.isString(r));
-        HANDLERS.put("__native_polyglot_as_string",
+        putPolyglotValueOp("__native_polyglot_as_string",
             (r, c) -> PolyglotNatives.asString(r));
-        HANDLERS.put("__native_polyglot_is_number",
+        putPolyglotValueOp("__native_polyglot_is_number",
             (r, c) -> PolyglotNatives.isNumber(r));
-        HANDLERS.put("__native_polyglot_fits_in_long",
+        putPolyglotValueOp("__native_polyglot_fits_in_long",
             (r, c) -> PolyglotNatives.fitsInLong(r));
-        HANDLERS.put("__native_polyglot_as_long",
+        putPolyglotValueOp("__native_polyglot_as_long",
             (r, c) -> PolyglotNatives.asLong(r));
-        HANDLERS.put("__native_polyglot_as_double",
+        putPolyglotValueOp("__native_polyglot_as_double",
             (r, c) -> PolyglotNatives.asDouble(r));
-        HANDLERS.put("__native_polyglot_as_boolean",
+        putPolyglotValueOp("__native_polyglot_as_boolean",
             (r, c) -> PolyglotNatives.asBoolean(r));
 
         // Constructors
-        HANDLERS.put("__native_polyglot_from_int",
+        putPolyglotValueOp("__native_polyglot_from_int",
             (r, c) -> PolyglotNatives.fromInt(r));
-        HANDLERS.put("__native_polyglot_from_float",
+        putPolyglotValueOp("__native_polyglot_from_float",
             (r, c) -> PolyglotNatives.fromFloat(r));
-        HANDLERS.put("__native_polyglot_from_str",
+        putPolyglotValueOp("__native_polyglot_from_str",
             (r, c) -> PolyglotNatives.fromStr(r));
-        HANDLERS.put("__native_polyglot_from_bool",
+        putPolyglotValueOp("__native_polyglot_from_bool",
             (r, c) -> PolyglotNatives.fromBool(r));
-        HANDLERS.put("__native_polyglot_null_val",
+        putPolyglotValueOp("__native_polyglot_null_val",
             (r, c) -> PolyglotNatives.nullVal(r));
 
         // Members
-        HANDLERS.put("__native_polyglot_has_members",
+        putPolyglotValueOp("__native_polyglot_has_members",
             (r, c) -> PolyglotNatives.hasMembers(r));
-        HANDLERS.put("__native_polyglot_has_member",
+        putPolyglotValueOp("__native_polyglot_has_member",
             (r, c) -> PolyglotNatives.hasMember(r));
-        HANDLERS.put("__native_polyglot_read_member",
+        putPolyglotValueOp("__native_polyglot_read_member",
             (r, c) -> PolyglotNatives.readMember(r));
-        HANDLERS.put("__native_polyglot_write_member",
+        putPolyglotValueOp("__native_polyglot_write_member",
             (r, c) -> PolyglotNatives.writeMember(r));
-        HANDLERS.put("__native_polyglot_invoke_member",
+        putPolyglotValueOp("__native_polyglot_invoke_member",
             (r, c) -> PolyglotNatives.invokeMember(r));
 
         // Arrays
-        HANDLERS.put("__native_polyglot_has_array_elements",
+        putPolyglotValueOp("__native_polyglot_has_array_elements",
             (r, c) -> PolyglotNatives.hasArrayElements(r));
-        HANDLERS.put("__native_polyglot_array_size",
+        putPolyglotValueOp("__native_polyglot_array_size",
             (r, c) -> PolyglotNatives.arraySize(r));
-        HANDLERS.put("__native_polyglot_read_array",
+        putPolyglotValueOp("__native_polyglot_read_array",
             (r, c) -> PolyglotNatives.readArray(r));
-        HANDLERS.put("__native_polyglot_write_array",
+        putPolyglotValueOp("__native_polyglot_write_array",
             (r, c) -> PolyglotNatives.writeArray(r));
         // BUG 2: the read side existed, the build side did not — so a codec's
         // `encode_list` / `encode_map` had no native to call and containers had
         // no `.to_py {}` / `.to_js {}` chain at all.
-        HANDLERS.put("__native_polyglot_make_list",
+        putPolyglotValueOp("__native_polyglot_make_list",
             (r, c) -> PolyglotNatives.makeList(r));
-        HANDLERS.put("__native_polyglot_make_dict",
+        putPolyglotValueOp("__native_polyglot_make_dict",
             (r, c) -> PolyglotNatives.makeDict(r));
         // ...and make_dict's own mirror. A ForeignDict is HASH-shaped, so none
         // of the member or array natives can read one back: the build side
         // shipped without a read side, which left `decode_map` /
         // `decode_record_field` with nothing to call.
-        HANDLERS.put("__native_polyglot_has_hash_entries",
+        putPolyglotValueOp("__native_polyglot_has_hash_entries",
             (r, c) -> PolyglotNatives.hasHashEntries(r));
-        HANDLERS.put("__native_polyglot_hash_size",
+        putPolyglotValueOp("__native_polyglot_hash_size",
             (r, c) -> PolyglotNatives.hashSize(r));
-        HANDLERS.put("__native_polyglot_read_hash",
+        putPolyglotValueOp("__native_polyglot_read_hash",
             (r, c) -> PolyglotNatives.readHash(r));
-        HANDLERS.put("__native_polyglot_hash_entries",
+        putPolyglotValueOp("__native_polyglot_hash_entries",
             (r, c) -> PolyglotNatives.hashEntries(r));
         // Whole-array read in ONE crossing. The per-element `read_array` made
         // pulling an N-element guest array into Mezze cost N native calls and N
         // Results, while handing a seq the other way is already O(1) via a view.
-        HANDLERS.put("__native_polyglot_array_to_seq",
+        putPolyglotValueOp("__native_polyglot_array_to_seq",
             (r, c) -> PolyglotNatives.arrayToSeq(r));
         // The complete-surface additions: write side of a hash (mirror of
         // read_hash), a `size` that unifies array/hash length into one `len`-like
         // verb, and a `to_seq` that drains ANY iterable (a generator / range /
         // custom __iter__), not just an array-shaped Foreign — with the iterator
         // cursor kept inside the native so pure code never sees it.
-        HANDLERS.put("__native_polyglot_write_hash",
+        putPolyglotValueOp("__native_polyglot_write_hash",
             (r, c) -> PolyglotNatives.writeHash(r));
-        HANDLERS.put("__native_polyglot_size",
+        putPolyglotValueOp("__native_polyglot_size",
             (r, c) -> PolyglotNatives.size(r));
-        HANDLERS.put("__native_polyglot_to_seq",
+        putPolyglotValueOp("__native_polyglot_to_seq",
             (r, c) -> PolyglotNatives.toSeq(r));
         // Bulk drain + coerce: whole guest array → Mezze [Int]/[Float] in ONE
         // crossing (loop host-side). Backs a codec's bulk scalar-seq decode.
-        HANDLERS.put("__native_polyglot_to_int_seq",
+        putPolyglotValueOp("__native_polyglot_to_int_seq",
             (r, c) -> PolyglotNatives.toIntSeq(r));
-        HANDLERS.put("__native_polyglot_to_float_seq",
+        putPolyglotValueOp("__native_polyglot_to_float_seq",
             (r, c) -> PolyglotNatives.toFloatSeq(r));
-        HANDLERS.put("__native_polyglot_to_str_seq",
+        putPolyglotValueOp("__native_polyglot_to_str_seq",
             (r, c) -> PolyglotNatives.toStrSeq(r));
-        HANDLERS.put("__native_polyglot_to_bool_seq",
+        putPolyglotValueOp("__native_polyglot_to_bool_seq",
             (r, c) -> PolyglotNatives.toBoolSeq(r));
 
         // Execution
-        HANDLERS.put("__native_polyglot_is_executable",
+        putPolyglotValueOp("__native_polyglot_is_executable",
             (r, c) -> PolyglotNatives.isExecutable(r));
-        HANDLERS.put("__native_polyglot_execute",
+        putPolyglotValueOp("__native_polyglot_execute",
             (r, c) -> PolyglotNatives.execute(r));
-        HANDLERS.put("__native_polyglot_is_instantiable",
+        putPolyglotValueOp("__native_polyglot_is_instantiable",
             (r, c) -> PolyglotNatives.isInstantiable(r));
-        HANDLERS.put("__native_polyglot_instantiate",
+        putPolyglotValueOp("__native_polyglot_instantiate",
             (r, c) -> PolyglotNatives.instantiate(r));
 
         // Meta
-        HANDLERS.put("__native_polyglot_type_name",
+        putPolyglotValueOp("__native_polyglot_type_name",
             (r, c) -> PolyglotNatives.typeName(r));
-        HANDLERS.put("__native_polyglot_check",
+        putPolyglotValueOp("__native_polyglot_check",
             (r, c) -> PolyglotNatives.checkOk(r));
 
         // Generic guest entry — the ONE eval native, language chosen at runtime
@@ -4669,7 +4696,7 @@ public final class NativeDispatch extends MezzeNode {
         // its own `__native_<lang>_eval`. Works for any language the Context has
         // enabled (Ruby, R, …), which is what lets a third party add a language
         // in pure Mezze with no Java at all.
-        HANDLERS.put("__native_polyglot_eval",
+        putPolyglotValueOp("__native_polyglot_eval",
             (r, c) -> PolyglotNatives.evalRaw(r, c));
 
         // Generic language-tagged constructors: the `lang` is a field, so a
@@ -4677,54 +4704,54 @@ public final class NativeDispatch extends MezzeNode {
         // the `Runtime` handler rather than shipping a `__native_python_from_int`
         // of its own. They delegate to the same PolyglotNatives constructors the
         // in-tree `__native_<lang>_*` handlers use.
-        HANDLERS.put("__native_polyglot_box_int",
+        putPolyglotValueOp("__native_polyglot_box_int",
             (r, c) -> PolyglotNatives.fromInt(r, PolyglotNatives.getString(r, "lang")));
-        HANDLERS.put("__native_polyglot_box_float",
+        putPolyglotValueOp("__native_polyglot_box_float",
             (r, c) -> PolyglotNatives.fromFloat(r, PolyglotNatives.getString(r, "lang")));
-        HANDLERS.put("__native_polyglot_box_str",
+        putPolyglotValueOp("__native_polyglot_box_str",
             (r, c) -> PolyglotNatives.fromStr(r, PolyglotNatives.getString(r, "lang")));
-        HANDLERS.put("__native_polyglot_box_bool",
+        putPolyglotValueOp("__native_polyglot_box_bool",
             (r, c) -> PolyglotNatives.fromBool(r, PolyglotNatives.getString(r, "lang")));
-        HANDLERS.put("__native_polyglot_box_null",
+        putPolyglotValueOp("__native_polyglot_box_null",
             (r, c) -> PolyglotNatives.nullVal(r, PolyglotNatives.getString(r, "lang")));
-        HANDLERS.put("__native_polyglot_box_list",
+        putPolyglotValueOp("__native_polyglot_box_list",
             (r, c) -> PolyglotNatives.makeList(r, PolyglotNatives.getString(r, "lang")));
-        HANDLERS.put("__native_polyglot_box_dict",
+        putPolyglotValueOp("__native_polyglot_box_dict",
             (r, c) -> PolyglotNatives.makeDict(r, PolyglotNatives.getString(r, "lang")));
         // Bulk numeric WRITE: a whole [Int]/[Float] → guest array in ONE crossing
         // (counterpart of to_int_seq/to_float_seq). Raw scalars, no per-element box.
-        HANDLERS.put("__native_polyglot_box_int_seq",
+        putPolyglotValueOp("__native_polyglot_box_int_seq",
             (r, c) -> PolyglotNatives.boxScalarSeq(r, PolyglotNatives.getString(r, "lang")));
-        HANDLERS.put("__native_polyglot_box_float_seq",
+        putPolyglotValueOp("__native_polyglot_box_float_seq",
             (r, c) -> PolyglotNatives.boxScalarSeq(r, PolyglotNatives.getString(r, "lang")));
-        HANDLERS.put("__native_polyglot_box_str_seq",
+        putPolyglotValueOp("__native_polyglot_box_str_seq",
             (r, c) -> PolyglotNatives.boxScalarSeq(r, PolyglotNatives.getString(r, "lang")));
-        HANDLERS.put("__native_polyglot_box_bool_seq",
+        putPolyglotValueOp("__native_polyglot_box_bool_seq",
             (r, c) -> PolyglotNatives.boxScalarSeq(r, PolyglotNatives.getString(r, "lang")));
 
         // Binary guest entry + bulk byte-buffer access + narrow-int boxing — the
         // generic ops a wasm-style provider needs (binary module eval, linear
         // memory copy, i32 args). All generic (a `lang` field / any array-shaped
         // Foreign), so the wasm provider ships no natives either.
-        HANDLERS.put("__native_polyglot_eval_bytes",
+        putPolyglotValueOp("__native_polyglot_eval_bytes",
             (r, c) -> PolyglotNatives.evalBytes(r, c));
-        HANDLERS.put("__native_polyglot_read_bytes",
+        putPolyglotValueOp("__native_polyglot_read_bytes",
             (r, c) -> PolyglotNatives.readBytes(r));
-        HANDLERS.put("__native_polyglot_write_bytes",
+        putPolyglotValueOp("__native_polyglot_write_bytes",
             (r, c) -> PolyglotNatives.writeBytes(r));
-        HANDLERS.put("__native_polyglot_box_i32",
+        putPolyglotValueOp("__native_polyglot_box_i32",
             (r, c) -> PolyglotNatives.boxI32(r, PolyglotNatives.getString(r, "lang")));
 
         // Sandboxed inner contexts — a `GraalXWith { config }` handler opens a
         // configured inner context (isolated + access restricted below the parent),
         // evals a scalar in it, and closes it. Generic over any enabled language.
-        HANDLERS.put("__native_polyglot_open_context",
+        putPolyglotContextOp("__native_polyglot_open_context",
             (r, c) -> PolyglotNatives.openContext(r, c));
-        HANDLERS.put("__native_polyglot_eval_in",
+        putPolyglotContextOp("__native_polyglot_eval_in",
             (r, c) -> PolyglotNatives.evalIn(r, c));
-        HANDLERS.put("__native_polyglot_eval_bytes_in",
+        putPolyglotContextOp("__native_polyglot_eval_bytes_in",
             (r, c) -> PolyglotNatives.evalBytesIn(r, c));
-        HANDLERS.put("__native_polyglot_close_context",
+        putPolyglotContextOp("__native_polyglot_close_context",
             (r, c) -> PolyglotNatives.closeContext(r));
 
         // JVM host access. Host class lookup is the JVM's one language-specific
@@ -4744,18 +4771,6 @@ public final class NativeDispatch extends MezzeNode {
         // stays available for genuinely new native capabilities, but the polyglot
         // providers no longer need it.
 
-        // #8: wrap every polyglot op so one performed on an INNER-context foreign
-        // (an `eval_in` result, tagged with its sandbox context) runs with that
-        // context entered and its foreign result stays tagged — a chain off an
-        // eval_in result keeps working. PolyglotNatives.inInnerContext is a no-op
-        // (zero overhead) for a main-context foreign or a native with no `val`
-        // receiver, so blanket-wrapping is safe. Done once here, not per-handler.
-        for (String name : new java.util.ArrayList<>(HANDLERS.keySet())) {
-            if (name.startsWith("__native_polyglot_")) {
-                NativeHandler inner = HANDLERS.get(name);
-                HANDLERS.put(name, (r, c) -> PolyglotNatives.inInnerContext(r, c, () -> inner.handle(r, c)));
-            }
-        }
     }
 
     @TruffleBoundary
