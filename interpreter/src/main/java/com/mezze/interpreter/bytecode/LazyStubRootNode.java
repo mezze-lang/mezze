@@ -81,6 +81,36 @@ public final class LazyStubRootNode extends RootNode {
         return inflated;
     }
 
+    /**
+     * The target this stub forwards to, resolved WITHOUT inflating, or null
+     * when it cannot be answered safely yet.
+     *
+     * For a call site deciding whether it may bypass the stub. The decision is
+     * a `@Cached` initialiser, so it is taken once per call site and the first
+     * call is exactly when this root is still a stub — answering "no" there
+     * costs that call site the allocation-free path forever. See
+     * `MezzeBytecodeRootNode.CallIndirectScalar1.canBypassTarget`.
+     *
+     * REFUSES WHEN THE FUNCTION CARRIES CLOSURES. This root prepends them on
+     * every call (`prependClosures`), and a caller that bypasses it does not,
+     * so handing out the target for a closure-carrying function would silently
+     * drop the captures. Top-level functions have none, which is the case worth
+     * the bypass.
+     */
+    @CompilerDirectives.TruffleBoundary
+    public CallTarget peekForwardTargetNoClosures() {
+        CallTarget already = inflated;
+        if (already != null) {
+            Object[] closures = cachedClosures;
+            return (closures == null || closures.length == 0) ? already : null;
+        }
+        MezzeFunction fn = resolveMezzeFunction();
+        if (fn == null) return null;
+        Object[] closures = fn.getClosureValues();
+        if (closures != null && closures.length != 0) return null;
+        return fn.getCallTarget();
+    }
+
     @Override
     public Object execute(VirtualFrame frame) {
         DirectCallNode fwd = forward;

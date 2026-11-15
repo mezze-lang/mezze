@@ -50,6 +50,12 @@ public final class EmptyMapStorage implements MapStorage {
     }
 
     @Override
+    public MapStorage withValues(Object[] newValues) {
+        // Nothing to put them in, and nothing to share.
+        return this;
+    }
+
+    @Override
     public Object[] values() {
         return EMPTY_ARRAY;
     }

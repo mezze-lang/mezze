@@ -929,6 +929,7 @@ object StorePopulator {
                         collectEdgesFromNode(s.step, report)
                     }
                     is com.mezze.language.truffleir.SourceIR.RawSeq -> collectEdgesFromNode(s.xs, report)
+                    is com.mezze.language.truffleir.SourceIR.RawBytes -> collectEdgesFromNode(s.xs, report)
                     is com.mezze.language.truffleir.SourceIR.RawList -> collectEdgesFromNode(s.xs, report)
                     is com.mezze.language.truffleir.SourceIR.Opaque -> collectEdgesFromNode(s.expr, report)
                 }
@@ -938,8 +939,23 @@ object StorePopulator {
                         is com.mezze.language.truffleir.StageIR.Filter -> report(stage.p.functionHash.hex, EdgeKind.CALLS)
                         is com.mezze.language.truffleir.StageIR.Take -> collectEdgesFromNode(stage.n, report)
                         is com.mezze.language.truffleir.StageIR.Drop -> collectEdgesFromNode(stage.n, report)
+                        is com.mezze.language.truffleir.StageIR.Zip ->
+                            com.mezze.language.truffleir.forEachSourceNode(stage.second) { n ->
+                                collectEdgesFromNode(n, report)
+                            }
+                        // Both halves name code: the lambda the emitter
+                        // reads its inner bounds from, and the inner
+                        // source's own expressions.
+                        is com.mezze.language.truffleir.StageIR.FlatMap -> {
+                            report(stage.f.functionHash.hex, EdgeKind.CALLS)
+                            com.mezze.language.truffleir.forEachSourceNode(stage.inner) { n ->
+                                collectEdgesFromNode(n, report)
+                            }
+                        }
                         is com.mezze.language.truffleir.StageIR.TakeWhile -> report(stage.p.functionHash.hex, EdgeKind.CALLS)
                         is com.mezze.language.truffleir.StageIR.DropWhile -> report(stage.p.functionHash.hex, EdgeKind.CALLS)
+                        // No lambda and no expression: no edge to record.
+                        com.mezze.language.truffleir.StageIR.Enumerate -> {}
                     }
                 }
                 when (val sk = node.sink) {

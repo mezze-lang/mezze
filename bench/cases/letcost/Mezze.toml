@@ -1,0 +1,12 @@
+[package]
+name = "letcost"
+version = "0.1.0"
+
+[[app]]
+name = "letcost"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

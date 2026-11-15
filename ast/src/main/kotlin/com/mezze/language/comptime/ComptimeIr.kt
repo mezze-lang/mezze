@@ -313,12 +313,20 @@ class ComptimeIr(private val comptimeHash: Hash? = null) {
                     sr.copy(start = f(sr.start), end = f(sr.end), step = f(sr.step))
                 is SourceIR.RawSeq -> sr.copy(xs = f(sr.xs))
                 is SourceIR.RawList -> sr.copy(xs = f(sr.xs))
+                is SourceIR.RawBytes -> sr.copy(xs = f(sr.xs))
                 is SourceIR.Opaque -> sr.copy(expr = f(sr.expr))
             },
             stages = node.stages.map { st ->
                 when (st) {
                     is StageIR.Take -> st.copy(n = f(st.n))
                     is StageIR.Drop -> st.copy(n = f(st.n))
+                    StageIR.Enumerate -> st
+                    // The second source holds NodeIRs like any other source and
+                    // is rewritten through the same mapper.
+                    is StageIR.Zip -> st.copy(
+                        second = com.mezze.language.truffleir.mapSourceIR(st.second, f))
+                    is StageIR.FlatMap -> st.copy(
+                        inner = com.mezze.language.truffleir.mapSourceIR(st.inner, f))
                     is StageIR.Map, is StageIR.Filter,
                     is StageIR.TakeWhile, is StageIR.DropWhile -> st
                 }

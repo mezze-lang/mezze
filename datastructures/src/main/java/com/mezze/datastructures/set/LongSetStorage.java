@@ -122,7 +122,7 @@ public final class LongSetStorage implements SetStorage {
             return fromSorted(newElements);
         }
 
-        // Transition to HashSetStorage
+        // Transition to the trie
         return transitionToHash().add(elem);
     }
 
@@ -381,21 +381,15 @@ public final class LongSetStorage implements SetStorage {
         return new SmallFlatSetStorage(boxed);
     }
 
-    /** Promote to {@link LongHashSetStorage} (primitive-keyed, no boxing) when
-     *  every element is sentinel-safe; fall back to {@link HashSetStorage} otherwise. */
+    /** Promote to {@link LongTrieSetStorage} (primitive-keyed, no boxing) when
+     *  no element can disqualify, since a trie reserves no sentinels. */
     private SetStorage transitionToHash() {
+        // No element can disqualify any more: the table this used to promote to
+        // reserved two sentinel values and sent such sets to boxed storage
+        // instead, and a trie stores no sentinels.
+        SetStorage out = new LongTrieSetStorage();
         for (long elem : elements) {
-            if (!LongHashSetStorage.isStorable(elem)) {
-                HashSetStorage hash = new HashSetStorage();
-                for (long e : elements) {
-                    hash = (HashSetStorage) hash.add(e);
-                }
-                return hash;
-            }
-        }
-        LongHashSetStorage out = new LongHashSetStorage();
-        for (long elem : elements) {
-            out = (LongHashSetStorage) out.addLong(elem);
+            out = ((LongTrieSetStorage) out).addLong(elem);
         }
         return out;
     }

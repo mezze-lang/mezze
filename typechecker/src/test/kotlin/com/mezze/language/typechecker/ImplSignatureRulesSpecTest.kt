@@ -61,7 +61,14 @@ class ImplSignatureRulesSpecTest : VariantSpecBase() {
               t.f { n = 1 }
             $MAIN
             """,
-            "T0201",
+            // V0423 since integration/all-three merged feat/perf-obsession, which
+            // added a DEDICATED diagnostic for this rule — "binds parameter 'm',
+            // which 'Op.f' does not declare. It declares: it, n. Arguments are
+            // matched by NAME, so a parameter the ability does not declare is never
+            // supplied". This test pinned the rule through the generic T0201 it used
+            // to surface as; the named code says the same thing better, and it is
+            // the code a reader can `--explain`.
+            "V0423",
             "THE ABILITY SIDE OF BUG 37, and the reason that bug is a gap rather " +
                 "than a design choice: the identical rename on a performer's op is " +
                 "accepted.",
@@ -79,7 +86,10 @@ class ImplSignatureRulesSpecTest : VariantSpecBase() {
               t.f { n = 1 }
             $MAIN
             """,
-            "T0201",
+            // V0423, same merge as the sibling above: an EXTRA parameter is also a
+            // name the ability does not declare, so the dedicated rule catches it
+            // before the record types are compared.
+            "V0423",
             "Arity is part of the record type, so an extra field is the same " +
                 "mismatch as a wrong one.",
         )

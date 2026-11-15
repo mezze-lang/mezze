@@ -77,6 +77,22 @@ pub let to_seq: { s: Set 'a } -> ['a] = { s } -> __native_set_to_seq { s = s }
 ## Creates a set from a Seq.
 pub let from_seq: { xs: ['a] } with Eq 'a, Hash 'a -> Set 'a = { xs } -> __native_set_from_seq { xs = xs }
 
+## Collects an `Iter` into a Set.
+##
+## `Iter` has seven ways IN -- `range`, `from_seq`, `from_list`, `unfold`,
+## `once`, `empty`, and `.to_iter{}` on any of the seven types implementing
+## `Iterable` -- and had only `to_seq`/`to_list` out, so reaching any other
+## collection meant spelling the intermediate yourself.
+##
+## This is ERGONOMICS, not speed: it is what you would have written. `to_seq`
+## hands its buffer to the sequence without copying it, so the intermediate is
+## a wrapper around the buffer the sink had to fill anyway.
+##
+## Lives here rather than in `iter` because `set` imports `iter` for its
+## `Iterable` impl, so the dependency only runs this way.
+pub let from_iter: { it: Iter 'a } with Eq 'a, Hash 'a -> Set 'a = { it } ->
+  from_seq { xs = iter::to_seq { it = it } }
+
 ## ── Operations that carry the element's own `Eq`/`Hash` ──────────────────
 ##
 ## A hash container buckets by the element's runtime representation, which is
@@ -102,6 +118,17 @@ pub let remove_with_evidence:
   { s: Set 'a, x: 'a, hash: { it: 'a } -> Int, eq: { it: 'a, r: 'a } -> Bool } -> Set 'a =
   { s, x, hash, eq } -> __native_set_remove_with_evidence { s = s, x = x, hash = hash, eq = eq }
 
+pub let filter_map_with_evidence:
+  { set: Set 'a, f: { val: 'a } -> Option 'b <...>,
+    hash: { it: 'b } -> Int, eq: { it: 'b, r: 'b } -> Bool } -> Set 'b <...> =
+  { set, f, hash, eq } ->
+    __native_set_filter_map_with_evidence { set = set, f = f, hash = hash, eq = eq }
+
+pub let map_with_evidence:
+  { s: Set 'a, f: { val: 'a } -> 'b <...>,
+    hash: { it: 'b } -> Int, eq: { it: 'b, r: 'b } -> Bool } -> Set 'b <...> =
+  { s, f, hash, eq } -> __native_set_map_with_evidence { s = s, f = f, hash = hash, eq = eq }
+
 pub let from_seq_with_evidence:
   { xs: ['a], hash: { it: 'a } -> Int, eq: { it: 'a, r: 'a } -> Bool } -> Set 'a =
   { xs, hash, eq } -> __native_set_from_seq_with_evidence { xs = xs, hash = hash, eq = eq }
@@ -117,7 +144,12 @@ pub let filter: { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Set 'a <...> = { 
   __native_set_filter { s = s, p = p }
 
 ## Transforms each element using f.
-pub let map: { s: Set 'a, f: { val: 'a } -> 'b <...> } -> Set 'b <...> = { s, f } ->
+## `Eq 'b, Hash 'b`, NOT the source's: the result's elements are `'b`, so the
+## SOURCE's equality says nothing about which of them are the same element.
+## Without it the result collapsed by REPRESENTATION — mapping the distinct Ints
+## 10 and 11 to a newtype equal by tens gave a set of two where the author's
+## `Eq` says one. `sorted_set::map` carries `with Ord 'b` for the same reason.
+pub let map: { s: Set 'a, f: { val: 'a } -> 'b <...> } with Eq 'b, Hash 'b -> Set 'b <...> = { s, f } ->
   __native_set_map { s = s, f = f }
 
 ## Folds over all elements with an accumulator.
@@ -228,8 +260,10 @@ pub let symmetric_difference: { s1: Set 'a, s2: Set 'a } with Eq 'a -> Set 'a = 
   __native_set_symmetric_difference { s1 = s1, s2 = s2 }
 
 ## Maps elements with f, collecting only Some results into a Set.
+## `Eq 'b, Hash 'b` for the same reason as `map` above: the kept elements are
+## `'b`, so the source's equality says nothing about which are the same element.
 pub let filter_map
-  : { set: Set 'a, f: { val: 'a } -> Option 'b <...> }
+  : { set: Set 'a, f: { val: 'a } -> Option 'b <...> } with Eq 'b, Hash 'b
   -> Set 'b <...>
   = { set, f } -> __native_set_filter_map { set = set, f = f }
 
@@ -245,9 +279,19 @@ pub let collect_list
   -> List 'b <...>
   = { set, f } -> __native_set_collect_list { set = set, f = f }
 
-## Converts to a SortedSet (elements must be comparable).
-pub let to_sorted_set: { s: Set 'a } -> SortedSet 'a = { s } ->
-  __native_set_to_sorted_set { s = s }
+let to_sorted_set_with_cmp
+  : { s: Set 'a, cmp: { a: 'a, b: 'a } -> Int } -> SortedSet 'a
+  = { s, cmp } -> __native_set_to_sorted_set { s = s, cmp = cmp }
+
+## Converts to a SortedSet, ordered by the element's `Ord`.
+##
+## THE REQUIREMENT USED TO BE A COMMENT: this said "(elements must be
+## comparable)" in prose and carried no constraint, so nothing supplied the
+## order and the result came out naturally ordered whatever that `Ord` said. A
+## comment where a constraint belongs tells the reader the order is handled
+## while the typechecker knows nothing about it. See known-bugs.md BUG 45.
+pub let to_sorted_set: { s: Set 'a } with Ord 'a -> SortedSet 'a = { s } ->
+  to_sorted_set_with_cmp { s = s, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
 
 ## Creates a Set from a SortedSet.
 pub let from_sorted_set: { s: SortedSet 'a } -> Set 'a = { s } ->

@@ -1,0 +1,498 @@
+## WHAT MAP AND SET COST — first numbers for the ledger's collections block.
+##
+## PERF-LOG lists under UNKNOWN: "Collections. Map · Set · SortedMap ·
+## SortedSet · Deque · NonEmptyList, every op". `ds_matrix` covers seq and List;
+## nothing covered Map, which is in every program.
+##
+## METHOD, the same as bench/cases/surface, ds_matrix and asyncsurface:
+##   - per OPERATION, and as a ratio to a CONTROL timed in this same process —
+##     a counted loop over the same arithmetic with no collection in it.
+##   - min over k measured passes after `warm` warmup passes; a row whose
+##     median exceeds twice its minimum prints UNDER-WARMED, and one whose
+##     slowest WARMUP pass exceeds 10x its minimum prints WARMUP-DOMINATED.
+##   - ONE ROW PER PROCESS (`mapsurface <n> <row>`): sharing a process lets the
+##     collector run while the timer does, measured elsewhere as a 6x artefact.
+##
+## EVERY ROW NEEDS TWO SIZES OF n AND MUST CONVERGE. That is not advice, it is
+## the rule that the async bench's retraction was written to enforce: a row
+## sized by guesswork read 7 309 335 ps/op at n=800 and 61 861 at n=80 000, and
+## the smaller figure was published as a finding. The flags cannot save a row
+## where EVERY pass is slow — only convergence across n can.
+##
+## PERSISTENT, NOT MUTABLE. `map::insert` returns a new Map, so an insert row
+## measures a persistent update and should be read against that, never against
+## a Java HashMap.put. The lookup rows are the ones comparable to a hash probe.
+##
+## AND THERE ARE TWO INSERT COSTS, which is the point of rows 4 and 8.
+## `LongHashMapStorage.putLong` mutates its arrays IN PLACE when this storage is
+## the owner, and CLONES both when it is not:
+##
+##   row 8  insert along a CHAIN (rebind `m` each time, as building a map does)
+##          -> owner path, O(1):  12 365 / 16 901 / 16 091 ps at 250/1k/4k keys
+##   row 4  insert from a SHARED base (keep `m`, discard the result)
+##          -> clone path, O(size): 278 611 / 1 305 284 / 5 407 531 ps
+##
+## So building a map is O(1) per insert and NOT quadratic — an earlier reading of
+## row 4 alone was published as "O(N^2) to build a map" and that was wrong. What
+## is real is a 338x cliff at 4 000 keys when the base map is still held by
+## someone else, which is exactly what a persistent map is for.
+##
+## EVERY ROW CHECKSUMS: the accumulator is printed, so a row that got fast by
+## not doing the work reads as a different number.
+use std::effects::log::{ println, Console }
+use std::effects::args::{ SystemArgs, argv }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::collections::seq
+use std::collections::map
+use std::collections::set
+use std::collections::list
+use std::str
+use std::int
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_one = { thunk } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = thunk {}
+  let t1 = monotonic {}
+  { ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }, sum = r }
+
+let time_k_go = { thunk, k, acc, last } -> if k == 0
+  then { times = acc, sum = last }
+  else do
+    let r = time_one { thunk = thunk }
+    time_k_go { thunk = thunk, k = k - 1, acc = seq::push { xs = acc, x = r.ns }, last = r.sum }
+
+let nth_or_zero = { xs, i } -> match seq::get { xs = xs, i = i } is
+  Some { val } -> val
+  None -> 0
+
+let min_of = { thunk, warm, k } -> do
+  let w = time_k_go { thunk = thunk, k = warm, acc = [], last = 0 }
+  let ws = seq::sort { xs = w.times }
+  let warm_max = nth_or_zero { xs = ws, i = seq::size { xs = ws } - 1 }
+  let run = time_k_go { thunk = thunk, k = k, acc = [], last = 0 }
+  let sorted = seq::sort { xs = run.times }
+  let half = seq::size { xs = sorted } / 2
+  { min = nth_or_zero { xs = sorted, i = 0 },
+    med = nth_or_zero { xs = sorted, i = half },
+    warm_max = warm_max,
+    sum = run.sum }
+
+## THE FLOOR: one loop iteration and one add, no collection at all.
+let control_loop = { i, acc } -> if i <= 0 then acc else control_loop { i = i - 1, acc = acc + i }
+
+let report = { idx, sel, label, thunk, floor_ps, n, warm, k } -> perform Console in perform SystemTime in
+  if sel != 0 && sel != idx then {} else do
+    let t = min_of { thunk = thunk, warm = warm, k = k }
+    let ps_per_op = (t.min * 1000) / n
+    let ratio = if floor_ps == 0 then 0 else (ps_per_op * 100) / floor_ps
+    let warm_ratio = if t.min == 0 then 0 else t.warm_max / t.min
+    let warn = if t.med > (t.min * 2) then "   UNDER-WARMED (raise n or passes)"
+      else if warm_ratio > 10 then "   WARMUP-DOMINATED"
+      else ""
+    let ps_s = int::to_str { n = ps_per_op }
+    let ratio_s = int::to_str { n = ratio }
+    let sum_s = int::to_str { n = t.sum }
+    println { msg = "  $(label): $(ps_s) ps/op  x$(ratio_s)/100 floor  sum=$(sum_s)$(warn)" }
+
+## ── build a map once, outside every timed loop ──────────────────────────────
+let build_map = { i, m } -> if i <= 0 then m
+  else build_map { i = i - 1, m = map::insert { m = m, k = i, v = i } }
+
+let build_set = { i, s } -> if i <= 0 then s
+  else build_set { i = i - 1, s = set::insert { s = s, x = i } }
+
+## A second MAP shifted by half, so the merge row has two DIFFERENT inputs with
+## a half overlap — exactly what `build_set_off` already gives the set rows.
+## Row 24 used to merge `m` with itself, which the structural merge answers in
+## O(1) by sharing the whole trie: a 5000x that measured the short-circuit and
+## not a merge.
+let build_map_off = { i, m, off } -> if i <= 0 then m
+  else build_map_off { i = i - 1, off = off,
+                       m = map::insert { m = m, k = i + off, v = i + off } }
+
+## A second set shifted by half, so the two-set rows have a HALF OVERLAP: a
+## union of `keys * 3 / 2`, an intersection and a difference of `keys / 2`, and
+## a symmetric difference of `keys`. Disjoint or identical sets would each let
+## one of those rows answer without building anything.
+let build_set_off = { i, s, off } -> if i <= 0 then s
+  else build_set_off { i = i - 1, off = off,
+                       s = set::insert { s = s, x = i + off } }
+
+## ── 1. map::get, key PRESENT ────────────────────────────────────────────────
+let l_get = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let v = match map::get { m = m, k = (i % keys) + 1 } is
+      Some { val } -> val
+      None -> 0
+    l_get { i = i - 1, acc = acc + v, m = m, keys = keys }
+
+## ── 2. map::get, key ABSENT ─────────────────────────────────────────────────
+let l_get_miss = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let v = match map::get { m = m, k = 0 - ((i % keys) + 1) } is
+      Some { val } -> val
+      None -> 1
+    l_get_miss { i = i - 1, acc = acc + v, m = m, keys = keys }
+
+## ── 3. map::contains_key ────────────────────────────────────────────────────
+let l_contains = { i, acc, m, keys } -> if i <= 0 then acc
+  else l_contains { i = i - 1, m = m, keys = keys,
+                    acc = acc + (if map::contains_key { m = m, k = (i % keys) + 1 } then 1 else 0) }
+
+## ── 4. map::insert — PERSISTENT, so this allocates a new map per op ─────────
+let l_insert = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let m2 = map::insert { m = m, k = (i % keys) + 1, v = i }
+    l_insert { i = i - 1, acc = acc + map::size { m = m2 }, m = m, keys = keys }
+
+## ── 5. map::size, an O(1) reference point ───────────────────────────────────
+let l_size = { i, acc, m } -> if i <= 0 then acc
+  else l_size { i = i - 1, acc = acc + map::size { m = m }, m = m }
+
+## ── 6. set::contains ────────────────────────────────────────────────────────
+let l_set_contains = { i, acc, s, keys } -> if i <= 0 then acc
+  else l_set_contains { i = i - 1, s = s, keys = keys,
+                        acc = acc + (if set::contains { s = s, x = (i % keys) + 1 } then 1 else 0) }
+
+## ── 7. set::insert, persistent ──────────────────────────────────────────────
+let l_set_insert = { i, acc, s, keys } -> if i <= 0 then acc
+  else do
+    let s2 = set::insert { s = s, x = (i % keys) + 1 }
+    l_set_insert { i = i - 1, acc = acc + set::size { s = s2 }, s = s, keys = keys }
+
+## -- 8. map::insert ALONG A CHAIN -------------------------------------------
+## Row 4 keeps the original `m` and throws the result away, so every insert
+## branches off a map someone else still holds. `LongHashMapStorage.putLong`
+## has a single-OWNER optimisation — it mutates in place when this storage is
+## the owner and CLONES both arrays otherwise — so row 4 measures the clone
+## path by construction.
+##
+## This row rebinds `m` to the result, which is how a map is actually built: a
+## linear chain where each storage is the owner of the next. Only existing keys
+## are inserted, so the size never changes and no growth or rehash enters the
+## figure. Row 8 against row 4 is the owner path against the clone path, and
+## row 8 against the key count says whether the owner path is O(1).
+let l_insert_chain = { i, acc, m, keys } -> if i <= 0 then acc
+  else l_insert_chain { i = i - 1, acc = acc + 1, keys = keys,
+                        m = map::insert { m = m, k = (i % keys) + 1, v = i } }
+
+## The Set counterpart, and READ ITS LABEL. These rows insert elements the set
+## ALREADY CONTAINS, and `LongHashSetStorage.addLong` opens with
+## `if (containsLongInternal(elem)) return this;` — so they measure a contains
+## and an early return, never an insert. They are NOT comparable with the
+## map::insert rows, which must still update the value for a present key. The
+## first version of this file compared them and concluded "Set has no cliff";
+## that conclusion was unfounded and is struck.
+let l_set_insert_chain = { i, acc, s, keys } -> if i <= 0 then acc
+  else l_set_insert_chain { i = i - 1, acc = acc + 1, keys = keys,
+                            s = set::insert { s = s, x = (i % keys) + 1 } }
+
+## ── 10-13. STRING KEYS, because every number above uses Int keys ───────────
+##
+## The String-specialised table was deleted when BUG 38 forced every storage to
+## become a persistent trie, and nothing measured what that cost: the ledger
+## said so and said a Str-keyed row was the next thing owed. These are it.
+##
+## A `Str` key cannot be built inside the timed loop — `int::to_str` plus a
+## concat would dominate the map operation several times over. So the keys are
+## built ONCE into a seq and indexed, which puts a `seq::get` and an Option
+## match in every iteration. Row 10 is that and nothing else, so rows 11-13
+## minus row 10 is the map operation; without it the overhead would be charged
+## to the map, which is the mistake the tier-control rule exists to prevent.
+let build_strkeys = { i, acc } -> if i <= 0 then acc
+  else build_strkeys { i = i - 1, acc = seq::push { xs = acc, x = "k$(int::to_str { n = i })" } }
+
+let build_strmap = { i, m, ks } -> if i <= 0 then m
+  else build_strmap { i = i - 1, ks = ks,
+                      m = map::insert { m = m, k = key_at_or { ks = ks, i = i - 1 }, v = i } }
+
+let key_at_or = { ks, i } -> match seq::get { xs = ks, i = i } is
+  Some { val } -> val
+  None -> "?"
+
+## 10. THE CONTROL: fetch a key out of the seq and consume it. No map at all.
+let l_str_fetch = { i, acc, ks, keys } -> if i <= 0 then acc
+  else l_str_fetch { i = i - 1, ks = ks, keys = keys,
+                     acc = acc + str::size { s = key_at_or { ks = ks, i = i % keys } } }
+
+## 11. map::get on a Str key, hit.
+let l_str_get = { i, acc, m, ks, keys } -> if i <= 0 then acc
+  else do
+    let v = match map::get { m = m, k = key_at_or { ks = ks, i = i % keys } } is
+      Some { val } -> val
+      None -> 0
+    l_str_get { i = i - 1, acc = acc + v, m = m, ks = ks, keys = keys }
+
+## 12. map::contains_key on a Str key.
+let l_str_contains = { i, acc, m, ks, keys } -> if i <= 0 then acc
+  else l_str_contains { i = i - 1, m = m, ks = ks, keys = keys,
+                        acc = acc + (if map::contains_key { m = m, k = key_at_or { ks = ks, i = i % keys } }
+                                     then 1 else 0) }
+
+## 13. map::insert along a chain, Str keys already PRESENT — a replace.
+let l_str_insert_chain = { i, acc, m, ks, keys } -> if i <= 0 then acc
+  else l_str_insert_chain { i = i - 1, acc = acc + 1, ks = ks, keys = keys,
+                            m = map::insert { m = m, k = key_at_or { ks = ks, i = i % keys }, v = i } }
+
+## ── 14-25. THE REST OF THE MAP SURFACE ─────────────────────────────────────
+##
+## `scripts/collection-coverage.py` says 8 of map's 58 operations had ever been
+## measured. These are the twelve most ordinary of the fifty that had not, and
+## they split into two groups that must NOT be run at the same n:
+##
+##   PER-KEY (rows 14-17) touch one entry, so they belong at the file's default
+##   n of 1e6 beside `map::get`.
+##   WHOLE-MAP (rows 18-25) touch every entry, so at 1 000 keys one op is a
+##   thousand element-operations and n=1e6 would be 1e9 of them. Run these with
+##   `sel` and a small n — 2 000 is a fifth of a second — and read them as
+##   ps per OP, which is what the harness reports; divide by the key count for
+##   ps per element.
+
+## 14. map::is_empty — `size { m } == 0`, so it should cost what size costs.
+let l_is_empty = { i, acc, m } -> if i <= 0 then acc
+  else l_is_empty { i = i - 1, m = m,
+                    acc = acc + (if map::is_empty { m = m } then 1 else 0) }
+
+## 15. map::remove, key PRESENT — the delete twin of insert.
+let l_remove = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let m2 = map::remove { m = m, k = (i % keys) + 1 }
+    l_remove { i = i - 1, acc = acc + map::size { m = m2 }, m = m, keys = keys }
+
+## 16. map::get_or — the shape that replaces a `match get is Some/None`.
+let l_get_or = { i, acc, m, keys } -> if i <= 0 then acc
+  else l_get_or { i = i - 1, m = m, keys = keys,
+                  acc = acc + map::get_or { m = m, k = (i % keys) + 1, def = 0 } }
+
+## 17. map::update — read, transform, write, in one traversal.
+let l_update = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let m2 = map::update { m = m, k = (i % keys) + 1, f = { x } -> match x is
+      Some { val } -> Some { val = val + 1 }
+      None -> Some { val = 1 } }
+    l_update { i = i - 1, acc = acc + map::size { m = m2 }, m = m, keys = keys }
+
+## 18. map::keys — materialises a List of every key.
+let l_keys = { i, acc, m } -> if i <= 0 then acc
+  else l_keys { i = i - 1, m = m, acc = acc + list::size { xs = map::keys { m = m } } }
+
+## 19. map::values — the same for values.
+let l_values = { i, acc, m } -> if i <= 0 then acc
+  else l_values { i = i - 1, m = m, acc = acc + list::size { xs = map::values { m = m } } }
+
+## 20. map::to_seq — a Seq of `{k, v}` records, the shape every iteration over a
+##     map goes through.
+let l_to_seq = { i, acc, m } -> if i <= 0 then acc
+  else l_to_seq { i = i - 1, m = m, acc = acc + seq::size { xs = map::to_seq { m = m } } }
+
+## 21. map::map_values — a callback per entry and a new map.
+let l_map_values = { i, acc, m } -> if i <= 0 then acc
+  else do
+    let m2 = map::map_values { m = m, f = { val } -> val + 1 }
+    l_map_values { i = i - 1, acc = acc + map::size { m = m2 }, m = m }
+
+## 22. map::filter — a predicate per entry, keeping half.
+let l_filter = { i, acc, m, keys } -> if i <= 0 then acc
+  else do
+    let m2 = map::filter { m = m, p = { k, v } -> k > keys / 2 }
+    l_filter { i = i - 1, acc = acc + map::size { m = m2 }, m = m, keys = keys }
+
+## 23. map::count — a predicate per entry, no new map.
+let l_count = { i, acc, m, keys } -> if i <= 0 then acc
+  else l_count { i = i - 1, m = m, keys = keys,
+                 acc = acc + map::count { m = m, p = { k, v } -> k > keys / 2 } }
+
+## 24. map::merge — TWO DIFFERENT maps, half overlapping, which is the shape
+## `set::union` (row 28) already measured. This row used to merge `m` with
+## itself and the structural merge turned that into an O(1) share: 38 548 989 ps
+## to 7 701, WARMUP-DOMINATED, a 5000x measuring the short-circuit. The answer
+## was still right — merging a map with itself IS that map — but the row had
+## stopped measuring a merge.
+let l_merge = { i, acc, m, mo } -> if i <= 0 then acc
+  else do
+    let m2 = map::merge { m1 = m, m2 = mo }
+    l_merge { i = i - 1, acc = acc + map::size { m = m2 }, m = m, mo = mo }
+
+## 32. map::merge WITH ITSELF — kept, and named for what it is. Both sides being
+## the same object is a real spelling with a real answer, and the structural
+## merge returns in O(1) because every key collides and the winner's values are
+## already in place. It is a legitimate number for that case and NOT a number
+## for merging two maps; row 24 is that.
+let l_merge_self = { i, acc, m } -> if i <= 0 then acc
+  else do
+    let m2 = map::merge { m1 = m, m2 = m }
+    l_merge_self { i = i - 1, acc = acc + map::size { m = m2 }, m = m }
+
+## 25. map::contains_value — the only lookup that cannot use the hash, so it is
+##     the control for how much the hashing is worth.
+let l_contains_value = { i, acc, m, keys } -> if i <= 0 then acc
+  else l_contains_value { i = i - 1, m = m, keys = keys,
+                          acc = acc + (if map::contains_value { m = m, v = (i % keys) + 1 }
+                                       then 1 else 0) }
+
+## ── 26-32. THE SET'S REBUILD ROWS. Every one of these produced its result by
+## adding one element at a time to a growing set, which is a persistent add per
+## element — a node allocated at every level of the path, discarded on the next
+## element. `set::to_seq` (row 32) is the CONTROL: it walks the same set and
+## materialises it without building a set, so it is the one row here that a
+## bulk builder cannot help.
+
+## ── 26-27. THE RESULT MUST BE USED AS A SET, or these rows measure fusion
+## instead of the rebuild. `set::size { s = set::filter { ... } }` is a FUSED
+## chain: the predicate runs in a loop that counts, and no set is ever built.
+## Both rows read 4.34 ms either side of a change that made the build 2.9x
+## faster, and the arithmetic says why — one `set::insert` is 13.8 ns, so 500
+## persistent adds would be 6.9 ms on their own, more than the whole row.
+## A `set::insert` on the result is not a chain sink, so the set has to exist.
+
+## ── 26. set::filter — a predicate per element, keeping half, and BUILT ─────
+let l_set_filter = { i, acc, s, keys } -> if i <= 0 then acc
+  else do
+    let s2 = set::insert { s = set::filter { s = s, p = { val } -> val > keys / 2 },
+                           x = 0 }
+    l_set_filter { i = i - 1, acc = acc + set::size { s = s2 }, s = s, keys = keys }
+
+## ── 27. set::map — a callback per element, a whole new set, and BUILT ──────
+let l_set_map = { i, acc, s } -> if i <= 0 then acc
+  else do
+    let s2 = set::insert { s = set::map { s = s, f = { val } -> val + 1 }, x = 0 }
+    l_set_map { i = i - 1, acc = acc + set::size { s = s2 }, s = s }
+
+## ── 28. set::union — half overlapping ─────────────────────────────────────
+let l_set_union = { i, acc, s, t } -> if i <= 0 then acc
+  else do
+    let u = set::union { s1 = s, s2 = t }
+    l_set_union { i = i - 1, acc = acc + set::size { s = u }, s = s, t = t }
+
+## ── 29. set::intersection ─────────────────────────────────────────────────
+let l_set_inter = { i, acc, s, t } -> if i <= 0 then acc
+  else do
+    let u = set::intersection { s1 = s, s2 = t }
+    l_set_inter { i = i - 1, acc = acc + set::size { s = u }, s = s, t = t }
+
+## ── 30. set::difference ───────────────────────────────────────────────────
+let l_set_diff = { i, acc, s, t } -> if i <= 0 then acc
+  else do
+    let u = set::difference { s1 = s, s2 = t }
+    l_set_diff { i = i - 1, acc = acc + set::size { s = u }, s = s, t = t }
+
+## ── 31. set::symmetric_difference ─────────────────────────────────────────
+let l_set_symdiff = { i, acc, s, t } -> if i <= 0 then acc
+  else do
+    let u = set::symmetric_difference { s1 = s, s2 = t }
+    l_set_symdiff { i = i - 1, acc = acc + set::size { s = u }, s = s, t = t }
+
+## ── 32. set::to_seq — THE CONTROL: walks and materialises, builds no set ───
+let l_set_to_seq = { i, acc, s } -> if i <= 0 then acc
+  else do
+    let xs = set::to_seq { s = s }
+    l_set_to_seq { i = i - 1, acc = acc + seq::size { xs = xs }, s = s }
+
+## ── 33. set::from_seq — the build with no callback and no walk of a set ────
+let l_set_from_seq = { i, acc, xs } -> if i <= 0 then acc
+  else do
+    let s2 = set::from_seq { xs = xs }
+    l_set_from_seq { i = i - 1, acc = acc + set::size { s = s2 }, xs = xs }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let n = arg_at { args = args, i = 0, def = 1000000 }
+  let sel = arg_at { args = args, i = 1, def = 0 }
+  let keys = arg_at { args = args, i = 2, def = 1000 }
+  let floor_n = arg_at { args = args, i = 3, def = 40000000 }
+  let warm = 4
+  let k = 9
+  let m = build_map { i = keys, m = map::empty {} }
+  let s = build_set { i = keys, s = set::empty {} }
+  let t = build_set_off { i = keys, s = set::empty {}, off = keys / 2 }
+  let mo = build_map_off { i = keys, m = map::empty {}, off = keys / 2 }
+  let set_xs = set::to_seq { s = s }
+  let ks = build_strkeys { i = keys, acc = [] }
+  let sm = build_strmap { i = keys, m = map::empty {}, ks = ks }
+  let floor = min_of { thunk = {} -> control_loop { i = floor_n, acc = 0 }, warm = warm, k = k }
+  let floor_ps = (floor.min * 1000) / floor_n
+  let n_s = int::to_str { n = n }
+  let keys_s = int::to_str { n = keys }
+  let floor_s = int::to_str { n = floor_ps }
+  println { msg = "mapsurface (n=$(n_s) ops, $(keys_s) keys): $(int::to_str { n = warm }) warmup + $(int::to_str { n = k }) measured, MIN per row" }
+  println { msg = "control: a counted loop + add = $(floor_s) ps/op. Rows below are xNNN/100 of it." }
+  if floor.med > (floor.min * 2) then
+    println { msg = "!! the CONTROL is under-warmed, so every ratio below is suspect — raise n" }
+  else
+    println { msg = "" }
+
+  report { idx = 1, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::get  (hit)      ", thunk = {} -> l_get { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 2, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::get  (miss)     ", thunk = {} -> l_get_miss { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 3, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::contains_key    ", thunk = {} -> l_contains { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 4, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::insert (persist)", thunk = {} -> l_insert { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 5, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::size (O(1) ref) ", thunk = {} -> l_size { i = n, acc = 0, m = m } }
+  report { idx = 6, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::contains        ", thunk = {} -> l_set_contains { i = n, acc = 0, s = s, keys = keys } }
+  report { idx = 7, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::insert PRESENT-key", thunk = {} -> l_set_insert { i = n, acc = 0, s = s, keys = keys } }
+  report { idx = 8, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::insert (chain)  ", thunk = {} -> l_insert_chain { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 9, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::ins PRESENT, chain", thunk = {} -> l_set_insert_chain { i = n, acc = 0, s = s, keys = keys } }
+  report { idx = 14, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::is_empty        ", thunk = {} -> l_is_empty { i = n, acc = 0, m = m } }
+  report { idx = 15, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::remove PRESENT  ", thunk = {} -> l_remove { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 16, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::get_or (hit)    ", thunk = {} -> l_get_or { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 17, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::update          ", thunk = {} -> l_update { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 18, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::keys (whole map)", thunk = {} -> l_keys { i = n, acc = 0, m = m } }
+  report { idx = 19, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::values (whole)  ", thunk = {} -> l_values { i = n, acc = 0, m = m } }
+  report { idx = 20, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::to_seq (whole)  ", thunk = {} -> l_to_seq { i = n, acc = 0, m = m } }
+  report { idx = 21, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::map_values      ", thunk = {} -> l_map_values { i = n, acc = 0, m = m } }
+  report { idx = 22, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::filter          ", thunk = {} -> l_filter { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 23, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::count           ", thunk = {} -> l_count { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 24, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::merge half-ovlp ", thunk = {} -> l_merge { i = n, acc = 0, m = m, mo = mo } }
+  report { idx = 25, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::contains_value  ", thunk = {} -> l_contains_value { i = n, acc = 0, m = m, keys = keys } }
+  report { idx = 10, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "STR key fetch (control)", thunk = {} -> l_str_fetch { i = n, acc = 0, ks = ks, keys = keys } }
+  report { idx = 11, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "str map::get (hit)   ", thunk = {} -> l_str_get { i = n, acc = 0, m = sm, ks = ks, keys = keys } }
+  report { idx = 12, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "str map::contains_key", thunk = {} -> l_str_contains { i = n, acc = 0, m = sm, ks = ks, keys = keys } }
+  report { idx = 13, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "str map::insert chain", thunk = {} -> l_str_insert_chain { i = n, acc = 0, m = sm, ks = ks, keys = keys } }
+  report { idx = 26, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::filter          ", thunk = {} -> l_set_filter { i = n, acc = 0, s = s, keys = keys } }
+  report { idx = 27, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::map             ", thunk = {} -> l_set_map { i = n, acc = 0, s = s } }
+  report { idx = 28, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::union           ", thunk = {} -> l_set_union { i = n, acc = 0, s = s, t = t } }
+  report { idx = 29, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::intersection    ", thunk = {} -> l_set_inter { i = n, acc = 0, s = s, t = t } }
+  report { idx = 30, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::difference      ", thunk = {} -> l_set_diff { i = n, acc = 0, s = s, t = t } }
+  report { idx = 31, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::symmetric_diff  ", thunk = {} -> l_set_symdiff { i = n, acc = 0, s = s, t = t } }
+  report { idx = 34, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "map::merge SELF O(1) ", thunk = {} -> l_merge_self { i = n, acc = 0, m = m } }
+  report { idx = 32, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::to_seq   CONTROL", thunk = {} -> l_set_to_seq { i = n, acc = 0, s = s } }
+  report { idx = 33, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "set::from_seq        ", thunk = {} -> l_set_from_seq { i = n, acc = 0, xs = set_xs } }

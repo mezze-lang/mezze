@@ -64,36 +64,145 @@ pub let singleton: { k: 'k, v: 'v } with Ord 'k -> SortedMap 'k 'v = { k, v } ->
   singleton_with_cmp { k = k, v = v, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
 
 ## Inserts a key-value pair, returning a new map.
-let insert_with_cmp
-  : { m: SortedMap 'k 'v, k: 'k, v: 'v, cmp: { a: 'k, b: 'k } -> Int } -> SortedMap 'k 'v = { m, k, v, cmp } ->
-  __native_sorted_map_insert { m = m, k = k, v = v, cmp = cmp }
+##
+## The search runs HERE, like `get`'s and `contains_key`'s — see the note above
+## `find_index`. `insert` used to hand the native a comparator closure and let
+## it search, which cost ~30 ns a comparison and ~300 ns a lookup against ~15 ns
+## for the whole guest search; at 1 000 keys that search was most of the
+## operation, with the array copy the smaller half.
+##
+## `find_index` returns everything needed to finish without searching again:
+## the index when the key is there, and `-(insertPos + 1)` when it is not.
+##
+## Separate helper for the same reason `get` has `value_or_none`: `insert`
+## cannot bind the search result to a `do`-block `let` without detaching its
+## `Ord` (the note above `find_index` explains why), and calling the search
+## twice would double the work. This helper compares nothing, so it raises no
+## constraint its annotation cannot name.
+let insert_at_slot: { m: SortedMap 'k 'v, k: 'k, v: 'v, idx: Int } -> SortedMap 'k 'v = { m, k, v, idx } ->
+  if idx < 0
+    then __native_sorted_map_insert_at { m = m, i = 0 - idx - 1, k = k, v = v }
+    else __native_sorted_map_set_at { m = m, i = idx, v = v }
 
 pub let insert: { m: SortedMap 'k 'v, k: 'k, v: 'v } with Ord 'k -> SortedMap 'k 'v = { m, k, v } ->
-  insert_with_cmp { m = m, k = k, v = v, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
+  insert_at_slot { m = m, k = k, v = v,
+                   idx = find_index { m = m, k = k, lo = 0,
+                                      hi = __native_sorted_map_size { m = m } - 1 } }
+
+## ── THE ORDERED LOOKUPS RUN HERE, NOT IN THE NATIVE ───────────────────────
+##
+## A SortedMap is a sorted array, so a lookup is a binary search. It used to
+## run inside the native, which meant the COMPARISON ran in host code and so
+## called back into guest code once per comparison — two allocations and an
+## uncached call each time, measured at ~30 ns a comparison and ~300 ns a
+## lookup against 10 ns for the hash map's.
+##
+## No way of making that callback cheaper reaches it: host code is past the
+## boundary, so Graal can never inline a guest function into it, and ten
+## callbacks a lookup is ten full Truffle calls however they are issued. Run
+## the search HERE and the comparison is an ordinary guest `<` that inlines,
+## while the native's whole job becomes an array read.
+##
+## This also drops two allocations per lookup that had nothing to do with
+## comparing: the native installed a fresh comparator on the map first, and
+## `withComparator` allocates a new map whenever the comparator differs — which
+## it always did, being built fresh at every call.
+##
+## The index must stay in [0, size); `find_index` maintains that, which is why
+## these two are private.
+let key_at: { m: SortedMap 'k 'v, i: Int } -> 'k = { m, i } ->
+  __native_sorted_map_key_at { m = m, i = i }
+
+let value_at: { m: SortedMap 'k 'v, i: Int } -> 'v = { m, i } ->
+  __native_sorted_map_value_at { m = m, i = i }
+
+## The position of `k` in sort order, or `-(insertPos + 1)` if absent, where
+## `insertPos` is the index that would keep the array sorted — the encoding a
+## Java binary search uses, and for the same reason: one search answers both
+## "is it there" and "where does it go", which is what lets `insert` finish
+## without searching twice. `get` and `contains_key` only test the sign.
+##
+## NO `do`-BLOCK BINDING IN HERE, and that is not a style choice. The obvious
+## spelling binds the probed key first:
+##
+##     let mk = key_at { m = m, i = mid }
+##     if mk < k then ... else if k < mk then ...
+##
+## and the typechecker then refuses this function's annotation:
+##
+##     Type annotation mismatch for 'find_index': the annotation constrains
+##     `with Ord 'k`, but the body applies Ord to a type the annotation does
+##     not name.
+##
+## A `do`-block `let` GENERALIZES its binding, so `mk` becomes polymorphic and
+## each use instantiates it fresh; the `Ord` the comparison raises then lands on
+## that fresh variable instead of on `'k`. Calling `key_at` directly inside the
+## comparison keeps the key's type where the annotation can see it — the same
+## expression typechecks fine without the intermediate binding, which is how
+## this was pinned down.
+##
+## Dropping the annotations instead was tried and is worse: the module compiles
+## and infers the right types, but `ElaborationInvariantGateTest` then reports
+## `UNBOUND_TYPE_VAR let:get` — the stray variable survives to the end of
+## elaboration, where something downstream would be guessing.
+##
+## `(lo + hi) / 2` is therefore written out rather than bound. It is integer
+## arithmetic on values already in registers and Graal shares it; the probes it
+## guards are inline operations, so a repeated `key_at` costs about half a
+## nanosecond and the whole search still beats the native one by 10x.
+##
+## STORED key on the left, probe key on the right — the order the native
+## comparator was handed, so an `Ord` that is not symmetric orders the array the
+## same way whichever side does the search.
+let find_index = { m, k, lo, hi } ->
+  if lo > hi then 0 - lo - 1
+  else if key_at { m = m, i = (lo + hi) / 2 } < k
+    then find_index { m = m, k = k, lo = (lo + hi) / 2 + 1, hi = hi }
+  else if k < key_at { m = m, i = (lo + hi) / 2 }
+    then find_index { m = m, k = k, lo = lo, hi = (lo + hi) / 2 - 1 }
+  else (lo + hi) / 2
+
+## Turns a search result into an Option. Separate from `get` because `get`
+## cannot bind the index to a `do`-block `let` without detaching its `Ord`
+## (see `find_index`), and calling the search twice would double the work. This
+## helper raises no constraint of its own, so its annotation is accepted.
+let value_or_none: { m: SortedMap 'k 'v, idx: Int } -> Option 'v = { m, idx } ->
+  if idx < 0 then None else Some { val = value_at { m = m, i = idx } }
 
 ## Returns the value for the given key, or None.
-let get_with_cmp
-  : { m: SortedMap 'k 'v, k: 'k, cmp: { a: 'k, b: 'k } -> Int } -> Option 'v = { m, k, cmp } ->
-  __native_sorted_map_get { m = m, k = k, cmp = cmp }
-
 pub let get: { m: SortedMap 'k 'v, k: 'k } with Ord 'k -> Option 'v = { m, k } ->
-  get_with_cmp { m = m, k = k, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
+  value_or_none { m = m,
+                  idx = find_index { m = m, k = k, lo = 0,
+                                     hi = __native_sorted_map_size { m = m } - 1 } }
 
 ## Removes a key, returning a new map.
-let remove_with_cmp
-  : { m: SortedMap 'k 'v, k: 'k, cmp: { a: 'k, b: 'k } -> Int } -> SortedMap 'k 'v = { m, k, cmp } ->
-  __native_sorted_map_remove { m = m, k = k, cmp = cmp }
+##
+## The search runs HERE, like `get`'s and `insert`'s. Removing a key that is NOT
+## there is a pure SEARCH — the map comes back unchanged — so that case now
+## never reaches a native at all, and the case that is there hands the native a
+## position instead of a comparator.
+##
+## Separate helper for the branch, for the reason given above `insert_at_slot`.
+let remove_at_slot: { m: SortedMap 'k 'v, idx: Int } -> SortedMap 'k 'v = { m, idx } ->
+  if idx < 0
+    then m
+    else __native_sorted_map_remove_at { m = m, i = idx }
 
 pub let remove: { m: SortedMap 'k 'v, k: 'k } with Ord 'k -> SortedMap 'k 'v = { m, k } ->
-  remove_with_cmp { m = m, k = k, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
+  remove_at_slot { m = m,
+                   idx = find_index { m = m, k = k, lo = 0,
+                                      hi = __native_sorted_map_size { m = m } - 1 } }
 
-## Returns True if the key exists.
-let contains_key_with_cmp
-  : { m: SortedMap 'k 'v, k: 'k, cmp: { a: 'k, b: 'k } -> Int } -> Bool = { m, k, cmp } ->
-  __native_sorted_map_contains_key { m = m, k = k, cmp = cmp }
+## Pins the search result to Int, which is what `value_or_none` does for
+## `get` by accident of taking an Int field. Without it, unannotated
+## `find_index` hands back a numeric type VARIABLE and `>= 0` raises an Ord
+## obligation on it that `contains_key`'s annotation cannot name.
+let found_at: { idx: Int } -> Bool = { idx } -> idx >= 0
 
+## Returns True if the key exists. Same search as `get`, without the Option.
 pub let contains_key: { m: SortedMap 'k 'v, k: 'k } with Ord 'k -> Bool = { m, k } ->
-  contains_key_with_cmp { m = m, k = k, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
+  found_at { idx = find_index { m = m, k = k, lo = 0,
+                                hi = __native_sorted_map_size { m = m } - 1 } }
 
 ## Returns the number of entries.
 pub let size: { m: SortedMap 'k 'v } -> Int = { m } -> __native_sorted_map_size { m = m }
@@ -136,8 +245,18 @@ pub let from_map: { m: Map 'k 'v } with Ord 'k -> SortedMap 'k 'v = { m } ->
   from_map_with_cmp { m = m, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
 
 ## Converts to a regular Map.
-pub let to_map: { m: SortedMap 'k 'v } -> Map 'k 'v = { m } ->
+## `Eq 'k, Hash 'k`: this LEAVES a comparator-ordered container for a HASHED
+## one, so the key's own equality becomes the question and `Ord` stops being it.
+## Without the pair it bucketed by representation — a sorted map holding two keys
+## a finer `Ord` separates stayed two where the author's `Eq` calls them one.
+## `from_map` just above always carried its `Ord`.
+pub let to_map: { m: SortedMap 'k 'v } with Eq 'k, Hash 'k -> Map 'k 'v = { m } ->
   __native_sorted_map_to_map { m = m }
+
+pub let to_map_with_evidence:
+  { m: SortedMap 'k 'v, hash: { it: 'k } -> Int, eq: { it: 'k, r: 'k } -> Bool }
+  -> Map 'k 'v =
+  { m, hash, eq } -> __native_sorted_map_to_map_with_evidence { m = m, hash = hash, eq = eq }
 
 ## Returns True if the two sorted maps are equal.
 pub let equals: { m1: SortedMap 'k 'v, m2: SortedMap 'k 'v } with Eq 'k, Eq 'v -> Bool = { m1, m2 } ->
@@ -149,39 +268,84 @@ pub let partition
   -> { pass: SortedMap 'k 'v, fail: SortedMap 'k 'v } <...>
   = { m, p } -> __native_sorted_map_partition { m = m, p = p }
 
+## ── THE SLICES AND NEIGHBOURS RUN HERE TOO, AND HAVE TO ───────────────────
+##
+## These six take NO comparator argument. They searched with the one STORED on
+## the map, which the old `insert` installed as a SIDE EFFECT of going through a
+## native that called `withComparator`. The moment `insert` started taking its
+## position from the guest search, nothing installed it, and the only comparator
+## a map could have was the natural-order lambda `empty {}` is built with — so a
+## key whose `Ord` is not the host's reached `(Comparable) a` and threw
+## `ClassCastException`. That was a REGRESSION, caught by nothing in the suite
+## because no test combined a user `Ord` with these six, and
+## `SortedOrderOpsOrdTest` exists for it now.
+##
+## The fix is not to put the comparator back. A slice is INDEX ARITHMETIC over
+## the search the guest already does, so nothing needs storing: `find_index`
+## answers both halves at once, since the number of keys strictly BELOW a probe
+## and the number up to and INCLUDING it are each one expression over its
+## encoded result, and every one of these six is a pair of those numbers handed
+## to `take`/`drop`. It also takes the ~300 ns native comparator search off
+## them, which is the same ~20x the other ordered operations got.
+let count_below: { idx: Int } -> Int = { idx } -> if idx < 0 then 0 - idx - 1 else idx
+
+let count_upto: { idx: Int } -> Int = { idx } -> if idx < 0 then 0 - idx - 1 else idx + 1
+
+## `[from, to)` of the sort order, empty rather than negative when the ends
+## cross — which `range { lo = x, hi = y }` produces for any `y` before `x`.
+## Every slice goes through ONE native, which copies a contiguous run of the
+## already-ordered arrays and makes no comparison. It clamps its own ends, so
+## crossing ends give an empty map rather than a negative length.
+let slice: { m: SortedMap 'k 'v, from: Int, to: Int } -> SortedMap 'k 'v = { m, from, to } ->
+  __native_sorted_map_slice { m = m, from = from, to = to }
+
+let key_at_or_none: { m: SortedMap 'k 'v, n: Int } -> Option 'k = { m, n } ->
+  if n < 0 then None
+  else if n >= __native_sorted_map_size { m = m } then None
+  else Some { val = key_at { m = m, i = n } }
+
 ## Returns entries with keys in range [lo, hi] inclusive.
 pub let range: { m: SortedMap 'k 'v, lo: 'k, hi: 'k } with Ord 'k -> SortedMap 'k 'v = { m, lo, hi } ->
-  __native_sorted_map_range { m = m, lo = lo, hi = hi }
+  slice { m = m,
+          from = count_below { idx = find_index { m = m, k = lo, lo = 0, hi = __native_sorted_map_size { m = m } - 1 } },
+          to = count_upto { idx = find_index { m = m, k = hi, lo = 0, hi = __native_sorted_map_size { m = m } - 1 } } }
 
 ## Returns the greatest key <= the given key, or None.
 pub let floor_key: { m: SortedMap 'k 'v, k: 'k } with Ord 'k -> Option 'k = { m, k } ->
-  __native_sorted_map_floor_key { m = m, k = k }
+  key_at_or_none { m = m,
+                   n = count_upto { idx = find_index { m = m, k = k, lo = 0, hi = __native_sorted_map_size { m = m } - 1 } } - 1 }
 
 ## Returns the least key >= the given key, or None.
 pub let ceiling_key: { m: SortedMap 'k 'v, k: 'k } with Ord 'k -> Option 'k = { m, k } ->
-  __native_sorted_map_ceiling_key { m = m, k = k }
+  key_at_or_none { m = m,
+                   n = count_below { idx = find_index { m = m, k = k, lo = 0, hi = __native_sorted_map_size { m = m } - 1 } } }
 
 ## Returns entries with keys strictly less than the given key.
 pub let head_map: { m: SortedMap 'k 'v, to: 'k } with Ord 'k -> SortedMap 'k 'v = { m, to } ->
-  __native_sorted_map_head_map { m = m, to = to }
+  slice { m = m, from = 0,
+    to = count_below { idx = find_index { m = m, k = to, lo = 0, hi = __native_sorted_map_size { m = m } - 1 } } }
 
 ## Returns entries with keys >= the given key.
 pub let tail_map: { m: SortedMap 'k 'v, from: 'k } with Ord 'k -> SortedMap 'k 'v = { m, from } ->
-  __native_sorted_map_tail_map { m = m, from = from }
+  slice { m = m, to = __native_sorted_map_size { m = m },
+    from = count_below { idx = find_index { m = m, k = from, lo = 0, hi = __native_sorted_map_size { m = m } - 1 } } }
 
 ## Returns entries with keys in range [lo, hi).
 pub let sub_map
   : { m: SortedMap 'k 'v, lo: 'k, hi: 'k } with Ord 'k
   -> SortedMap 'k 'v
-  = { m, lo, hi } -> __native_sorted_map_sub_map { m = m, lo = lo, hi = hi }
+  = { m, lo, hi } ->
+  slice { m = m,
+          from = count_below { idx = find_index { m = m, k = lo, lo = 0, hi = __native_sorted_map_size { m = m } - 1 } },
+          to = count_below { idx = find_index { m = m, k = hi, lo = 0, hi = __native_sorted_map_size { m = m } - 1 } } }
 
 ## Takes the first n entries in key-sorted order.
 pub let take: { m: SortedMap 'k 'v, n: Int } -> SortedMap 'k 'v = { m, n } ->
-  __native_sorted_map_take { m = m, n = n }
+  slice { m = m, from = 0, to = n }
 
 ## Drops the first n entries in key-sorted order.
 pub let drop: { m: SortedMap 'k 'v, n: Int } -> SortedMap 'k 'v = { m, n } ->
-  __native_sorted_map_drop { m = m, n = n }
+  slice { m = m, from = n, to = __native_sorted_map_size { m = m } }
 
 ## Keeps only entries for which the predicate returns True.
 pub let filter
@@ -190,6 +354,14 @@ pub let filter
   = { m, p } -> __native_sorted_map_filter { m = m, p = p }
 
 ## Folds over entries in key-sorted order.
+## Sums the values. The counterpart of `map::sum_values`, and the reason it
+## exists is not the spelling: `FoldToSumRewriter` rewrites
+## `fold { init = 0, f = { acc, k, v } -> acc + v }` into this, which takes the
+## per-element guest call out of the loop entirely. Measured on
+## `bench/cases/collfold`, that call is 95% of what the fold cost.
+pub let sum_values: { m: SortedMap 'k Int } -> Int = { m } ->
+  __native_sorted_map_sum_values { m = m }
+
 pub let fold
   : { m: SortedMap 'k 'v, init: 'acc, f: { acc: 'acc, k: 'k, v: 'v } -> 'acc <...> }
   -> 'acc <...>
@@ -202,10 +374,22 @@ pub let map_values
   = { m, f } -> __native_sorted_map_map_values { m = m, f = f }
 
 ## Transforms all keys using f.
+let map_keys_with_cmp
+  : { m: SortedMap 'k 'v, f: { val: 'k } -> 'k2 <...>, cmp: { a: 'k2, b: 'k2 } -> Int }
+  -> SortedMap 'k2 'v <...>
+  = { m, f, cmp } -> __native_sorted_map_map_keys { m = m, f = f, cmp = cmp }
+
+## Transforms all keys using f.
+##
+## The `Ord 'k2` was declared here and NOT PASSED ON: the native set its order
+## to null, so the result was naturally ordered whatever `'k2`'s `Ord` said —
+## mapping into a descending newtype gave keys `1, 3, 5` and a `get` that found
+## one of three. The keys are a NEW type, so the source map's comparator
+## genuinely does not apply; the target's has to travel with the call.
 pub let map_keys
   : { m: SortedMap 'k 'v, f: { val: 'k } -> 'k2 <...> } with Ord 'k2
   -> SortedMap 'k2 'v <...>
-  = { m, f } -> __native_sorted_map_map_keys { m = m, f = f }
+  = { m, f } -> map_keys_with_cmp { m = m, f = f, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
 
 ## Keeps only entries where the key matches the predicate.
 pub let filter_keys
@@ -220,8 +404,15 @@ pub let filter_values
   = { m, p } -> __native_sorted_map_filter_values { m = m, p = p }
 
 ## Swaps keys and values.
+let invert_with_cmp
+  : { m: SortedMap 'k 'v, cmp: { a: 'v, b: 'v } -> Int } -> SortedMap 'v 'k
+  = { m, cmp } -> __native_sorted_map_invert { m = m, cmp = cmp }
+
+## Swaps keys and values. See `map_keys`: the new keys are the old VALUES, so
+## `Ord 'v` is the order that applies and it has to be threaded, not merely
+## declared.
 pub let invert: { m: SortedMap 'k 'v } with Ord 'v -> SortedMap 'v 'k = { m } ->
-  __native_sorted_map_invert { m = m }
+  invert_with_cmp { m = m, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
 
 ## Converts to a List of {k, v} records.
 pub let to_list: { m: SortedMap 'k 'v } -> List { k: 'k, v: 'v } = { m } ->
@@ -275,6 +466,22 @@ impl Sized for SortedMap 'k 'v where {
   size = { it } -> size { m = it },
   is_empty = { it } -> is_empty { m = it },
 }
+
+## Collects an `Iter` into a SortedMap.
+##
+## `Iter` has seven ways IN -- `range`, `from_seq`, `from_list`, `unfold`,
+## `once`, `empty`, and `.to_iter{}` on any of the seven types implementing
+## `Iterable` -- and had only `to_seq`/`to_list` out, so reaching any other
+## collection meant spelling the intermediate yourself.
+##
+## This is ERGONOMICS, not speed: it is what you would have written. `to_seq`
+## hands its buffer to the sequence without copying it, so the intermediate is
+## a wrapper around the buffer the sink had to fill anyway.
+##
+## Lives here rather than in `iter` because `sorted_map` imports `iter` for its
+## `Iterable` impl, so the dependency only runs this way.
+pub let from_iter: { it: Iter { k: 'k, v: 'v } } with Ord 'k -> SortedMap 'k 'v = { it } ->
+  from_list { xs = iter::to_list { it = it } }
 
 impl Iterable for SortedMap 'k 'v having 'elem = { k: 'k, v: 'v } where {
   to_iter = { it } -> iter::from_list { xs = to_list { m = it } }

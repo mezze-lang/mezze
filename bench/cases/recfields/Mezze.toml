@@ -1,0 +1,12 @@
+[package]
+name = "recfields"
+version = "0.1.0"
+
+[[app]]
+name = "recfields"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

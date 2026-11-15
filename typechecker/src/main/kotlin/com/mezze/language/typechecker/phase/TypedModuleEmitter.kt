@@ -184,7 +184,10 @@ internal fun emitTypedModuleAndLower(
             .processImportedCalls(importedForDecode, derivedDecodeImpls)
         val mergedDecodeOpBySite = if (importedDecodeOps.isEmpty()) decodeResult.decodeOpBySite
             else decodeResult.decodeOpBySite + importedDecodeOps
-        val compileResult = compileModule(emittedTypedModule!!, loadedModules, substitution, mergedDecodeOpBySite)
+        val compileResult = compileModule(
+            emittedTypedModule!!, loadedModules, substitution, mergedDecodeOpBySite,
+            solved.callFunctionTypes,
+        )
         loweredFns = compileResult.functions
         loweredPerformers = compileResult.performerRecords
     } catch (e: com.mezze.language.typechecker.TypeCheckError) {
@@ -293,6 +296,8 @@ private fun compileModule(
     loadedModules: Map<ModulePath, TypedModuleResult>,
     substitution: Substitution,
     decodeOpBySite: Map<com.mezze.language.parsedast.Loc, com.mezze.language.typedast.Hash> = emptyMap(),
+    /** Per-call-site instantiated callee arrows — see `TypedASTCompiler.callSiteArrows`. */
+    callSiteArrows: Map<com.mezze.language.parsedast.Loc, com.mezze.language.ast.MezzeType> = emptyMap(),
 ): CompileResult {
     val wrapped = EntryFunctionBuilder.wrapTopLevel(typedModule)
 
@@ -390,11 +395,23 @@ private fun compileModule(
             }
         }
     }
+    // ONE decision about what counts as a usable per-site arrow, for both
+    // consumers. Only a FULLY resolved arrow is kept: `holdsTypeVar` walks a
+    // FunctionType's ability constraints too, so one whose constraint operand is
+    // still open says no more than the scheme does.
+    val resolvedCallSiteArrows: Map<com.mezze.language.parsedast.Loc, com.mezze.language.ast.MezzeType.FunctionType> =
+        callSiteArrows.mapNotNull { (loc, ty) ->
+            val applied = substitution.apply(ty)
+            if (applied is com.mezze.language.ast.MezzeType.FunctionType &&
+                !applied.holdsTypeVar()
+            ) loc to applied else null
+        }.toMap()
     val monoResult = MonoDriver.run(
         entry = wrapped,
         imported = importedModules,
         resolutionOnly = stdlibModulesForMono,
         recordShapes = recordShapesForMono,
+        callSiteArrows = resolvedCallSiteArrows,
         declShapes = declShapesForMono,
     )
 
@@ -412,6 +429,7 @@ private fun compileModule(
         preloweredFunctions = stdlibFns,
         preloweredDictMethods = stdlibDictMethods,
         substitution = substitution,
+        callSiteArrows = resolvedCallSiteArrows,
         decodeOpBySite = decodeOpBySite,
         abilityOpNames = abilityOpNames,
     )
@@ -426,8 +444,14 @@ private fun compileModule(
     val printTypes = com.mezze.language.typechecker.compiler.PrintTypeDefs.forModule(typedModule, importedModules)
     compiler.setPrintTypeDefs(printTypes.defs, printTypes.params)
 
+    // Compile the decls the local-lambda pass produced, not the ones handed to
+    // mono: a polymorphic local lambda is monomorphised in place, and the only
+    // record of that is this list. See LocalLambdaSpecializer.
+    val moduleToCompile = monoResult.entryDecls
+        ?.let { wrapped.copy(decls = it) } ?: wrapped
+
     val result = compiler.compile(
-        module = wrapped,
+        module = moduleToCompile,
         additionalModules = importedModules,
         additionalPerformers = importedPerformers,
         monoSpecializations = monoResult.specializations.values.toList()

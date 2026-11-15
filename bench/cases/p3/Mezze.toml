@@ -1,0 +1,12 @@
+[package]
+name = "p3"
+version = "0.1.0"
+
+[[app]]
+name = "p3"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

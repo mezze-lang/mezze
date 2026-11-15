@@ -2,6 +2,7 @@ package com.mezze.interpreter.nodes.builtin.collections;
 
 import com.mezze.datastructures.deque.MezzeDeque;
 import com.mezze.datastructures.list.MezzeList;
+import com.mezze.datastructures.set.ElementHashing;
 import com.mezze.datastructures.list.MezzeLongCons;
 import com.mezze.datastructures.map.MezzeMap;
 import com.mezze.datastructures.seq.MezzeSeq;
@@ -19,6 +20,11 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
  * All operations are designed for JIT compilation.
  */
 public final class ListNatives {
+    /** `{ fst, snd }`, hoisted: this was allocated per call. Names from
+     *  {@link com.mezze.language.truffleir.NativeHofNames} so a rename reaches every spelling. */
+    private static final String[] FIELD_FST_SND =
+        {com.mezze.language.truffleir.NativeHofNames.PAIR_FST, com.mezze.language.truffleir.NativeHofNames.PAIR_SND};
+
 
     private ListNatives() {}
 
@@ -417,7 +423,7 @@ public final class ListNatives {
         Object[] result = new Object[len];
         for (int i = 0; i < len; i++) {
             result[i] = MezzeRecord.fromFields(
-                new String[]{"fst", "snd"},
+                FIELD_FST_SND,
                 new Object[]{src1[i], src2[i]}
             );
         }
@@ -466,26 +472,66 @@ public final class ListNatives {
 
     // ==================== Sort Operations ====================
 
+    /**
+     * Natural-order sort with NO guest call — the same change `seq::sort` got,
+     * for the same defect.
+     *
+     * <p>WHAT THIS REPLACES. `list::sort` routed through `sort_by`, so each of
+     * roughly n log n comparisons ran a guest lambda: 1 713 883 ps for a
+     * hundred descending elements, against 1 530 512 for `sort_by` itself —
+     * the wrapper is nearly free and the comparator is the cost.
+     *
+     * <p>THE PREVIOUS BODY WAS DEAD AND WRONG, identically to `SeqNatives`':
+     * registered in both `NativeDispatch` and `ListOps.kt`, called from
+     * nowhere, and its comparator ended {@code return 0} — so a list of
+     * records would have come back in its original order reported as sorted.
+     *
+     * <p>Reached only when the compiler proved the element directly comparable;
+     * everything else is rewritten to {@code __native_list_sort_by_ord} and
+     * given that element's own `le`. A `newtype` over Int with a reversed `Ord`
+     * is a boxed Long here and would otherwise sort ascending, contradicting
+     * its author — known-bugs.md BUG 10.
+     *
+     * <p>A list holds BOXED elements in cons cells, so unlike a seq there is no
+     * primitive array to sort: this is `Arrays.sort(Object[])` through
+     * `Comparable`, measured at 3.9x the cost of the primitive path. Int, Float
+     * and Str are all `Comparable`, and `Double.compareTo` orders NaN last by
+     * the same IEEE 754 total order `seq::sort` uses — so the two agree about
+     * NaN without either being told about the other.
+     */
     @TruffleBoundary
-    @SuppressWarnings("unchecked")
     public static MezzeList sort(MezzeList list) {
         if (list.size() <= 1) return list;
-
         Object[] arr = list.toArray();
+        for (Object elem : arr) {
+            if (!(elem instanceof Comparable)) {
+                throw new IllegalStateException(
+                    "__native_list_sort reached a "
+                    + (elem == null ? "null" : elem.getClass().getName())
+                    + " element: this native sorts only the directly comparable"
+                    + " elements (Int, Float, Str). Anything else must have been"
+                    + " rewritten to __native_list_sort_by_ord by TypedASTCompiler,"
+                    + " so this is a compiler bug, not a program error.");
+            }
+        }
+        java.util.Arrays.sort(arr);
+        return MezzeList.of(arr);
+    }
 
-        java.util.Arrays.sort(arr, (a, b) -> {
-            if (a instanceof Long && b instanceof Long) {
-                return Long.compare((Long) a, (Long) b);
-            }
-            if (a instanceof Double && b instanceof Double) {
-                return Double.compare((Double) a, (Double) b);
-            }
-            if (a instanceof String && b instanceof String) {
-                return ((String) a).compareTo((String) b);
-            }
-            return 0;
-        });
-
+    /**
+     * Natural order through the element's OWN `Ord` — the general path, and
+     * what the stdlib writes.
+     *
+     * <p>`le` answers True when `it` should come before `r`. One guest call per
+     * comparison, which is what this path has always cost; see the note on
+     * {@code SeqNatives.sortByOrd} about the -1/1 normalisation it inherits.
+     */
+    public static MezzeList sortByOrd(MezzeList list, MezzeFunction leFn,
+                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        if (list.size() <= 1) return list;
+        var ctx = ScalarCall.prepare2(leFn, "it", "r");
+        Object[] arr = list.toArray();
+        java.util.Arrays.sort(arr, (a, b) -> ctx.callBool(callNode, a, b) ? -1 : 1);
         return MezzeList.of(arr);
     }
 
@@ -495,13 +541,10 @@ public final class ListNatives {
         if (list.size() <= 1) return list;
         var ctx = ScalarCall.prepare2(cmpFn, "a", "b");
         Object[] arr = list.toArray();
-        java.util.Arrays.sort(arr, (elemA, elemB) -> {
-            Object cmpResult = ctx.call2(callNode, elemA, elemB);
-            if (cmpResult instanceof Long) {
-                return ((Long) cmpResult).intValue();
-            }
-            return 0;
-        });
+        // See the note on NonEmptyListNatives.sortBy: `callCmp` takes signum,
+        // where the hand-rolled unbox this replaces narrowed with `intValue()`
+        // and fell back to `return 0`.
+        java.util.Arrays.sort(arr, (elemA, elemB) -> ctx.callCmp(callNode, elemA, elemB));
         return MezzeList.of(arr);
     }
 
@@ -537,6 +580,51 @@ public final class ListNatives {
         Object[] closureValues = folder.getClosureValues();
         int closureLen = closureValues.length;
         CallTarget target = folder.getCallTarget();
+
+        // WALK THE CELLS for a plain forward fold, which is `fold_left` and
+        // `reduce` — everything this shares the loop with.
+        //
+        // `toArray()` below is a FULL O(n) COPY of the list before a single
+        // element is folded: a second pass over every cons cell and an
+        // `Object[n]` that lives as long as the fold. `bench/cases/listwalk`
+        // at n=5e6 measured `list::fold_left` at 1 335 ps/elem against
+        // `seq::fold`'s 328 and a 282 ps control — 4.07x — with the array
+        // showing up as young collections a seq fold does not have.
+        //
+        // The copy exists because `reverse` and `scan` need random access:
+        // a right fold runs backwards and a scan writes `scanOut[i + 1]`, and
+        // a cons list walks one way only. Those two keep the array. A forward
+        // fold with no scan does not need it, and that is the common case.
+        if (!reverse && scanOut == null) {
+            Object acc0 = init;
+            MezzeList cur = list;
+            for (int skip = 0; skip < startIndex && !cur.isEmpty(); skip++) cur = cur.tail();
+            CallTarget inner = ScalarBypass.tryResolve(folder);
+            if (inner != null) {
+                String[] params = folder.getParameterNames();
+                boolean accFirst0 = params.length < 2 || "acc".equals(params[0]);
+                int accSlot0 = accFirst0 ? closureLen : closureLen + 1;
+                int elemSlot0 = accFirst0 ? closureLen + 1 : closureLen;
+                Object[] args0 = new Object[closureLen + 2];
+                System.arraycopy(closureValues, 0, args0, 0, closureLen);
+                while (!cur.isEmpty()) {
+                    args0[accSlot0] = acc0;
+                    args0[elemSlot0] = cur.head();
+                    acc0 = callNode.call(inner, args0);
+                    cur = cur.tail();
+                }
+                return acc0;
+            }
+            Object[] args0 = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, args0, 0, closureLen);
+            while (!cur.isEmpty()) {
+                args0[closureLen] = MezzeRecord.wrapAccX(acc0, cur.head());
+                acc0 = callNode.call(target, args0);
+                cur = cur.tail();
+            }
+            return acc0;
+        }
+
         Object[] elements = list.toArray();
         int size = elements.length;
         int from = reverse ? size - 1 - startIndex : startIndex;
@@ -987,9 +1075,64 @@ public final class ListNatives {
         return MezzeList.of(seen.toArray());
     }
 
+    /**
+     * The same, bucketing by the element's OWN `hash` and `eq`.
+     *
+     * <p>Reached when the author wrote those instances, via
+     * `TypedASTCompiler.evidenceNativeForm` — the rule that already routes
+     * `set::from_seq` and `seq::unique`. Without it a `newtype` whose `Eq`
+     * calls two differently-represented values equal keeps BOTH, because the
+     * structural bucketing never puts them in the same bucket to compare.
+     *
+     * <p>{@link ClosureHashing} supplies the pair or nothing: null means the
+     * instances are derived and the structural walk above is already right.
+     *
+     * <p>An open-addressed table of INDICES rather than a wrapper per element,
+     * so the author's `hash` runs once per element and the author's `eq` only
+     * when two land in the same slot.
+     */
     @TruffleBoundary
-    public static MezzeList distinct(MezzeList list) {
-        return unique(list);
+    public static MezzeList uniqueWithEvidence(MezzeList list, MezzeFunction hashFn,
+                                               MezzeFunction eqFn) {
+        ElementHashing hashing = ClosureHashing.of(hashFn, eqFn);
+        if (hashing == null) return unique(list);
+
+        Object[] src = list.toArray();
+        int n = src.length;
+        if (n <= 1) return list;
+
+        int cap = Integer.highestOneBit(Math.max(4, n)) << 2;   // load factor <= 0.5
+        int mask = cap - 1;
+        int[] slots = new int[cap];          // 0 = empty, else 1 + index into out
+        int[] hashes = new int[n];
+        Object[] out = new Object[n];
+        int kept = 0;
+
+        for (int i = 0; i < n; i++) {
+            Object elem = src[i];
+            int h = hashing.hashOf(elem);
+            int slot = (h ^ (h >>> 16)) & mask;
+            boolean duplicate = false;
+            while (slots[slot] != 0) {
+                int at = slots[slot] - 1;
+                // The stored hash is checked first so the author's `eq` runs
+                // only for a genuine collision, not for every probe.
+                if (hashes[at] == h && hashing.eq(out[at], elem)) {
+                    duplicate = true;
+                    break;
+                }
+                slot = (slot + 1) & mask;
+            }
+            if (!duplicate) {
+                hashes[kept] = h;
+                out[kept] = elem;
+                slots[slot] = kept + 1;
+                kept++;
+            }
+        }
+
+        if (kept == n) return list;
+        return MezzeList.of(java.util.Arrays.copyOf(out, kept));
     }
 
     @TruffleBoundary

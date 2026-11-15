@@ -1,0 +1,12 @@
+[package]
+name = "fusecross"
+version = "0.1.0"
+
+[[app]]
+name = "fusecross"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

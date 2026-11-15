@@ -1,0 +1,60 @@
+## DOT-CHAINED vs FREE-FUNCTION pipeline — the same three stages either way.
+##
+## `ChainCanonicalizer` rewrites an iter chain into one fused loop and is on by
+## default, but it refuses the DOT-CHAINED form. Measured earlier: 35.1 ns/elem
+## dot-chained — identical with the pass disabled, i.e. it never fired — against
+## 12.5-14.2 free-function, which does fuse. Dot-chaining dispatches through the
+## `Iter` ability impl, and the pass runs post-`TrivialWrapperInliner`, so an
+## un-inlined ability call leaves an opaque node where a peelable chain should
+## be.
+##
+## Re-measured here because closure-arg specialisation on NAMED callbacks landed
+## since, which changes what the canonicaliser is handed.
+##
+## Both routes must print the same checksum; the filter keeps everything
+## (`x < n` after `x * 3` is false for the upper two thirds, which is the point
+## — it is a real filter, not a no-op).
+use std::collections::iter
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::collections::seq
+use std::int
+
+let size_or = { args, def } -> match seq::get { xs = args, i = 0 } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+let dotted = { n } -> iter::range { start = 0, end = n }
+  .map { f = { x } -> x * 3 }
+  .filter { p = { x } -> x < n }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+let freefn = { n } -> iter::fold {
+  it = iter::filter {
+    it = iter::map { it = iter::range { start = 0, end = n }, f = { x } -> x * 3 },
+    p = { x } -> x < n,
+  },
+  init = 0,
+  f = { acc, x } -> acc + x,
+}
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let n = size_or { args = argv {}, def = 20000000 }
+  dotted { n = n }
+  dotted { n = n }
+  freefn { n = n }
+  freefn { n = n }
+  let a = time_it { f = {} -> dotted { n = n } }
+  let b = time_it { f = {} -> freefn { n = n } }
+  println { msg = "dotted   $(int::to_str { n = a.ns / 1000000 }) ms  $(int::to_str { n = a.ns / n }) ns/elem  sum=$(int::to_str { n = a.result })" }
+  println { msg = "freefn   $(int::to_str { n = b.ns / 1000000 }) ms  $(int::to_str { n = b.ns / n }) ns/elem  sum=$(int::to_str { n = b.result })" }

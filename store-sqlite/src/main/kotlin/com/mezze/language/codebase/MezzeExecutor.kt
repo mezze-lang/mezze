@@ -232,6 +232,7 @@ class MezzeExecutor(
                         collectDirectCallTargets(s.step, ownHashes, visited, resolves, out)
                     }
                     is com.mezze.language.truffleir.SourceIR.RawSeq -> collectDirectCallTargets(s.xs, ownHashes, visited, resolves, out)
+                    is com.mezze.language.truffleir.SourceIR.RawBytes -> collectDirectCallTargets(s.xs, ownHashes, visited, resolves, out)
                     is com.mezze.language.truffleir.SourceIR.RawList -> collectDirectCallTargets(s.xs, ownHashes, visited, resolves, out)
                     is com.mezze.language.truffleir.SourceIR.Opaque -> collectDirectCallTargets(s.expr, ownHashes, visited, resolves, out)
                 }
@@ -241,8 +242,23 @@ class MezzeExecutor(
                         is com.mezze.language.truffleir.StageIR.Filter -> check(stage.p.functionHash)
                         is com.mezze.language.truffleir.StageIR.Take -> collectDirectCallTargets(stage.n, ownHashes, visited, resolves, out)
                         is com.mezze.language.truffleir.StageIR.Drop -> collectDirectCallTargets(stage.n, ownHashes, visited, resolves, out)
+                        is com.mezze.language.truffleir.StageIR.Zip ->
+                            com.mezze.language.truffleir.forEachSourceNode(stage.second) { n ->
+                                collectDirectCallTargets(n, ownHashes, visited, resolves, out)
+                            }
+                        // Both halves name code: the lambda the emitter
+                        // reads its inner bounds from, and the inner
+                        // source's own expressions.
+                        is com.mezze.language.truffleir.StageIR.FlatMap -> {
+                            check(stage.f.functionHash)
+                            com.mezze.language.truffleir.forEachSourceNode(stage.inner) { n ->
+                                collectDirectCallTargets(n, ownHashes, visited, resolves, out)
+                            }
+                        }
                         is com.mezze.language.truffleir.StageIR.TakeWhile -> check(stage.p.functionHash)
                         is com.mezze.language.truffleir.StageIR.DropWhile -> check(stage.p.functionHash)
+                        // No lambda and no expression: no edge to record.
+                        com.mezze.language.truffleir.StageIR.Enumerate -> {}
                     }
                 }
                 when (val sk = node.sink) {
@@ -427,6 +443,7 @@ class MezzeExecutor(
                         collectReferencedHashes(s.step, queue)
                     }
                     is com.mezze.language.truffleir.SourceIR.RawSeq -> collectReferencedHashes(s.xs, queue)
+                    is com.mezze.language.truffleir.SourceIR.RawBytes -> collectReferencedHashes(s.xs, queue)
                     is com.mezze.language.truffleir.SourceIR.RawList -> collectReferencedHashes(s.xs, queue)
                     is com.mezze.language.truffleir.SourceIR.Opaque -> collectReferencedHashes(s.expr, queue)
                 }
@@ -436,8 +453,23 @@ class MezzeExecutor(
                         is com.mezze.language.truffleir.StageIR.Filter -> queue.add(stage.p.functionHash.hex)
                         is com.mezze.language.truffleir.StageIR.Take -> collectReferencedHashes(stage.n, queue)
                         is com.mezze.language.truffleir.StageIR.Drop -> collectReferencedHashes(stage.n, queue)
+                        is com.mezze.language.truffleir.StageIR.Zip ->
+                            com.mezze.language.truffleir.forEachSourceNode(stage.second) { n ->
+                                collectReferencedHashes(n, queue)
+                            }
+                        // Both halves name code: the lambda the emitter
+                        // reads its inner bounds from, and the inner
+                        // source's own expressions.
+                        is com.mezze.language.truffleir.StageIR.FlatMap -> {
+                            queue.add(stage.f.functionHash.hex)
+                            com.mezze.language.truffleir.forEachSourceNode(stage.inner) { n ->
+                                collectReferencedHashes(n, queue)
+                            }
+                        }
                         is com.mezze.language.truffleir.StageIR.TakeWhile -> queue.add(stage.p.functionHash.hex)
                         is com.mezze.language.truffleir.StageIR.DropWhile -> queue.add(stage.p.functionHash.hex)
+                        // No lambda and no expression: no edge to record.
+                        com.mezze.language.truffleir.StageIR.Enumerate -> {}
                     }
                 }
                 when (val sk = node.sink) {

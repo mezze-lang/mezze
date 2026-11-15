@@ -1,0 +1,140 @@
+## WHAT JSON COSTS — the first measurement of the codec group.
+##
+## `std::codec::json` is 10 operations at ZERO coverage, and json is on the
+## request path of anything that serves. The first look at the serializer found
+## `DslJsonCodec.serializeValue` dispatching on `json.getConstructorName()` — a
+## STRING SWITCH per node, which this repo has a rule against and which
+## `MezzeVariant` itself documents the answer to: "the tag is the structural
+## identity; the name is only for display".
+##
+## METHOD as elsewhere: one row per process (`jsonsurface <n> <row> <m>`), min
+## over k passes after `warm` warmups, every row checksummed, a counted
+## arithmetic loop as the floor, and two sizes of n that must converge.
+
+use std::effects::log::{ println, Console }
+use std::effects::args::{ SystemArgs, argv }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::collections::seq
+use std::codec::json
+use std::result
+use std::collections::bytes
+use std::str
+use std::int
+use std::option
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_one = { thunk } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = thunk {}
+  let t1 = monotonic {}
+  { ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }, sum = r }
+
+let time_k_go = { thunk, k, acc, last } -> if k == 0
+  then { times = acc, sum = last }
+  else do
+    let r = time_one { thunk = thunk }
+    time_k_go { thunk = thunk, k = k - 1, acc = seq::push { xs = acc, x = r.ns }, last = r.sum }
+
+let nth_or_zero = { xs, i } -> match seq::get { xs = xs, i = i } is
+  Some { val } -> val
+  None -> 0
+
+let min_of = { thunk, warm, k } -> do
+  let w = time_k_go { thunk = thunk, k = warm, acc = [], last = 0 }
+  let ws = seq::sort { xs = w.times }
+  let warm_max = nth_or_zero { xs = ws, i = seq::size { xs = ws } - 1 }
+  let run = time_k_go { thunk = thunk, k = k, acc = [], last = 0 }
+  let sorted = seq::sort { xs = run.times }
+  let half = seq::size { xs = sorted } / 2
+  { min = nth_or_zero { xs = sorted, i = 0 },
+    med = nth_or_zero { xs = sorted, i = half },
+    warm_max = warm_max,
+    sum = run.sum }
+
+## THE FLOOR: one loop iteration and one add, no json at all.
+let control_loop = { i, acc } -> if i <= 0 then acc else control_loop { i = i - 1, acc = acc + i }
+
+let report = { idx, sel, label, thunk, floor_ps, n, warm, k } -> perform Console in perform SystemTime in
+  if sel != 0 && sel != idx then {} else do
+    let t = min_of { thunk = thunk, warm = warm, k = k }
+    let ps_per_op = (t.min * 1000) / n
+    let ratio = if floor_ps == 0 then 0 else (ps_per_op * 100) / floor_ps
+    let warm_ratio = if t.min == 0 then 0 else t.warm_max / t.min
+    let warn = if t.med > (t.min * 2) then "   UNDER-WARMED (raise n or passes)"
+      else if warm_ratio > 10 then "   WARMUP-DOMINATED"
+      else ""
+    println { msg = "  $(label): $(int::to_str { n = ps_per_op }) ps/op  x$(int::to_str { n = ratio })/100 floor  sum=$(int::to_str { n = t.sum })$(warn)" }
+
+
+
+## ── the document, built ONCE outside every timed loop ────────────────
+## An array of `m` objects, each with an Int and a Str field, so a serialize
+## walks JArray, JObject, JInt and JString — four of the seven constructors,
+## and `m * 5 + 1` nodes in all.
+let build_items = { i, acc } -> if i <= 0 then acc
+  else build_items { i = i - 1, acc = seq::push { xs = acc,
+    x = JObject { fields = [
+      { key = "id", value = JInt { val = i } },
+      { key = "name", value = JString { val = "row" } },
+    ] } } }
+
+## ── 1. to_str ─ THE SERIALIZER, one string switch per node ───────────
+let l_to_str = { i, acc, doc } -> if i <= 0 then acc
+  else l_to_str { i = i - 1, doc = doc,
+    acc = acc + str::size { s = json::to_str { json = doc } } }
+
+## ── 2. to_bytes ─ the same walk, straight to UTF-8 ───────────────
+let l_to_bytes = { i, acc, doc } -> if i <= 0 then acc
+  else l_to_bytes { i = i - 1, doc = doc,
+    acc = acc + bytes::size { b = json::to_bytes { json = doc } } }
+
+## ── 3. parse_str ─ the other direction ──────────────────────
+let l_parse_str = { i, acc, s } -> if i <= 0 then acc
+  else l_parse_str { i = i - 1, s = s,
+    acc = acc + match json::parse_str { s = s } is
+      Ok { val } -> 1
+      Err { error } -> 0 }
+
+## ── 4. parse ─ from bytes, which skips one String decode ───────────
+let l_parse_bytes = { i, acc, b } -> if i <= 0 then acc
+  else l_parse_bytes { i = i - 1, b = b,
+    acc = acc + match json::parse { bytes = b } is
+      Ok { val } -> 1
+      Err { error } -> 0 }
+
+## ── 5. str::size of the document ─ THE CONTROL: touches the same string
+## and no json at all, so it says whether the machine moved. ────────────
+let l_control = { i, acc, s } -> if i <= 0 then acc
+  else l_control { i = i - 1, s = s, acc = acc + str::size { s = s } }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let n = arg_at { args = args, i = 0, def = 2000 }
+  let sel = arg_at { args = args, i = 1, def = 0 }
+  let m = arg_at { args = args, i = 2, def = 100 }
+  let floor_n = arg_at { args = args, i = 3, def = 20000000 }
+  let warm = 4
+  let k = 9
+  let doc = JArray { items = build_items { i = m, acc = [] } }
+  let doc_str = json::to_str { json = doc }
+  let doc_bytes = json::to_bytes { json = doc }
+  let floor = min_of { thunk = {} -> control_loop { i = floor_n, acc = 0 }, warm = warm, k = k }
+  let floor_ps = (floor.min * 1000) / floor_n
+  println { msg = "jsonsurface (n=$(int::to_str { n = n }) ops, $(int::to_str { n = m }) objects, $(int::to_str { n = str::size { s = doc_str } }) chars): $(int::to_str { n = warm }) warmup + $(int::to_str { n = k }) measured, MIN per row" }
+  println { msg = "  control (floor)     : $(int::to_str { n = floor_ps }) ps/op" }
+  report { idx = 1, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "json::to_str        ", thunk = {} -> l_to_str { i = n, acc = 0, doc = doc } }
+  report { idx = 2, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "json::to_bytes      ", thunk = {} -> l_to_bytes { i = n, acc = 0, doc = doc } }
+  report { idx = 3, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "json::parse_str     ", thunk = {} -> l_parse_str { i = n, acc = 0, s = doc_str } }
+  report { idx = 4, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "json::parse (bytes) ", thunk = {} -> l_parse_bytes { i = n, acc = 0, b = doc_bytes } }
+  report { idx = 5, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "str::size   CONTROL ", thunk = {} -> l_control { i = n, acc = 0, s = doc_str } }

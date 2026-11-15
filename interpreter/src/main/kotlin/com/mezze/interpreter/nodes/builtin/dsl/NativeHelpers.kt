@@ -63,12 +63,6 @@ object NativeHelpers {
     }
 
     @TruffleBoundary
-    fun stringSplit(s: String, delimiter: String): MezzeSeq<Any> {
-        val parts = s.split(java.util.regex.Pattern.quote(delimiter).toRegex())
-        return MezzeSeq.fromArray(parts.toTypedArray())
-    }
-
-    @TruffleBoundary
     fun stringJoin(strings: MezzeSeq<*>, separator: String): String {
         val sb = StringBuilder()
         val n = strings.size()
@@ -275,5 +269,147 @@ object NativeHelpers {
     fun intLcm(a: Long, b: Long): Long {
         if (a == 0L || b == 0L) return 0L
         return Math.abs(a / intGcd(a, b) * b)
+    }
+
+    // ==================== Receiver coercion ====================
+    //
+    // WHY THESE EXIST RATHER THAN A CAST AT EACH CALL SITE. The legacy
+    // `NativeDispatch.getSeq(r, name)` / `getMap(r, name)` accessors do not
+    // merely read a field and cast — `getSeq` also ACCEPTS an `Object[]` and
+    // wraps it with `MezzeSeq.fromArray`. A scalar-ABI port that writes
+    // `args.obj(0) as MezzeSeq<*>` therefore changes behaviour, and it fails
+    // far from the declaration: twenty codec and decode tests failed with
+    //
+    //   ClassCastException: [Ljava.lang.Object; cannot be cast to MezzeSeq
+    //     at SeqOps.seq(SeqOps.kt:45) … at <mezze>.find_field_value
+    //
+    // because `find_field_value` reaches `seq::get` with a raw array. So the
+    // coercion is part of the native's contract, and every `*Ops.kt` takes its
+    // receiver through these.
+
+    /** Bit-for-bit `NativeDispatch.getSeq`, minus the record lookup. */
+    fun asSeq(value: Any?, name: String): MezzeSeq<*> {
+        if (value is MezzeSeq<*>) return value
+        // Also handle Object[] - convert to MezzeSeq
+        if (value is Array<*>) {
+            @Suppress("UNCHECKED_CAST")
+            return MezzeSeq.fromArray(value as Array<Any?>)
+        }
+        throw com.mezze.interpreter.runtime.NativeTypeMismatchException(
+            "Expected MezzeSeq for field '" + name + "', got: " +
+                (if (value == null) "null" else value.javaClass.simpleName),
+        )
+    }
+
+    /**
+     * Bit-for-bit `NativeDispatch.getLong`, minus the record lookup — it accepts
+     * a `Double` that is an exact integer, which the original comment explains
+     * as handling "cases where float operations produce values used as integer
+     * args". `NativeArgs.long(i)` is a hard cast and would throw there.
+     *
+     * The `is Long` test is one instanceof on a stable profile, so partial
+     * evaluation folds it; being faithful here is free.
+     */
+    fun asLong(value: Any?, name: String): Long {
+        if (value is Long) return value
+        if (value is Double && value == Math.floor(value) && !value.isInfinite()) {
+            return value.toLong()
+        }
+        throw com.mezze.interpreter.runtime.NativeTypeMismatchException(
+            "Expected Long for field '" + name + "', got: " +
+                (if (value == null) "null" else value.javaClass.name + "=" + value),
+        )
+    }
+
+    /**
+     * Bit-for-bit `NativeDispatch.getList`, minus the record lookup — the widest
+     * coercion of any collection accessor. It accepts a [MezzeList], a raw
+     * `Object[]`, AND a Cons/Nil `MezzeVariant`, which it walks.
+     */
+    fun asList(value: Any?, name: String): com.mezze.datastructures.list.MezzeList<*> {
+        if (value is com.mezze.datastructures.list.MezzeList<*>) return value
+        // Handle array literals (Object[]) - convert to MezzeList
+        if (value is Array<*>) {
+            @Suppress("UNCHECKED_CAST")
+            return com.mezze.datastructures.list.MezzeList.of(*(value as Array<Any?>))
+        }
+        // Handle Cons/Nil linked list variants
+        if (value is MezzeVariant) return consListToMezzeList(value)
+        throw com.mezze.interpreter.runtime.NativeTypeMismatchException(
+            "Expected MezzeList for field '" + name + "', got: " +
+                (if (value == null) "null" else value.javaClass.simpleName),
+        )
+    }
+
+    /** Bit-for-bit `NativeDispatch.convertLinkedListToMezzeList`. */
+    @TruffleBoundary
+    private fun consListToMezzeList(
+        variant: MezzeVariant,
+    ): com.mezze.datastructures.list.MezzeList<*> {
+        val elements = java.util.ArrayList<Any?>()
+        var current: Any? = variant
+        while (current is MezzeVariant) {
+            if (current.getTag() == MezzeVariant.NIL_TAG) {
+                break
+            } else if (current.getTag() == MezzeVariant.CONS_TAG) {
+                // Cons always has 2 fields (head, tail) -> always MezzeRecord.
+                val pv = current.getPayloadValue()
+                if (pv !is com.mezze.interpreter.values.MezzeRecord) break
+                elements.add(pv.getField("head"))
+                current = pv.getField("tail")
+            } else {
+                // Not a Cons/Nil list, return empty
+                break
+            }
+        }
+        @Suppress("UNCHECKED_CAST")
+        return com.mezze.datastructures.list.MezzeList.of(
+            *(elements.toArray() as Array<Any?>),
+        )
+    }
+
+    /**
+     * Bit-for-bit `NativeDispatch.getBytes`, minus the record lookup. Like
+     * `getSet`, this one does NOT coerce — it casts or throws.
+     */
+    fun asBytes(
+        value: Any?,
+        name: String,
+    ): com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes {
+        if (value is com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes) return value
+        throw com.mezze.interpreter.runtime.NativeTypeMismatchException(
+            "Expected MezzeBytes for field '" + name + "'",
+        )
+    }
+
+    /**
+     * Bit-for-bit `NativeDispatch.getSet`, minus the record lookup. Unlike
+     * `getSeq`/`getList` this one does NOT coerce — it casts or throws.
+     */
+    fun asSet(value: Any?, name: String): com.mezze.datastructures.set.MezzeSet<*> {
+        if (value is com.mezze.datastructures.set.MezzeSet<*>) return value
+        throw com.mezze.interpreter.runtime.NativeTypeMismatchException(
+            "Expected MezzeSet for field '" + name + "'",
+        )
+    }
+
+    /**
+     * Bit-for-bit `NativeDispatch.getDeque`, minus the record lookup. Like
+     * `getSet` and unlike `getSeq`/`getList`, this one does NOT coerce — it
+     * casts or throws.
+     */
+    fun asDeque(value: Any?, name: String): com.mezze.datastructures.deque.MezzeDeque<*> {
+        if (value is com.mezze.datastructures.deque.MezzeDeque<*>) return value
+        throw com.mezze.interpreter.runtime.NativeTypeMismatchException(
+            "Expected MezzeDeque for field '" + name + "'",
+        )
+    }
+
+    /** Bit-for-bit `NativeDispatch.getMap`, minus the record lookup. */
+    fun asMap(value: Any?, name: String): com.mezze.datastructures.map.MezzeMap<*, *> {
+        if (value is com.mezze.datastructures.map.MezzeMap<*, *>) return value
+        throw com.mezze.interpreter.runtime.NativeTypeMismatchException(
+            "Expected MezzeMap for field '" + name + "'",
+        )
     }
 }

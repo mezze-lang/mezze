@@ -1,0 +1,131 @@
+## WHAT ONE ELEMENT COSTS TO VISIT, FOR EVERY COLLECTION.
+##
+## PERF-LOG carries these figures from several different sessions and
+## instruments, so they are not comparable with each other. This puts every
+## collection's bare fold in ONE case against ONE control, timed in the same
+## process, so the ranking is a ranking and not a collage.
+##
+## Every collection holds the same n Ints and every fold sums them, so the
+## checksums agree and a row that got fast by skipping work shows up as a
+## different number rather than a better one. The maps hold key = value = i and
+## sum the VALUES, so their checksum matches the rest.
+##
+## Built ONCE, outside every timed call: this measures the WALK, not the build.
+##
+## SO THE `Pause Young` COUNT IS NOT THE WALK'S. It is process-wide and the
+## build is in it, which for the SORTED collections dominates: every ordered
+## operation allocates a comparator closure and calls back into guest code per
+## comparison, so building n entries is O(n log n) GUEST calls. sorted_map
+## reports 43 collections and ~none of them are the fold. Read the GC column as
+## the walk's only for the rows whose build is cheap — seq, list, deque, and the
+## unordered set and map.
+## ONE KERNEL PER PROCESS — see bench/scripts/ab.sh on why.
+use std::collections::iter
+use std::collections::seq
+use std::collections::list
+use std::collections::deque
+use std::collections::set
+use std::collections::sorted_set
+use std::collections::map
+use std::collections::sorted_map
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::int
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }, result = r }
+
+let report = { name, n, reps, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / (n * reps) }) ps/elem  sum=$(int::to_str { n = r.result / reps })" }
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let thrice = { f } -> do
+  f {}
+  f {}
+  f {}
+
+## REPEAT THE FOLD INSIDE THE TIMED REGION. The collection cannot simply grow:
+## building a sorted map of 2e6 entries takes MINUTES, because every ordered
+## operation allocates a comparator closure and calls back into guest code per
+## comparison, so the build is O(n log n) GUEST calls. But at n=2e5 a single
+## fold is ~2ms against a warm-up window near a second, and the arithmetic
+## CONTROL then moves 1.7x between two builds of identical source — which is
+## how a column of noise announces itself. Repeating inside the window fixes
+## the regime without touching the collection.
+let repeat = { f, k, acc } ->
+  if k <= 0 then acc else repeat { f = f, k = k - 1, acc = acc + f {} }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  let n = arg_at { args = args, i = 1, def = 200000 }
+  ## Enough repetitions that the timed window is long even for the fast rows.
+  let reps = arg_at { args = args, i = 2, def = 500 }
+  let base = seq::range { start = 0, end = n }
+  let pairs = seq::map { xs = base, f = { x } -> { k = x, v = x } }
+
+  if k == 1 then do
+    let go = { i, acc } -> if i <= 0 then acc else go { i = i - 1, acc = acc + i }
+    let f = {} -> go { i = n - 1, acc = 0 }
+    thrice { f = f }
+    report { name = "1 control (no coll)", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+    report { name = "1 control (no coll)", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+    report { name = "1 control (no coll)", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+  else if k == 2 then do
+    let f = {} -> seq::fold { xs = base, init = 0, f = { acc, x } -> acc + x }
+    thrice { f = f }
+    report { name = "2 seq              ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+    report { name = "2 seq              ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+    report { name = "2 seq              ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+  else if k == 3 then do
+    let xs = list::from_seq { xs = base }
+    let f = {} -> list::fold_left { xs = xs, init = 0, f = { acc, x } -> acc + x }
+    thrice { f = f }
+    report { name = "3 list             ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+    report { name = "3 list             ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+    report { name = "3 list             ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+  else if k == 4 then do
+    let d = deque::from_seq { xs = base }
+    let f = {} -> deque::fold { d = d, init = 0, f = { acc, x } -> acc + x }
+    thrice { f = f }
+    report { name = "4 deque            ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+    report { name = "4 deque            ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+    report { name = "4 deque            ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+  else if k == 5 then do
+    let s = set::from_seq { xs = base }
+    let f = {} -> set::fold { s = s, init = 0, f = { acc, x } -> acc + x }
+    thrice { f = f }
+    report { name = "5 set              ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+    report { name = "5 set              ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+    report { name = "5 set              ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+  else if k == 6 then do
+    let s = sorted_set::from_seq { xs = base }
+    let f = {} -> sorted_set::fold { s = s, init = 0, f = { acc, x } -> acc + x }
+    thrice { f = f }
+    report { name = "6 sorted_set       ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+    report { name = "6 sorted_set       ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+    report { name = "6 sorted_set       ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+  else if k == 7 then do
+    let m = map::from_iter { it = iter::from_seq { xs = pairs } }
+    let f = {} -> map::fold { m = m, init = 0, f = { acc, k, v } -> acc + v }
+    thrice { f = f }
+    report { name = "7 map (values)     ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+    report { name = "7 map (values)     ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+    report { name = "7 map (values)     ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+  else do
+    let m = sorted_map::from_iter { it = iter::from_seq { xs = pairs } }
+    let f = {} -> sorted_map::fold { m = m, init = 0, f = { acc, k, v } -> acc + v }
+    thrice { f = f }
+    report { name = "8 sorted_map       ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+    report { name = "8 sorted_map       ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }
+    report { name = "8 sorted_map       ", n = n, reps = reps, r = time_it { f = {} -> repeat { f = f, k = reps, acc = 0 } } }

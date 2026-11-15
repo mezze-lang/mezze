@@ -3,6 +3,8 @@ package com.mezze.interpreter.nodes.builtin.collections;
 import com.mezze.datastructures.map.MezzeMap;
 import com.mezze.datastructures.list.MezzeList;
 import com.mezze.datastructures.seq.MezzeSeq;
+import com.mezze.datastructures.map.EvidenceMapStorage;
+import com.mezze.datastructures.set.ElementHashing;
 import com.mezze.datastructures.sorted.MezzeSortedMap;
 import com.mezze.interpreter.values.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
@@ -39,6 +41,56 @@ public final class SortedMapNatives {
     }
 
     @TruffleBoundary
+    /**
+     * The key at a position in sort order — the probe the guest-side binary
+     * search in `std::collections::sorted_map` drives. See
+     * {@link MezzeSortedMap#keyAt}: the search moved out of host code so that
+     * the comparison is a guest call Graal can inline instead of a callback it
+     * cannot.
+     */
+    public static Object keyAt(MezzeSortedMap map, Object index) {
+        return map.keyAt((int) (long) (Long) index);
+    }
+
+    /** The value at a position in sort order. See {@link #keyAt}. */
+    public static Object valueAt(MezzeSortedMap map, Object index) {
+        return map.valueAt((int) (long) (Long) index);
+    }
+
+    /**
+     * Replace the value at a position the GUEST search already found, and
+     * insert at a position it already computed. Neither takes a comparator,
+     * because neither compares: the index is the whole input.
+     *
+     * <p>`insert` used to search here, which meant the comparison ran in host
+     * code and called back into guest code once per comparison — ~30 ns each,
+     * ~300 ns a lookup, against ~15 ns for the entire guest-side search. That
+     * is the same cost `get` and `contains_key` stopped paying when their
+     * search moved out; these two are what let `insert` stop paying it too.
+     *
+     * <p>The guest encodes the search result the way a Java binary search
+     * does: a non-negative index means found, and {@code -(insertPos + 1)}
+     * means absent with the position that keeps the array sorted. The guest
+     * decides which of these two to call.
+     */
+    @TruffleBoundary
+    public static MezzeSortedMap setAt(MezzeSortedMap map, Object index, Object value) {
+        return map.setAt((int) (long) (Long) index, value);
+    }
+
+    /** See {@link #setAt}. */
+    @TruffleBoundary
+    public static MezzeSortedMap insertAt(MezzeSortedMap map, Object index, Object key, Object value) {
+        return map.insertAt((int) (long) (Long) index, key, value);
+    }
+
+    /** See {@link #setAt}. The guest calls this only when the key is present,
+     *  so an absent key never reaches a native at all. */
+    @TruffleBoundary
+    public static MezzeSortedMap removeAt(MezzeSortedMap map, Object index) {
+        return map.removeAt((int) (long) (Long) index);
+    }
+
     public static MezzeVariant get(MezzeSortedMap map, Object key, MezzeFunction cmpFn) {
         map = map.withComparator(ElementComparator.of(cmpFn));
         Object value = map.getObject(key);
@@ -46,18 +98,6 @@ public final class SortedMapNatives {
             return MezzeVariant.none();
         }
         return MezzeVariant.some(value);
-    }
-
-    @TruffleBoundary
-    public static MezzeSortedMap remove(MezzeSortedMap map, Object key, MezzeFunction cmpFn) {
-        map = map.withComparator(ElementComparator.of(cmpFn));
-        return map.removeObject(key);
-    }
-
-    @TruffleBoundary
-    public static boolean containsKey(MezzeSortedMap map, Object key, MezzeFunction cmpFn) {
-        map = map.withComparator(ElementComparator.of(cmpFn));
-        return map.containsKeyObject(key);
     }
 
     public static long size(MezzeSortedMap map) {
@@ -211,6 +251,31 @@ public final class SortedMapNatives {
         ));
     }
 
+    /**
+     * `to_map` under the KEY's own hash and equality.
+     *
+     * <p>This leaves a comparator-ordered container for a HASHED one, so the
+     * sorted map's `Ord` stops being the right question and the key's
+     * `Eq`/`Hash` becomes it. The plain {@link #toMap} below builds through a
+     * bare {@code MezzeMap.empty()}, which buckets structurally — a sorted map
+     * holding two keys an author's finer `Ord` separates must collapse to one
+     * when that author's `Eq` calls them equal, and it did not.
+     * `fromMap` one method down already took its comparator.
+     */
+    @TruffleBoundary
+    public static MezzeMap toMapWithEvidence(MezzeSortedMap sortedMap, MezzeFunction hashFn,
+                                             MezzeFunction eqFn) {
+        ElementHashing hashing = ClosureHashing.of(hashFn, eqFn);
+        if (hashing == null) return toMap(sortedMap);
+        MezzeMap result = MezzeMap.fromStorage(
+            EvidenceMapStorage.fromEntries(new Object[0], new Object[0], hashing));
+        for (Object entryObj : sortedMap.rawEntries()) {
+            MezzeSortedMap.RawEntry entry = (MezzeSortedMap.RawEntry) entryObj;
+            result = result.put(entry.key(), entry.value());
+        }
+        return result;
+    }
+
     @TruffleBoundary
     public static MezzeMap toMap(MezzeSortedMap sortedMap) {
         MezzeMap result = MezzeMap.empty();
@@ -260,6 +325,35 @@ public final class SortedMapNatives {
             }
         }
         return result;
+    }
+
+    /**
+     * Sum the values, with no guest callback in the loop.
+     *
+     * <p>WHY THIS EXISTS. `FoldToSumRewriter` turns a summing fold into the
+     * collection's own `sum`, and a SortedMap had none for it to aim at — the
+     * same gap `nel` had before `nel::sum` was added. `bench/cases/collfold`
+     * at n=2e5: `sorted_map::fold` costs 13 202 ps/elem where
+     * `sorted_set::fold` costs 446, and the two are the same sorted array
+     * walked the same way. The difference is entirely the rewrite: summing the
+     * values in Java with the callback skipped measures **633 ps/elem**, so
+     * 95% of that 13 202 is the per-element guest call and 5% is the walk.
+     *
+     * <p>Only the VALUES. A key sum is a different question and
+     * `FoldToSumRewriter` refuses to rewrite a folder that reads the key.
+     */
+    public static Object sumValues(MezzeSortedMap map) {
+        long sum = 0;
+        int n = map.size();
+        for (int i = 0; i < n; i++) {
+            Object v = map.valueAt(i);
+            if (v instanceof Long l) sum += l;
+            else if (v instanceof Number num) sum += num.longValue();
+            else throw new IllegalStateException(
+                    "sorted_map::sum_values over a non-numeric value: "
+                    + (v == null ? "null" : v.getClass().getSimpleName()));
+        }
+        return sum;
     }
 
     public static Object fold(MezzeSortedMap map, Object init, MezzeFunction f,
@@ -425,8 +519,16 @@ public final class SortedMapNatives {
     public static MezzeRecord partition(MezzeSortedMap map, MezzeFunction predicate,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(predicate, "k", "v");
-        MezzeSortedMap passMap = MezzeSortedMap.empty();
-        MezzeSortedMap failMap = MezzeSortedMap.empty();
+        // BOTH HALVES INHERIT THE SOURCE'S ORDER. The key type is unchanged, so
+        // rebuilding through a bare `empty()` dropped the ordering the map was
+        // partitioned from — the failure `SortedSetNatives.slice`'s doc names
+        // for `take`/`drop`. See known-bugs.md BUG 45.
+        // `comparator()`, the EFFECTIVE one, is right here where it was wrong
+        // for the set: `MezzeSortedMap` has no instanceof fast paths, so there
+        // is no natural-order flag to preserve and nothing to forfeit.
+        var order = map.comparator();
+        MezzeSortedMap passMap = MezzeSortedMap.empty(order);
+        MezzeSortedMap failMap = MezzeSortedMap.empty(order);
         for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
             Object result = ctx.call2(callNode, entry.key(), entry.value());
             if (result instanceof Boolean && (Boolean) result) {
@@ -562,41 +664,38 @@ public final class SortedMapNatives {
         return result;
     }
 
+    /**
+     * A contiguous run of the sort order, which is every slice
+     * {@code std::collections::sorted_map} offers: {@code take}, {@code drop},
+     * {@code head_map}, {@code tail_map}, {@code range} and {@code sub_map} are
+     * each a pair of indices the GUEST computes from its own search, handed
+     * here.
+     *
+     * <p>{@code take} and {@code drop} used to rebuild their result one
+     * {@code putObject} at a time — O(n^2), with a comparator search per entry.
+     * That made them the last place a slice could reach {@code (Comparable) a}
+     * for a key the host cannot order, so a sorted map keyed by a record threw
+     * from `take` however it was reached.
+     */
     @TruffleBoundary
-    public static MezzeSortedMap take(MezzeSortedMap map, long n) {
-        var order = map.comparator();
-        MezzeSortedMap result = MezzeSortedMap.empty(order);
-        int count = 0;
-        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
-            if (count >= n) break;
-            result = result.putObject(entry.key(), entry.value());
-            count++;
-        }
-        return result;
-    }
-
-    @TruffleBoundary
-    public static MezzeSortedMap drop(MezzeSortedMap map, long n) {
-        var order = map.comparator();
-        MezzeSortedMap result = MezzeSortedMap.empty(order);
-        int count = 0;
-        for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
-            if (count >= n) {
-                result = result.putObject(entry.key(), entry.value());
-            }
-            count++;
-        }
-        return result;
+    public static MezzeSortedMap slice(MezzeSortedMap map, Object from, Object to) {
+        return map.slice((int) (long) (Long) from, (int) (long) (Long) to);
     }
 
     // ==================== Additional Higher-Order Functions ====================
 
     public static MezzeSortedMap mapKeys(MezzeSortedMap map, MezzeFunction f,
+                                         MezzeFunction cmpFn,
                                          com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        // mapKeys / invert produce keys of a DIFFERENT type, so the source map's
-        // comparator does not apply; these fall back to natural ordering and are
-        // therefore still primitive-only (tracked with the sorted-container gap).
-        java.util.Comparator<Object> order = null;
+        // ORDERED BY THE TARGET'S `Ord`, supplied by the caller. These produce
+        // keys of a DIFFERENT type, so the source map's comparator genuinely
+        // does not apply — but `null` meant natural ordering, which silently
+        // overrode a hand-written `Ord`: `map_keys` into a descending newtype
+        // gave `1, 3, 5` and a `get` that found one key of three. The comment
+        // this replaces called it "primitive-only (tracked with the
+        // sorted-container gap)"; the gap is this. `cmpFn` is null when the
+        // compiler proved the new key directly comparable.
+        java.util.Comparator<Object> order = ElementComparator.of(cmpFn);
         var ctx = ScalarCall.prepare1(f, "val");
         MezzeSortedMap result = MezzeSortedMap.empty(order);
         for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
@@ -635,11 +734,10 @@ public final class SortedMapNatives {
     }
 
     @TruffleBoundary
-    public static MezzeSortedMap invert(MezzeSortedMap map) {
-        // mapKeys / invert produce keys of a DIFFERENT type, so the source map's
-        // comparator does not apply; these fall back to natural ordering and are
-        // therefore still primitive-only (tracked with the sorted-container gap).
-        java.util.Comparator<Object> order = null;
+    /** See {@link #mapKeys}: the new keys are the old VALUES, so the order is
+     *  theirs and comes from the caller. */
+    public static MezzeSortedMap invert(MezzeSortedMap map, MezzeFunction cmpFn) {
+        java.util.Comparator<Object> order = ElementComparator.of(cmpFn);
         MezzeSortedMap result = MezzeSortedMap.empty(order);
         for (MezzeSortedMap.RawEntry entry : (Iterable<MezzeSortedMap.RawEntry>) map.rawEntries()) {
             result = result.putObject(entry.value(), entry.key());

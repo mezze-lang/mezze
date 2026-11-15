@@ -1,0 +1,36 @@
+## DOES A CLOSURE CALL RESPECT FIELD ORDER?
+##
+## `CallIndirectScalar2`'s fast bypass specialisations call
+## `callNode.call(arg1, arg2)` POSITIONALLY and ignore the `fieldNames` operand
+## they are handed. Lowering passes the arguments in the order the record was
+## WRITTEN (`argIR.fields.map { it.value }`), and carries the names precisely
+## because that order need not match the callee's parameter order.
+##
+## If both halves are as they read, then calling a 2-param closure with its
+## fields written in the opposite order passes the arguments swapped. For a
+## non-commutative operation that is a silent wrong answer.
+##
+## `sub_tc` subtracts by counting down, so it is tail-recursive and therefore
+## TRAMPOLINED — which is the only shape `canBypassTarget` accepts today, so
+## this exercises the fast path rather than the record fallback.
+##
+##   sub_tc { a = 10, b = 3 } = 7      (fields in declaration order)
+##   sub_tc { b = 3, a = 10 } = 7      (same call, fields written swapped)
+##
+## Anything other than 7 7 from the two lines below is an argument-order bug.
+use std::effects::log::{ println, Console }
+use std::int
+
+let sub_tc = { a, b } ->
+  if b <= 0 then a
+  else sub_tc { a = a - 1, b = b - 1 }
+
+## Called through a closure parameter, so the call site is an indirect scalar
+## call rather than a direct one.
+let apply_in_order = { f } -> f { a = 10, b = 3 }
+let apply_swapped = { f } -> f { b = 3, a = 10 }
+
+pub let main = {} -> perform Console in do
+  println { msg = "in-order: $(int::to_str { n = apply_in_order { f = sub_tc } })" }
+  println { msg = "swapped : $(int::to_str { n = apply_swapped { f = sub_tc } })" }
+  println { msg = "direct  : $(int::to_str { n = sub_tc { b = 3, a = 10 } })" }

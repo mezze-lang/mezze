@@ -35,6 +35,13 @@ object NativeBootstrap {
             NatOps.MARKER
             CharOps.MARKER
             StringOps.MARKER
+            MapOps.MARKER
+            SeqOps.MARKER
+            ListOps.MARKER
+            SetOps.MARKER
+            BytesOps.MARKER
+            DequeOps.MARKER
+            MutOps.MARKER
         }
     }
 }

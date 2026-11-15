@@ -3,6 +3,8 @@ use std::effects::log::{println, Console}
 use std::effects::time::{Time, SystemTime, monotonic}
 use std::datetime::{duration_to_nanos, sub_duration}
 use std::collections::iter
+use std::effects::args::{ SystemArgs, argv }
+use std::int
 use std::collections::seq
 
 let n = 10000000
@@ -50,6 +52,116 @@ let bench_all = {} ->
     match iter::all { it = iter::range { start = 0, end = n }, p = {x} -> x < 9999990 } is
         True -> 1
         False -> 0
+
+## STAGES THE CANONICALIZER DOES NOT KNOW. `enumerate` is here as the
+## control of the group: its name IS referenced, so if it fuses and the other
+## three do not, the difference is the vocabulary and not the shape of the row.
+let bench_flat_map = {} -> do
+    let tenth = n / 10
+    iter::fold {
+        it = iter::flat_map {
+            it = iter::range { start = 0, end = tenth },
+            f = {x} -> iter::range { start = x, end = x + 10 },
+        },
+        init = 0,
+        f = {acc, x} -> acc + x,
+    }
+
+let bench_zip = {} ->
+    iter::fold {
+        it = iter::zip {
+            a = iter::range { start = 0, end = n },
+            b = iter::range { start = 0, end = n },
+        },
+        init = 0,
+        f = {acc, x} -> acc + x.fst,
+    }
+
+let bench_chain = {} -> do
+    let half = n / 2
+    iter::fold {
+        it = iter::chain {
+            a = iter::range { start = 0, end = half },
+            b = iter::range { start = half, end = n },
+        },
+        init = 0,
+        f = {acc, x} -> acc + x,
+    }
+
+let bench_enumerate = {} ->
+    iter::fold {
+        it = iter::enumerate { it = iter::range { start = 0, end = n } },
+        init = 0,
+        f = {acc, x} -> acc + x.val,
+    }
+
+## THE SAME `enumerate`, READING THE OTHER FIELD. The peel rewrites `x.i` to a
+## counter; this row reads `.i` and the row above reads `.val`, so the pair says
+## whether the stage fuses for one field of its own output and not the other.
+let bench_enumerate_i = {} ->
+    iter::fold {
+        it = iter::enumerate { it = iter::range { start = 0, end = n } },
+        init = 0,
+        f = {acc, x} -> acc + x.i,
+    }
+
+## ENUMERATE CONSUMED BY A STAGE rather than by the sink. The peel's own note
+## says the emitter resolves a downstream `x.val` to the element and `x.i` to
+## the counter — this row puts a `map` between the enumerate and the fold so
+## the record is consumed by a STAGE, and the two rows above have the SINK's
+## folder consume it. If this one fuses and those do not, the gap is which
+## lambda is allowed to read the record.
+let bench_enumerate_map = {} ->
+    iter::fold {
+        it = iter::map {
+            it = iter::enumerate { it = iter::range { start = 0, end = n } },
+            f = {x} -> x.val + x.i,
+        },
+        init = 0,
+        f = {acc, x} -> acc + x,
+    }
+
+## IS IT THE RECORD STAGES, OR IS IT THE FOLDER? `isFoldBodyEmittable` accepts
+## arithmetic over the two params, dict dispatch and a two-param native — a
+## FIELD READ on the element is not in that grammar, and the file's own comment
+## says a refused folder declines the WHOLE chain. These two rows use no zip and
+## no enumerate: both map a range to a one-field record, and they differ only in
+## WHERE the field is read — in the folder, or in a map stage with a bare
+## `acc + x` folder.
+let bench_rec_fold_field = {} ->
+    iter::fold {
+        it = iter::map { it = iter::range { start = 0, end = n }, f = {x} -> { v = x } },
+        init = 0,
+        f = {acc, x} -> acc + x.v,
+    }
+
+let bench_rec_fold_bare = {} ->
+    iter::fold {
+        it = iter::map {
+            it = iter::map { it = iter::range { start = 0, end = n }, f = {x} -> { v = x } },
+            f = {x} -> x.v,
+        },
+        init = 0,
+        f = {acc, x} -> acc + x,
+    }
+
+## HOW MUCH IS A MAP LAMBDA THE CLASSIFIER CANNOT READ? `classifyUnaryLiteralLambda`
+## handles `x <op> rhs` — one operation. A two-operation lambda is not that
+## shape, so the stage becomes a `MapCall` and the loop calls it per element.
+## These two rows differ only in the number of operations in the mapper.
+let bench_map_one_op = {} ->
+    iter::fold {
+        it = iter::map { it = iter::range { start = 0, end = n }, f = {x} -> x * 2 },
+        init = 0,
+        f = {acc, x} -> acc + x,
+    }
+
+let bench_map_two_ops = {} ->
+    iter::fold {
+        it = iter::map { it = iter::range { start = 0, end = n }, f = {x} -> x * 2 + 1 },
+        init = 0,
+        f = {acc, x} -> acc + x,
+    }
 
 let bench_reduce = {} ->
     match iter::reduce { it = iter::range { start = 1, end = n }, f = {acc, x} -> acc + x } is
@@ -112,20 +224,43 @@ let time_it = {label: Str, f: {} -> Int} -> perform Console in perform SystemTim
     let avg_ms = avg / 1000000
     println { msg = "$(label): avg=$(avg_ms.to_str{})ms  [$(e0.to_str{}) $(e1.to_str{}) $(e2.to_str{}) $(e3.to_str{}) $(e4.to_str{})]ns" }
 
-let main = {} -> perform Console in perform SystemTime in do
+## `bench_iter_perf_compare [row]` — no argument, or 0, runs every row as
+## before. Any other number runs ONLY that row, which is how a row should be
+## measured against another build: see the note on this file's row selector in
+## PERF-LOG, where three rows moved 0.85x purely from running after a row whose
+## cost had changed.
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+    let k = arg_at { args = argv {}, i = 0, def = 0 }
+    let one = { i, label, f } -> if k == 0 || k == i then time_it { label = label, f = f } else {}
     println { msg = "== Mezze Iter Fusion Perf N=$(n.to_str{}) ==" }
-    let _1 = time_it { label = "sum(0..10M)           ", f = bench_sum }
-    let _2 = time_it { label = "filter+fold(0..10M)   ", f = bench_filter_fold }
-    let _3 = time_it { label = "filter+map+fold(0..10M)", f = bench_filter_map_fold }
-    let _4 = time_it { label = "count(0..10M)         ", f = bench_count }
-    let _5 = time_it { label = "filter+to_seq(0..10M) ", f = bench_to_seq }
-    let _6 = time_it { label = "find(0..10M)          ", f = bench_find }
-    let _7 = time_it { label = "any(0..10M)           ", f = bench_any }
-    let _8 = time_it { label = "all(0..10M)           ", f = bench_all }
-    let _9 = time_it { label = "reduce(0..10M)        ", f = bench_reduce }
+    let _1 = one { i = 1, label = "sum(0..10M)           ", f = bench_sum }
+    let _2 = one { i = 2, label = "filter+fold(0..10M)   ", f = bench_filter_fold }
+    let _3 = one { i = 3, label = "filter+map+fold(0..10M)", f = bench_filter_map_fold }
+    let _4 = one { i = 4, label = "count(0..10M)         ", f = bench_count }
+    let _5 = one { i = 5, label = "filter+to_seq(0..10M) ", f = bench_to_seq }
+    let _6 = one { i = 6, label = "find(0..10M)          ", f = bench_find }
+    let _7 = one { i = 7, label = "any(0..10M)           ", f = bench_any }
+    let _8 = one { i = 8, label = "all(0..10M)           ", f = bench_all }
+    let _9 = one { i = 9, label = "reduce(0..10M)        ", f = bench_reduce }
+    let _10 = one { i = 10, label = "flat_map+fold(1M x 10)", f = bench_flat_map }
+    let _11 = one { i = 11, label = "zip+fold(0..10M)      ", f = bench_zip }
+    let _12 = one { i = 12, label = "chain+fold(0..10M)    ", f = bench_chain }
+    let _13 = one { i = 13, label = "enumerate+fold(0..10M)", f = bench_enumerate }
+    let _14 = one { i = 14, label = "enumerate .i+fold     ", f = bench_enumerate_i }
+    let _15 = one { i = 15, label = "enumerate+map+fold    ", f = bench_enumerate_map }
+    let _16 = one { i = 16, label = "record, field in FOLDER", f = bench_rec_fold_field }
+    let _17 = one { i = 17, label = "record, field in MAP   ", f = bench_rec_fold_bare }
     println { msg = "-- seq --" }
-    let _10 = time_it { label = "seq_sum(0..10M)       ", f = bench_seq_sum }
-    let _11 = time_it { label = "seq_fold(+)(0..10M)   ", f = bench_seq_fold }
-    let _12 = time_it { label = "seq_filter+fold(0..10M)", f = bench_seq_filter_fold }
-    let _13 = time_it { label = "seq_map+fold(0..10M)  ", f = bench_seq_map_fold }
+    let _18 = one { i = 18, label = "seq_sum(0..10M)       ", f = bench_seq_sum }
+    let _19 = one { i = 19, label = "seq_fold(+)(0..10M)   ", f = bench_seq_fold }
+    let _20 = one { i = 20, label = "seq_filter+fold(0..10M)", f = bench_seq_filter_fold }
+    let _21 = one { i = 21, label = "seq_map+fold(0..10M)  ", f = bench_seq_map_fold }
+    let _22 = one { i = 22, label = "map 1 op + fold       ", f = bench_map_one_op }
+    let _23 = one { i = 23, label = "map 2 ops + fold      ", f = bench_map_two_ops }
     println { msg = "== done ==" }

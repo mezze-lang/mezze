@@ -27,8 +27,31 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
     @CompilationFinal
     private final SeqStorage storage;
 
+    /**
+     * The element count, read ONCE at construction.
+     *
+     * <p>WHY A FIELD AND NOT A DELEGATION. `size` is the most-called operation
+     * any collection has, and `storage.size()` is an interface call over
+     * Long/Double/Boolean/Object storages that is MEGAMORPHIC process-wide, so
+     * it does not devirtualise however monomorphic a given call site is.
+     * MEASURED on `bench/cases/allocsurface`: with a dedicated operation on
+     * both, `bytes::size` is 630 ps and `seq::size` 2 217 — and the only
+     * difference between them is that `MezzeBytes.length()` reads a final
+     * `byte[]`'s length while this went through the interface.
+     *
+     * <p>SOUND BECAUSE NOTHING HERE EVER CHANGES SIZE. This class is `final`
+     * with ONE private constructor, `storage` is `final`, and every storage's
+     * own length is `final` too — an append returns a NEW `MezzeSeq` over a new
+     * storage rather than growing one in place, which is what BUG 38 made
+     * structural throughout. A storage whose length could move would make this
+     * wrong rather than slow, so it is written down here.
+     */
+    @CompilationFinal
+    private final int size;
+
     private MezzeSeq(SeqStorage storage) {
         this.storage = storage;
+        this.size = storage.size();
     }
 
     // ===== CONSTRUCTION =====
@@ -153,7 +176,7 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
      * Returns the number of elements.
      */
     public int size() {
-        return storage.size();
+        return size;
     }
 
     /**
@@ -175,6 +198,51 @@ public final class MezzeSeq<A> implements TruffleObject, Iterable<A> {
      */
     @SuppressWarnings("unchecked")
     public A get(int index) {
+        // NAMING THE STORAGE TYPE IS WORTH 1.21x, BUT ONLY TOGETHER WITH
+        // REMOVING `InlineSeqGetRaw`'s BOUNDARY. Either one alone does nothing
+        // or harm, which is why the 2x2 had to be finished rather than stopped
+        // at the first null:
+        //
+        //   boundary   MezzeSeq.get     seq::get
+        //     kept     delegating       3 561 ps   baseline
+        //     kept     concrete         3 550      null
+        //     REMOVED  delegating       4 781      0.78x WORSE
+        //     REMOVED  concrete         2 949      1.21x
+        //
+        // THE PAIR IS THE POINT. Without the boundary gone this runs where
+        // HotSpot compiles it, and its inline cache already handled a site
+        // monomorphic within any one compiled method — so naming the type buys
+        // nothing. With the boundary gone but the call still an interface call,
+        // partial evaluation inlines a four-implementation megamorphic call and
+        // the caller's graph grows for a read that did not get cheaper — hence
+        // 0.78x. Removing BOTH leaves one concrete array read to inline, which
+        // is the shape `bytes::get` always had and why that one was 1.44x on
+        // the boundary alone.
+        //
+        // Measured n=2e7 and n=1e7, min of 8 per arm, interleaved, both arms
+        // built by the dev launcher with the extracted classes confirmed to
+        // differ. `seq::get` 1.21x and 1.18x across the two sizes; the
+        // materialised twin (a seq LITERAL rather than a lazy range) 1.18x and
+        // 1.11x, which is the second independent row. Controls at the quieter
+        // size: counted loop 1.00x, `bytes::get` 0.99x, `seq::size` 0.94x.
+        //
+        // AND THE GAIN IS MODEST AGAINST THE NOISE — at n=2e7 `bytes::get`, a
+        // row nothing here touches, moved 1.10x on its own, because it is
+        // BIMODAL across runs (~1 200 or ~2 200 ps, a compilation lottery).
+        // Min-of-8 and the second size are what make 1.2x readable; three reps
+        // showed the same target with a 1.80x control and said nothing.
+        if (storage instanceof LongSeqStorage l) {
+            return (A) (Long) l.getLong(index);
+        }
+        if (storage instanceof ObjectSeqStorage o) {
+            return (A) o.get(index);
+        }
+        if (storage instanceof DoubleSeqStorage d) {
+            return (A) (Double) d.getDouble(index);
+        }
+        if (storage instanceof BooleanSeqStorage b) {
+            return (A) (Boolean) b.getBoolean(index);
+        }
         return (A) storage.get(index);
     }
 

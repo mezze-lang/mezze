@@ -1,0 +1,12 @@
+[package]
+name = "capthresh"
+version = "0.1.0"
+
+[[app]]
+name = "capthresh"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

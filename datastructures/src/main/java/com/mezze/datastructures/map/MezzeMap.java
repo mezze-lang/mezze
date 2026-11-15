@@ -29,8 +29,12 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     @CompilationFinal
     private final MapStorage storage;
 
+    /** Retest: with the native dispatch gone, does the interface call matter? */
+    private final int cachedSize;
+
     private MezzeMap(MapStorage storage) {
         this.storage = storage;
+        this.cachedSize = storage.size();
     }
 
     /**
@@ -87,6 +91,69 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     }
 
     /**
+     * BUILDS A MAP FROM ENTRIES ALREADY IN HAND, in one pass.
+     *
+     * <p>WHY. Every path that rebuilds a whole map — `filter`, `map_values`,
+     * `filter_keys`, `filter_values` — used to write `result = result.put(k, v)`
+     * per entry, and so did `TrieMapStorage.fromMap`, whose comment calls
+     * itself a one-pass build while doing exactly those N persistent puts. A
+     * persistent put allocates a node at every level of the path it touches,
+     * which is what an update wants and what a rebuild discards on the next
+     * entry. MEASURED: 1 000 puts cost 76.3 ns an entry where a
+     * `java.util.HashMap` of the same keys costs 10.4.
+     *
+     * <p>THE STRATEGY LADDER IS PRESERVED, which is the whole reason this lives
+     * on `MezzeMap` and not on a storage. A map's storage is chosen by size and
+     * by key type — {@link SingleEntryMapStorage}, then
+     * {@link SmallFlatMapStorage} to {@link SmallFlatMapStorage#MAX_SIZE},
+     * then the LONG-KEYED trie when every key is a {@code Long} and the general
+     * trie otherwise. A builder that always made a general trie would be faster
+     * than one path and slower than another, so this picks the same tier the
+     * ladder would and only uses a builder where the ladder ends up in a trie.
+     * Below the flat storage's maximum it puts one at a time, because at eight
+     * entries the flat storage is the faster answer anyway.
+     *
+     * <p>Duplicate keys are allowed: a later entry replaces an earlier one, so
+     * the result has the same contents repeated puts would give. {@code count}
+     * says how much of the arrays to read, so a caller that filtered may pass
+     * arrays sized for the input.
+     */
+    @TruffleBoundary
+    @SuppressWarnings("unchecked")
+    public static <K, V> MezzeMap<K, V> fromEntries(Object[] keys, Object[] values, int count) {
+        if (count <= 0) {
+            return empty();
+        }
+        if (count <= SmallFlatMapStorage.MAX_SIZE) {
+            MapStorage out = EmptyMapStorage.INSTANCE;
+            for (int i = 0; i < count; i++) {
+                out = out.put(keys[i], values[i]);
+            }
+            return new MezzeMap<>(out);
+        }
+        if (allLongKeys(keys, count)) {
+            var b = new LongTrieMapStorage.Builder();
+            for (int i = 0; i < count; i++) {
+                b.put((Long) keys[i], values[i]);
+            }
+            return new MezzeMap<>(b.build());
+        }
+        var b = new TrieMapStorage.Builder();
+        for (int i = 0; i < count; i++) {
+            b.put(keys[i], values[i]);
+        }
+        return new MezzeMap<>(b.build());
+    }
+
+    /** The flat storage's own condition for promoting to the long-keyed trie. */
+    private static boolean allLongKeys(Object[] keys, int count) {
+        for (int i = 0; i < count; i++) {
+            if (!(keys[i] instanceof Long)) return false;
+        }
+        return true;
+    }
+
+    /**
      * Creates from an existing storage.
      */
     /** The storage strategy backing this map. Callers use it to ask whether the map
@@ -106,7 +173,7 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
      * Returns the number of entries.
      */
     public int size() {
-        return storage.size();
+        return cachedSize;
     }
 
     /**
@@ -125,6 +192,36 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
 
     /**
      * Gets the value for a key, or null if not present.
+     *
+     * <p>A CONCRETE-RECEIVER PROBE WAS TRIED HERE AND NOT DEMONSTRATED, which
+     * is worth recording because the identical move is 1.33x on
+     * {@code MezzeSet.containsDirect} and was 1.21x on `seq::get` and 4.19x on
+     * `list::get`. A CPU profile of the one-entry probe put 118 of ~130
+     * steady-state samples in `MapNatives.containsKey` — a `@TruffleBoundary` —
+     * and `InlineMapContainsKey.doMap`, so the boundary looked like the whole
+     * cost. Removing it with the storage receiver named:
+     *
+     * <pre>
+     *   row            n=2e7 (8 reps)   n=1e7 (14 reps)
+     *     map has          1.29x             1.13x
+     *     map get          1.08x             1.01x
+     *     set has          1.34x             1.33x   <- shipped
+     *     controls      0.92-1.01x        0.99-1.09x
+     * </pre>
+     *
+     * `map has` does not converge and 1.13x sits on the control ceiling;
+     * `map::get` is null. So the map half is NOT here, while the set half is —
+     * an unproven type test is exactly what cost 10% on the one-element
+     * storages.
+     *
+     * <p>AND THE WIDE VERSION OF IT IS A DISASTER. Naming SIX storage
+     * implementations rather than one measured **0.02x** — 40-48x WORSE on all
+     * three rows at once, checksums still correct. Each branch is a whole
+     * hash-map probe, one an `@ExplodeLoop` 8-way scan and another a general
+     * HAMT walk, so partial evaluation inlined six map implementations into the
+     * caller. The chain pays when each branch is a CONSTANT number of field
+     * reads — one array load on seq, one field read on list — and not
+     * otherwise.
      */
     @SuppressWarnings("unchecked")
     public V get(K key) {
@@ -148,11 +245,19 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
 
     /**
      * Unboxed get for long keys.
+     *
+     * <p>Both long-keyed storages are covered. The trie was added to this
+     * check when it replaced the open-addressed table: without it the method
+     * boxed on every Long-keyed map above SmallFlat, which is the size at
+     * which it matters and the opposite of what the name says.
      */
     @SuppressWarnings("unchecked")
     public V getLong(long key) {
         if (storage instanceof LongKeyMapStorage longStorage) {
             return (V) longStorage.getLong(key);
+        }
+        if (storage instanceof LongTrieMapStorage trie) {
+            return (V) trie.getLong(key);
         }
         return get((K) Long.valueOf(key));
     }
@@ -177,42 +282,78 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
 
     /**
      * Returns a new map with all entries from other map added.
-     * Optimized: uses mutable builder for batch operations.
+     *
+     * <p>Both sides' entries go to {@link #fromEntries}, which builds the trie
+     * in place. This used to fill a {@code java.util.HashMap} and then put its
+     * entries into a trie ONE AT A TIME — the detour cost an extra hash table
+     * and still paid a persistent put per entry, and it also forced a general
+     * trie, so merging two long-keyed maps silently gave up the unboxed
+     * storage every later lookup would have used.
      */
+    @SuppressWarnings("unchecked")
     public MezzeMap<K, V> putAll(MezzeMap<K, V> other) {
         if (other.isEmpty()) return this;
         if (isEmpty()) return other;
 
-        // Use mutable HashMap for bulk insert, then convert back
-        java.util.HashMap<K, V> mutable = new java.util.HashMap<>(size() + other.size());
-
-        // Add all from this
-        for (Entry<K, V> entry : this) {
-            mutable.put(entry.key, entry.value);
+        // THE TRIE MERGES STRUCTURALLY instead of rebuilding. The four arrays
+        // below hash every key again and discard both input tries; a
+        // thousand-key `map::merge` was the most expensive row measured at
+        // 38 549 ps/element. `LongTrieMapStorage.mergeWith` shares every
+        // subtree only one side has and hashes nothing — its set twin,
+        // `LongTrieSetStorage.unionWith`, measured 3.6x on the same shape once
+        // the rebuild was found to be 72-84% of the work.
+        //
+        // OTHER'S VALUES WIN, which is what this method means, and the merge is
+        // asymmetric for that reason — see `mergeWith`.
+        if (storage instanceof LongTrieMapStorage lt
+                && other.storage instanceof LongTrieMapStorage otherLt) {
+            return new MezzeMap<>(LongTrieMapStorage.mergeWith(lt, otherLt));
         }
-        // Add all from other (overwrites duplicates)
-        for (Entry<K, V> entry : other) {
-            mutable.put(entry.key, entry.value);
-        }
 
-        // Convert back to immutable
-        return fromMutableMap(mutable);
+        // THE FOUR ARRAYS STAY HERE, and that is a measurement, not an
+        // oversight. Everywhere else in this family, replacing `keys()` and
+        // `values()` with a `storage.forEach` walk paid — 1.33x on
+        // `map::count`, 1.23x and 1.24x on the set's intersection and
+        // difference. Here it measured 1.01x on `map::merge` and 0.99x on
+        // `set::union`, because this shape COPIES both sides into the output
+        // wholesale: `System.arraycopy` moves them in bulk, and a per-element
+        // consumer walk gives that up to save the allocation. The two cancel.
+        Object[] mine = keys();
+        Object[] mineV = values();
+        Object[] theirs = other.keys();
+        Object[] theirsV = other.values();
+
+        Object[] outK = new Object[mine.length + theirs.length];
+        Object[] outV = new Object[mine.length + theirs.length];
+        System.arraycopy(mine, 0, outK, 0, mine.length);
+        System.arraycopy(mineV, 0, outV, 0, mine.length);
+        // `other` goes in second, so a shared key keeps ITS value.
+        System.arraycopy(theirs, 0, outK, mine.length, theirs.length);
+        System.arraycopy(theirsV, 0, outV, mine.length, theirs.length);
+
+        // BUCKETED BY WHOSE EQUALITY. `fromEntries` buckets STRUCTURALLY, so
+        // two keys a hand-written `Eq` calls one key stayed apart and
+        // `map::merge` answered 4 where 3 was right — the same defect, in the
+        // same shape, as the set's `addAll`, which this method's comment
+        // already pointed at for its measurement.
+        //
+        // It hid the same way too: `get` takes its evidence from the CALL
+        // SITE, so the merged map still answered correctly for a
+        // differently-spelled key and only the SIZE gave it away.
+        com.mezze.datastructures.set.ElementHashing hashing = hashingOf(this);
+        if (hashing == null) hashing = hashingOf(other);
+        if (hashing != null) {
+            // `other` is still second in the arrays, so a shared key keeps ITS
+            // value exactly as it does structurally.
+            return fromStorage(EvidenceMapStorage.fromEntries(outK, outV, hashing));
+        }
+        return (MezzeMap<K, V>) fromEntries(outK, outV, outK.length);
     }
 
-    /**
-     * Creates a MezzeMap from a mutable HashMap (internal use).
-     * Optimized: builds HashMapStorage directly instead of adding one by one.
-     */
-    @SuppressWarnings("unchecked")
-    private static <K, V> MezzeMap<K, V> fromMutableMap(java.util.HashMap<K, V> mutable) {
-        if (mutable.isEmpty()) return empty();
-        if (mutable.size() == 1) {
-            var entry = mutable.entrySet().iterator().next();
-            return of(entry.getKey(), entry.getValue());
-        }
-
-        // Build HashMapStorage directly from map (O(n) vs O(n^2))
-        return new MezzeMap<>(HashMapStorage.fromMap(mutable));
+    /** The key instance this map buckets by, or null when it buckets
+     *  structurally. */
+    private static com.mezze.datastructures.set.ElementHashing hashingOf(MezzeMap<?, ?> m) {
+        return m.storage instanceof EvidenceMapStorage es ? es.hashing() : null;
     }
 
     /**
@@ -240,88 +381,99 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
      * Maps over entries.
      */
     @TruffleBoundary
+    @SuppressWarnings("unchecked")
     public <K2, V2> MezzeMap<K2, V2> map(BiFunction<K, V, Entry<K2, V2>> fn) {
         if (isEmpty()) return empty();
 
-        MezzeMap<K2, V2> result = empty();
-        for (Entry<K, V> entry : this) {
-            Entry<K2, V2> mapped = fn.apply(entry.key, entry.value);
-            result = result.put(mapped.key, mapped.value);
-        }
-        return result;
+        int size = size();
+        Object[] outK = new Object[size];
+        Object[] outV = new Object[size];
+        int[] n = {0};
+        storage.forEach((k, v) -> {
+            Entry<K2, V2> mapped = fn.apply((K) k, (V) v);
+            outK[n[0]] = mapped.key;
+            outV[n[0]] = mapped.value;
+            n[0]++;
+        });
+        // Two entries may map to one key: the later wins, as the puts did.
+        return (MezzeMap<K2, V2>) fromEntries(outK, outV, size);
     }
 
     /**
      * Maps over keys.
      */
     @TruffleBoundary
+    @SuppressWarnings("unchecked")
     public <K2> MezzeMap<K2, V> mapKeys(Function<K, K2> fn) {
         if (isEmpty()) return empty();
 
-        MezzeMap<K2, V> result = empty();
-        for (Entry<K, V> entry : this) {
-            result = result.put(fn.apply(entry.key), entry.value);
-        }
-        return result;
+        int size = size();
+        Object[] outK = new Object[size];
+        Object[] outV = new Object[size];
+        int[] n = {0};
+        storage.forEach((k, v) -> {
+            outK[n[0]] = fn.apply((K) k);
+            outV[n[0]] = v;
+            n[0]++;
+        });
+        // Two keys may map to one: the later wins, as the puts did.
+        return (MezzeMap<K2, V>) fromEntries(outK, outV, size);
     }
 
     /**
      * Maps over values.
-     * Optimized: uses mutable builder for batch operations.
+     *
+     * <p>The keys are unchanged, so only the values are rebuilt — and now that
+     * is what happens. This said exactly the same thing while calling
+     * {@link #fromEntries}, which pushes every key back through a builder and
+     * hashes it again; the claim was true of the intent and false of the code.
+     * {@link MapStorage#withValues} shares the key storage by reference and
+     * copies only what holds values, so no key is hashed and none is compared.
+     *
+     * <p>29 302 ps/element for the rebuild against 10 925 for the structure
+     * copy, measured on 1000 string keys — and that ratio is a lower bound,
+     * because the copy was measured through reflection.
+     *
+     * <p>(The {@code LinkedHashMap} this once filled "to preserve insertion
+     * order" preserved nothing — a trie has no insertion order — and then put
+     * its entries in one at a time anyway.)
      */
     @TruffleBoundary
+    @SuppressWarnings("unchecked")
     public <V2> MezzeMap<K, V2> mapValues(Function<V, V2> fn) {
         if (isEmpty()) return empty();
 
-        // Use mutable LinkedHashMap to preserve insertion order
-        java.util.LinkedHashMap<K, V2> mutable = new java.util.LinkedHashMap<>(size());
-        for (Entry<K, V> entry : this) {
-            mutable.put(entry.key, fn.apply(entry.value));
-        }
-
-        return fromMutableLinkedMap(mutable);
-    }
-
-    /**
-     * Creates a MezzeMap from a mutable LinkedHashMap (internal use).
-     * Optimized: builds HashMapStorage directly instead of adding one by one.
-     */
-    @SuppressWarnings("unchecked")
-    private static <K, V> MezzeMap<K, V> fromMutableLinkedMap(java.util.LinkedHashMap<K, V> mutable) {
-        if (mutable.isEmpty()) return empty();
-        if (mutable.size() == 1) {
-            var entry = mutable.entrySet().iterator().next();
-            return of(entry.getKey(), entry.getValue());
-        }
-
-        // Build HashMapStorage directly from map (O(n) vs O(n^2))
-        return new MezzeMap<>(HashMapStorage.fromMap(mutable));
+        Object[] vs = storage.values();
+        Object[] outV = new Object[vs.length];
+        for (int i = 0; i < vs.length; i++) outV[i] = fn.apply((V) vs[i]);
+        return (MezzeMap<K, V2>) new MezzeMap<>(storage.withValues(outV));
     }
 
     /**
      * Filters entries by predicate.
-     * Optimized: uses mutable builder for batch operations.
+     *
+     * <p>Keeping everything still returns {@code this}: an immutable map that
+     * would be rebuilt entry for entry is already the answer.
      */
     @TruffleBoundary
+    @SuppressWarnings("unchecked")
     public MezzeMap<K, V> filter(BiPredicate<K, V> p) {
         if (isEmpty()) return this;
 
-        // Use mutable LinkedHashMap to preserve order
-        java.util.LinkedHashMap<K, V> mutable = new java.util.LinkedHashMap<>();
-        boolean allMatch = true;
-
-        for (Entry<K, V> entry : this) {
-            if (p.test(entry.key, entry.value)) {
-                mutable.put(entry.key, entry.value);
-            } else {
-                allMatch = false;
+        int size = size();
+        Object[] outK = new Object[size];
+        Object[] outV = new Object[size];
+        int[] n = {0};
+        storage.forEach((k, v) -> {
+            if (p.test((K) k, (V) v)) {
+                outK[n[0]] = k;
+                outV[n[0]] = v;
+                n[0]++;
             }
-        }
+        });
+        if (n[0] == size) return this;
 
-        // If all entries matched, return this (no change)
-        if (allMatch) return this;
-
-        return fromMutableLinkedMap(mutable);
+        return (MezzeMap<K, V>) fromEntries(outK, outV, n[0]);
     }
 
     /**
@@ -375,6 +527,23 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
     @SuppressWarnings("unchecked")
     public V[] values() {
         return (V[]) storage.values();
+    }
+
+    /**
+     * THIS MAP WITH NEW VALUES, sharing every key.
+     *
+     * <p>For a caller that has already mapped {@link #values()} and so does not
+     * want {@link #mapValues}'s callback — the natives, which run the guest
+     * callback in their own frame rather than behind this class's
+     * {@code @TruffleBoundary}.
+     *
+     * <p>{@code newValues} is in {@link #values()} order and must have
+     * {@link #size()} elements. See {@link MapStorage#withValues}.
+     */
+    @SuppressWarnings("unchecked")
+    public <V2> MezzeMap<K, V2> withValues(Object[] newValues) {
+        if (isEmpty()) return empty();
+        return (MezzeMap<K, V2>) new MezzeMap<>(storage.withValues(newValues));
     }
 
     /**
@@ -445,6 +614,26 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
      * Applies function to each entry for side effects.
      */
     @TruffleBoundary
+    /**
+     * ONE WALK, NO ARRAYS, for the whole-map operations.
+     *
+     * <p>MEASURED on a 1 000-entry long-keyed map: taking {@code keys()} and
+     * {@code values()} and indexing them in step costs 7.16 ns an entry, the
+     * {@code Entry} iterator it replaced 7.25, and this 1.97 — 3.6x, because
+     * neither of the others is the walk, they are the two n-element arrays and
+     * the trie walked twice to fill them. 2.56x for String keys, 3.54x at
+     * n=4 000.
+     */
+    @SuppressWarnings("unchecked")
+    public void walkEntries(java.util.function.BiConsumer<Object, Object> fn) {
+        storage.forEach(fn);
+    }
+
+    /** {@link #walkEntries} that stops, for `any`, `all`, `none` and `find`. */
+    public boolean walkEntriesUntil(java.util.function.BiPredicate<Object, Object> p) {
+        return storage.forEachUntil(p);
+    }
+
     public void foreach(java.util.function.BiConsumer<K, V> fn) {
         for (Entry<K, V> entry : this) {
             fn.accept(entry.key, entry.value);
@@ -458,11 +647,15 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
      */
     @SuppressWarnings("unchecked")
     public static <K, V> MezzeMap<K, V> fromJavaMap(java.util.Map<K, V> map) {
-        MezzeMap<K, V> result = empty();
+        Object[] outK = new Object[map.size()];
+        Object[] outV = new Object[map.size()];
+        int n = 0;
         for (java.util.Map.Entry<K, V> entry : map.entrySet()) {
-            result = result.put(entry.getKey(), entry.getValue());
+            outK[n] = entry.getKey();
+            outV[n] = entry.getValue();
+            n++;
         }
-        return result;
+        return (MezzeMap<K, V>) fromEntries(outK, outV, n);
     }
 
     /**
@@ -474,78 +667,6 @@ public final class MezzeMap<K, V> implements TruffleObject, Iterable<MezzeMap.En
             result.put(entry.key, entry.value);
         }
         return result;
-    }
-
-    // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
-
-    /**
-     * Creates a mutable copy of this map.
-     * Used by to_mut to get a fresh copy that can be mutated.
-     */
-    public MezzeMap<K, V> copyToMutable() {
-        if (storage instanceof HashMapStorage hashStorage) {
-            return new MezzeMap<>(hashStorage.copyToMutable());
-        }
-        // For other storage types, convert to HashMap first
-        return new MezzeMap<>(HashMapStorage.fromMap(toJavaMap()).copyToMutable());
-    }
-
-    /**
-     * Creates a mutable map with given initial capacity.
-     * Use this when you know the approximate final size.
-     */
-    public static <K, V> MezzeMap<K, V> mutableWithCapacity(int capacity) {
-        // Pre-create a HashMapStorage with enough room
-        java.util.HashMap<Object, Object> temp = new java.util.HashMap<>(capacity);
-        return new MezzeMap<>(HashMapStorage.fromMap(temp).copyToMutable());
-    }
-
-    /**
-     * In-place put - mutates the underlying storage.
-     * Only safe within LocalMut context.
-     * Returns true if key was new, false if updated.
-     */
-    public boolean mutPut(K key, V value) {
-        if (storage instanceof HashMapStorage hashStorage) {
-            return hashStorage.mutPut(key, value);
-        }
-        throw new UnsupportedOperationException("mutPut requires HashMapStorage - use copyToMutable() first");
-    }
-
-    /**
-     * In-place remove - mutates the underlying storage.
-     * Only safe within LocalMut context.
-     * Returns true if key was found and removed.
-     */
-    public boolean mutRemove(K key) {
-        if (storage instanceof HashMapStorage hashStorage) {
-            return hashStorage.mutRemove(key);
-        }
-        throw new UnsupportedOperationException("mutRemove requires HashMapStorage - use copyToMutable() first");
-    }
-
-    /**
-     * In-place update - mutates the underlying storage.
-     * Only safe within LocalMut context.
-     * Returns true if key was found and updated.
-     */
-    public boolean mutUpdate(K key, V value) {
-        if (storage instanceof HashMapStorage hashStorage) {
-            return hashStorage.mutUpdate(key, value);
-        }
-        throw new UnsupportedOperationException("mutUpdate requires HashMapStorage - use copyToMutable() first");
-    }
-
-    /**
-     * In-place clear - mutates the underlying storage.
-     * Only safe within LocalMut context.
-     */
-    public void mutClear() {
-        if (storage instanceof HashMapStorage hashStorage) {
-            hashStorage.mutClear();
-        } else {
-            throw new UnsupportedOperationException("mutClear requires HashMapStorage - use copyToMutable() first");
-        }
     }
 
     // ===== INTERNAL =====

@@ -29,6 +29,11 @@ public final class SmallFlatSetStorage implements SetStorage {
 
     @Override
     @ExplodeLoop(kind = ExplodeLoop.LoopExplosionKind.FULL_UNROLL_UNTIL_RETURN)
+    // NO LONG FAST PATH HERE, and not for a performance reason: this storage
+    // is UNREACHABLE for long elements. `SingleElemSetStorage.add` sends two
+    // Longs to `LongSetStorage`, which keeps a primitive `long[]` and binary
+    // searches it, so a long-element set never arrives here at all. A fast path
+    // was added and measured before that was checked; it was dead code.
     public boolean contains(Object elem) {
         for (int i = 0; i < elements.length; i++) {
             if (Objects.equals(elements[i], elem)) {
@@ -53,56 +58,44 @@ public final class SmallFlatSetStorage implements SetStorage {
             return new SmallFlatSetStorage(newElements);
         }
 
-        // Transition to LongHashSetStorage if every element is a primitive-storable Long
+        // Transition to LongTrieSetStorage if every element is a Long
         // (no sentinel collision), HashSetStorage otherwise.
         return transitionToBestHash(elem);
     }
 
     private SetStorage transitionToBestHash(Object newElem) {
-        if (allLongElementsStorable(newElem)) {
-            LongHashSetStorage out = new LongHashSetStorage();
+        if (allLongElements(newElem)) {
+            SetStorage out = new LongTrieSetStorage();
             for (Object e : elements) {
-                out = (LongHashSetStorage) out.addLong((Long) e);
+                out = ((LongTrieSetStorage) out).addLong((Long) e);
             }
             return out.add(newElem);
         }
-        if (allDoubleElements(newElem)) {
-            DoubleHashSetStorage out = new DoubleHashSetStorage();
-            for (Object e : elements) {
-                out = (DoubleHashSetStorage) out.addDouble((Double) e);
-            }
-            return out.add(newElem);
-        }
-        if (allStringElements(newElem)) {
-            StringHashSetStorage out = new StringHashSetStorage();
-            for (Object e : elements) {
-                out = (StringHashSetStorage) out.addString((String) e);
-            }
-            return out.add(newElem);
-        }
+        // DOUBLE KEYS GO TO THE GENERAL TRIE TOO. The specialised table stored
+        // them as raw bits in a long[], which the trie gives up — a Double is
+        // boxed here. That is deliberate: the table carried BUG 38 and the only
+        // fix is structural sharing, so the choice was a Double-specialised
+        // trie or this. Semantics are identical either way, because
+        // Double.equals and doubleToLongBits agree on the two cases that could
+        // differ (both fold every NaN together, both keep -0.0 apart from 0.0),
+        // and Float-keyed maps are rare enough that one more class was not
+        // worth carrying for them.
+        // String elements likewise: the specialised table read a cached
+        // String.hashCode and called String.equals directly, and the trie does
+        // both — Objects.equals devirtualizes on a String receiver — so there
+        // was nothing left for it to specialise.
         return transitionToHash().add(newElem);
     }
 
-    private boolean allLongElementsStorable(Object newElem) {
-        if (!(newElem instanceof Long ne) || !LongHashSetStorage.isStorable(ne)) return false;
+    /**
+     * Being a Long is the whole condition — see the note on the Map's copy: a
+     * trie reserves no sentinel values, so the predicate that used to express
+     * that restriction is gone rather than left returning true.
+     */
+    private boolean allLongElements(Object newElem) {
+        if (!(newElem instanceof Long)) return false;
         for (Object e : elements) {
-            if (!(e instanceof Long le) || !LongHashSetStorage.isStorable(le)) return false;
-        }
-        return true;
-    }
-
-    private boolean allDoubleElements(Object newElem) {
-        if (!(newElem instanceof Double)) return false;
-        for (Object e : elements) {
-            if (!(e instanceof Double)) return false;
-        }
-        return true;
-    }
-
-    private boolean allStringElements(Object newElem) {
-        if (!(newElem instanceof String)) return false;
-        for (Object e : elements) {
-            if (!(e instanceof String)) return false;
+            if (!(e instanceof Long)) return false;
         }
         return true;
     }
@@ -154,10 +147,10 @@ public final class SmallFlatSetStorage implements SetStorage {
         return elements[index];
     }
 
-    private HashSetStorage transitionToHash() {
-        HashSetStorage hash = new HashSetStorage();
+    private SetStorage transitionToHash() {
+        SetStorage hash = new TrieSetStorage();
         for (Object elem : elements) {
-            hash = (HashSetStorage) hash.add(elem);
+            hash = hash.add(elem);
         }
         return hash;
     }

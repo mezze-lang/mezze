@@ -1,0 +1,52 @@
+## MINIMISING the "effect-op arithmetic" row: what makes a `having 'out` binding
+## lose its link to the accumulator.
+##
+## Both loops below are the same shape — seed `acc = 0`, add an Int each round,
+## return the accumulator. The only difference is where the SUBTRAHEND comes
+## from: a literal in the first, an effect operation in the second.
+##
+## `mez check` reports:
+##
+##   plain  : { i: Int, acc: 'a } with NumAdd Int 'a having 'out = 'a -> 'a
+##   viaop  : { i: Int, acc: 'a } with NumAdd Int 'a having 'out = out  -> 'a
+##
+## `'out = 'a` against `'out = out`. In the first the associated output is
+## unified with the accumulator, so a call site that passes `0` resolves the whole
+## thing to Int. In the second it is a FREE variable that happens to be named
+## after the associated type, tied to nothing — so nothing a caller does can
+## resolve it, the decl stays generic, and mono refuses it: `go_a` and its four
+## siblings in `bench/cases/effectsurface` compile as `[i, acc, __dict_add]`,
+## five of the eight dictionary-carrying functions left in the whole bench suite.
+##
+## A bare `0` IS an Int — `mez check` says `lit_int : Int` below — so this was
+## never literal defaulting. It is the `having` binding being dropped on the
+## path that goes through an effect op.
+effect Stopper where {
+  stop: {} -> Int <Stopper>
+}
+
+impl Stopper for Aborts {} where {
+  stop = {} -> abort { val = 1 }
+}
+
+let lit_int = 0
+let lit_nat = 0n
+let lit_float = 0.0
+
+## ── The accumulator loop, subtrahend from a literal. `having 'out = 'a`.
+let plain = { i, acc } ->
+  if i <= 0 then acc
+  else plain { i = i - 1, acc = acc + i }
+
+let used_plain = plain { i = 3, acc = 0 }
+
+## ── The same loop, subtrahend from an effect op. `having 'out = out`.
+let one = {} -> perform Aborts {} in Stopper.stop {}
+
+let viaop = { i, acc } ->
+  if i <= 0 then acc
+  else viaop { i = i - one {}, acc = acc + i }
+
+let used_viaop = { } -> viaop { i = 3, acc = 0 }
+
+pub let main = {} -> {}

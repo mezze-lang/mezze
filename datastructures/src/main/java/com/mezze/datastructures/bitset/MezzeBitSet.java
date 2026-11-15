@@ -40,7 +40,12 @@ public final class MezzeBitSet implements TruffleObject, Iterable<Integer> {
         this.ownerToken = ownerToken;
     }
 
-    /** Latched flag — see HashMapStorage.ownershipRevoked for rationale. */
+    /** Latched flag: once anything has READ this structure it may never be
+     *  mutated in place again, however the ownership token stands. (The
+     *  rationale used to live on HashMapStorage, which is gone — its whole
+     *  family was replaced by persistent tries after the in-place writes turned
+     *  out to be observable in the structure derived FROM; see known-bugs
+     *  BUG 38.) */
     @CompilationFinal
     private boolean ownershipRevoked;
 

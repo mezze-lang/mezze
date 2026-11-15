@@ -6,6 +6,7 @@ import com.mezze.interpreter.nodes.builtin.dsl.TypedNativeHandlers;
 import com.mezze.interpreter.runtime.MezzeLanguage;
 import com.mezze.language.truffleir.BlockIR;
 import com.mezze.language.truffleir.OrdKind;
+import com.mezze.language.truffleir.NativeHofNames;
 import com.mezze.language.truffleir.BoolLitIR;
 import com.mezze.language.truffleir.CallDirectIR;
 import com.mezze.language.truffleir.CallIndirectIR;
@@ -164,7 +165,11 @@ public final class BytecodeCompiler {
     private static final int NONE_TAG = com.mezze.language.ast.BuiltinTypes.INSTANCE
             .computeVariantTag(com.mezze.language.ast.BuiltinTypes.NONE, null);
     /** Cached field name array for Option payload records ({val = x}). */
-    private static final String[] VAL_FIELD = new String[] { "val" };
+    /** `Option.Some`'s payload field. The NAME comes from `BuiltinTypes`,
+     *  which already owned it — this array spelled it a second time. It is
+     *  NOT `iter::enumerate`'s `val`, which shares only the spelling. */
+    private static final String[] VAL_FIELD =
+        new String[] { com.mezze.language.ast.BuiltinTypes.VAL_FIELD };
 
     private final MezzeLanguage language;
 
@@ -686,6 +691,7 @@ public final class BytecodeCompiler {
             }
             if (src instanceof SourceIR.RawSeq rs && !supportsNode(rs.getXs(), argCount)) return false;
             if (src instanceof SourceIR.RawList rl && !supportsNode(rl.getXs(), argCount)) return false;
+            if (src instanceof SourceIR.RawBytes rb && !supportsNode(rb.getXs(), argCount)) return false;
             if (src instanceof SourceIR.Opaque os && !supportsNode(os.getExpr(), argCount)) return false;
             // Walk fallback so its MakeLambdaIR hashes get pre-compiled.
             // Without this, emitNode falling back to chain.getFallback()
@@ -806,7 +812,13 @@ public final class BytecodeCompiler {
                 if (ct != null) {
                     compiledCallTargets.put(c.getTargetHash(), ct);
                 } else if (existing == null) {
-                    markReject(node, "target-not-compiled"); return false;
+                    // Name the hash. A target that resolves NOWHERE — not the
+                    // context, not the prelowered stdlib, not the store — is a
+                    // dangling reference from lowering, and the node type alone
+                    // gives no way to find which callee went missing.
+                    markReject(node, "target-not-compiled:"
+                            + c.getTargetHash().getHex().substring(0, 8));
+                    return false;
                 }
                 // If existing was an unattached trampoline and we couldn't
                 // upgrade it (stub not mintable — e.g., language null in
@@ -909,7 +921,8 @@ public final class BytecodeCompiler {
                 if (ct != null) {
                     compiledCallTargets.put(ml.getFunctionHash(), ct);
                 } else if (existingMl == null) {
-                    markReject(node, "target-not-compiled");
+                    markReject(node, "target-not-compiled:"
+                            + ml.getFunctionHash().getHex().substring(0, 8));
                     return false;
                 }
                 // Same as CallDirect: keep unattached trampoline if we
@@ -1381,6 +1394,27 @@ public final class BytecodeCompiler {
         // Consumed here, so a nested compile during this emit cannot inherit it.
         final boolean isEntryParse = this.compilingEntry;
         this.compilingEntry = false;
+        // MEZZE_DUMP_FN=<name> prints this function's lowered IR before emission.
+        // The passes that consume this IR — ChainCanonicalizer, the self-tail
+        // tiers, the native collapses — all refuse SILENTLY, so without a way to
+        // see what they were handed, a refusal can only be inferred from a
+        // timing. Comma-separated names are accepted; `*` dumps everything.
+        // AND `*` HAS TO MEAN EVERY FUNCTION, not every NAMED one: a top-level
+        // `let go = { i, acc } -> …` arrives here with a null name, which is
+        // most user code, so the guard below used to exclude exactly the
+        // functions a probe is reached for.
+        String dumpWanted = System.getenv("MEZZE_DUMP_FN");
+        if (dumpWanted != null) {
+            for (String want : dumpWanted.split(",")) {
+                if (want.trim().equals("*") || want.trim().equals(ir.getName())) {
+                    System.err.println("[dump-fn] " + probeLabel(ir)
+                            + " hash=" + ir.getHash().getHex().substring(0, 8)
+                            + " params=" + ir.getParamNames()
+                            + "\n  body=" + ir.getBody());
+                    break;
+                }
+            }
+        }
         var nodes = MezzeBytecodeRootNodeGen.create(language, config, b -> {
             // Rebuilt per parse, and the previous value restored on the way out
             // so a compile nested inside this emit does not strand the outer one
@@ -1530,9 +1564,41 @@ public final class BytecodeCompiler {
                         emittedDirect = tryEmitFusedLongTailLoop(
                                 ifBody, ir, paramCount, captureCount,
                                 b, argCount, localMap);
+                    } else if (paramCount == 3) {
+                        emittedDirect = tryEmitFusedLongTailLoop3P(
+                                ifBody, ir, captureCount,
+                                b, argCount, localMap);
                     }
                 }
-
+                // WHY THIS DIAGNOSTIC EXISTS. The three self-tail tiers all
+                // refuse SILENTLY — a declined function simply compiles the
+                // slow way, with no diagnostic anywhere. That is how a 48x
+                // regression hid in plain sight: every annotation-free numeric
+                // tail loop was declined by tier 1 because its operands arrived
+                // in a record, and the only visible symptom was that programs
+                // were slow. `MEZZE_TRACE_SELFTAIL=1` names the tier per
+                // function so a refusal is a fact you can read rather than a
+                // number you have to go hunting for.
+                if (System.getenv("MEZZE_TRACE_SELFTAIL") != null) {
+                    System.err.println("[selftail] " + ir.getName()
+                            + " params=" + paramCount
+                            + " tier=" + (emittedDirect ? "FUSED" : "not-fused"));
+                }
+                // The tier a shape lands on is worth 75x and was only
+                // reportable for one of the three. MEASURED on
+                // `bench/cases/allocsurface` at n=2e7, min of 3, young
+                // collections beside each:
+                //
+                //   counted loop                              219 ps /  2
+                //   acc + str::size { s }                      564    / 13
+                //   acc + str::size { s } + i              41 582    / 68
+                //   acc + str::size { s } + str::size { s } 42 230    / 64
+                //
+                // One extra `+` in the accumulator update, and the loop starts
+                // allocating per iteration. Which tier that is cannot be read
+                // off the source, so it goes on the seam the fused chains
+                // already use.
+                if (emittedDirect) recordFusedEmit("fused-tail:" + ir.getName());
                 // ── Try direct-while optimization ──
                 // When body = IfIR(cond, base, selfTailCall), emit a
                 // tight While loop using the source condition directly
@@ -1547,6 +1613,9 @@ public final class BytecodeCompiler {
                     CallDirectIR tailCall = null;
                     NodeIR baseExpr = null;
                     boolean tailInElse = false;
+                    // Statements that run each iteration BEFORE the param
+                    // update, when the recursing branch is a block.
+                    java.util.List<com.mezze.language.truffleir.StmtIR> loopStmts = null;
 
                     if (elseBr instanceof CallDirectIR ec && ec.isTailCall()
                             && ec.getTargetHash().equals(ir.getHash())
@@ -1560,6 +1629,41 @@ public final class BytecodeCompiler {
                         tailCall = tc;
                         baseExpr = elseBr;
                         tailInElse = false;
+                    } else {
+                        // A BLOCK ending in the self tail call — which is how an
+                        // imperative loop reads, and the shape EVERY mut loop
+                        // has, because the op is a statement:
+                        //
+                        //   go = { i } -> if i <= 0 then 0
+                        //                 else do incr { n = c, delta = 1 }
+                        //                         go { i = i - 1 }
+                        //
+                        // Requiring a bare `CallDirectIR` here sent that to the
+                        // flag-based fallback, ~16 extra BDSL ops per iteration.
+                        // MEASURED on `bench/cases/mutvsimmut`: the immutable
+                        // counter, whose update IS an expression and so fuses,
+                        // ran 355 ps/iter against the mut counter's 833 — mut
+                        // 2.3x SLOWER for the same work, where the mut op itself
+                        // accounts for about 100 ps of it.
+                        //
+                        // A statement containing a self call REFUSES: hoisting
+                        // it into the loop body would turn a tail call into a
+                        // non-tail one.
+                        var blockTail = stlBlockTailCall(elseBr, ir, paramCount);
+                        if (blockTail != null) {
+                            tailCall = blockTail;
+                            baseExpr = thenBr;
+                            tailInElse = true;
+                            loopStmts = ((com.mezze.language.truffleir.BlockIR) elseBr).getStmts();
+                        } else {
+                            blockTail = stlBlockTailCall(thenBr, ir, paramCount);
+                            if (blockTail != null) {
+                                tailCall = blockTail;
+                                baseExpr = elseBr;
+                                tailInElse = false;
+                                loopStmts = ((com.mezze.language.truffleir.BlockIR) thenBr).getStmts();
+                            }
+                        }
                     }
 
                     if (tailCall != null && stlIsSimpleExpr(baseExpr)) {
@@ -1579,9 +1683,65 @@ public final class BytecodeCompiler {
                             emitNode(cond, b, argCount, localMap);
                         }
 
-                        // Body: update params from tail-call args.
-                        stlEmitParamUpdate(tailCall.getArgs(), stlParams,
-                                b, argCount, localMap);
+                        // Body: the block's statements, if any, then the
+                        // param update. The statements are emitted as a
+                        // synthesized BlockIR so they go through the ordinary
+                        // block emitter — which is the one that gets the
+                        // debugger's statement tags and the let-slot
+                        // bookkeeping right. Its value is discarded: a BDSL
+                        // Block yields its LAST child, which here is the param
+                        // update.
+                        if (loopStmts != null && !loopStmts.isEmpty()) {
+                            // Recorded so a test can assert the PATH, not just
+                            // the values. Both paths compute the same answer —
+                            // the flag fallback produces identical results —
+                            // so a value test cannot tell them apart and
+                            // losing this tier would be silent. Verified by
+                            // disabling the recognition: the four value tests
+                            // still passed.
+                            recordFusedEmit("block-while:" + ir.getName());
+                            b.beginBlock();
+                            // Each statement is a bare native call — the guard
+                            // in stlBlockTailCall admits nothing else — so it
+                            // emits directly, with no synthesized BlockIR and
+                            // no dummy result. An earlier version wrapped them
+                            // in `BlockIR(stmts, UnitLit)` to reuse the
+                            // ordinary block emitter, and the extra nested
+                            // Block plus discarded value cost measurably more
+                            // than the loop body did. A BDSL Block already
+                            // drops every child's value but the last.
+                            //
+                            // THE SUSPEND CHECK IS NOT OPTIONAL (#361). A BDSL
+                            // block discards a bare statement's value, so a
+                            // statement that returns a `MezzeSuspend` has to be
+                            // intercepted before the drop or the suspension is
+                            // silently swallowed. The ordinary block emitter
+                            // wraps such a statement in `CheckSuspendedThrow`;
+                            // emitting the call bare here instead left a plain
+                            // `pop` in its place, which is visible in
+                            // `MEZZE_DUMP_BC` output and is how this was
+                            // caught — by reading the listing, not by a test,
+                            // because no test in the suite performs an effect
+                            // from a statement inside a tail loop.
+                            for (com.mezze.language.truffleir.StmtIR st : loopStmts) {
+                                NodeIR stNode =
+                                    ((com.mezze.language.truffleir.StmtIR.Expr) st).getNode();
+                                if (canYieldSuspended(stNode)) {
+                                    b.beginCheckSuspendedThrow();
+                                    emitNode(stNode, b, argCount, localMap);
+                                    b.endCheckSuspendedThrow();
+                                } else {
+                                    emitNode(stNode, b, argCount, localMap);
+                                }
+                            }
+                            stlEmitParamUpdate(tailCall.getArgs(), stlParams,
+                                    b, argCount, localMap);
+                            b.endBlock();
+                        } else {
+                            recordFusedEmit("direct-while:" + ir.getName());
+                            stlEmitParamUpdate(tailCall.getArgs(), stlParams,
+                                    b, argCount, localMap);
+                        }
 
                         b.endWhile();
 
@@ -1592,6 +1752,11 @@ public final class BytecodeCompiler {
 
                 if (!emittedDirect) {
                     // ── Fallback: flag-based self-tail-loop ──
+                    // The slowest of the three, by a long way: ~16 extra BDSL
+                    // ops per iteration, and the body is emitted whole inside
+                    // the loop rather than as a param update, so anything in it
+                    // that did not fold to arithmetic allocates per iteration.
+                    recordFusedEmit("flag-fallback:" + ir.getName());
                     BytecodeLocal stlFlag = b.createLocal("_stl_cont", null);
                     BytecodeLocal stlResult = b.createLocal("_stl_res", null);
                     this.selfTailContinueFlag = stlFlag;
@@ -1651,6 +1816,22 @@ public final class BytecodeCompiler {
             }
         });
         RootNode inner = nodes.getNode(0);
+        // PROBE: MEZZE_DUMP_BC=<substring> prints the emitted bytecode for any
+        // function whose name contains the substring. The three self-tail tiers
+        // choose between a fused Java loop, a direct while, and a flag-based
+        // fallback, and which one wins is NOT predictable from the op count on
+        // paper — the fallback beats direct-while on a trivial body. Reading
+        // the listing is the only way to see why.
+        {
+            String want = System.getenv("MEZZE_DUMP_BC");
+            if (want != null && probeMatches(want, ir.getName())) {
+                System.err.println("=== BC " + probeLabel(ir)
+                        + " params=" + ir.getParamNames() + " ===");
+                System.err.println(
+                    ((com.oracle.truffle.api.bytecode.BytecodeRootNode) inner)
+                        .getBytecodeNode().dump());
+            }
+        }
         if (trampoline != null) {
             // For self-tail-loop, the loop is inside the BDSL root —
             // tell the trampoline there are no tail calls so it uses
@@ -2506,6 +2687,28 @@ public final class BytecodeCompiler {
                 b.beginMakeSingleFieldRecord(fieldNames);
                 emitNode(m.getFields().get(0).getValue(), b, argCount, localMap);
                 b.endMakeSingleFieldRecord();
+            } else if (fieldNames.length == 2) {
+                // Two-field record: fixed arity, so the operands arrive as
+                // PRIMITIVES when they are numbers. The variadic MakeRecord
+                // below cannot do that — its Object[] is already full of boxes
+                // by the time the operation runs. See MakeRecord2.
+                b.beginMakeRecord2(fieldNames);
+                for (FieldIR f : m.getFields()) {
+                    emitNode(f.getValue(), b, argCount, localMap);
+                }
+                b.endMakeRecord2();
+            } else if (fieldNames.length == 3) {
+                b.beginMakeRecord3(fieldNames);
+                for (FieldIR f : m.getFields()) {
+                    emitNode(f.getValue(), b, argCount, localMap);
+                }
+                b.endMakeRecord3();
+            } else if (fieldNames.length == 4) {
+                b.beginMakeRecord4(fieldNames);
+                for (FieldIR f : m.getFields()) {
+                    emitNode(f.getValue(), b, argCount, localMap);
+                }
+                b.endMakeRecord4();
             } else {
                 b.beginMakeRecord(fieldNames);
                 for (FieldIR f : m.getFields()) {
@@ -2629,7 +2832,12 @@ public final class BytecodeCompiler {
                 StringPartIR p = is.getParts().get(i);
                 parts[i] = (p instanceof StringPartIR.Lit lit) ? lit.getValue() : null;
             }
-            b.beginInterpolateString(parts);
+            int exprParts = 0;
+            for (StringPartIR p : is.getParts()) if (p instanceof StringPartIR.Expr) exprParts++;
+            // ONE expression takes the fixed-arity operation, which has no
+            // variadic array to allocate. See InterpolateString1.
+            boolean one = exprParts == 1;
+            if (one) b.beginInterpolateString1(parts); else b.beginInterpolateString(parts);
             for (StringPartIR p : is.getParts()) {
                 if (p instanceof StringPartIR.Expr e) {
                     // Wrap suspend-capable parts so a MezzeSuspend flows
@@ -2646,7 +2854,7 @@ public final class BytecodeCompiler {
                     }
                 }
             }
-            b.endInterpolateString();
+            if (one) b.endInterpolateString1(); else b.endInterpolateString();
             return;
         }
         if (node instanceof CallIndirectIR ci) {
@@ -3070,6 +3278,45 @@ public final class BytecodeCompiler {
                 // Emit inline BDSL operations directly, skipping MakeRecord
                 // allocation and NativeDispatch HashMap lookup.
                 String recName = cn.getName();
+                // ── GENERIC record-ABI collapse ──────────────────────────────
+                // Any native whose signature declares an inlineOp and exactly
+                // two params becomes that inline op, with the operands read out
+                // of the record by DECLARED PARAMETER NAME. This replaces
+                // writing a hand-rolled fast path per native (the
+                // `__native_string_concat` arm below is one such) and covers
+                // every arithmetic and comparison native at once.
+                //
+                // WHY IT IS NEEDED AT ALL: a record is Mezze's SYNTAX, for the
+                // typechecker, and should be gone by emission. It is not,
+                // because the compile-time collapse cannot run — under
+                // `mez build` the NativeSignatures registry is EMPTY (the
+                // interpreter module is `compileOnly` in the CLI), so
+                // `__native_int_add { l = acc, r = n }` reaches us intact with
+                // inlineOp=null. HERE the registry IS loaded, so here it can be
+                // undone.
+                //
+                // MEASURED on a 20M-iteration numeric tail loop: 12 ns/iter
+                // with the record, 0.2 ns/iter without it, and allocation drops
+                // from ~100 bytes/iteration to nothing (young-GC count flat from
+                // 20M to 40M iterations instead of 46 then 92).
+                //
+                // ORDER IS PRESERVED, not assumed: an InlineBinaryOp evaluates
+                // left then right, while the record evaluates its fields in the
+                // order they are WRITTEN. Those can differ, and an operand can
+                // be a call, so this takes the path only when the written field
+                // order already matches the signature's parameter order.
+                if (cn.getArg() instanceof MakeRecordIR genMr) {
+                    var genSig = NativeSignatures.INSTANCE.signatureOf(recName);
+                    java.util.List<NodeIR> genOps =
+                            (genSig == null) ? null : fltlRecordOperands(cn, genSig);
+                    if (genOps != null && fltlRecordFieldsInSigOrder(genMr, genSig)) {
+                        emitNode(new InlineBinaryOpIR(
+                                genSig.getInlineOp(),
+                                genOps.get(0), genOps.get(1), cn.getSrc()),
+                                b, argCount, localMap);
+                        return;
+                    }
+                }
                 if (cn.getArg() instanceof MakeRecordIR mr) {
                     // str::concat { l, r } → DirectAdd (addStrings specialization)
                     if ("__native_string_concat".equals(recName) && mr.getFields().size() == 2) {
@@ -3157,6 +3404,155 @@ public final class BytecodeCompiler {
                             emitNode(sNode, b, argCount, localMap);
                             emitNode(suffixNode, b, argCount, localMap);
                             b.endInlineStringPredicate();
+                            return;
+                        }
+                    }
+                    // map::insert { m, k, v } → InlineMapInsert
+                    if (mr.getFields().size() == 3 && "__native_map_insert".equals(recName)) {
+                        NodeIR iM = null, iK = null, iV = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("m".equals(fld.getName())) iM = fld.getValue();
+                            else if ("k".equals(fld.getName())) iK = fld.getValue();
+                            else if ("v".equals(fld.getName())) iV = fld.getValue();
+                        }
+                        if (iM != null && iK != null && iV != null) {
+                            b.beginInlineMapInsert();
+                            emitNode(iM, b, argCount, localMap);
+                            emitNode(iK, b, argCount, localMap);
+                            emitNode(iV, b, argCount, localMap);
+                            b.endInlineMapInsert();
+                            return;
+                        }
+                    }
+                    // set::insert { s, x } → InlineSetInsert
+                    if (mr.getFields().size() == 2 && "__native_set_insert".equals(recName)) {
+                        NodeIR siS = null, siX = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("s".equals(fld.getName())) siS = fld.getValue();
+                            else if ("x".equals(fld.getName())) siX = fld.getValue();
+                        }
+                        if (siS != null && siX != null) {
+                            b.beginInlineSetInsert();
+                            emitNode(siS, b, argCount, localMap);
+                            emitNode(siX, b, argCount, localMap);
+                            b.endInlineSetInsert();
+                            return;
+                        }
+                    }
+                    // map::get { m, k } → InlineMapGet
+                    if (mr.getFields().size() == 2 && "__native_map_get".equals(recName)) {
+                        NodeIR gContNode = null, gKeyNode = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("m".equals(fld.getName())) gContNode = fld.getValue();
+                            else if ("k".equals(fld.getName())) gKeyNode = fld.getValue();
+                        }
+                        if (gContNode != null && gKeyNode != null) {
+                            b.beginInlineMapGet();
+                            emitNode(gContNode, b, argCount, localMap);
+                            emitNode(gKeyNode, b, argCount, localMap);
+                            b.endInlineMapGet();
+                            return;
+                        }
+                    }
+                    // map::contains_key { m, k } / set::contains { s, x }
+                    // → InlineMapContainsKey. Same reason as InlineMapSize:
+                    // the generic native dispatch in front is the cost.
+                    if (mr.getFields().size() == 2
+                            && ("__native_map_contains_key".equals(recName)
+                                || "__native_set_contains".equals(recName))) {
+                        boolean isMapCk = "__native_map_contains_key".equals(recName);
+                        String ckContName = isMapCk ? "m" : "s";
+                        String ckKeyName = isMapCk ? "k" : "x";
+                        NodeIR ckContNode = null, ckKeyNode = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if (ckContName.equals(fld.getName())) ckContNode = fld.getValue();
+                            else if (ckKeyName.equals(fld.getName())) ckKeyNode = fld.getValue();
+                        }
+                        if (ckContNode != null && ckKeyNode != null) {
+                            b.beginInlineMapContainsKey();
+                            emitNode(ckContNode, b, argCount, localMap);
+                            emitNode(ckKeyNode, b, argCount, localMap);
+                            b.endInlineMapContainsKey();
+                            return;
+                        }
+                    }
+                    // ── Single-field CONTAINER size, whatever the field is called ──
+                    // Every one of these answers `size` out of a stored count,
+                    // and they declare SIX different parameter names between
+                    // them — m, s, xs, d, b — which is why this used to be
+                    // three separate scans, one per name, and why seq, list and
+                    // bytes were in none of them.
+                    if (mr.getFields().size() == 1
+                            && INLINE_IS_EMPTY_NATIVES.contains(recName)) {
+                        NodeIR eNode = mr.getFields().get(0).getValue();
+                        if (eNode != null) {
+                            recordFusedEmit("inline-is-empty:" + recName);
+                            b.beginInlineContainerIsEmpty();
+                            emitNode(eNode, b, argCount, localMap);
+                            b.endInlineContainerIsEmpty();
+                            return;
+                        }
+                    }
+                    if (mr.getFields().size() == 1
+                            && INLINE_SIZE_NATIVES.contains(recName)) {
+                        NodeIR mNode = mr.getFields().get(0).getValue();
+                        if (mNode != null) {
+                            recordFusedEmit("inline-size:" + recName);
+                            b.beginInlineMapSize();
+                            emitNode(mNode, b, argCount, localMap);
+                            b.endInlineMapSize();
+                            return;
+                        }
+                    }
+                    // sorted_map key_at / value_at { m, i } — the probes of the
+                    // guest-side ordered binary search, which makes ~log2(n) of
+                    // them per lookup.
+                    if (mr.getFields().size() == 2
+                            && ("__native_sorted_map_key_at".equals(recName)
+                                || "__native_sorted_map_value_at".equals(recName))) {
+                        NodeIR atM = null, atI = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("m".equals(fld.getName())) atM = fld.getValue();
+                            else if ("i".equals(fld.getName())) atI = fld.getValue();
+                        }
+                        if (atM != null && atI != null) {
+                            boolean wantKey = "__native_sorted_map_key_at".equals(recName);
+                            if (wantKey) b.beginInlineSortedKeyAt(); else b.beginInlineSortedValueAt();
+                            emitNode(atM, b, argCount, localMap);
+                            emitNode(atI, b, argCount, localMap);
+                            if (wantKey) b.endInlineSortedKeyAt(); else b.endInlineSortedValueAt();
+                            return;
+                        }
+                    }
+                    // sorted_set element_at { s, i } — the Set search's probe.
+                    if (mr.getFields().size() == 2
+                            && "__native_sorted_set_element_at".equals(recName)) {
+                        NodeIR eS = null, eI = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("s".equals(fld.getName())) eS = fld.getValue();
+                            else if ("i".equals(fld.getName())) eI = fld.getValue();
+                        }
+                        if (eS != null && eI != null) {
+                            b.beginInlineSortedElementAt();
+                            emitNode(eS, b, argCount, localMap);
+                            emitNode(eI, b, argCount, localMap);
+                            b.endInlineSortedElementAt();
+                            return;
+                        }
+                    }
+                    // ── Single-field { d } Deque natives ──
+                    // `deque::size` is not here any more: it rides the
+                    // container-size set above, with the other seven.
+                    if (mr.getFields().size() == 1
+                            && "__native_deque_first".equals(recName)) {
+                        NodeIR dNode = null;
+                        for (FieldIR fld : mr.getFields()) {
+                            if ("d".equals(fld.getName())) dNode = fld.getValue();
+                        }
+                        if (dNode != null) {
+                            b.beginInlineDequeFirst();
+                            emitNode(dNode, b, argCount, localMap);
+                            b.endInlineDequeFirst();
                             return;
                         }
                     }
@@ -3269,6 +3665,28 @@ public final class BytecodeCompiler {
                     b.endInlineStringSize();
                     return;
                 }
+                // map::size / set::size → InlineMapSize, same reasoning.
+                if (INLINE_SIZE_NATIVES.contains(name)) {
+                    recordFusedEmit("inline-size:" + name);
+                    b.beginInlineMapSize();
+                    emitNode(arg0, b, argCount, localMap);
+                    b.endInlineMapSize();
+                    return;
+                }
+                if (INLINE_IS_EMPTY_NATIVES.contains(name)) {
+                    recordFusedEmit("inline-is-empty:" + name);
+                    b.beginInlineContainerIsEmpty();
+                    emitNode(arg0, b, argCount, localMap);
+                    b.endInlineContainerIsEmpty();
+                    return;
+                }
+                // deque::first → InlineDequeFirst
+                if ("__native_deque_first".equals(name)) {
+                    b.beginInlineDequeFirst();
+                    emitNode(arg0, b, argCount, localMap);
+                    b.endInlineDequeFirst();
+                    return;
+                }
                 // {int,float,nat,bool}::to_str → InlineScalarInspect
                 if ("__native_int_to_str".equals(name)
                         || "__native_float_to_str".equals(name)
@@ -3314,12 +3732,95 @@ public final class BytecodeCompiler {
                     b.endInlineStringPredicate();
                     return;
                 }
+                // set::insert → InlineSetInsert
+                if ("__native_set_insert".equals(name)) {
+                    b.beginInlineSetInsert();
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    emitNode(cn.getArgs().get(1), b, argCount, localMap);
+                    b.endInlineSetInsert();
+                    return;
+                }
+                // map::get → InlineMapGet
+                if ("__native_map_get".equals(name)) {
+                    b.beginInlineMapGet();
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    emitNode(cn.getArgs().get(1), b, argCount, localMap);
+                    b.endInlineMapGet();
+                    return;
+                }
+                // sorted_set element_at → the inline probe
+                if ("__native_sorted_set_element_at".equals(name)) {
+                    b.beginInlineSortedElementAt();
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    emitNode(cn.getArgs().get(1), b, argCount, localMap);
+                    b.endInlineSortedElementAt();
+                    return;
+                }
+                // sorted_map key_at / value_at → the inline probes
+                if ("__native_sorted_map_key_at".equals(name)
+                        || "__native_sorted_map_value_at".equals(name)) {
+                    boolean wantKey = "__native_sorted_map_key_at".equals(name);
+                    if (wantKey) b.beginInlineSortedKeyAt(); else b.beginInlineSortedValueAt();
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    emitNode(cn.getArgs().get(1), b, argCount, localMap);
+                    if (wantKey) b.endInlineSortedKeyAt(); else b.endInlineSortedValueAt();
+                    return;
+                }
+                // map::contains_key / set::contains → InlineMapContainsKey
+                if ("__native_map_contains_key".equals(name)
+                        || "__native_set_contains".equals(name)) {
+                    b.beginInlineMapContainsKey();
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    emitNode(cn.getArgs().get(1), b, argCount, localMap);
+                    b.endInlineMapContainsKey();
+                    return;
+                }
+            } else if (arity == 3) {
+                // map::insert → InlineMapInsert
+                if ("__native_map_insert".equals(name)) {
+                    b.beginInlineMapInsert();
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    emitNode(cn.getArgs().get(1), b, argCount, localMap);
+                    emitNode(cn.getArgs().get(2), b, argCount, localMap);
+                    b.endInlineMapInsert();
+                    return;
+                }
             }
             // Typed fast paths — bypass Object[] alloc + PositionalArgs
             // + NativeHandler indirection when the signature matches
             // one we registered typed via TypedNativeHandlers. Ordered
             // by argument count so we short-circuit early.
             if (arity == 2) {
+                // Object receiver first — the shape every collection
+                // and mut op has, whose only alternative is the boundary.
+                var typedOLO = TypedNativeHandlers.lookupOLO(name);
+                if (typedOLO != null) {
+                    b.beginCallNativeOLO(typedOLO);
+                    for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
+                    b.endCallNativeOLO();
+                    return;
+                }
+                var typedODO = TypedNativeHandlers.lookupODO(name);
+                if (typedODO != null) {
+                    b.beginCallNativeODO(typedODO);
+                    for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
+                    b.endCallNativeODO();
+                    return;
+                }
+                var typedOBO = TypedNativeHandlers.lookupOBO(name);
+                if (typedOBO != null) {
+                    b.beginCallNativeOBO(typedOBO);
+                    for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
+                    b.endCallNativeOBO();
+                    return;
+                }
+                var typedOOB = TypedNativeHandlers.lookupOOB(name);
+                if (typedOOB != null) {
+                    b.beginCallNativeOOB(typedOOB);
+                    for (NodeIR arg : cn.getArgs()) emitNode(arg, b, argCount, localMap);
+                    b.endCallNativeOOB();
+                    return;
+                }
                 var typedLLL = TypedNativeHandlers.lookupLLL(name);
                 if (typedLLL != null) {
                     b.beginCallNativeLLL(typedLLL);
@@ -3356,6 +3857,36 @@ public final class BytecodeCompiler {
                     return;
                 }
             } else if (arity == 1) {
+                // Object receiver first: the shape every collection and mut
+                // accessor has, whose only alternative is the boundary.
+                var typedOL = TypedNativeHandlers.lookupOL(name);
+                if (typedOL != null) {
+                    b.beginCallNativeOL(typedOL);
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    b.endCallNativeOL();
+                    return;
+                }
+                var typedOB = TypedNativeHandlers.lookupOB(name);
+                if (typedOB != null) {
+                    b.beginCallNativeOB(typedOB);
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    b.endCallNativeOB();
+                    return;
+                }
+                var typedOD = TypedNativeHandlers.lookupOD(name);
+                if (typedOD != null) {
+                    b.beginCallNativeOD(typedOD);
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    b.endCallNativeOD();
+                    return;
+                }
+                var typedOO = TypedNativeHandlers.lookupOO(name);
+                if (typedOO != null) {
+                    b.beginCallNativeOO(typedOO);
+                    emitNode(cn.getArgs().get(0), b, argCount, localMap);
+                    b.endCallNativeOO();
+                    return;
+                }
                 var typedLL = TypedNativeHandlers.lookupLL(name);
                 if (typedLL != null) {
                     b.beginCallNativeLL(typedLL);
@@ -3475,31 +4006,68 @@ public final class BytecodeCompiler {
         return null;
     }
 
+    /**
+     * The inline form of an ability operation, from the ONE table that says so.
+     *
+     * This was a switch over operation names, a second copy of a mapping
+     * {@link com.mezze.language.truffleir.InlineOpMapping} also needs — it folds
+     * the same shape earlier, so a binding holding `i.sub { r = 1 }` can be
+     * substituted and its loop can reach the fused tail-loop tier. Two copies
+     * would drift SILENTLY: a new operator would stop folding and the only
+     * symptom would be slower programs. The table's binary half is derived from
+     * {@code OperatorMapping.BINARY_OPERATORS} and pinned by
+     * {@code InlineOpMappingTest}.
+     *
+     * The eq/neq note the switch carried is worth keeping: these two must fold
+     * unconditionally, or `let x: Int = …; if x == 0 …` inside a `perform` block
+     * emits ReadFieldByName("eq") on a Long and dies in the @Fallback with
+     * "Expected record for field 'eq', got: Long" (#346).
+     */
+    /**
+     * The container-size natives that reach {@link
+     * MezzeBytecodeRootNode.InlineMapSize}, in ONE place.
+     *
+     * <p>This was three separate emitter scans keyed on the PARAMETER NAME —
+     * one for `m`, one for `s`, one for `d` — because these eight natives
+     * declare six different names for the same thing, and seq, list and bytes
+     * were in none of them. A set keyed on the native's own name cannot have
+     * that shape of hole: the operation dispatches on the container's TYPE, so
+     * what the parameter is called never mattered.
+     */
+    private static final java.util.Set<String> INLINE_SIZE_NATIVES = java.util.Set.of(
+            "__native_map_size",
+            "__native_set_size",
+            "__native_sorted_map_size",
+            "__native_sorted_set_size",
+            "__native_deque_size",
+            "__native_seq_size",
+            "__native_list_size",
+            "__native_bytes_size");
+
+    /**
+     * The container `is_empty` natives, in ONE place — the Bool peer of
+     * {@link #INLINE_SIZE_NATIVES}, and declared the same way for the same
+     * reason: the operation dispatches on the container's TYPE, so keying this
+     * on the native's name rather than on its parameter name is what keeps a
+     * container from being left out of it.
+     *
+     * <p>The MUT ones are deliberately absent: `__native_mut_deque_is_empty`
+     * and `__native_mut_string_is_empty` take a mutable value, which this
+     * operation has no specialization for and which is not a container in the
+     * sense the others are.
+     */
+    private static final java.util.Set<String> INLINE_IS_EMPTY_NATIVES = java.util.Set.of(
+            "__native_map_is_empty",
+            "__native_set_is_empty",
+            "__native_sorted_map_is_empty",
+            "__native_sorted_set_is_empty",
+            "__native_deque_is_empty",
+            "__native_seq_is_empty",
+            "__native_list_is_empty",
+            "__native_bytes_is_empty");
+
     private static InlineOp inlineOpFor(String opName) {
-        switch (opName) {
-            case "add": return InlineOp.ADD;
-            case "sub": return InlineOp.SUB;
-            case "mul": return InlineOp.MUL;
-            case "div": return InlineOp.DIV;
-            case "mod": return InlineOp.MOD;
-            // eq/neq: fold to inline op, mirroring AST's tryCompileInlineOp
-            // which unconditionally folds these. Without this, code shaped
-            // like `let x : Int = ...; if x == 0 then ...` inside a `perform`
-            // block emits ReadFieldByName("eq") on the scalar Long, hitting
-            // ReadFieldByName.doNotRecord @Fallback → "Expected record for
-            // field 'eq', got: Long" at runtime. See task #346.
-            case "eq":  return InlineOp.EQ;
-            case "neq": return InlineOp.NEQ;
-            case "lt":  return InlineOp.LT;
-            case "le":  return InlineOp.LE;
-            case "gt":  return InlineOp.GT;
-            case "ge":  return InlineOp.GE;
-            case "and": return InlineOp.AND;
-            case "or":  return InlineOp.OR;
-            case "neg": return InlineOp.NEG;
-            case "not": return InlineOp.NOT;
-            default: return null;
-        }
+        return com.mezze.language.truffleir.InlineOpMapping.INSTANCE.forAbilityMethod(opName);
     }
 
     private void emitInlineBinaryOp(InlineBinaryOpIR bin,
@@ -4018,15 +4586,146 @@ public final class BytecodeCompiler {
         if (sinkMode == null) return false;
 
         // ── Phase 4b: classify pipeline stages ──
+        // WHICH STAGES SEE THE ENUMERATE RECORD. `chain.getStages()` is
+        // outer-to-inner, so this loop meets the LAST-applied stage first and
+        // cannot tell on the fly whether an Enumerate has already run. So walk
+        // application order once up front — list end to start — and record, for
+        // each stage, whether the element arriving at it is the `{i, val}`
+        // record. The record is live from the Enumerate until a MAP consumes it
+        // and produces a plain value; a filter or a take passes it through
+        // unchanged, so it stays live across those.
+        var stageList = chain.getStages();
+        SynthRec[] recordLiveAt = new SynthRec[stageList.size()];
+        SynthRec recordLive = SynthRec.NONE;
+        for (int i = stageList.size() - 1; i >= 0; i--) {
+            recordLiveAt[i] = recordLive;
+            var st = stageList.get(i);
+            // A Zip's `{fst, snd}` is live from the zip exactly as an
+            // Enumerate's `{i, val}` is from the enumerate, and a Map consumes
+            // either by producing a plain value.
+            if (st instanceof StageIR.Enumerate) recordLive = SynthRec.ENUM;
+            else if (st instanceof StageIR.Zip) recordLive = SynthRec.ZIP;
+            else if (st instanceof StageIR.Map) recordLive = SynthRec.NONE;
+        }
+        // WHATEVER IS STILL LIVE AFTER THE OUTERMOST STAGE REACHES THE SINK.
+        // Most sinks cannot read the `{i, val}` record and must decline rather
+        // than be handed an element that is not the shape they expect.
+        //
+        // A FOLD WHOSE FOLDER IS AN EXPRESSION CAN, and refusing it was the
+        // whole of `enumerate`'s cost: `iter::fold { it = enumerate(src), f =
+        // {acc, x} -> acc + x.val }` is the ordinary way to use an enumerate,
+        // and it measured 75 049 ps/elem against 72 for `sum` — 1 036x — for
+        // want of resolving two field names the loop already has in locals.
+        // `x.val` is the element, which is in `xSlot`; `x.i` is the index,
+        // which is in `enumIndex`. A `MapInline` with `leftIsIndex` has
+        // resolved them that way all along.
+        //
+        // The folder must be the TREE form, and that is a correctness
+        // condition rather than a preference: `AccumulateCall` hands the folder
+        // the raw element, and a folder expecting a record would read fields
+        // off a Long. It must also read NOTHING but `i` and `val` off the
+        // element — any other field name means the shape is not what this
+        // analysis thinks it is, so it declines.
+        if (recordLive != SynthRec.NONE) {
+            boolean foldCanRead = sinkMode instanceof FusedSinkMode.AccumulateTree t
+                    && foldTreeReadsOnlyEnumFields(t.body(), t.elemParamSlot(), recordLive);
+            if (!foldCanRead) {
+                if (dbg) System.err.println("[chain-canon-emit] reject: "
+                        + recordLive + " record reaches a sink that cannot read it");
+                return false;
+            }
+        }
         var classifiedStages = new java.util.ArrayList<ClassifiedStage>();
-        for (var stage : chain.getStages()) {
+        for (int si = 0; si < stageList.size(); si++) {
+            var stage = stageList.get(si);
+            SynthRec elemSynth = recordLiveAt[si];
+            if (stage instanceof StageIR.Enumerate) {
+                classifiedStages.add(new ClassifiedStage.EnumerateStep());
+                continue;
+            }
+            if (stage instanceof StageIR.Zip zipStage) {
+                // ONE ZIP PER CHAIN. `SynthRec` names ONE live record and
+                // cannot express a zip whose `.fst` is itself a zip, so a
+                // second one declines rather than resolving the wrong local.
+                if (classifiedStages.stream().anyMatch(s -> s instanceof ClassifiedStage.ZipStep)) {
+                    if (dbg) System.err.println("[chain-canon-emit] reject: more than one zip in a chain");
+                    return false;
+                }
+                var second = zipStage.getSecond();
+                if (second instanceof SourceIR.RangeSeq r) {
+                    classifiedStages.add(new ClassifiedStage.ZipStep(true, r.getStart(), r.getEnd()));
+                } else if (second instanceof SourceIR.RawSeq rs) {
+                    classifiedStages.add(new ClassifiedStage.ZipStep(false, rs.getXs(), null));
+                } else {
+                    // A list, bytes, a step range or an opaque value: the loop
+                    // reads `.snd` by index and none of those answer that here.
+                    if (dbg) System.err.println("[chain-canon-emit] reject: zip second source "
+                            + second.getClass().getSimpleName());
+                    return false;
+                }
+                continue;
+            }
+            if (elemSynth != SynthRec.NONE
+                    && !(stage instanceof StageIR.Map)
+                    && !(stage instanceof StageIR.Take)
+                    && !(stage instanceof StageIR.Drop)) {
+                // A predicate over the record would need the same field
+                // resolution as a mapper; until it has it, decline.
+                if (dbg) System.err.println("[chain-canon-emit] reject: "
+                        + stage.getClass().getSimpleName() + " over an enumerate record");
+                return false;
+            }
             if (stage instanceof StageIR.Map mapStage) {
-                var shape = classifyUnaryLiteralLambda(mapStage.getF(), language);
-                if (shape == null) {
+                var shape = classifyUnaryLiteralLambda(mapStage.getF(), language, elemSynth);
+                // THE TREE IS A FALLBACK AND NOT A PREFERENCE, and measuring it
+                // the other way round is what settled that. A one-operation
+                // mapper classified as `MapInline` reaches a loop the compiler
+                // VECTORISES; emitting the same `{x} -> x * 2` as a tree instead
+                // measured 4 327 913 ns against 1 316 990 — **3.3x worse** — and
+                // took `filter+map+fold` with it. So the tree is tried only
+                // where the alternative is a per-element call, which is the
+                // case it was built for.
+                var treeFirst = (shape != null && shape.callHash == null)
+                        ? null
+                        : classifyMapTree(mapStage.getF(), elemSynth);
+                if (treeFirst == null && elemSynth != SynthRec.NONE
+                        && shape != null && shape.callHash != null) {
+                    // A call form would be handed the element where the lambda
+                    // expects the record. Never emit that.
+                    if (dbg) System.err.println("[chain-canon-emit] reject: call-form map over an enumerate record");
+                    return false;
+                }
+                if (treeFirst == null && shape == null) {
                     if (dbg) System.err.println("[chain-canon-emit] reject: unclassifiable map lambda");
                     return false;
                 }
-                if (shape.callHash != null) {
+                // TWO OPERATIONS ARE TWO MAPS, and that is the difference
+                // between vectorised and not. `classifyUnaryLiteralLambda` reads
+                // one operation; `{x} -> x * 2 + 1` is two, so the stage became a
+                // call (or, since the tree tier, an inline tree) and the pipeline
+                // left the vectorised FLP path: 132 ps an element against 576.
+                //
+                // But FLP already takes SEVERAL map stages — `FLP_MAX_EXTRA_MAPS`
+                // is 2, packed into an extras table as (op, literal) pairs — so
+                // the mapper does not need a wider kernel, it needs to be two
+                // stages instead of one. `x * 2 + 1` IS `map(x * 2).map(+ 1)`.
+                //
+                // No lambda is minted: `ClassifiedStage.MapInline` carries an op
+                // and a literal, not a function, so the pair is built directly.
+                // This is the same decomposition the folder path already does for
+                // `acc + x * x`, which its own comment describes as "map(f) +
+                // fold(OP)".
+                var twoOp = (shape != null && shape.callHash == null)
+                        ? null
+                        : classifyMapTwoOp(mapStage.getF(), elemSynth);
+                if (twoOp != null) {
+                    classifiedStages.addAll(twoOp);
+                    continue;
+                }
+                var mapTree = treeFirst;
+                if (mapTree != null) {
+                    classifiedStages.add(mapTree);
+                } else if (shape.callHash != null) {
                     classifiedStages.add(new ClassifiedStage.MapCall(
                         shape.callHash, shape.callScalarABI, shape.callFieldName));
                 } else {
@@ -4038,8 +4737,50 @@ public final class BytecodeCompiler {
                         }
                     }
                     classifiedStages.add(new ClassifiedStage.MapInline(
-                        shape.op, shape.rhsLit, shape.rhsNode, shape.selfOp));
+                        shape.op, shape.rhsLit, shape.rhsNode, shape.selfOp,
+                        shape.leftIsIndex));
                 }
+            } else if (stage instanceof StageIR.FlatMap fmStage) {
+                // ONE flat_map per chain, and no zip or enumerate beside it.
+                // Both of those keep a per-element counter that the inner loop
+                // would advance at the wrong rate, and the record neither of
+                // them builds would have to mean the INNER element here. The
+                // combination is refusable because refusing declines the chain
+                // to exactly the path it took before this stage existed.
+                if (classifiedStages.stream().anyMatch(s ->
+                        s instanceof ClassifiedStage.FlatMapStep
+                     || s instanceof ClassifiedStage.ZipStep
+                     || s instanceof ClassifiedStage.EnumerateStep)
+                        || elemSynth != SynthRec.NONE) {
+                    if (dbg) System.err.println("[chain-canon-emit] reject: flat_map beside zip/enumerate or a second flat_map");
+                    return false;
+                }
+                // Only a RANGE inner is emitted as a counted loop. A seq inner
+                // would need its own indexed read and is left to fall back.
+                if (!(fmStage.getInner() instanceof SourceIR.RangeSeq innerRange)) {
+                    if (dbg) System.err.println("[chain-canon-emit] reject: flat_map inner is not a range");
+                    return false;
+                }
+                if (language == null) return false;
+                var fnIr = language.lookupFunctionIR(fmStage.getF().getFunctionHash());
+                if (fnIr == null || fnIr.getParamSlots().size() != 1
+                        || !fnIr.getCaptureSlots().isEmpty()) {
+                    if (dbg) System.err.println("[chain-canon-emit] reject: flat_map lambda shape");
+                    return false;
+                }
+                // Frame layout is [captures..., params..., locals...] and
+                // captures are refused, so the parameter is at slot 0 — the
+                // same derivation `classifyMapTree` makes.
+                int fmParamSlot = fnIr.getCaptureSlots().size();
+                // The bounds are emitted inline, so they must be trees the
+                // loop can write out, reading nothing but that parameter.
+                if (!isPureArithFoldTree(innerRange.getStart(), -1, fmParamSlot, 0)
+                        || !isPureArithFoldTree(innerRange.getEnd(), -1, fmParamSlot, 0)) {
+                    if (dbg) System.err.println("[chain-canon-emit] reject: flat_map inner bounds not a pure tree");
+                    return false;
+                }
+                classifiedStages.add(new ClassifiedStage.FlatMapStep(
+                    innerRange.getStart(), innerRange.getEnd(), fmParamSlot));
             } else if (stage instanceof StageIR.Filter filterStage) {
                 var predShape = classifyUnaryPredicateLambda(filterStage.getP(), language);
                 if (predShape == null) {
@@ -4077,6 +4818,21 @@ public final class BytecodeCompiler {
                     predShape.cmpOp, predShape.cmpRhs, predShape.cmpRhsNode,
                     predShape.callHash, predShape.callScalarABI, predShape.callFieldName,
                     /*innerXs=*/ null)));
+            } else {
+                // A STAGE THIS CHAIN DOES NOT RECOGNISE MUST DECLINE, NOT
+                // VANISH. Without this branch an unmatched StageIR variant is
+                // simply never added to `classifiedStages`, so the stage
+                // disappears from the pipeline and the loop computes a
+                // different function than the program wrote — a wrong answer
+                // where a refusal costs only speed. PERF-LOG records that shape
+                // as BUG 42, "a stage nobody wrote".
+                //
+                // Every variant is handled above today, so this is unreachable
+                // now and exists for the NEXT one: whoever adds a StageIR gets
+                // a fallback to the real pipeline instead of silent corruption.
+                if (dbg) System.err.println("[chain-canon-emit] reject: no classifier for stage "
+                        + stage.getClass().getSimpleName());
+                return false;
             }
         }
         java.util.Collections.reverse(classifiedStages);
@@ -4086,6 +4842,14 @@ public final class BytecodeCompiler {
         NodeIR rangeStart = null, rangeEnd = null, rangeStep = null;
         NodeIR rawXsExpr = null;
         NodeIR rawListExpr = null;
+        // Held apart from rawXsExpr deliberately. A bytes source has exactly
+        // ONE legal destination here — BuiltinSumBytes — and must reach
+        // neither the Builtin*Seq / FusedLongPipeline fast paths (which need a
+        // real MezzeSeq and crash on anything else) nor the generic fused
+        // loop, which was MEASURED slower than BytesNatives.fold. Those all
+        // key on rawXsExpr / rawListExpr, so keeping bytes out of those two
+        // names is what keeps it out of those paths.
+        NodeIR rawBytesExpr = null;
         boolean isSumSink = sinkMode instanceof FusedSinkMode.Accumulate a
                 && !a.ignoreElement() && a.op() == InlineOp.ADD
                 && a.elemOp() == null  // exclude compound folds (e.g. acc + x*x)
@@ -4101,6 +4865,8 @@ public final class BytecodeCompiler {
             rawXsExpr = rawSrc.getXs();
         } else if (chain.getSource() instanceof SourceIR.RawList rawListSrc) {
             rawListExpr = rawListSrc.getXs();
+        } else if (chain.getSource() instanceof SourceIR.RawBytes rawBytesSrc) {
+            rawBytesExpr = rawBytesSrc.getXs();
         } else {
             // Opaque source — the runtime value could be Seq, List, Deque, etc.
             // BuiltinSumLongSeq only handles MezzeSeq; passing other types
@@ -4147,6 +4913,18 @@ public final class BytecodeCompiler {
                   emitNode(rawXsExpr, b, argCount, localMap);
                 b.endBuiltinSumLongSeq();
                 if (dbg) System.err.println("[chain-canon-emit] emitted BuiltinSumLongSeq (RawSeq+Sum)");
+                return true;
+            }
+            // The bytes twin, and the ONLY shape a bytes source may fuse into.
+            // Same guards as its seq peer: a zero long init, no stages, and a
+            // plain ADD folder with no element transform — i.e. exactly the
+            // fold whose callback BuiltinSumBytes can delete rather than call.
+            if (rawBytesExpr != null && isSumSink && !hasStages && longZeroInit) {
+                b.beginBuiltinSumBytes();
+                  emitNode(rawBytesExpr, b, argCount, localMap);
+                b.endBuiltinSumBytes();
+                recordFusedEmit("BuiltinSumBytes");
+                if (dbg) System.err.println("[chain-canon-emit] emitted BuiltinSumBytes (RawBytes+Sum)");
                 return true;
             }
             // No RawList twin of the branch above: BuiltinSumLongSeq takes a Seq,
@@ -4216,7 +4994,7 @@ public final class BytecodeCompiler {
             if (flp != null) {
                 if (rangeStart != null && rangeStep == null) {
                     // Range source (step=1) → FusedLongRangePipeline (no seq allocation at all)
-                    b.beginFusedLongRangePipeline(flp.config);
+                    b.beginFusedLongRangePipeline(flp.config, flp.extraOps, flp.extraLits);
                       emitNode(rangeStart, b, argCount, localMap);             // child 0: start
                       emitNode(rangeEnd,   b, argCount, localMap);             // child 1: end
                       emitFLPOperand(flp.mapLit, flp.mapNode, b, argCount, localMap);
@@ -4227,6 +5005,12 @@ public final class BytecodeCompiler {
                       emitFLPOperand(flp.foldInitLit, flp.foldInitNode, b, argCount, localMap);
                       emitFLPOperand(flp.takeLimitLit, flp.takeLimitNode, b, argCount, localMap);
                     b.endFusedLongRangePipeline();
+                    // The range pipeline had no test seam, so a value test could
+                    // not tell a correct FUSION from a correct FALLBACK — which is
+                    // the only thing worth asserting about a stage rewrite.
+                    recordFusedEmit(flp.extraOps != 0
+                            ? "FusedLongRangePipeline+extraMaps"
+                            : "FusedLongRangePipeline");
                     if (dbg) System.err.println("[chain-canon-emit] emitted FusedLongRangePipeline ("
                             + sinkMode.getClass().getSimpleName() + ", " + classifiedStages.size() + " stages)");
                     return true;
@@ -4294,6 +5078,18 @@ public final class BytecodeCompiler {
             }
         }
 
+        // A bytes source that did not reach BuiltinSumBytes above must NOT
+        // continue into the generic loop. MEASURED: fusing a bytes fold into
+        // it costs more than `BytesNatives.fold`, which is already a tight
+        // loop on the scalar-ABI bypass — 13 492 ps/elem against 11 256 on
+        // `fuseall` kernel 8, and the emitter's own "(Accumulate, 0 stages)"
+        // says why. Refusing here drops the chain to its fallback, which is
+        // the native call.
+        if (rawBytesExpr != null) {
+            if (dbg) System.err.println("[chain-canon-emit] reject: bytes source outside BuiltinSumBytes");
+            return false;
+        }
+
         // ── Phase 4d: emit the generic fused loop (fallback) ──
         emitFusedLoop(classifiedStages, rangeStart, rangeEnd, rangeStep, rawXsExpr,
                 rawListExpr, sinkMode, b, argCount, localMap);
@@ -4311,6 +5107,9 @@ public final class BytecodeCompiler {
      */
     private static final class FLPSpec {
         final int config;
+        /** Map stages TWO AND LATER: ops packed 5 bits each, literals beside. */
+        final int extraOps;
+        final long[] extraLits;
         final long mapLit;           final NodeIR mapNode;
         final long filterPreLit;     final NodeIR filterPreNode;
         final long filterCmpLit;     final NodeIR filterCmpNode;
@@ -4318,7 +5117,7 @@ public final class BytecodeCompiler {
         final long sinkPredCmpLit;   final NodeIR sinkPredCmpNode;
         final long foldInitLit;      final NodeIR foldInitNode;
         final long takeLimitLit;     final NodeIR takeLimitNode;
-        FLPSpec(int config,
+        FLPSpec(int config, int extraOps, long[] extraLits,
                 long mapLit, NodeIR mapNode,
                 long filterPreLit, NodeIR filterPreNode,
                 long filterCmpLit, NodeIR filterCmpNode,
@@ -4327,6 +5126,8 @@ public final class BytecodeCompiler {
                 long foldInitLit, NodeIR foldInitNode,
                 long takeLimitLit, NodeIR takeLimitNode) {
             this.config = config;
+            this.extraOps = extraOps;
+            this.extraLits = extraLits;
             this.mapLit = mapLit;               this.mapNode = mapNode;
             this.filterPreLit = filterPreLit;   this.filterPreNode = filterPreNode;
             this.filterCmpLit = filterCmpLit;   this.filterCmpNode = filterCmpNode;
@@ -4360,6 +5161,8 @@ public final class BytecodeCompiler {
     private FLPSpec tryBuildFusedLongPipeline(
             java.util.List<ClassifiedStage> stages, FusedSinkMode mode) {
         if (mode instanceof FusedSinkMode.CallEach) return null;
+        // The folder is a call, so there is no inline long op sequence to build.
+        if (mode instanceof FusedSinkMode.AccumulateCall) return null;
 
         int mapOp = -1; long mapLit = 0; NodeIR mapNode = null;
         boolean selfMap = false; boolean filterFirst = false;
@@ -4370,22 +5173,54 @@ public final class BytecodeCompiler {
         boolean hasTake = false; long takeLimitLit = 0; NodeIR takeLimitNode = null;
         // Track whether we've seen a filter before a map (for stage ordering).
         boolean seenFilter = false;
+        // A filter that came AFTER a map: it would sit between that map and any
+        // later one, which the single extras block cannot express.
+        boolean filterAfterMap = false;
+        // Map stages two and later: ops packed into an int (so they stay PE
+        // constants and the arithmetic folds), literals in a parallel list.
+        int extraOps = 0;
+        java.util.List<Long> extraLits = new java.util.ArrayList<>();
 
         for (ClassifiedStage stage : stages) {
             if (stage instanceof ClassifiedStage.MapInline mi) {
-                if (mapOp >= 0) return null;
-                mapOp = mi.op().ordinal();
-                // If we saw a filter before this map, the filter goes first.
-                if (seenFilter) filterFirst = true;
-                selfMap = mi.selfOp();
-                if (!selfMap && mi.rhsNode() != null && !(mi.rhsNode() instanceof LongLitIR)) {
-                    mapNode = mi.rhsNode();
-                } else if (!selfMap) {
-                    mapLit = mi.rhsLit();
+                if (mapOp < 0) {
+                    // The FIRST map keeps the config slot and its bytecode child,
+                    // so the single-map case — runtime operand and vectorised path
+                    // included — is exactly what it was.
+                    mapOp = mi.op().ordinal();
+                    // If we saw a filter before this map, the filter goes first.
+                    if (seenFilter) filterFirst = true;
+                    selfMap = mi.selfOp();
+                    if (!selfMap && mi.rhsNode() != null && !(mi.rhsNode() instanceof LongLitIR)) {
+                        mapNode = mi.rhsNode();
+                    } else if (!selfMap) {
+                        mapLit = mi.rhsLit();
+                    }
+                } else {
+                    // A FURTHER map goes in the extras table. This used to be
+                    // `return null`, which dropped the pipeline to the generic
+                    // bytecode loop at 7.7x — see flpApplyExtraMaps.
+                    //
+                    // The extras all run TOGETHER, immediately after the primary
+                    // map, so every map must be on the same side of the filter.
+                    // A filter BETWEEN two maps cannot be expressed and is
+                    // refused; a filter before ALL of them is `filterFirst`, and
+                    // after all of them is the default.
+                    if (filterAfterMap) return null;
+                    // A dynamic operand needs a bytecode child and the emitter's
+                    // child list is fixed, so only a literal (or a self op, which
+                    // needs no operand at all) can ride in the table.
+                    if (!mi.selfOp() && mi.rhsNode() != null
+                            && !(mi.rhsNode() instanceof LongLitIR)) return null;
+                    if (extraLits.size() >= MezzeBytecodeRootNode.FLP_MAX_EXTRA_MAPS) return null;
+                    extraOps = MezzeBytecodeRootNode.flpPackExtraMap(
+                            extraOps, extraLits.size(), mi.op().ordinal(), mi.selfOp());
+                    extraLits.add(mi.selfOp() ? 0L : mi.rhsLit());
                 }
             } else if (stage instanceof ClassifiedStage.FilterStep fs) {
                 if (filterCmpOp >= 0) return null;
                 seenFilter = true;
+                if (mapOp >= 0) filterAfterMap = true;
                 FilterPeel fp = fs.peel();
                 if (fp.callHash() != null) return null;
                 if (fp.preOp() != null) {
@@ -4437,17 +5272,56 @@ public final class BytecodeCompiler {
             // element pre-transform (e.g. acc + x*x → elemOp=MUL, elemSelfOp)
             // and no explicit Map stage was in the pipeline, inject it as the map.
             if (a.elemOp() != null) {
-                // The pipeline carries ONE map stage. With an explicit map already in
-                // it there is nowhere to put the element transform, and dropping it
-                // silently computes the wrong fold, so refuse and let the fallback run.
-                if (mapOp >= 0) return null;
-                mapOp = a.elemOp().ordinal();
-                selfMap = a.elemSelfOp();
-                if (!selfMap) {
-                    // A captured rhs arrives as a node (already lifted to the enclosing
-                    // frame); emitFLPOperand emits it in place of the literal.
-                    if (a.elemRhsNode() != null) mapNode = a.elemRhsNode();
-                    else mapLit = a.elemRhs();
+                // THIS TRANSFORM BELONGS TO THE SINK -- in `acc + x * x` the square
+                // is part of the fold, not a stage -- so it runs LAST: after every
+                // map, and after every filter.
+                //
+                // A filter that came after a map would have to sit between the maps
+                // and this, which the single extras block cannot express.
+                if (filterAfterMap) return null;
+                // AND AFTER THE FILTER. `filterFirst` means exactly "the filter goes
+                // before the map", which is the order this needs. When an explicit
+                // map preceded the filter, `filterAfterMap` above already refused;
+                // when the filter came first it is already set; and when there is no
+                // map at all it is false only because the branch that sets it never
+                // ran -- which was BUG 42: `filter(x > 5).fold(0, {acc,x} -> acc+x*x)`
+                // over 0..10 filtered on `x * x > 5` and returned 280 where the
+                // explicit-map spelling returns 230.
+                if (filterCmpOp >= 0) filterFirst = true;
+                if (mapOp < 0 && extraOps == 0) {
+                    // The primary slot is free. Keep this path: it is the only one
+                    // that can take a DYNAMIC rhs, which arrives as a node (already
+                    // lifted to the enclosing frame) and is emitted as a child.
+                    mapOp = a.elemOp().ordinal();
+                    selfMap = a.elemSelfOp();
+                    if (!selfMap) {
+                        if (a.elemRhsNode() != null) mapNode = a.elemRhsNode();
+                        else mapLit = a.elemRhs();
+                    }
+                } else {
+                    // AN EXPLICIT MAP HOLDS THE SLOT, so the transform appends as the
+                    // LAST map stage -- which is where it belongs anyway.
+                    //
+                    // This used to `return null`, and that did not merely decline the
+                    // fast path: the chain then hit the blanket refusal below and fell
+                    // back to the REAL folder, unfused. `bench/cases/foldshape` at
+                    // n=2e7 measured the result at 14 024 ps/elem with 80 young
+                    // collections -- against 726 for the SAME pipeline with a DEEPER
+                    // body, which is not the "acc OP f(x)" shape at all and so takes
+                    // the generic loop's inline tree. A one-op transform was 19x
+                    // slower than a two-op one, a cliff pointing the wrong way.
+                    //
+                    // No algebra is involved: the transform is applied to the element
+                    // after the maps, exactly as written. (Reassociating is NOT
+                    // available here -- `acc + x * 2 - 1` parses as `(acc + x*2) - 1`,
+                    // and `Int` overflow RAISES, so moving the subtraction across the
+                    // accumulator changes WHICH operation overflows. That shape keeps
+                    // the tree.)
+                    if (!a.elemSelfOp() && a.elemRhsNode() != null) return null;
+                    if (extraLits.size() >= MezzeBytecodeRootNode.FLP_MAX_EXTRA_MAPS) return null;
+                    extraOps = MezzeBytecodeRootNode.flpPackExtraMap(
+                            extraOps, extraLits.size(), a.elemOp().ordinal(), a.elemSelfOp());
+                    extraLits.add(a.elemSelfOp() ? 0L : a.elemRhs());
                 }
             }
         } else if (mode instanceof FusedSinkMode.ShortCircuit sc) {
@@ -4490,7 +5364,11 @@ public final class BytecodeCompiler {
         int config = MezzeBytecodeRootNode.flpPackConfig(
                 sinkKind, mapOp, filterPreOp, filterCmpOp,
                 sinkPredPreOp, sinkPredCmpOp, foldOp, selfMap, filterFirst, hasTake);
-        return new FLPSpec(config,
+        long[] extras = extraLits.isEmpty()
+                ? MezzeBytecodeRootNode.FLP_NO_EXTRA_MAPS
+                : new long[extraLits.size()];
+        for (int i = 0; i < extraLits.size(); i++) extras[i] = extraLits.get(i);
+        return new FLPSpec(config, extraOps, extras,
                 mapLit, mapNode, filterPreLit, filterPreNode,
                 filterCmpLit, filterCmpNode,
                 sinkPredPreLit, sinkPredPreNode,
@@ -5044,8 +5922,18 @@ public final class BytecodeCompiler {
      * Phase 4c — classified pipeline stage, either a map transform or a
      * filter predicate. Built from the canonicalizer's StageIR list.
      */
+    /** What a stage opened, so the unwind closes it with the right end. */
+    private enum FusedScope { FILTER, FLAT_MAP }
+
     private sealed interface ClassifiedStage {
-        record MapInline(InlineOp op, long rhsLit, NodeIR rhsNode, boolean selfOp) implements ClassifiedStage {}
+        /** [leftIsIndex] when the mapped expression reads `x.i` rather than the
+         *  element — the left operand is then the enumerate counter. */
+        record MapInline(InlineOp op, long rhsLit, NodeIR rhsNode, boolean selfOp,
+                         boolean leftIsIndex) implements ClassifiedStage {
+            MapInline(InlineOp op, long rhsLit, NodeIR rhsNode, boolean selfOp) {
+                this(op, rhsLit, rhsNode, selfOp, false);
+            }
+        }
         record MapCall(Hash callHash, boolean scalarABI, String fieldName) implements ClassifiedStage {}
         record FilterStep(FilterPeel peel) implements ClassifiedStage {}
         record TakeStep(NodeIR n) implements ClassifiedStage {}
@@ -5054,6 +5942,110 @@ public final class BytecodeCompiler {
         record TakeWhileStep(FilterPeel peel) implements ClassifiedStage {}
         /** DropWhile: boolean state; skip elements while predicate is true. */
         record DropWhileStep(FilterPeel peel) implements ClassifiedStage {}
+        /**
+         * Enumerate: carries nothing, because the `{i, val}` record it
+         * nominally produces is never built. The loop keeps a counter, the
+         * element stays where it is, and the next stage's `x.val` and `x.i`
+         * resolve to the element and that counter.
+         */
+        record EnumerateStep() implements ClassifiedStage {}
+
+        /**
+         * A mapper that is a pure arithmetic EXPRESSION over its parameter,
+         * emitted inline into the loop.
+         *
+         * <p>WHY THERE IS A TIER BETWEEN `MapInline` AND `MapCall`.
+         * `classifyUnaryLiteralLambda` reads `x <op> rhs` — ONE operation. A
+         * mapper with two is not that shape, so it became a `MapCall` and the
+         * loop called it per element: `{x} -> x * 2` measured 132 ps an element
+         * and `{x} -> x * 2 + 1` measured 576, **4.4x for one more
+         * arithmetic operation**. The body is a tree the loop can emit as
+         * written, exactly as `AccumulateTree` does for a folder.
+         *
+         * <p>[elemIsEnumRecord] when the element arriving here is an
+         * Enumerate's `{i, val}` record, which is never built: `val` is the
+         * element local and `i` is the index local. A call form cannot be
+         * handed that record at all, so before this tier existed an
+         * `enumerate` followed by any mapper the one-operation matcher could
+         * not read declined the whole chain.
+         */
+        record MapTree(NodeIR body, int paramSlot, SynthRec elemSynth)
+                implements ClassifiedStage {}
+
+        /**
+         * Advance a SECOND source in lockstep, as `iter::zip` does.
+         *
+         * <p>Like {@link EnumerateStep} this produces a two-field record that
+         * is never built — `.fst` is the loop's element local, `.snd` is the
+         * second source's element, loaded into a local beside it.
+         *
+         * <p>WHY A COUNTER RATHER THAN A PRECOMPUTED `min` BOUND. Setting the
+         * loop bound to `min(lenA, lenB)` up front is wrong the moment a stage
+         * precedes the zip: `zip(filter(a), b)` must advance `b` only for
+         * elements that SURVIVE the filter, and how many that is cannot be
+         * known before the loop runs. The counter is incremented at this
+         * stage's own position, so it counts exactly the elements that reach
+         * it — the same reasoning {@link EnumerateStep}'s index rests on.
+         *
+         * <p>"Stops at the shorter" is therefore an early exit when the
+         * counter reaches [lenLocal], using the forward branch
+         * {@link TakeWhileStep} already established.
+         *
+         * <p>Carries the second source's EXPRESSIONS, not locals: classification
+         * runs before the loop exists, so the emitter creates the base, length,
+         * counter and `.snd` locals itself — the way Take/Drop counters are
+         * made.
+         *
+         * @param secondIsRange  true when the second source is a counted
+         *                       range, so `.snd` is `base + counter` rather
+         *                       than an indexed read
+         * @param baseExpr       the range's start, or the seq to materialise
+         * @param endExpr        the range's end; null for a seq, whose length
+         *                       is read at run time
+         */
+        /**
+         * Replace each element with the elements of an inner source derived
+         * from it — `iter::flat_map`.
+         *
+         * <p>THE ONLY STAGE THAT OPENS A LOOP. Every other stage keeps, drops
+         * or replaces one element; this one produces many, so the stages after
+         * it and the SINK run inside the inner loop, and the element local is
+         * REBOUND to the inner value. The outer loop's advance sits outside,
+         * which falls out of closing scopes before it.
+         *
+         * <p>[startBody] and [endBody] are the inner range's bounds as written
+         * in the lambda, emitted inline with [paramSlot] bound to the element
+         * local — the same binding {@link MapTree} uses. They are evaluated
+         * INSIDE the outer loop, once per outer element, because that is what
+         * they depend on; a zip's second source is a value and is hoisted, and
+         * this deliberately is not.
+         *
+         * <p>Measured before building: 14 703 ps/elem against 1 258 for the
+         * same computation as nested folds — 11.7x.
+         */
+        record FlatMapStep(NodeIR startBody, NodeIR endBody, int paramSlot)
+                implements ClassifiedStage {}
+
+        record ZipStep(boolean secondIsRange, NodeIR baseExpr, NodeIR endExpr)
+                implements ClassifiedStage {}
+    }
+
+    /**
+     * The local a synthetic record's SECOND field resolves to.
+     *
+     * One place, because the two record shapes differ only in which local
+     * plays the companion: an enumerate's `.i` is the loop counter, a zip's
+     * `.snd` is the second source's element.
+     */
+    private static com.oracle.truffle.api.bytecode.BytecodeLocal companionLocalFor(
+            SynthRec kind,
+            com.oracle.truffle.api.bytecode.BytecodeLocal enumIndexLocal,
+            com.oracle.truffle.api.bytecode.BytecodeLocal zipSndLocal) {
+        return switch (kind) {
+            case ENUM -> enumIndexLocal;
+            case ZIP -> zipSndLocal;
+            case NONE -> null;
+        };
     }
 
     // ── Sink mode: the per-element action and post-loop result ──────────
@@ -5088,6 +6080,56 @@ public final class BytecodeCompiler {
                            boolean scalarABI, String fieldName) implements FusedSinkMode {}
         /** Partition: predicate split into {pass, fail} record of two Seqs. */
         record PartitionPred(FilterPeel predPeel) implements FusedSinkMode {}
+        /**
+         * Fold whose body is an arbitrary PURE ARITHMETIC TREE over its two
+         * parameters, emitted as written rather than matched against a shape.
+         *
+         * {@link FolderShape} can express `acc OP x` and one level of element
+         * transform (`acc OP x*k`), which is two of the three nodes in
+         * `acc + x * 2 - 1`. That fold was refused, and a refused folder
+         * declines the WHOLE chain — measured at 14025 ps/elem against 93 for
+         * the shapes that fuse, a 159x cliff on any fold that is not a bare
+         * `acc + x`.
+         *
+         * [accParamSlot] and [elemParamSlot] are the folder's own frame slots,
+         * which the emitter rewrites to the loop's accumulator and element
+         * locals.
+         */
+        record AccumulateTree(NodeIR body, int accParamSlot, int elemParamSlot,
+                              NodeIR initExpr) implements FusedSinkMode {}
+        /**
+         * A fold whose folder is NOT an arithmetic expression: build the closure
+         * once before the loop, CALL it per element, thread the result.
+         *
+         * The two modes above both emit the folder's arithmetic INTO the loop, and
+         * between them they want `acc OP x` with at most one element transform, or
+         * a pure arithmetic tree over the two parameters with no captures and no
+         * locals. A folder that calls anything satisfies neither, and the whole
+         * chain was declined — so a fold whose body does real work fell all the way
+         * back to the native fold and its element-at-a-time iterator protocol.
+         *
+         * MEASURED on `bench/cases/mandelannot`, grid walk only, through the
+         * generated launcher (`java -jar` is NOT the same program — it omits
+         * `--add-modules=jdk.incubator.vector` and the GC flags, and read 21 ns/px
+         * where the launcher reads 10):
+         *
+         *   iter::range().fold(), folder `acc + x % 7`      10 ns/px   (fuses)
+         *   the same walk as a tail loop                     1 ns/px
+         *   iter::range().fold(), folder calls `pixel`       29 ns/px   (declined)
+         *
+         * `mezze-benchmark`'s mandelbrot walks its grid exactly this way, on
+         * purpose — the grid is a traversal nobody needs materialised — and that
+         * 29 ns is 29 of its 69 ns/px against kotlin's 22.3 ns/px total.
+         *
+         * One call and one closure-arg record per element is not free; it is what
+         * `CallEach` already settled for on the ForEach sink, whose own note puts
+         * it plainly — the win is "going from not fused at all to fused with one
+         * alloc per iter", and Truffle's escape analysis often folds the record
+         * away. The loop itself becomes a counted range walk with no iterator
+         * state and no Option per step, which is the part that was costing 20 ns.
+         */
+        record AccumulateCall(NodeIR lambdaExpr, NodeIR initExpr,
+                              String[] argFieldNames) implements FusedSinkMode {}
 
         enum ShortCircuitKind { ANY, ALL, FIND, NONE, FIND_INDEX }
         enum MaterializeTarget { SEQ, LIST }
@@ -5098,13 +6140,129 @@ public final class BytecodeCompiler {
      * Classify the chain's sink into a {@link FusedSinkMode}, doing
      * lambda/folder classification up front. Returns null on rejection.
      */
+    /**
+     * True when every field this fold tree reads off its ELEMENT parameter is
+     * one of the enumerate record's own two, `i` and `val` — the two the fused
+     * loop can resolve to locals. A read of any other name means the element is
+     * not the record this analysis believes it is, and the caller declines.
+     *
+     * <p>Fields of the ACCUMULATOR are not restricted: the accumulator is
+     * whatever the fold's `init` made it, never the enumerate record.
+     */
+    private static boolean foldTreeReadsOnlyEnumFields(NodeIR node, int elemParam, SynthRec kind) {
+        if (node instanceof ReadFieldIR rf) {
+            if (rf.getRecord() instanceof ReadLocalIR rl && rl.getSlot() == elemParam) {
+                return synthFieldIndex(kind, rf.getFieldName()) >= 0;
+            }
+            return foldTreeReadsOnlyEnumFields(rf.getRecord(), elemParam, kind);
+        }
+        if (node instanceof InlineBinaryOpIR bin) {
+            return foldTreeReadsOnlyEnumFields(bin.getLeft(), elemParam, kind)
+                    && foldTreeReadsOnlyEnumFields(bin.getRight(), elemParam, kind);
+        }
+        return true;
+    }
+
+    /**
+     * A map stage whose lambda is a pure arithmetic expression over its one
+     * parameter — see {@link ClassifiedStage.MapTree} — or null.
+     *
+     * <p>Captures are refused for the reason {@link #isPureArithFoldTree}
+     * refuses them: a `ReadCaptureIR` addresses the lambda's capture array, and
+     * emitting it in the loop's frame needs the capture lifted. The
+     * one-operation shape matcher has machinery for that in its `rhsNode`
+     * path; a tree does not, so a capturing mapper keeps the old path.
+     */
+    /**
+     * `{x} -> x <op1> lit1 <op2> lit2` as TWO one-operation map stages, outermost
+     * first — or null. See the call site for why two stages beat one tree.
+     *
+     * <p>LEFT-LEANING AND LITERAL-ONLY, deliberately. The parameter must be the
+     * LEFT operand at each level, because `MapInline` means `x <op> lit` and
+     * `lit - x` is not that; a captured or dynamic operand cannot ride in FLP's
+     * extras table at all (the emitter's child list is fixed), so only a literal
+     * qualifies. Anything else falls through to the tree tier below, which is
+     * correct and merely scalar.
+     *
+     * <p>An enumerate record is refused outright: these stages are packed as
+     * arithmetic on a long, and the `{i, val}` resolution lives in the tree
+     * emitter.
+     */
+    private java.util.List<ClassifiedStage> classifyMapTwoOp(
+            MakeLambdaIR lambda, SynthRec elemSynth) {
+        if (language == null || elemSynth != SynthRec.NONE) return null;
+        if (!lambda.getCaptures().isEmpty()) return null;
+        var ir = language.lookupFunctionIR(lambda.getFunctionHash());
+        if (ir == null || ir.getParamSlots().size() != 1
+                || !ir.getLocalSlots().isEmpty()
+                || !ir.getCaptureSlots().isEmpty()) {
+            return null;
+        }
+        int paramSlot = ir.getCaptureSlots().size();
+        if (!(ir.getBody() instanceof InlineBinaryOpIR outer)) return null;
+        if (!isFlpArithOp(outer.getOp())) return null;
+        if (!(outer.getRight() instanceof LongLitIR outerLit)) return null;
+        if (!(outer.getLeft() instanceof InlineBinaryOpIR inner)) return null;
+        if (!isFlpArithOp(inner.getOp())) return null;
+        if (!(inner.getRight() instanceof LongLitIR innerLit)) return null;
+        if (!(inner.getLeft() instanceof ReadLocalIR rl) || rl.getSlot() != paramSlot) {
+            return null;
+        }
+        // Outer-to-inner, which is the order `classifiedStages` is built in: the
+        // operation applied LAST comes FIRST.
+        return java.util.List.of(
+            new ClassifiedStage.MapInline(outer.getOp(), outerLit.getValue(), null, false, false),
+            new ClassifiedStage.MapInline(inner.getOp(), innerLit.getValue(), null, false, false));
+    }
+
+    private static boolean isFlpArithOp(InlineOp op) {
+        return switch (op) {
+            case ADD, SUB, MUL, DIV, MOD -> true;
+            default -> false;
+        };
+    }
+
+    private ClassifiedStage classifyMapTree(MakeLambdaIR lambda, SynthRec elemSynth) {
+        if (language == null) return null;
+        if (!lambda.getCaptures().isEmpty()) return null;
+        var ir = language.lookupFunctionIR(lambda.getFunctionHash());
+        if (ir == null || ir.getParamSlots().size() != 1
+                || !ir.getLocalSlots().isEmpty()
+                || !ir.getCaptureSlots().isEmpty()) {
+            return null;
+        }
+        // Frame layout is [captures..., params..., locals...] and captures are
+        // refused above, so the one parameter sits at slot 0 — the same way
+        // `classifyBinaryFolder` derives its two slots from the capture count.
+        int paramSlot = ir.getCaptureSlots().size();
+        var body = ir.getBody();
+        // A single `ReadLocal` is the identity mapper, which the loop already
+        // expresses by doing nothing — leave it to the existing path.
+        if (body instanceof ReadLocalIR) return null;
+        // accParam = -1 so no read can resolve to an accumulator: this is a
+        // one-parameter lambda and every read must be of that parameter.
+        if (!isPureArithFoldTree(body, -1, paramSlot, 0)) return null;
+        if (elemSynth != SynthRec.NONE
+                && !foldTreeReadsOnlyEnumFields(body, paramSlot, elemSynth)) return null;
+        return new ClassifiedStage.MapTree(body, paramSlot, elemSynth);
+    }
+
     private FusedSinkMode classifySinkMode(FusedChainIR chain, boolean dbg) {
         if (chain.getSink() instanceof SinkIR.Fold foldSink) {
             var folderShape = classifyBinaryFolder(foldSink.getF(), dbg, "folder");
-            if (folderShape == null) return null;
-            return new FusedSinkMode.Accumulate(folderShape.op, foldSink.getInit(), false,
-                    folderShape.elemOp, folderShape.elemRhs, folderShape.elemRhsNode,
-                    folderShape.elemSelfOp);
+            if (folderShape != null) {
+                return new FusedSinkMode.Accumulate(folderShape.op, foldSink.getInit(), false,
+                        folderShape.elemOp, folderShape.elemRhs, folderShape.elemRhsNode,
+                        folderShape.elemSelfOp);
+            }
+            // The shape match covers `acc OP x` and one element transform. A
+            // deeper body is still a pure expression the loop can emit as
+            // written, so try that before declining the whole chain.
+            var tree = classifyFolderTree(foldSink, dbg);
+            if (tree != null) return tree;
+            // And a folder that is not an expression at all still does not have to
+            // cost the whole chain — call it per element inside the fused loop.
+            return classifyFolderCall(foldSink, dbg);
         }
         if (chain.getSink() instanceof SinkIR.Sum) {
             return new FusedSinkMode.Accumulate(InlineOp.ADD,
@@ -5222,7 +6380,7 @@ public final class BytecodeCompiler {
     private void emitFLP(FLPSpec flp, NodeIR src,
                          MezzeBytecodeRootNodeGen.Builder b, int argCount,
                          com.oracle.truffle.api.bytecode.BytecodeLocal[] localMap) {
-        b.beginFusedLongPipeline(flp.config);
+        b.beginFusedLongPipeline(flp.config, flp.extraOps, flp.extraLits);
           emitNode(src, b, argCount, localMap);                        // child 0: source
           emitFLPOperand(flp.mapLit, flp.mapNode, b, argCount, localMap);
           emitFLPOperand(flp.filterPreLit, flp.filterPreNode, b, argCount, localMap);
@@ -5257,6 +6415,202 @@ public final class BytecodeCompiler {
     }
 
     /** Shared classification for Fold and Reduce combining functions. */
+    /** How deep a fold body may be before it stops being worth emitting inline. */
+    private static final int FOLD_TREE_MAX_DEPTH = 8;
+
+    /**
+     * Accept a fold body that is a pure arithmetic tree over the folder's two
+     * parameters and integer literals.
+     *
+     * PURE AND TOTAL-AS-WRITTEN is the whole requirement: every operator emitted
+     * here is the same overflow-checked `Direct*` operation the unfused path
+     * would run, every leaf is a parameter read or a constant, and there are no
+     * calls, no allocation and no effects — so emitting the tree inline computes
+     * exactly what calling the folder would. Comparisons are excluded because an
+     * accumulator update must produce a number, not a Bool.
+     */
+    static boolean isPureArithFoldTree(NodeIR node, int accParam, int elemParam, int depth) {
+        if (depth > FOLD_TREE_MAX_DEPTH) return false;
+        if (node instanceof ReadLocalIR rl) {
+            return rl.getSlot() == accParam || rl.getSlot() == elemParam;
+        }
+        if (node instanceof LongLitIR) return true;
+        // A FIELD OF ONE OF THE TWO PARAMS — `acc + x.v`. This predicate is the
+        // emit side of `ChainCanonicalizer.isPureArithTree`, which admits the
+        // same leaf; the two have to agree, or a chain the canonicalizer
+        // accepted arrives at `emitFoldTree` and throws. Without it, such a
+        // chain still FUSES — the folder is called per element through
+        // `AccumulateCall` — so this is the difference between a loop with a
+        // field load in it and a loop with a call in it, not between fused and
+        // unfused.
+        if (node instanceof ReadFieldIR rf && rf.getRecord() instanceof ReadLocalIR rl) {
+            return rl.getSlot() == accParam || rl.getSlot() == elemParam;
+        }
+        if (node instanceof InlineBinaryOpIR bin) {
+            switch (bin.getOp()) {
+                case ADD, SUB, MUL, DIV, MOD -> { }
+                default -> { return false; }
+            }
+            return isPureArithFoldTree(bin.getLeft(), accParam, elemParam, depth + 1)
+                    && isPureArithFoldTree(bin.getRight(), accParam, elemParam, depth + 1);
+        }
+        return false;
+    }
+
+    /**
+     * Classify a fold whose body the shape matcher refused into an
+     * {@link FusedSinkMode.AccumulateTree}, or null to leave the chain unfused.
+     *
+     * A CAPTURED operand is deliberately not accepted here. A `ReadCaptureIR`
+     * addresses the lambda's capture array, so emitting it in the loop's frame
+     * needs the capture lifted to an enclosing-frame expression — which
+     * {@link FolderShape#withElemRhsNode} already does for the one-level shape
+     * it supports. Those bodies keep taking that path; a deeper body with a
+     * capture declines and runs unfused, correctly.
+     */
+    private FusedSinkMode classifyFolderTree(SinkIR.Fold foldSink, boolean dbg) {
+        var lambda = foldSink.getF();
+        var ir = language.lookupFunctionIR(lambda.getFunctionHash());
+        if (ir == null || ir.getCaptureSlots().size() != lambda.getCaptures().size()
+                || ir.getParamSlots().size() != 2 || !ir.getLocalSlots().isEmpty()) {
+            return null;
+        }
+        if (!lambda.getCaptures().isEmpty()) return null;
+        int accAt = 0, elemAt = 1;
+        if (!isPureArithFoldTree(ir.getBody(), accAt, elemAt, 0)) {
+            if (dbg) System.err.println("[chain-canon-emit] reject: folder body not a pure arith tree");
+            return null;
+        }
+        if (dbg) System.err.println("[chain-canon-emit] folder body emitted as a tree");
+        return new FusedSinkMode.AccumulateTree(ir.getBody(), accAt, elemAt, foldSink.getInit());
+    }
+
+    /**
+     * The Fold sink's last resort: keep the fused loop and call the folder.
+     *
+     * Unlike {@link #classifyFolderTree} this accepts CAPTURES, because the
+     * closure is built once in the loop's prologue rather than reconstructed per
+     * element — and a folder that captures is the common case the moment the
+     * callback mentions anything from its enclosing scope (mandelbrot's captures
+     * `side` and `span`). All it needs is a two-parameter function whose
+     * parameters have names, so the call can be made on the scalar ABI.
+     */
+    private FusedSinkMode classifyFolderCall(SinkIR.Fold foldSink, boolean dbg) {
+        if (language == null) return null;
+        var lambda = foldSink.getF();
+        var ir = language.lookupFunctionIR(lambda.getFunctionHash());
+        if (ir == null || ir.getParamSlots().size() != 2) {
+            if (dbg) System.err.println(
+                "[chain-canon-emit] reject: folder not a two-parameter function");
+            return null;
+        }
+        var names = ir.getParamNames();
+        if (names == null || names.size() != 2) {
+            if (dbg) System.err.println("[chain-canon-emit] reject: folder params unnamed");
+            return null;
+        }
+        if (dbg) System.err.println("[chain-canon-emit] folder called per element");
+        return new FusedSinkMode.AccumulateCall(lambda, foldSink.getInit(),
+                new String[] { names.get(0), names.get(1) });
+    }
+
+    /** Begin the BDSL operation for an arithmetic [op]; the caller emits both
+     *  operands and then calls {@link #endInlineArithOp}. Split from
+     *  {@link #emitInlineOpTwoLocals} so an operand can itself be a tree. */
+    private void beginInlineArithOp(InlineOp op, MezzeBytecodeRootNodeGen.Builder b) {
+        switch (op) {
+            case ADD -> b.beginDirectAdd();
+            case SUB -> b.beginDirectSubtract();
+            case MUL -> b.beginDirectMultiply();
+            case DIV -> b.beginDirectDivide();
+            case MOD -> b.beginDirectModulo();
+            default -> throw new IllegalStateException("beginInlineArithOp: " + op);
+        }
+    }
+
+    private void endInlineArithOp(InlineOp op, MezzeBytecodeRootNodeGen.Builder b) {
+        switch (op) {
+            case ADD -> b.endDirectAdd();
+            case SUB -> b.endDirectSubtract();
+            case MUL -> b.endDirectMultiply();
+            case DIV -> b.endDirectDivide();
+            case MOD -> b.endDirectModulo();
+            default -> throw new IllegalStateException("endInlineArithOp: " + op);
+        }
+    }
+
+    /**
+     * Emit a fold body tree with the folder's parameter reads rewritten to the
+     * loop's accumulator and element locals. Only the shapes
+     * {@link #isPureArithFoldTree} accepts can reach here.
+     */
+    private void emitFoldTree(NodeIR node, int accParam, int elemParam,
+                              com.oracle.truffle.api.bytecode.BytecodeLocal accLocal,
+                              com.oracle.truffle.api.bytecode.BytecodeLocal xLocal,
+                              MezzeBytecodeRootNodeGen.Builder b) {
+        emitFoldTree(node, accParam, elemParam, accLocal, xLocal, SynthRec.NONE, null, b);
+    }
+
+    /**
+     * As above, and when [elemIsEnumRecord] the element is the `{i, val}`
+     * record an Enumerate stage nominally produced — which is never built. A
+     * read of `val` is the element in [xLocal] and a read of `i` is the index
+     * in [enumIndexLocal]; see the note on the record-reaches-the-sink gate.
+     */
+    private void emitFoldTree(NodeIR node, int accParam, int elemParam,
+                              com.oracle.truffle.api.bytecode.BytecodeLocal accLocal,
+                              com.oracle.truffle.api.bytecode.BytecodeLocal xLocal,
+                              SynthRec elemSynth,
+                              com.oracle.truffle.api.bytecode.BytecodeLocal companionLocal,
+                              MezzeBytecodeRootNodeGen.Builder b) {
+        if (node instanceof InlineBinaryOpIR bin) {
+            beginInlineArithOp(bin.getOp(), b);
+              emitFoldTree(bin.getLeft(), accParam, elemParam, accLocal, xLocal,
+                           elemSynth, companionLocal, b);
+              emitFoldTree(bin.getRight(), accParam, elemParam, accLocal, xLocal,
+                           elemSynth, companionLocal, b);
+            endInlineArithOp(bin.getOp(), b);
+            return;
+        }
+        // The enumerate record's two fields, resolved to the loop's locals
+        // rather than read off a record that was never built.
+        if (elemSynth != SynthRec.NONE
+                && node instanceof ReadFieldIR erf
+                && erf.getRecord() instanceof ReadLocalIR erl
+                && erl.getSlot() == elemParam) {
+            int which = synthFieldIndex(elemSynth, erf.getFieldName());
+            if (which == 0) {
+                b.emitLoadLocal(xLocal);
+            } else if (which == 1) {
+                b.emitLoadLocal(companionLocal);
+            } else {
+                throw new IllegalStateException(
+                    "emitFoldTree: " + elemSynth + " record has no field " + erf.getFieldName());
+            }
+            return;
+        }
+        if (node instanceof ReadLocalIR rl) {
+            b.emitLoadLocal(rl.getSlot() == accParam ? accLocal : xLocal);
+            return;
+        }
+        if (node instanceof LongLitIR lit) {
+            b.emitLoadLongConstant(lit.getValue());
+            return;
+        }
+        // A FIELD OF ONE OF THE TWO PARAMS — `acc + x.v`. The canonicalizer's
+        // `isPureArithTree` admits this leaf and the two have to agree, or a
+        // chain it accepted arrives here and throws. Only a field read whose
+        // record is one of the params is vetted; anything else still throws,
+        // because it would mean the grammars have drifted apart.
+        if (node instanceof ReadFieldIR rf && rf.getRecord() instanceof ReadLocalIR rl) {
+            b.beginReadFieldByName(rf.getFieldName());
+              b.emitLoadLocal(rl.getSlot() == accParam ? accLocal : xLocal);
+            b.endReadFieldByName();
+            return;
+        }
+        throw new IllegalStateException("emitFoldTree: unvetted node " + node.getClass().getSimpleName());
+    }
+
     private FolderShape classifyBinaryFolder(MakeLambdaIR lambda, boolean dbg, String label) {
         var caps = lambda.getCaptures();
         var ir = language.lookupFunctionIR(lambda.getFunctionHash());
@@ -5451,7 +6805,12 @@ public final class BytecodeCompiler {
         boolean useShortCircuitBranch = mode instanceof FusedSinkMode.ShortCircuit;
         boolean hasTakeWhile = stages.stream()
                 .anyMatch(s -> s instanceof ClassifiedStage.TakeWhileStep);
-        boolean needsEarlyExit = useShortCircuitBranch || hasTakeWhile
+        boolean hasZip = stages.stream()
+                .anyMatch(s -> s instanceof ClassifiedStage.ZipStep);
+        // A zip leaves the loop when its second source runs out, so it needs
+        // the same forward-branch exit TakeWhile uses. Without this the label
+        // is never created and the branch has nowhere to go.
+        boolean needsEarlyExit = useShortCircuitBranch || hasTakeWhile || hasZip
                 || (mode instanceof FusedSinkMode.ElementCapture ec
                     && ec.kind() == FusedSinkMode.ElementCaptureKind.FIRST);
 
@@ -5476,12 +6835,32 @@ public final class BytecodeCompiler {
         com.oracle.truffle.api.bytecode.BytecodeLocal resultSlot  = null;
         com.oracle.truffle.api.bytecode.BytecodeLocal hasAccSlot  = null;
         com.oracle.truffle.api.bytecode.BytecodeLocal builderSlot = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal folderSlot  = null;
 
         switch (mode) {
             case FusedSinkMode.Accumulate a -> {
                 accSlot = b.createLocal();
                 b.beginStoreLocal(accSlot);
                   emitNode(a.initExpr(), b, argCount, localMap);
+                b.endStoreLocal();
+            }
+            // Same accumulator, same seed — only the update differs.
+            case FusedSinkMode.AccumulateTree t -> {
+                accSlot = b.createLocal();
+                b.beginStoreLocal(accSlot);
+                  emitNode(t.initExpr(), b, argCount, localMap);
+                b.endStoreLocal();
+            }
+            // Same accumulator again, plus the closure — built ONCE here, which is
+            // what lets this mode accept a folder that captures.
+            case FusedSinkMode.AccumulateCall ac -> {
+                accSlot = b.createLocal();
+                b.beginStoreLocal(accSlot);
+                  emitNode(ac.initExpr(), b, argCount, localMap);
+                b.endStoreLocal();
+                folderSlot = b.createLocal();
+                b.beginStoreLocal(folderSlot);
+                  emitNode(ac.lambdaExpr(), b, argCount, localMap);
                 b.endStoreLocal();
             }
             case FusedSinkMode.CallEach ignored -> { /* no extra state */ }
@@ -5800,6 +7179,92 @@ public final class BytecodeCompiler {
             b.endStoreLocal();
         }
 
+        // ── Pre-allocate the enumerate counter and the current index ──
+        // Two locals, not one: the element needs ITS index while the counter
+        // moves on, and the index has to be read before the increment.
+        // IS THE ELEMENT REACHING THE SINK THE ENUMERATE RECORD? The same
+        // application-order walk `emitCanonicalIterChain` does to decide
+        // whether to accept the chain at all: the record is live from an
+        // Enumerate until a map consumes it. Recomputed here rather than
+        // threaded, because this is where the locals it resolves to live.
+        SynthRec synthAtSink = SynthRec.NONE;
+        for (int i = stages.size() - 1; i >= 0; i--) {
+            var st = stages.get(i);
+            if (st instanceof ClassifiedStage.EnumerateStep) synthAtSink = SynthRec.ENUM;
+            else if (st instanceof ClassifiedStage.ZipStep) synthAtSink = SynthRec.ZIP;
+            else if (st instanceof ClassifiedStage.MapInline
+                    || st instanceof ClassifiedStage.MapCall
+                    || st instanceof ClassifiedStage.MapTree) synthAtSink = SynthRec.NONE;
+        }
+        boolean enumRecordAtSink = synthAtSink != SynthRec.NONE;
+
+        com.oracle.truffle.api.bytecode.BytecodeLocal enumCounter = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal enumIndex = null;
+        if (stages.stream().anyMatch(st -> st instanceof ClassifiedStage.EnumerateStep)) {
+            enumCounter = b.createLocal();
+            b.beginStoreLocal(enumCounter);
+              b.emitLoadLongConstant(0L);
+            b.endStoreLocal();
+            enumIndex = b.createLocal();
+            b.beginStoreLocal(enumIndex);
+              b.emitLoadLongConstant(0L);
+            b.endStoreLocal();
+        }
+
+        // ── The zip's second source, evaluated ONCE before the loop ──
+        // Its base (a range's start, or the seq itself), its length, the
+        // counter of elements that have reached the stage, and the local
+        // `.snd` is read out of. Evaluated here and not per iteration: the
+        // source expression is a value, and re-evaluating it would both cost
+        // and risk running a side effect n times.
+        // The inner loop's index and bound. ALLOCATED here but STORED inside
+        // the loop, because unlike a zip's second source the bounds depend on
+        // the outer element and have to be recomputed for each one.
+        com.oracle.truffle.api.bytecode.BytecodeLocal flatIdx = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal flatEnd = null;
+        if (stages.stream().anyMatch(s -> s instanceof ClassifiedStage.FlatMapStep)) {
+            flatIdx = b.createLocal();
+            flatEnd = b.createLocal();
+        }
+        com.oracle.truffle.api.bytecode.BytecodeLocal zipBase = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal zipLen = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal zipCounter = null;
+        com.oracle.truffle.api.bytecode.BytecodeLocal zipSndLocal = null;
+        ClassifiedStage.ZipStep zipStep = null;
+        for (var st : stages) {
+            if (st instanceof ClassifiedStage.ZipStep zs) { zipStep = zs; break; }
+        }
+        if (zipStep != null) {
+            zipBase = b.createLocal();
+            b.beginStoreLocal(zipBase);
+              emitNode(zipStep.baseExpr(), b, argCount, localMap);
+            b.endStoreLocal();
+            zipLen = b.createLocal();
+            b.beginStoreLocal(zipLen);
+            if (zipStep.secondIsRange()) {
+                // A range's length is end - start, floored at zero so an
+                // inverted range contributes nothing rather than a negative
+                // bound the comparison would read as "always exhausted".
+                b.beginDirectSubtract();
+                  emitNode(zipStep.endExpr(), b, argCount, localMap);
+                  b.emitLoadLocal(zipBase);
+                b.endDirectSubtract();
+            } else {
+                b.beginSeqSize();
+                  b.emitLoadLocal(zipBase);
+                b.endSeqSize();
+            }
+            b.endStoreLocal();
+            zipCounter = b.createLocal();
+            b.beginStoreLocal(zipCounter);
+              b.emitLoadLongConstant(0L);
+            b.endStoreLocal();
+            zipSndLocal = b.createLocal();
+            b.beginStoreLocal(zipSndLocal);
+              b.emitLoadLongConstant(0L);
+            b.endStoreLocal();
+        }
+
         // ── Pre-allocate Take/Drop counter locals + DropWhile state ──
         var takeDropCounters = new java.util.ArrayList<com.oracle.truffle.api.bytecode.BytecodeLocal>();
         var dropWhileFlags = new java.util.ArrayList<com.oracle.truffle.api.bytecode.BytecodeLocal>();
@@ -5870,6 +7335,13 @@ public final class BytecodeCompiler {
         b.endStoreLocal();
 
         // ── Pipeline stages (shared across all modes) ──
+        // SCOPES ARE UNWOUND IN REVERSE OPEN ORDER, which is why this is a list
+        // and not the count it used to be. A filter opens an `IfThen`; a
+        // flat_map opens a `While`, and the two nest EITHER WAY ROUND —
+        // `flat_map(...).filter(...)` opens while-then-if, and
+        // `filter(...).flat_map(...)` opens if-then-while. Closing all the
+        // filters first, as a count must, is right for only one of those.
+        var openScopes = new java.util.ArrayList<FusedScope>();
         int filterDepth = 0;
         int takeDropIdx = 0;
         var takeCounterPostIncrement = new java.util.ArrayList<com.oracle.truffle.api.bytecode.BytecodeLocal>();
@@ -5879,10 +7351,72 @@ public final class BytecodeCompiler {
                     b.beginIfThen();
                       emitPredicateCheck(b, xSlot, fs.peel(), argCount, localMap);
                       b.beginBlock();
-                    filterDepth++;
+                    filterDepth++; openScopes.add(FusedScope.FILTER);
+                }
+                // The index of the element now passing, then the counter moves
+                // on. Placed at the stage's own position, so it counts exactly
+                // the elements that REACH the enumerate — a filter above it
+                // drops elements that have already been numbered, which is what
+                // `enumerate` means.
+                case ClassifiedStage.EnumerateStep ignored -> {
+                    b.beginStoreLocal(enumIndex);
+                      b.emitLoadLocal(enumCounter);
+                    b.endStoreLocal();
+                    b.beginStoreLocal(enumCounter);
+                      b.beginDirectAdd();
+                        b.emitLoadLocal(enumCounter); b.emitLoadLongConstant(1L);
+                      b.endDirectAdd();
+                    b.endStoreLocal();
+                }
+                // The second source, advanced in lockstep. Same placement
+                // rationale as the enumerate above: the counter moves once per
+                // element that REACHES the zip, so a filter between the source
+                // and the zip cannot desynchronise it — which is why the
+                // "stops at the shorter" bound is this running check and not a
+                // `min` computed before the loop.
+                case ClassifiedStage.ZipStep zs -> {
+                    // EXHAUSTION FIRST, before `.snd` is read: reading past the
+                    // end is what "stops at the shorter" forbids, and for a seq
+                    // it would be out of bounds rather than merely wrong.
+                    b.beginIfThen();
+                      b.beginDirectNot();
+                        b.beginDirectLessThan();
+                          b.emitLoadLocal(zipCounter); b.emitLoadLocal(zipLen);
+                        b.endDirectLessThan();
+                      b.endDirectNot();
+                      b.beginBlock();
+                        b.emitBranch(exitLabel);
+                      b.endBlock();
+                    b.endIfThen();
+                    b.beginStoreLocal(zipSndLocal);
+                    if (zs.secondIsRange()) {
+                        // A counted range: the element IS base + counter.
+                        b.beginDirectAdd();
+                          b.emitLoadLocal(zipBase); b.emitLoadLocal(zipCounter);
+                        b.endDirectAdd();
+                    } else {
+                        b.beginSeqGet();
+                          b.emitLoadLocal(zipBase); b.emitLoadLocal(zipCounter);
+                        b.endSeqGet();
+                    }
+                    b.endStoreLocal();
+                    b.beginStoreLocal(zipCounter);
+                      b.beginDirectAdd();
+                        b.emitLoadLocal(zipCounter); b.emitLoadLongConstant(1L);
+                      b.endDirectAdd();
+                    b.endStoreLocal();
                 }
                 case ClassifiedStage.MapInline mi -> {
-                    if (mi.selfOp()) {
+                    if (mi.leftIsIndex()) {
+                        // `x.i <op> rhs` — the record's index field, which is
+                        // the counter, never a materialised field read.
+                        b.beginStoreLocal(xSlot);
+                          beginInlineArithOp(mi.op(), b);
+                            b.emitLoadLocal(enumIndex);
+                            emitFLPOperand(mi.rhsLit(), mi.rhsNode(), b, argCount, localMap);
+                          endInlineArithOp(mi.op(), b);
+                        b.endStoreLocal();
+                    } else if (mi.selfOp()) {
                         b.beginStoreLocal(xSlot);
                         emitInlineOpTwoLocals(mi.op(), xSlot, xSlot, b);
                         b.endStoreLocal();
@@ -5890,6 +7424,40 @@ public final class BytecodeCompiler {
                         emitMapperStep(b, xSlot, mi.op(), mi.rhsLit(), mi.rhsNode(),
                             null, false, null, argCount, localMap);
                     }
+                }
+                // The mapper's own body, with its parameter rewritten to the
+                // loop's element local — and, over an enumerate record, `.val`
+                // and `.i` resolved to the element and index locals.
+                // THE INNER LOOP OPENS HERE and closes in the unwind, so
+                // every stage after it and the sink run per INNER element.
+                // The element local is rebound, which is what lets the rest of
+                // the pipeline stay exactly as it is written for a flat chain.
+                case ClassifiedStage.FlatMapStep fm -> {
+                    b.beginStoreLocal(flatIdx);
+                      emitFoldTree(fm.startBody(), -1, fm.paramSlot(), null, xSlot,
+                                   SynthRec.NONE, null, b);
+                    b.endStoreLocal();
+                    b.beginStoreLocal(flatEnd);
+                      emitFoldTree(fm.endBody(), -1, fm.paramSlot(), null, xSlot,
+                                   SynthRec.NONE, null, b);
+                    b.endStoreLocal();
+                    b.beginWhile();
+                      b.beginDirectLessThan();
+                        b.emitLoadLocal(flatIdx); b.emitLoadLocal(flatEnd);
+                      b.endDirectLessThan();
+                      b.beginBlock();
+                        // REBIND: from here down, the element IS the inner one.
+                        b.beginStoreLocal(xSlot);
+                          b.emitLoadLocal(flatIdx);
+                        b.endStoreLocal();
+                    openScopes.add(FusedScope.FLAT_MAP);
+                }
+                case ClassifiedStage.MapTree mt -> {
+                    b.beginStoreLocal(xSlot);
+                      emitFoldTree(mt.body(), -1, mt.paramSlot(), null, xSlot,
+                                   mt.elemSynth(),
+                                   companionLocalFor(mt.elemSynth(), enumIndex, zipSndLocal), b);
+                    b.endStoreLocal();
                 }
                 case ClassifiedStage.MapCall mc -> {
                     emitMapperStep(b, xSlot, null, 0L, null,
@@ -5908,7 +7476,7 @@ public final class BytecodeCompiler {
                         emitNode(ds.n(), b, argCount, localMap); b.emitLoadLocal(ctr);
                       b.endDirectLessThan();
                       b.beginBlock();
-                    filterDepth++;
+                    filterDepth++; openScopes.add(FusedScope.FILTER);
                 }
                 case ClassifiedStage.TakeStep ts -> {
                     var ctr = takeDropCounters.get(takeDropIdx++);
@@ -5917,7 +7485,7 @@ public final class BytecodeCompiler {
                         b.emitLoadLocal(ctr); emitNode(ts.n(), b, argCount, localMap);
                       b.endDirectLessThan();
                       b.beginBlock();
-                    filterDepth++;
+                    filterDepth++; openScopes.add(FusedScope.FILTER);
                     takeCounterPostIncrement.add(ctr);
                 }
                 case ClassifiedStage.TakeWhileStep tw -> {
@@ -5973,7 +7541,7 @@ public final class BytecodeCompiler {
                         b.emitLoadLocal(shouldSkip);
                       b.endDirectNot();
                       b.beginBlock();
-                    filterDepth++;
+                    filterDepth++; openScopes.add(FusedScope.FILTER);
                 }
             }
         }
@@ -5994,6 +7562,30 @@ public final class BytecodeCompiler {
                       emitInlineOpTwoLocals(a.op(), accSlot, xSlot, b);
                     b.endStoreLocal();
                 }
+            }
+            case FusedSinkMode.AccumulateTree t -> {
+                // acc = <the folder's own body, with its params rewritten to
+                // the loop's locals>. When an Enumerate's record is still live
+                // here, `x.val` and `x.i` are two of those locals — the gate in
+                // `emitCanonicalIterChain` has already established that the
+                // folder reads nothing else off the element.
+                b.beginStoreLocal(accSlot);
+                  emitFoldTree(t.body(), t.accParamSlot(), t.elemParamSlot(),
+                               accSlot, xSlot, synthAtSink,
+                               companionLocalFor(synthAtSink, enumIndex, zipSndLocal), b);
+                b.endStoreLocal();
+            }
+            case FusedSinkMode.AccumulateCall ac -> {
+                // acc = folder(acc, x). Reading `accSlot` inside its own store is
+                // the same shape AccumulateTree uses: the loads are emitted before
+                // the store takes effect.
+                b.beginStoreLocal(accSlot);
+                  b.beginCallIndirectScalar2(ac.argFieldNames());
+                    b.emitLoadLocal(folderSlot);
+                    b.emitLoadLocal(accSlot);
+                    b.emitLoadLocal(xSlot);
+                  b.endCallIndirectScalar2();
+                b.endStoreLocal();
             }
             case FusedSinkMode.CallEach ce -> {
                 var argCopy = b.createLocal();
@@ -6251,9 +7843,22 @@ public final class BytecodeCompiler {
               b.endDirectAdd();
             b.endStoreLocal();
         }
-        for (int j = 0; j < filterDepth; j++) {
-              b.endBlock();
-            b.endIfThen();
+        for (int j = openScopes.size() - 1; j >= 0; j--) {
+            if (openScopes.get(j) == FusedScope.FILTER) {
+                  b.endBlock();
+                b.endIfThen();
+            } else {
+                // The inner index advances at the END of the inner body, so
+                // every stage after the flat_map and the sink itself have
+                // already run for this inner element.
+                b.beginStoreLocal(flatIdx);
+                  b.beginDirectAdd();
+                    b.emitLoadLocal(flatIdx); b.emitLoadLongConstant(1L);
+                  b.endDirectAdd();
+                b.endStoreLocal();
+                  b.endBlock();
+                b.endWhile();
+            }
         }
         // Advance: cursor = ListTail(cursor) for lists;
         //          i += step for step ranges; i++ otherwise.
@@ -6289,6 +7894,10 @@ public final class BytecodeCompiler {
         switch (mode) {
             case FusedSinkMode.Accumulate ignored ->
                 b.emitLoadLocal(accSlot);
+            case FusedSinkMode.AccumulateTree ignored ->
+                b.emitLoadLocal(accSlot);
+            case FusedSinkMode.AccumulateCall ignored ->
+                b.emitLoadLocal(accSlot);
             case FusedSinkMode.CallEach ignored ->
                 b.emitLoadObjectConstant(com.mezze.interpreter.values.MezzeRecord.empty());
             case FusedSinkMode.ShortCircuit sc -> {
@@ -6305,7 +7914,7 @@ public final class BytecodeCompiler {
                         b.beginConditional();
                           b.emitLoadLocal(foundSlot);
                           b.beginMakeVariantSingleFieldPayload(SOME_TAG,
-                              com.mezze.language.ast.BuiltinTypes.SOME, "val");
+                              com.mezze.language.ast.BuiltinTypes.SOME, com.mezze.language.ast.BuiltinTypes.VAL_FIELD);
                             b.emitLoadLocal(resultSlot);
                           b.endMakeVariantSingleFieldPayload();
                           b.emitMakeVariantNoPayload(NONE_TAG,
@@ -6318,7 +7927,7 @@ public final class BytecodeCompiler {
                 b.beginConditional();
                   b.emitLoadLocal(hasAccSlot);
                   b.beginMakeVariantSingleFieldPayload(SOME_TAG,
-                      com.mezze.language.ast.BuiltinTypes.SOME, "val");
+                      com.mezze.language.ast.BuiltinTypes.SOME, com.mezze.language.ast.BuiltinTypes.VAL_FIELD);
                     b.emitLoadLocal(accSlot);
                   b.endMakeVariantSingleFieldPayload();
                   b.emitMakeVariantNoPayload(NONE_TAG,
@@ -6349,7 +7958,7 @@ public final class BytecodeCompiler {
                 b.beginConditional();
                   b.emitLoadLocal(foundSlot);
                   b.beginMakeVariantSingleFieldPayload(SOME_TAG,
-                      com.mezze.language.ast.BuiltinTypes.SOME, "val");
+                      com.mezze.language.ast.BuiltinTypes.SOME, com.mezze.language.ast.BuiltinTypes.VAL_FIELD);
                     b.emitLoadLocal(resultSlot);
                   b.endMakeVariantSingleFieldPayload();
                   b.emitMakeVariantNoPayload(NONE_TAG,
@@ -6361,7 +7970,7 @@ public final class BytecodeCompiler {
                 b.beginConditional();
                   b.emitLoadLocal(foundSlot);
                   b.beginMakeVariantSingleFieldPayload(SOME_TAG,
-                      com.mezze.language.ast.BuiltinTypes.SOME, "val");
+                      com.mezze.language.ast.BuiltinTypes.SOME, com.mezze.language.ast.BuiltinTypes.VAL_FIELD);
                     b.emitLoadLocal(accSlot);
                   b.endMakeVariantSingleFieldPayload();
                   b.emitMakeVariantNoPayload(NONE_TAG,
@@ -6385,7 +7994,7 @@ public final class BytecodeCompiler {
                 b.beginConditional();
                   b.emitLoadLocal(foundSlot);
                   b.beginMakeVariantSingleFieldPayload(SOME_TAG,
-                      com.mezze.language.ast.BuiltinTypes.SOME, "val");
+                      com.mezze.language.ast.BuiltinTypes.SOME, com.mezze.language.ast.BuiltinTypes.VAL_FIELD);
                     b.emitLoadLocal(accSlot);
                   b.endMakeVariantSingleFieldPayload();
                   b.emitMakeVariantNoPayload(NONE_TAG,
@@ -6435,6 +8044,10 @@ public final class BytecodeCompiler {
         final Hash callHash;
         final boolean callScalarABI;
         final String callFieldName;
+        /** True when the body reads `x.i` — the enumerate counter — rather than
+         *  the element. Only reachable after an Enumerate stage. */
+        boolean leftIsIndex;
+        UnaryLitShape withLeftIsIndex() { this.leftIsIndex = true; return this; }
         UnaryLitShape(InlineOp op, long rhsLit) {
             this.op = op; this.rhsLit = rhsLit; this.rhsNode = null; this.selfOp = false;
             this.callHash = null; this.callScalarABI = false; this.callFieldName = null;
@@ -6491,6 +8104,57 @@ public final class BytecodeCompiler {
             this.callFieldName = callFieldName;
         }
     }
+    /**
+     * A native arith/compare call still carrying its argument record, rewritten
+     * to the inline op it denotes. Any other body is returned unchanged.
+     *
+     * The registry that says `__native_int_lt` IS `LT` belongs to the
+     * interpreter, so the compiler cannot collapse this itself and the call
+     * reaches the lambda classifiers intact wherever monomorphisation did not
+     * inline the impl. {@link #classifyFolderBody} already recognises the form;
+     * the UNARY classifiers did not, so a predicate like `{x} -> x < n` with `n`
+     * captured was unclassifiable — and an unclassifiable stage declines the
+     * WHOLE chain.
+     *
+     * MEASURED: a pipeline reached through a higher-order parameter ran at
+     * 71000 ps/elem against 90 called directly, because that copy's predicate
+     * was left in this form and the chain fell back to the lazy walker —
+     * `IterNatives.foldRange`, caught OSR-compiling in the slow run and absent
+     * from the fast one. Writing the types out made it fast, which is the
+     * signature of a cliff that inference alone should not be able to create:
+     * fusion must not depend on whether mono happened to fire.
+     *
+     * ORDER IS PRESERVED, not assumed. A record evaluates its fields in the
+     * order they are WRITTEN while an InlineBinaryOp evaluates left then right,
+     * and an operand can be a call — so the record form collapses only when the
+     * written order already matches the signature's parameter order. Same
+     * reasoning as the emission-time collapse in {@link #emitNode}.
+     */
+    static NodeIR normalizeNativeArith(NodeIR body) {  // package-visible for NativeArithNormalisationTest
+        if (!(body instanceof CallNativeIR nat)) return body;
+        var sig = com.mezze.language.truffleir.NativeSignatures.INSTANCE.signatureOf(nat.getName());
+        if (sig == null || sig.getInlineOp() == null || sig.getParams().size() != 2) return body;
+        NodeIR[] operands = new NodeIR[2];
+        if (nat.isScalarABI()) {
+            if (nat.getArgs().size() != 2) return body;
+            operands[0] = nat.getArgs().get(0);
+            operands[1] = nat.getArgs().get(1);
+        } else {
+            if (!(nat.getArg() instanceof MakeRecordIR rec)) return body;
+            if (rec.getFields().size() != 2) return body;
+            for (int i = 0; i < 2; i++) {
+                var fld = rec.getFields().get(i);
+                int at = sig.indexOf(fld.getName());
+                // `at != i` means the fields were written in the other order,
+                // so collapsing would reorder two evaluations.
+                if (at != i) return body;
+                operands[at] = fld.getValue();
+            }
+        }
+        if (operands[0] == null || operands[1] == null) return body;
+        return new InlineBinaryOpIR(sig.getInlineOp(), operands[0], operands[1], nat.getSrc());
+    }
+
     private PredShape classifyUnaryPredicateLambda(MakeLambdaIR ml, MezzeLanguage language) {
         // #515 — captures OK: RHS resolution below lifts ReadCaptureIR(i)
         // to a ReadLocalIR(ml.captures[i].slot) at emit time. Call-form
@@ -6506,7 +8170,7 @@ public final class BytecodeCompiler {
         // N captures + one param → param slot = captureCount (frame layout
         //   is [captures..., params..., locals...]). Adjust below.
         int paramSlot = caps.size();
-        NodeIR body = fnIR.getBody();
+        NodeIR body = normalizeNativeArith(fnIR.getBody());
         // #442 Day 9 — Shape D first: arbitrary pure single-arg call.
         //   {x} -> user_pred { arg = x }   returning Bool
         // Same 2 recognized IR forms as classifyUnaryLiteralLambda's Shape D.
@@ -6749,36 +8413,85 @@ public final class BytecodeCompiler {
      */
     private NodeIR liftCaptureRhs(NodeIR rhs,
                                   java.util.List<com.mezze.language.truffleir.CaptureIR> capturesOnEnclosing) {
-        if (!(rhs instanceof ReadCaptureIR rc)) return null;
-        if (capturesOnEnclosing == null) return null;
-        int idx = rc.getIndex();
-        if (idx < 0 || idx >= capturesOnEnclosing.size()) return null;
-        var cap = capturesOnEnclosing.get(idx);
-        // capturesOnEnclosing[i].slot is a frame slot in the ENCLOSING
-        // function's `[captures..., params..., locals...]` layout. A
-        // plain ReadLocalIR(slot) at emit time thus loads whichever
-        // arg/local held the captured value at the MakeLambda site.
-        return new ReadLocalIR(cap.getSlot(), cap.getKind(), rc.getSrc(), null);
+        if (rhs instanceof ReadCaptureIR rc) {
+            if (capturesOnEnclosing == null) return null;
+            int idx = rc.getIndex();
+            if (idx < 0 || idx >= capturesOnEnclosing.size()) return null;
+            var cap = capturesOnEnclosing.get(idx);
+            // capturesOnEnclosing[i].slot is a frame slot in the ENCLOSING
+            // function's `[captures..., params..., locals...]` layout. A
+            // plain ReadLocalIR(slot) at emit time thus loads whichever
+            // arg/local held the captured value at the MakeLambda site.
+            return new ReadLocalIR(cap.getSlot(), cap.getKind(), rc.getSrc(), null);
+        }
+        // THE LIFT GOES THROUGH ARITHMETIC, because a capture is not always the
+        // whole right-hand side. `{val} -> val > half + 1` has the capture one
+        // level down, and lifting only a BARE capture left that shape to Shape
+        // A′ below, which emitted the capture read UNCHANGED in the fused
+        // loop's frame — where the index means something else entirely. A
+        // literal or a global is the same value in any frame and passes
+        // through; anything else refuses, and the chain declines.
+        if (rhs instanceof LongLitIR || rhs instanceof DoubleLitIR
+                || rhs instanceof BoolLitIR || rhs instanceof StringLitIR
+                || rhs instanceof CharLitIR || rhs instanceof FracLitIR
+                || rhs instanceof UnitLitIR
+                || rhs instanceof ReadGlobalByHashIR
+                || rhs instanceof ReadGlobalFnByHashIR) {
+            return rhs;
+        }
+        if (rhs instanceof InlineBinaryOpIR bin) {
+            switch (bin.getOp()) {
+                case ADD, SUB, MUL, DIV, MOD -> { }
+                default -> { return null; }
+            }
+            NodeIR left = liftCaptureRhs(bin.getLeft(), capturesOnEnclosing);
+            if (left == null) return null;
+            NodeIR right = liftCaptureRhs(bin.getRight(), capturesOnEnclosing);
+            if (right == null) return null;
+            if (left == bin.getLeft() && right == bin.getRight()) return bin;
+            return new InlineBinaryOpIR(bin.getOp(), left, right, bin.getSrc());
+        }
+        return null;
     }
 
     /**
-     * #442 — returns true iff the expression tree rooted at {@code node}
-     * does NOT reference {@link ReadLocalIR} at {@code paramSlot}. Used to
-     * determine whether a comparison RHS can be emitted inline in the
-     * fused loop body (evaluated each iteration but independent of the
-     * loop variable). Conservatively returns false for IR shapes with
-     * children we don't walk (e.g. LetIR, MatchIR, BlockIR) — those are
-     * too complex to inline safely.
+     * Whether the expression tree rooted at {@code node} means the SAME THING
+     * when it is re-emitted in the fused loop's frame.
+     *
+     * <p>This used to ask a weaker question — whether the tree mentions the
+     * callback's own parameter — and answered yes for every other
+     * {@link ReadLocalIR} and for {@link ReadCaptureIR}. Those are
+     * FRAME-RELATIVE: the node comes from the callback's body, where index 0 is
+     * the callback's first capture, and the fused loop runs in the ENCLOSING
+     * frame, where index 0 is whatever that function put there. So
+     * `{val} -> val > half + 1` fused with the capture read left as written and
+     * the loop compared against the enclosing frame's slot 0 — which for a
+     * one-argument native HOF callback is the argument record, giving "Cannot
+     * add MezzeRecord and Long" where the record is a number's worth of
+     * arithmetic away, and a SILENTLY WRONG answer where it is not: the same
+     * predicate inside `set::filter` returned an empty set instead of half the
+     * elements, and `mapsurface` row 26 reported a checksum of 0.
+     *
+     * <p>A literal, a global and arithmetic over them denote the same value in
+     * any frame, so they still pass. A capture is handled by
+     * {@link #liftCaptureRhs}, which rewrites it to the enclosing slot it was
+     * captured FROM and is tried before this; what reaches here and is
+     * frame-relative cannot be expressed, so the chain declines and runs
+     * unfused.
+     *
+     * <p>Conservatively false for IR shapes whose children are not walked
+     * (LetIR, MatchIR, BlockIR) — too complex to inline safely.
      */
     private static boolean isParamFree(NodeIR node, int paramSlot) {
-        if (node instanceof ReadLocalIR rl) return rl.getSlot() != paramSlot;
+        // Frame-relative: see the note above. `paramSlot` is not consulted,
+        // because EVERY local read is wrong here, not only the parameter's.
+        if (node instanceof ReadLocalIR || node instanceof ReadCaptureIR) return false;
         if (node instanceof LongLitIR || node instanceof DoubleLitIR
                 || node instanceof BoolLitIR || node instanceof StringLitIR
                 || node instanceof CharLitIR || node instanceof FracLitIR
                 || node instanceof UnitLitIR) return true;
         if (node instanceof ReadGlobalByHashIR || node instanceof ReadGlobalFnByHashIR)
             return true;
-        if (node instanceof ReadCaptureIR) return true;
         if (node instanceof InlineBinaryOpIR bin)
             return isParamFree(bin.getLeft(), paramSlot)
                 && isParamFree(bin.getRight(), paramSlot);
@@ -6791,8 +8504,68 @@ public final class BytecodeCompiler {
         return false;
     }
 
+    /**
+     * WHICH never-built record the element arriving at a stage is.
+     *
+     * `Enumerate` and `Zip` both nominally produce a two-field record that is
+     * never allocated, and both resolve to the same two loop locals — the
+     * element, and one companion. Only the field names differ, so this is the
+     * one thing that has to be carried.
+     */
+    enum SynthRec {
+        /** A plain element: field reads on it are not this machinery's. */
+        NONE,
+        /** `{i, val}` — companion is the enumerate counter. */
+        ENUM,
+        /** `{fst, snd}` — companion is the second source's element. */
+        ZIP
+    }
+
+    /**
+     * Which loop local a synthetic record's field denotes: 0 for the ELEMENT,
+     * 1 for the COMPANION, -1 for anything that is not a field of this record.
+     *
+     * THE ONLY PLACE THESE NAMES ARE CONSULTED. Three sites used to spell
+     * them independently — the lambda classifier, the fold-tree check, and
+     * the emitter — and a name added to one and not the others is a record
+     * that resolves in some positions and not others. The names themselves
+     * live in {@link com.mezze.language.truffleir.NativeHofNames} beside the
+     * stdlib signatures that produce them, so a rename reaches both the
+     * record's author and its reader.
+     */
+    private static int synthFieldIndex(SynthRec kind, String field) {
+        return switch (kind) {
+            case NONE -> -1;
+            case ENUM -> NativeHofNames.ITER_ENUM_VAL.equals(field) ? 0
+                       : NativeHofNames.ITER_ENUM_INDEX.equals(field) ? 1 : -1;
+            case ZIP -> NativeHofNames.PAIR_FST.equals(field) ? 0
+                      : NativeHofNames.PAIR_SND.equals(field) ? 1 : -1;
+        };
+    }
+
+    /**
+     * How [node] reads the `{i, val}` record a preceding Enumerate stage
+     * nominally produced: 0 for `.val` (the element), 1 for `.i` (the counter),
+     * -1 for anything else.
+     *
+     * A BARE read of the parameter is -1 on purpose. The record is never built,
+     * so there is nothing for a bare read to denote — the chain must decline
+     * rather than hand out the raw element in its place.
+     */
+    private static int enumFieldRead(NodeIR node, int paramSlot, SynthRec kind) {
+        if (!(node instanceof ReadFieldIR rf)) return -1;
+        if (!(rf.getRecord() instanceof ReadLocalIR rl) || rl.getSlot() != paramSlot) return -1;
+        return synthFieldIndex(kind, rf.getFieldName());
+    }
+
     private UnaryLitShape classifyUnaryLiteralLambda(MakeLambdaIR ml,
                                                      MezzeLanguage language) {
+        return classifyUnaryLiteralLambda(ml, language, SynthRec.NONE);
+    }
+
+    private UnaryLitShape classifyUnaryLiteralLambda(MakeLambdaIR ml,
+                                                     MezzeLanguage language,
+                                                     SynthRec elemSynth) {
         // #515 — accept captures for Shape A/B/C only. Call-form (Shape D)
         // still refuses captures — a captured user_fn callee isn't safe
         // to inline as a mapper without further work.
@@ -6805,7 +8578,27 @@ public final class BytecodeCompiler {
         // Frame layout: [captures..., params..., locals...] so the single
         // param sits at slot equal to captures.size().
         int paramSlot = caps.size();
-        NodeIR body = fnIR.getBody();
+        NodeIR body = normalizeNativeArith(fnIR.getBody());
+        if (elemSynth != SynthRec.NONE) {
+            // The parameter is the enumerate record, which is never built, so
+            // only a field read can be honoured — `x.val` is the element and
+            // `x.i` is the counter. Restricted to the left operand of an inline
+            // arithmetic shape; anything else declines and the chain falls back
+            // to the real, record-building pipeline.
+            if (!(body instanceof InlineBinaryOpIR bin)) return null;
+            int which = enumFieldRead(bin.getLeft(), paramSlot, elemSynth);
+            if (which < 0) return null;
+            NodeIR right = bin.getRight();
+            UnaryLitShape shape;
+            if (right instanceof LongLitIR r) {
+                shape = new UnaryLitShape(bin.getOp(), r.getValue());
+            } else if (isParamFree(right, paramSlot)) {
+                shape = new UnaryLitShape(bin.getOp(), right);
+            } else {
+                return null;
+            }
+            return which == 1 ? shape.withLeftIsIndex() : shape;
+        }
         // Shape A: InlineBinaryOp(ReadLocal(paramSlot), rhs) where rhs is
         // LongLit OR ReadCapture(i).
         if (body instanceof InlineBinaryOpIR bin
@@ -7118,8 +8911,208 @@ public final class BytecodeCompiler {
      * yield the case-body value.
      */
 
+    /**
+     * Detect and emit the fused
+     * {@code match map::get { m, k } is Some { val } -> expr, None -> default}
+     * pattern, skipping the {@code MezzeVariant} the native would allocate for
+     * the {@code Some}.
+     *
+     * <p>WHY THIS IS WORTH A SPECIAL CASE. Measured on
+     * `bench/cases/allocsurface` at n=2e7, one kernel per process, counting
+     * young collections:
+     *
+     * <pre>
+     *   kernel            ps/iter   young
+     *   map size            1 172       3     a native call, no lookup
+     *   map has             6 111       3     the same lookup, returns Bool
+     *   map get            16 303      18     the same lookup, returns Option
+     * </pre>
+     *
+     * `has` sits on the tier control (6 180 ps, 3 collections), so the lookup
+     * allocates nothing and costs ~5 ns, and the ~10 ns plus fifteen
+     * collections between it and `get` are the `Option` alone — TWICE the cost
+     * of the lookup it wraps.
+     *
+     * <p>WHY IT MATCHES THE NATIVE AND NOT THE WRAPPER. {@link
+     * #tryEmitFusedMutGetMatch} is the same idea for mut sequences and it is
+     * DEAD CODE: it gates on {@code CallDirectIR.isScalarABI()}, which is set
+     * for extracted lambdas only, and by the time this compiler runs the
+     * stdlib wrapper has been inlined and no such call survives to match.
+     * Keying on the NATIVE's name is what survives inlining — the same reason
+     * the `__native_sorted_map_key_at` fast path above fires.
+     *
+     * <p>NULL MEANS ABSENT, unambiguously: Mezze has no null value, so a map
+     * cannot hold one, and {@code MezzeMap.get} already returns null for a
+     * missing key.
+     *
+     * <p>THE LOOKUP RUNS ONCE. Its result goes into a local and the branch
+     * tests that local, rather than looking up twice the way the mut version
+     * could afford to with a bounds check and a read.
+     *
+     * <p>REFUSED for a guard, an if-let binding, or anything but exactly a
+     * one-field {@code Some} and an empty {@code None} (or a wildcard), so a
+     * match this does not fully understand falls back to the generic path.
+     */
+    private boolean tryEmitFusedNativeMapGetMatch(MatchIR m, MezzeBytecodeRootNodeGen.Builder b,
+                                                  int argCount, BytecodeLocal[] localMap) {
+        NodeIR scrutinee = m.getScrutinee();
+        if (!(scrutinee instanceof CallNativeIR cn)) return false;
+        String getName = cn.getName();
+        boolean isMapGet = "__native_map_get".equals(getName);
+        boolean isSeqGet = "__native_seq_get".equals(getName);
+        boolean isListGet = "__native_list_get".equals(getName);
+        boolean isBytesGet = "__native_bytes_get".equals(getName);
+        boolean isDequeGet = "__native_deque_get".equals(getName);
+        // ONE-ARGUMENT MEMBER OF THE FAMILY. `deque::first` returns the same
+        // `Option` for the same reason and was unfused for the same reason, so
+        // it belongs here; the only difference is that there is no key operand.
+        boolean isDequeFirst = "__native_deque_first".equals(getName);
+        if (!isMapGet && !isSeqGet && !isListGet && !isBytesGet
+                && !isDequeGet && !isDequeFirst) return false;
+
+        // BOTH ABIs, and the scalar one is what actually turns up here. A probe
+        // printing the scrutinee reported
+        // `CallNativeIR name=__native_map_get scalar=true` for the loop in
+        // `bench/cases/allocsurface`, alongside `__native_seq_get`,
+        // `__native_list_get` and `__native_bytes_get` — all scalar. An earlier
+        // draft of this method rejected `isScalarABI()`, a condition copied
+        // from the record-ABI fast paths above without checking that it
+        // applied, and so fired only in straight-line test code and never
+        // where the cost is.
+        NodeIR mapArg, keyArg;
+        if (isDequeFirst) {
+            // No key operand: one positional arg, or a one-field `{ d }`.
+            if (cn.isScalarABI()) {
+                if (cn.getArgs().size() != 1) return false;
+                mapArg = cn.getArgs().get(0);
+            } else {
+                if (!(cn.getArg() instanceof MakeRecordIR mr1)) return false;
+                if (mr1.getFields().size() != 1) return false;
+                if (!"d".equals(mr1.getFields().get(0).getName())) return false;
+                mapArg = mr1.getFields().get(0).getValue();
+            }
+            keyArg = null;
+        } else if (cn.isScalarABI()) {
+            // Positional, already in signature order, so there is no written
+            // field order to preserve.
+            if (cn.getArgs().size() != 2) return false;
+            mapArg = cn.getArgs().get(0);
+            keyArg = cn.getArgs().get(1);
+        } else {
+            if (!(cn.getArg() instanceof MakeRecordIR mr)) return false;
+            if (mr.getFields().size() != 2) return false;
+            // ORDER IS PRESERVED, NOT ASSUMED. A record evaluates its fields in
+            // the order they are WRITTEN, and this emits the map then the key;
+            // either can be a call. So the record path is taken only when the
+            // written order already matches, exactly as the generic record-ABI
+            // collapse above requires.
+            String f0 = isMapGet ? "m" : isSeqGet ? "xs" : isListGet ? "xs"
+                    : isDequeGet ? "d" : "b";
+            String f1 = isMapGet ? "k" : isListGet ? "index" : "i";
+            if (!f0.equals(mr.getFields().get(0).getName())
+                    || !f1.equals(mr.getFields().get(1).getName())) return false;
+            mapArg = mr.getFields().get(0).getValue();
+            keyArg = mr.getFields().get(1).getValue();
+        }
+        if (mapArg == null) return false;
+        if (keyArg == null && !isDequeFirst) return false;
+
+        var cases = m.getCases();
+        if (cases.size() != 2) return false;
+        CaseIR someCase = null, noneCase = null;
+        for (CaseIR cs : cases) {
+            if (cs.getGuard() != null) return false;
+            if (!cs.getIfLetBindings().isEmpty()) return false;
+            var pat = cs.getPattern();
+            if (pat instanceof PatternIR.Variant vp) {
+                if ("Some".equals(vp.getTagName()) && vp.getFieldNames().size() == 1) someCase = cs;
+                else if ("None".equals(vp.getTagName()) && vp.getFieldNames().isEmpty()) noneCase = cs;
+                else return false;
+            } else if (pat instanceof PatternIR.Wildcard) {
+                noneCase = cs;
+            } else {
+                return false;
+            }
+        }
+        if (someCase == null || noneCase == null) return false;
+
+        PatternIR.Variant somePat = (PatternIR.Variant) someCase.getPattern();
+        int valSlot = somePat.getFieldSlots().get(0);
+
+        // Block {
+        //   rawLocal = InlineMapGetRaw(mapArg, keyArg)
+        //   Conditional(IsNotNull(rawLocal),
+        //     Block { val = rawLocal; someBody },
+        //     noneBody)
+        // }
+        b.beginBlock();
+        BytecodeLocal rawLocal = b.createLocal();
+        b.beginStoreLocal(rawLocal);
+        if (isMapGet) b.beginInlineMapGetRaw();
+        else if (isSeqGet) b.beginInlineSeqGetRaw();
+        else if (isListGet) b.beginInlineListGetRaw();
+        else if (isDequeGet) b.beginInlineDequeGetRaw();
+        else if (isDequeFirst) b.beginInlineDequeFirstRaw();
+        else b.beginInlineBytesGetRaw();
+        emitNode(mapArg, b, argCount, localMap);
+        if (keyArg != null) emitNode(keyArg, b, argCount, localMap);
+        if (isMapGet) b.endInlineMapGetRaw();
+        else if (isSeqGet) b.endInlineSeqGetRaw();
+        else if (isListGet) b.endInlineListGetRaw();
+        else if (isDequeGet) b.endInlineDequeGetRaw();
+        else if (isDequeFirst) b.endInlineDequeFirstRaw();
+        else b.endInlineBytesGetRaw();
+        b.endStoreLocal();
+
+        // Zero-init binding slots, as the generic emitMatch does.
+        java.util.Set<Integer> bindingSlots = new java.util.HashSet<>();
+        collectBindingSlots(cases, bindingSlots);
+        for (Integer slot : bindingSlots) {
+            if (slot != null && slot >= argCount && slot - argCount < localMap.length) {
+                b.beginStoreLocal(localMap[slot - argCount]);
+                b.emitLoadNullConstant();
+                b.endStoreLocal();
+            }
+        }
+
+        b.beginConditional();
+        b.beginIsNotNull();
+        b.emitLoadLocal(rawLocal);
+        b.endIsNotNull();
+
+        b.beginBlock();
+        if (valSlot >= argCount && valSlot - argCount < localMap.length) {
+            b.beginStoreLocal(localMap[valSlot - argCount]);
+            b.emitLoadLocal(rawLocal);
+            b.endStoreLocal();
+        }
+        for (var binding : someCase.getBindings()) {
+            if (binding.getSlot() >= argCount && binding.getSlot() - argCount < localMap.length) {
+                b.beginStoreLocal(localMap[binding.getSlot() - argCount]);
+                b.emitLoadLocal(rawLocal);
+                b.endStoreLocal();
+            }
+        }
+        emitNode(someCase.getBody(), b, argCount, localMap);
+        b.endBlock();
+
+        emitNode(noneCase.getBody(), b, argCount, localMap);
+        b.endConditional();
+        b.endBlock();
+        return true;
+    }
+
     private void emitMatch(MatchIR m, MezzeBytecodeRootNodeGen.Builder b,
                            int argCount, BytecodeLocal[] localMap) {
+        // `tryEmitFusedMutGetMatch` was called here on feat/perf-obsession. It is
+        // gone: a2a4d3f26 deleted the fused MUT_GET+match path (115 lines) after
+        // probing five decision points over the stdlib compile, `mut_loop` and
+        // `qsort_mut` and finding it never fires. The perf branch's copy of this
+        // file simply predates that deletion — it did not revive the path.
+        // The live one: a record-ABI `map::get` whose Option is matched
+        // immediately and therefore never escapes.
+        if (tryEmitFusedNativeMapGetMatch(m, b, argCount, localMap)) return;
+
         b.beginBlock();
         BytecodeLocal scrutineeLocal = b.createLocal();
         b.beginStoreLocal(scrutineeLocal);
@@ -7677,6 +9670,39 @@ public final class BytecodeCompiler {
      * Returns true if emission succeeded; the caller should skip the
      * direct-while fallback in that case.
      */
+    /**
+     * PROBE (temporary): names the refusal site when FusedLongTailLoop — the
+     * tier that runs a whole tail loop in Java with no per-iteration BDSL
+     * dispatch — declines a function. Refusal is otherwise silent, which is how
+     * an 11 ns/iter loop allocating ~100 bytes/iter went unnoticed.
+     */
+    /**
+     * Does a dump probe's filter select this function?
+     *
+     * <p>`*` IS NOT A CONVENIENCE. A top-level `let go = { i, acc } -> …` reaches
+     * here with a NULL name — which is most user code — so a probe that matches
+     * on the name alone cannot print the function anyone is actually looking at.
+     * `MEZZE_DUMP_BC=go_z` printing nothing for a `go_z` that was right there is
+     * what this is for.
+     */
+    private static boolean probeMatches(String want, String name) {
+        if ("*".equals(want)) return true;
+        return name != null && name.contains(want);
+    }
+
+    /** A name for a probe line, falling back to the hash when there is none. */
+    private static String probeLabel(FunctionIR ir) {
+        String n = ir.getName();
+        if (n != null && !n.isEmpty()) return n;
+        return "<unnamed " + ir.getHash() + ">";
+    }
+
+    private static void fltlRefuse(String where) {
+        if (System.getenv("MEZZE_TRACE_SELFTAIL") != null) {
+            System.err.println("[selftail]   tier-1 declined at " + where);
+        }
+    }
+
     private boolean tryEmitFusedLongTailLoop(
             IfIR ifBody, FunctionIR ir, int paramCount, int captureCount,
             MezzeBytecodeRootNodeGen.Builder b, int argCount,
@@ -7703,7 +9729,7 @@ public final class BytecodeCompiler {
             tailCall = tc; baseExpr = elseBr;
             invertCond = true;
         }
-        if (tailCall == null) return false;
+        if (tailCall == null) { fltlRefuse("line8520"); return false; }
 
         // Helper: resolve IR node to param index (0-based), or -1.
         // Params appear as ReadLocalIR(slot < argCount, slot >= captureCount)
@@ -7719,16 +9745,16 @@ public final class BytecodeCompiler {
 
         // Base case must read one of the params.
         int resultIdx = paramIdx.applyAsInt(baseExpr);
-        if (resultIdx < 0) return false;
+        if (resultIdx < 0) { fltlRefuse("line8536"); return false; }
 
         // Condition must be a comparison (param CMP constant) or
         // (constant CMP param). Accepted IR shapes: InlineBinaryOpIR,
         // CallNativeIR (scalar-ABI 2-arg), or CallIndirectIR wrapping
         // ReadField(<op>, receiver) + MakeRecord{r = ...} (VarType path).
         InlineOp condOp = fltlExtractOp(cond);
-        if (condOp == null) return false;
+        if (condOp == null) { fltlRefuse("line8543"); return false; }
         int condCmpOp = fltlClassifyCmp(condOp);
-        if (condCmpOp < 0) return false;
+        if (condCmpOp < 0) { fltlRefuse("line8545"); return false; }
         NodeIR condLeft = fltlExtractChild(cond, 0);
         NodeIR condRight = fltlExtractChild(cond, 1);
 
@@ -7744,7 +9770,7 @@ public final class BytecodeCompiler {
             condCmpOp = fltlSwapCmp(condCmpOp);
             condRhsVal = clit.getValue();
         } else {
-            return false;
+            { fltlRefuse("line8561"); return false; }
         }
 
         // If tail call was in the then-branch, negate the condition.
@@ -7765,15 +9791,15 @@ public final class BytecodeCompiler {
             // CallNativeIR (scalar-ABI 2-arg), or CallIndirectIR
             // (VarType ability-dispatch: ReadField + MakeRecord).
             InlineOp extractedOp = fltlExtractOp(arg);
-            if (extractedOp == null) return false;
+            if (extractedOp == null) { fltlRefuse("line8582"); return false; }
             int op = fltlClassifyArithOp(extractedOp);
-            if (op < 0) return false;
+            if (op < 0) { fltlRefuse("line8584"); return false; }
             NodeIR leftNode = fltlExtractChild(arg, 0);
             NodeIR rightNode = fltlExtractChild(arg, 1);
 
             // Left must be THIS param
             int lpi = paramIdx.applyAsInt(leftNode);
-            if (lpi != i) return false;
+            if (lpi != i) { fltlRefuse("line8590"); return false; }
 
             // Right: LongLitIR or OTHER param
             if (rightNode instanceof LongLitIR rlit) {
@@ -7782,7 +9808,7 @@ public final class BytecodeCompiler {
                 rhsIsOther[i] = false;
             } else {
                 int rpi = paramIdx.applyAsInt(rightNode);
-                if (rpi < 0 || rpi == i) return false;
+                if (rpi < 0 || rpi == i) { fltlRefuse("line8599"); return false; }
                 updateOp[i] = op;
                 updateRhs[i] = 0;
                 rhsIsOther[i] = true;
@@ -7808,6 +9834,146 @@ public final class BytecodeCompiler {
         // p1UpdateRhs
         b.emitLoadLongConstant(updateRhs[1]);
         b.endFusedLongTailLoop();
+
+        return true;
+    }
+
+    /**
+     * Try to emit a {@link MezzeBytecodeRootNode.FusedLongTailLoop3P} for a
+     * 3-param tail-recursive function — the same shape the 2-param version
+     * accepts, one parameter wider:
+     * <pre>
+     *   let f = { p0, p1, p2 } ->
+     *     if pK cmp lit then pR
+     *     else f { p0 = p0 op rhs, p1 = p1 op rhs, p2 = p2 op rhs }
+     * </pre>
+     * where each `rhs` is a long literal or ANOTHER parameter, and any update
+     * may be the identity.
+     *
+     * Added because the tiers stopping at two parameters was itself a cliff: a
+     * 3-param loop doing ordinary direct arithmetic measured 34 ns/iter against
+     * 0.45 for the identical 2-param loop. See `bench/cases/dispatch_probe`.
+     */
+    private boolean tryEmitFusedLongTailLoop3P(
+            IfIR ifBody, FunctionIR ir, int captureCount,
+            MezzeBytecodeRootNodeGen.Builder b, int argCount,
+            BytecodeLocal[] localMap) {
+        final int paramCount = 3;
+        NodeIR cond = ifBody.getCond();
+        NodeIR thenBr = ifBody.getThenBr();
+        NodeIR elseBr = ifBody.getElseBr();
+
+        CallDirectIR tailCall = null;
+        NodeIR baseExpr = null;
+        boolean invertCond = false;
+        if (elseBr instanceof CallDirectIR ec && ec.isTailCall()
+                && ec.getTargetHash().equals(ir.getHash())
+                && ec.getArgs().size() == paramCount) {
+            tailCall = ec; baseExpr = thenBr;
+        } else if (thenBr instanceof CallDirectIR tc && tc.isTailCall()
+                && tc.getTargetHash().equals(ir.getHash())
+                && tc.getArgs().size() == paramCount) {
+            tailCall = tc; baseExpr = elseBr; invertCond = true;
+        }
+        if (tailCall == null) { fltlRefuse("3P:no-self-tail"); return false; }
+
+        final int ac = captureCount + paramCount;
+        java.util.function.ToIntFunction<NodeIR> paramIdx = n -> {
+            if (n instanceof ReadLocalIR rl && rl.getSlot() < ac && rl.getSlot() >= captureCount)
+                return rl.getSlot() - captureCount;
+            if (n instanceof ReadArgIR ra && ra.getIndex() >= captureCount && ra.getIndex() < ac)
+                return ra.getIndex() - captureCount;
+            return -1;
+        };
+
+        // The base case must return one of the params.
+        int resultIdx = paramIdx.applyAsInt(baseExpr);
+        if (resultIdx < 0) { fltlRefuse("3P:base-not-param"); return false; }
+
+        InlineOp condOp = fltlExtractOp(cond);
+        if (condOp == null) { fltlRefuse("3P:cond-not-op"); return false; }
+        int condCmpOp = fltlClassifyCmp(condOp);
+        if (condCmpOp < 0) { fltlRefuse("3P:cond-not-cmp"); return false; }
+        NodeIR condLeft = fltlExtractChild(cond, 0);
+        NodeIR condRight = fltlExtractChild(cond, 1);
+        if (condLeft == null || condRight == null) { fltlRefuse("3P:cond-children"); return false; }
+
+        int condOnIdx;
+        long condRhsVal;
+        int leftPI = paramIdx.applyAsInt(condLeft);
+        int rightPI = paramIdx.applyAsInt(condRight);
+        if (leftPI >= 0 && condRight instanceof LongLitIR clit) {
+            condOnIdx = leftPI;
+            condRhsVal = clit.getValue();
+        } else if (rightPI >= 0 && condLeft instanceof LongLitIR clit) {
+            // `0 < n` means the same as `n > 0`; swap so the param is on the left.
+            condOnIdx = rightPI;
+            condCmpOp = fltlSwapCmp(condCmpOp);
+            condRhsVal = clit.getValue();
+        } else {
+            fltlRefuse("3P:cond-shape");
+            return false;
+        }
+        if (invertCond) condCmpOp = fltlNegateCmp(condCmpOp);
+
+        // Classify each parameter update.
+        int[] updateOp = new int[paramCount];
+        long[] updateRhs = new long[paramCount];
+        int[] rhsSrc = new int[paramCount];   // 0 = literal, else param index + 1
+
+        for (int i = 0; i < paramCount; i++) {
+            NodeIR arg = tailCall.getArgs().get(i);
+            int pi = paramIdx.applyAsInt(arg);
+            if (pi == i) {                      // identity: carried unchanged
+                updateOp[i] = -1;
+                continue;
+            }
+            if (pi >= 0) {
+                // `p0 = p1` — a pure permutation, which this operation has no
+                // encoding for (every update is `self op rhs`).
+                fltlRefuse("3P:update-is-other-param");
+                return false;
+            }
+            InlineOp extracted = fltlExtractOp(arg);
+            if (extracted == null) {
+                fltlRefuse("3P:update-not-op kind=" + arg.getClass().getSimpleName());
+                return false;
+            }
+            int op = fltlClassifyArithOp(extracted);
+            if (op < 0) { fltlRefuse("3P:update-not-arith"); return false; }
+            NodeIR leftNode = fltlExtractChild(arg, 0);
+            NodeIR rightNode = fltlExtractChild(arg, 1);
+            if (leftNode == null || rightNode == null) { fltlRefuse("3P:update-children"); return false; }
+            // Left must be THIS param: the operation computes `self op rhs`.
+            if (paramIdx.applyAsInt(leftNode) != i) { fltlRefuse("3P:update-left"); return false; }
+            if (rightNode instanceof LongLitIR rlit) {
+                updateOp[i] = op;
+                updateRhs[i] = rlit.getValue();
+                rhsSrc[i] = 0;
+            } else {
+                int rpi = paramIdx.applyAsInt(rightNode);
+                if (rpi < 0) { fltlRefuse("3P:update-rhs"); return false; }
+                updateOp[i] = op;
+                updateRhs[i] = 0;
+                rhsSrc[i] = rpi + 1;   // NAME the source param, don't just flag it
+            }
+        }
+
+        int config = MezzeBytecodeRootNode.fltlPack3(
+                condCmpOp, condOnIdx,
+                updateOp[0], updateOp[1], updateOp[2],
+                resultIdx,
+                rhsSrc[0], rhsSrc[1], rhsSrc[2]);
+
+        b.beginFusedLongTailLoop3P(config);
+        b.emitLoadArgument(captureCount);          // p0Init
+        b.emitLoadArgument(captureCount + 1);      // p1Init
+        b.emitLoadArgument(captureCount + 2);      // p2Init
+        b.emitLoadLongConstant(condRhsVal);        // condRhs
+        b.emitLoadLongConstant(updateRhs[0]);      // p0UpdateRhs
+        b.emitLoadLongConstant(updateRhs[1]);      // p1UpdateRhs
+        b.emitLoadLongConstant(updateRhs[2]);      // p2UpdateRhs
+        b.endFusedLongTailLoop3P();
 
         return true;
     }
@@ -7998,14 +10164,91 @@ public final class BytecodeCompiler {
      * </ol>
      * Returns the InlineOp, or null if the node doesn't match any shape.
      */
+    /**
+     * The two operands of a record-form scalar native, in the SIGNATURE's
+     * parameter order, or null when the record does not supply exactly those
+     * parameters.
+     *
+     * Binding by declared parameter name rather than by field position is what
+     * makes this safe: the record is a Mezze record, so its fields carry names
+     * and may be written in any order.
+     */
+    /* package-private for NativeRecordOperandTest */
+    static java.util.List<NodeIR> fltlRecordOperands(
+            CallNativeIR cnir,
+            com.mezze.language.truffleir.NativeSignature sig) {
+        if (sig.getInlineOp() == null) return null;
+        if (sig.getParams().size() != 2) return null;
+        if (!(cnir.getArg() instanceof MakeRecordIR mr)) return null;
+        java.util.List<NodeIR> out = new java.util.ArrayList<>(2);
+        for (var p : sig.getParams()) {
+            NodeIR found = null;
+            int seen = 0;
+            for (FieldIR f : mr.getFields()) {
+                if (p.getName().equals(f.getName())) { found = f.getValue(); seen++; }
+            }
+            // A spread or a duplicate field means we cannot be sure which value
+            // binds, so decline rather than guess.
+            if (found == null || seen != 1) return null;
+            out.add(found);
+        }
+        // Every field must be accounted for; an extra one would be dropped.
+        long fieldCount = mr.getFields().stream().filter(f -> f instanceof FieldIR).count();
+        if (fieldCount != mr.getFields().size() || fieldCount != 2) return null;
+        return out;
+    }
+
+    /**
+     * True when the record writes its fields in exactly the signature's
+     * parameter order, so collapsing it to a left-then-right inline op cannot
+     * reorder two operand expressions.
+     */
+    /* package-private for NativeRecordOperandTest */
+    static boolean fltlRecordFieldsInSigOrder(
+            MakeRecordIR mr,
+            com.mezze.language.truffleir.NativeSignature sig) {
+        var params = sig.getParams();
+        var fields = mr.getFields();
+        if (fields.size() != params.size()) return false;
+        for (int i = 0; i < fields.size(); i++) {
+            if (!(fields.get(i) instanceof FieldIR f)) return false;
+            if (!params.get(i).getName().equals(f.getName())) return false;
+        }
+        return true;
+    }
+
     private InlineOp fltlExtractOp(NodeIR node) {
         if (node instanceof InlineBinaryOpIR bin) {
             return bin.getOp();
         }
-        if (node instanceof CallNativeIR cnir
-                && cnir.isScalarABI() && cnir.getArgs().size() == 2) {
+        if (node instanceof CallNativeIR cnir) {
             var sig = NativeSignatures.INSTANCE.signatureOf(cnir.getName());
-            return (sig != null) ? sig.getInlineOp() : null;
+            if (sig == null) return null;
+            // Positional (scalar-ABI) form.
+            if (cnir.isScalarABI() && cnir.getArgs().size() == 2) {
+                return sig.getInlineOp();
+            }
+            // RECORD form. A record is Mezze's SYNTAX, for the typechecker; by
+            // the time we are emitting bytecode it should have become
+            // positional operands. It has not here, and it cannot be fixed at
+            // compile time: under `mez build` the NativeSignatures registry is
+            // EMPTY (the interpreter module is `compileOnly` in the CLI), so
+            // the lowering-side collapse to InlineBinaryOpIR never runs and
+            // `__native_int_add { l = acc, r = n }` survives into the IR with
+            // inlineOp=null. We ARE in the interpreter, where the registry is
+            // loaded, so read the operands out of the record by the
+            // signature's parameter names instead of refusing the function.
+            //
+            // WHY IT MATTERS: refusing here made FusedLongTailLoop decline
+            // every annotation-free numeric tail loop, which then ran as BDSL
+            // bytecode allocating a MezzeRecord per iteration. Measured on a
+            // 20M-iteration sum: 12 ns/iter refused vs 0.25 ns/iter fused —
+            // 48x, and the fused form allocates nothing (GC count flat from
+            // 20M to 40M iterations).
+            if (fltlRecordOperands(cnir, sig) != null) {
+                return sig.getInlineOp();
+            }
+            return null;
         }
         if (node instanceof CallIndirectIR ci
                 && ci.getFunction() instanceof ReadFieldIR rf
@@ -8023,8 +10266,19 @@ public final class BytecodeCompiler {
         if (node instanceof InlineBinaryOpIR bin) {
             return childIdx == 0 ? bin.getLeft() : bin.getRight();
         }
-        if (node instanceof CallNativeIR cnir && cnir.isScalarABI()) {
-            return cnir.getArgs().get(childIdx);
+        if (node instanceof CallNativeIR cnir) {
+            if (cnir.isScalarABI() && childIdx < cnir.getArgs().size()) {
+                return cnir.getArgs().get(childIdx);
+            }
+            // Record form — see fltlExtractOp. Operand order follows the
+            // SIGNATURE's parameter order, not the order the fields happen to
+            // be written in, so `{ r = .., l = .. }` still binds correctly.
+            var sig = NativeSignatures.INSTANCE.signatureOf(cnir.getName());
+            if (sig != null) {
+                java.util.List<NodeIR> ops = fltlRecordOperands(cnir, sig);
+                if (ops != null && childIdx < ops.size()) return ops.get(childIdx);
+            }
+            return null;
         }
         if (node instanceof CallIndirectIR ci
                 && ci.getFunction() instanceof ReadFieldIR rf) {
@@ -8115,6 +10369,38 @@ public final class BytecodeCompiler {
      * multiple params change, evaluation goes through temp locals to
      * preserve order-of-evaluation.
      */
+    /**
+     * The self tail call at the end of a BLOCK branch, or null when this
+     * branch is not that shape.
+     *
+     * NARROW ON PURPOSE: every statement must be a bare native call, which is
+     * exactly what a mut op lowers to (`incr { n = c, delta = 1 }` is a
+     * `CallNativeIR` in statement position) and is the shape this was measured
+     * on. A native is not a user function, so a statement cannot itself be the
+     * self call, and the rewrite is then plainly order-preserving — the
+     * statements run, then the parameters update, exactly as before.
+     *
+     * Widening this to arbitrary statements is a separate question: a `let` in
+     * the branch writes a slot whose lifetime would become the loop body, and
+     * a nested self call would need checking against the tail-call flag the
+     * trampoline relies on. Neither is needed for the measured case, so
+     * neither is assumed.
+     */
+    private com.mezze.language.truffleir.CallDirectIR stlBlockTailCall(
+            NodeIR branch, com.mezze.language.truffleir.FunctionIR ir, int paramCount) {
+        if (!(branch instanceof com.mezze.language.truffleir.BlockIR blk)) return null;
+        if (!(blk.getResult() instanceof CallDirectIR call)) return null;
+        if (!call.isTailCall()) return null;
+        if (!call.getTargetHash().equals(ir.getHash())) return null;
+        if (call.getArgs().size() != paramCount) return null;
+        if (blk.getStmts().isEmpty()) return null;
+        for (com.mezze.language.truffleir.StmtIR st : blk.getStmts()) {
+            if (!(st instanceof com.mezze.language.truffleir.StmtIR.Expr ex)) return null;
+            if (!(ex.getNode() instanceof com.mezze.language.truffleir.CallNativeIR)) return null;
+        }
+        return call;
+    }
+
     private void stlEmitParamUpdate(java.util.List<NodeIR> args,
                                     BytecodeLocal[] stlParams,
                                     MezzeBytecodeRootNodeGen.Builder b,

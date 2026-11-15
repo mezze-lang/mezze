@@ -37,7 +37,8 @@ public final class MapNatives {
 
     private static final String[] FIELD_K_V = {ENTRY_KEY, ENTRY_VALUE};
     private static final String[] FIELD_PASS_FAIL = {"pass", "fail"};
-    private static final String[] FIELD_FST_SND = {"fst", "snd"};
+    private static final String[] FIELD_FST_SND =
+        {com.mezze.language.truffleir.NativeHofNames.PAIR_FST, com.mezze.language.truffleir.NativeHofNames.PAIR_SND};
 
     // ==================== Factory Operations ====================
 
@@ -48,12 +49,11 @@ public final class MapNatives {
     public static MezzeMap fromKeys(Object[] keys, MezzeFunction valueFn,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(valueFn, "val");
-        MezzeMap map = MezzeMap.empty();
-        for (Object key : keys) {
-            Object value = ctx.call1(callNode, key);
-            map = map.put(key, value);
+        Object[] outV = new Object[keys.length];
+        for (int i = 0; i < keys.length; i++) {
+            outV[i] = ctx.call1(callNode, keys[i]);
         }
-        return map;
+        return MezzeMap.fromEntries(keys, outV, keys.length);
     }
 
     // ==================== Basic Operations ====================
@@ -170,52 +170,128 @@ public final class MapNatives {
      */
     @TruffleBoundary
     public static MezzeList entries(MezzeMap map) {
-        com.mezze.datastructures.map.MezzeMap<Object, Object> delegate = map;
-        Object[] result = new Object[delegate.size()];
-        int i = 0;
-        for (MezzeMap.Entry entry : delegate) {
-            result[i++] = MezzeRecord.fromFields(
-                FIELD_K_V,
-                new Object[]{entry.key(), entry.value()}
-            );
-        }
+        Object[] result = new Object[map.size()];
+        int[] i = {0};
+        map.walkEntries((k, v) -> {
+            result[i[0]++] = MezzeRecord.fromFields(FIELD_K_V, new Object[]{k, v});
+        });
         return MezzeList.of(result);
     }
 
     // ==================== Transform Operations ====================
 
+    /**
+     * EVERY OPERATION THAT REBUILDS A MAP COLLECTS AND BUILDS ONCE.
+     *
+     * <p>`result = result.put(k, v)` per entry is a persistent put per entry,
+     * and a persistent put allocates a node at every level of the path it
+     * touches — right for an update, wasted for a rebuild that discards the
+     * base on the very next entry. {@link MezzeMap#fromEntries} takes the
+     * entries already in hand and builds the trie in place instead, which
+     * MEASURED 3.2x faster than the same keys put one at a time (3.4x for
+     * String keys), against an in-place `java.util.HashMap` ceiling of 6.5x.
+     *
+     * <p>A key already present still takes the later value, so the contents
+     * are what the repeated puts gave.
+     *
+     * <p>`filter` keeping EVERYTHING returns the map itself, because an
+     * immutable map that would be rebuilt entry for entry is already the
+     * answer. A bench row that keeps every entry therefore measures that
+     * shortcut rather than the build — `mapsurface` row 22 keeps half.
+     */
     public static MezzeMap filter(MezzeMap map, MezzeFunction predicate,
                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(predicate, "k", "v");
-        MezzeMap result = MezzeMap.empty();
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
-            Object res = ctx.call2(callNode, entry.key(), entry.value());
+        int size = map.size();
+        Object[] outK = new Object[size];
+        Object[] outV = new Object[size];
+        int[] n = {0};
+        map.walkEntries((k, v) -> {
+            Object res = ctx.call2(callNode, k, v);
             if (res instanceof Boolean && (Boolean) res) {
-                result = result.put(entry.key(), entry.value());
+                outK[n[0]] = k;
+                outV[n[0]] = v;
+                n[0]++;
             }
+        });
+        if (n[0] == size) {
+            return map;
         }
-        return result;
+        return MezzeMap.fromEntries(outK, outV, n[0]);
     }
 
     public static MezzeMap mapValues(MezzeMap map, MezzeFunction mapper,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        // THE KEYS DO NOT CHANGE, so they are not touched: no key is copied
+        // into an array, no key is hashed, and the trie's shape is reused.
+        // This used to walk the entries into two arrays and call
+        // `fromEntries`, which pushes every key back through a builder —
+        // 29 302 ps/element against 10 925 for the structure copy, measured on
+        // 1000 string keys, and that ratio is a lower bound because the copy
+        // was measured through reflection.
+        //
+        // The guest calls stay HERE rather than moving inside a
+        // `MezzeMap.mapValues(fn)`, which is `@TruffleBoundary`: a boundary
+        // around a HOF's loop means the loop never compiles and the callback is
+        // never inlined into it, which is the point `BytesNatives.fold`'s
+        // comment makes. So the mapping runs in this frame and only the
+        // structure copy crosses.
+        //
+        // `withValues` wants the values in `values()` order, which is what
+        // mapping over `values()` itself produces.
         var ctx = ScalarCall.prepare1(mapper, "val");
-        MezzeMap result = MezzeMap.empty();
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
-            Object newValue = ctx.call1(callNode, entry.value());
-            result = result.put(entry.key(), newValue);
+        Object[] vs = map.values();
+        Object[] outV = new Object[vs.length];
+        for (int i = 0; i < vs.length; i++) {
+            outV[i] = ctx.call1(callNode, vs[i]);
         }
-        return result;
+        return map.withValues(outV);
+    }
+
+    /**
+     * Sum the integer VALUES, without a guest callback and without an Entry.
+     *
+     * A map fold is the most expensive walk in the collection ledger, and it
+     * pays THREE costs where the others pay one. `MezzeMap`'s iterator does
+     * `new Entry<>(keys[index], values[index])` per step, so there is an
+     * allocation per element on top of the three-argument guest callback — and
+     * the keys are read and boxed into it even when the folder ignores them, as
+     * a value sum does.
+     *
+     * None of that is necessary: the map stores keys and values in PARALLEL
+     * ARRAYS, so a value sum is a counted loop over one of them.
+     *
+     * Named `sum_values` and not `sum` because a map has two things to sum and
+     * the ambiguity would be the whole bug. Reads Long/Integer and ignores
+     * anything else, matching the sibling sums; the stdlib signature is
+     * `{ m: Map 'k Int } -> Int`, and `FoldToSumRewriter` additionally requires
+     * the folder's value parameter to be a LONG slot before redirecting here.
+     *
+     * One `@TruffleBoundary` for the whole loop, not one per element.
+     */
+    @TruffleBoundary
+    public static long sumValues(MezzeMap map) {
+        // `MapStorage.forEach` is the storage's own walk and its contract is
+        // "without creating intermediate arrays" — so no `values()` copy and no
+        // Entry. The accumulator is boxed in a one-element array because a
+        // BiConsumer cannot assign a local; that is ONE allocation per fold,
+        // against the Entry-per-element this replaces.
+        long[] total = { 0L };
+        map.storage().forEach((k, v) -> {
+            if (v instanceof Long l) total[0] += l;
+            else if (v instanceof Integer n) total[0] += n;
+        });
+        return total[0];
     }
 
     public static Object fold(MezzeMap map, Object init, MezzeFunction folder,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare3(folder, "acc", "k", "v");
-        Object acc = init;
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
-            acc = ctx.call3(callNode, acc, entry.key(), entry.value());
-        }
-        return acc;
+        Object[] acc = {init};
+        map.walkEntries((k, v) -> {
+            acc[0] = ctx.call3(callNode, acc[0], k, v);
+        });
+        return acc[0];
     }
 
     // ==================== Merge Operations ====================
@@ -228,17 +304,18 @@ public final class MapNatives {
     public static MezzeMap mergeWith(MezzeMap map1, MezzeMap map2, MezzeFunction merger,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(merger, "l", "r");
-        MezzeMap result = map1;
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map2) {
-            Object key = entry.key();
-            Object newValue = entry.value();
-            if (result.containsKey(key)) {
-                Object oldValue = result.get(key);
-                newValue = ctx.call2(callNode, oldValue, newValue);
+        // Still a put per entry of map2, on purpose: this starts from an
+        // EXISTING map1 and adds map2's entries, so a bulk rebuild would walk
+        // the whole base to save however few puts map2 asks for.
+        MezzeMap[] result = {map1};
+        map2.walkEntries((key, value) -> {
+            Object newValue = value;
+            if (result[0].containsKey(key)) {
+                newValue = ctx.call2(callNode, result[0].get(key), value);
             }
-            result = result.put(key, newValue);
-        }
-        return result;
+            result[0] = result[0].put(key, newValue);
+        });
+        return result[0];
     }
 
     // ==================== Equality ====================
@@ -263,41 +340,55 @@ public final class MapNatives {
                                  com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (map1.size() != map2.size()) return false;
         var ctx = ScalarCall.prepare2(eqFn, "a", "b");
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map1) {
-            Object other = map2.get(entry.key());
+        // The first unequal pair is the answer, so this stops there.
+        return map1.walkEntriesUntil((k, v) -> {
+            Object other = map2.get(k);
             if (other == null) return false;
-            Object result = ctx.call2(callNode, entry.value(), other);
-            if (!(result instanceof Boolean bool) || !bool) {
-                return false;
-            }
-        }
-        return true;
+            Object result = ctx.call2(callNode, v, other);
+            return result instanceof Boolean bool && bool;
+        });
     }
 
     // ==================== Predicate Operations ====================
 
+    /**
+     * ONE WALK, NO INPUT ARRAYS, and the second correction to this walk.
+     *
+     * <p>FIRST it built an `Entry` per element — `MezzeMap`'s iterator does
+     * `new Entry<>(keys[index], values[index])` for every step — so a walk over
+     * a 1 000-key map allocated a thousand two-field objects before any
+     * predicate ran. That became `keys()` and `values()` indexed in step, which
+     * is where the reasoning stopped too early: it removed the Entry but kept
+     * the trie being WALKED TWICE to fill two n-element arrays.
+     *
+     * <p>MEASURED on a 1 000-entry long-keyed map: the two arrays cost 7.16 ns
+     * an entry, the Entry iterator 7.25, and a single `forEach` walk 1.97. So
+     * NEITHER earlier shape was the walk — both were the arrays, and the Entry
+     * was never the main cost it was taken for. 3.54x at n=4 000, 2.56x for
+     * String keys.
+     *
+     * <p>`any`, `all`, `none` and `find` answer before the end, so they take
+     * `walkEntriesUntil`, whose predicate returning false stops the walk where
+     * the array loop used to `return` out of it.
+     */
     public static boolean any(MezzeMap map, MezzeFunction predicate,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(predicate, "k", "v");
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
-            Object result = ctx.call2(callNode, entry.key(), entry.value());
-            if (result instanceof Boolean && (Boolean) result) {
-                return true;
-            }
-        }
-        return false;
+        // false from the predicate STOPS the walk, so a hit in the first node
+        // does not pay for the rest of the trie.
+        return !map.walkEntriesUntil((k, v) -> {
+            Object result = ctx.call2(callNode, k, v);
+            return !(result instanceof Boolean && (Boolean) result);
+        });
     }
 
     public static boolean all(MezzeMap map, MezzeFunction predicate,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(predicate, "k", "v");
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
-            Object result = ctx.call2(callNode, entry.key(), entry.value());
-            if (!(result instanceof Boolean) || !(Boolean) result) {
-                return false;
-            }
-        }
-        return true;
+        return map.walkEntriesUntil((k, v) -> {
+            Object result = ctx.call2(callNode, k, v);
+            return result instanceof Boolean && (Boolean) result;
+        });
     }
 
     public static boolean none(MezzeMap map, MezzeFunction predicate,
@@ -308,29 +399,33 @@ public final class MapNatives {
     public static MezzeVariant find(MezzeMap map, MezzeFunction predicate,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(predicate, "k", "v");
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
-            Object result = ctx.call2(callNode, entry.key(), entry.value());
+        Object[] hit = new Object[2];
+        boolean ranToEnd = map.walkEntriesUntil((k, v) -> {
+            Object result = ctx.call2(callNode, k, v);
             if (result instanceof Boolean && (Boolean) result) {
-                return MezzeVariant.some(MezzeRecord.fromFields(
-                    FIELD_K_V,
-                    new Object[]{entry.key(), entry.value()}
-                ));
+                hit[0] = k;
+                hit[1] = v;
+                return false;
             }
+            return true;
+        });
+        if (ranToEnd) {
+            return MezzeVariant.none();
         }
-        return MezzeVariant.none();
+        return MezzeVariant.some(MezzeRecord.fromFields(FIELD_K_V, hit));
     }
 
     public static long count(MezzeMap map, MezzeFunction predicate,
                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(predicate, "k", "v");
-        long cnt = 0;
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
-            Object result = ctx.call2(callNode, entry.key(), entry.value());
+        long[] cnt = {0L};
+        map.walkEntries((k, v) -> {
+            Object result = ctx.call2(callNode, k, v);
             if (result instanceof Boolean && (Boolean) result) {
-                cnt++;
+                cnt[0]++;
             }
-        }
-        return cnt;
+        });
+        return cnt[0];
     }
 
     // ==================== Contains Value ====================
@@ -388,13 +483,17 @@ public final class MapNatives {
      */
     @TruffleBoundary
     public static MezzeMap fromSeq(MezzeSeq entries) {
-        MezzeMap result = MezzeMap.empty();
+        Object[] outK = new Object[entries.size()];
+        Object[] outV = new Object[entries.size()];
+        int n = 0;
         for (int i = 0; i < entries.size(); i++) {
             if (entries.get(i) instanceof MezzeRecord rec) {
-                result = result.put(rec.getField("k"), rec.getField("v"));
+                outK[n] = rec.getField(ENTRY_KEY);
+                outV[n] = rec.getField(ENTRY_VALUE);
+                n++;
             }
         }
-        return result;
+        return MezzeMap.fromEntries(outK, outV, n);
     }
 
     /**
@@ -421,15 +520,11 @@ public final class MapNatives {
 
     @TruffleBoundary
     public static MezzeSeq toSeq(MezzeMap map) {
-        com.mezze.datastructures.map.MezzeMap<Object, Object> delegate = map;
-        Object[] result = new Object[delegate.size()];
-        int i = 0;
-        for (MezzeMap.Entry entry : delegate) {
-            result[i++] = MezzeRecord.fromFields(
-                FIELD_K_V,
-                new Object[]{entry.key(), entry.value()}
-            );
-        }
+        Object[] result = new Object[map.size()];
+        int[] i = {0};
+        map.walkEntries((k, v) -> {
+            result[i[0]++] = MezzeRecord.fromFields(FIELD_K_V, new Object[]{k, v});
+        });
         return MezzeSeq.fromArray(result);
     }
 
@@ -455,19 +550,34 @@ public final class MapNatives {
     public static MezzeRecord partition(MezzeMap map, MezzeFunction predicate,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(predicate, "k", "v");
-        MezzeMap passMap = MezzeMap.empty();
-        MezzeMap failMap = MezzeMap.empty();
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
-            Object result = ctx.call2(callNode, entry.key(), entry.value());
+        // BOTH corrections at once: this walked the Entry iterator AND built
+        // its two results with a persistent put per entry, which the bulk-build
+        // sweep missed because it returns a record rather than a map.
+        int size = map.size();
+        Object[] passK = new Object[size];
+        Object[] passV = new Object[size];
+        Object[] failK = new Object[size];
+        Object[] failV = new Object[size];
+        int[] np = {0};
+        int[] nf = {0};
+        map.walkEntries((k, v) -> {
+            Object result = ctx.call2(callNode, k, v);
             if (result instanceof Boolean && (Boolean) result) {
-                passMap = passMap.put(entry.key(), entry.value());
+                passK[np[0]] = k;
+                passV[np[0]] = v;
+                np[0]++;
             } else {
-                failMap = failMap.put(entry.key(), entry.value());
+                failK[nf[0]] = k;
+                failV[nf[0]] = v;
+                nf[0]++;
             }
-        }
+        });
         return MezzeRecord.fromFields(
             FIELD_PASS_FAIL,
-            new Object[]{passMap, failMap}
+            new Object[]{
+                MezzeMap.fromEntries(passK, passV, np[0]),
+                MezzeMap.fromEntries(failK, failV, nf[0]),
+            }
         );
     }
 
@@ -525,26 +635,53 @@ public final class MapNatives {
         return MezzeVariant.some(maxVal);
     }
 
+    /**
+     * `invert` under the VALUE's own hash and equality.
+     *
+     * <p>Inverting keys a new map by the old map's VALUES, so the evidence that
+     * matters is the value type's, not the key type's — `Eq 'v, Hash 'v`. The
+     * plain {@link #invert} below hands `fromEntries` the raw arrays, which
+     * buckets structurally: two values a hand-written `Eq` calls one key both
+     * survived as separate keys. "Duplicate values keep one arbitrary key" was
+     * the documented behaviour, and it was not reached at all for such a type.
+     */
     @TruffleBoundary
-    public static MezzeMap invert(MezzeMap map) {
-        MezzeMap result = MezzeMap.empty();
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
-            result = result.put(entry.value(), entry.key());
+    public static MezzeMap invertWithEvidence(MezzeMap map, MezzeFunction hashFn,
+                                              MezzeFunction eqFn) {
+        ElementHashing hashing = ClosureHashing.of(hashFn, eqFn);
+        if (hashing == null) return invert(map);
+        MezzeMap result = withHashing(MezzeMap.empty(), hashing);
+        Object[] keys = map.storage().keys();
+        Object[] values = map.storage().values();
+        // Later entry wins, exactly as the structural form's puts did.
+        for (int i = 0; i < map.size(); i++) {
+            result = result.put(values[i], keys[i]);
         }
         return result;
+    }
+
+    @TruffleBoundary
+    public static MezzeMap invert(MezzeMap map) {
+        // Values become keys, so two entries may collide: the later wins, as
+        // the puts did.
+        return MezzeMap.fromEntries(map.values(), map.keys(), map.size());
     }
 
     // ==================== Task #22: Key/Value Operations ====================
 
     @TruffleBoundary
     public static MezzeMap selectKeys(MezzeMap map, Object[] keys) {
-        MezzeMap result = MezzeMap.empty();
+        Object[] outK = new Object[keys.length];
+        Object[] outV = new Object[keys.length];
+        int n = 0;
         for (Object key : keys) {
             if (map.containsKey(key)) {
-                result = result.put(key, map.get(key));
+                outK[n] = key;
+                outV[n] = map.get(key);
+                n++;
             }
         }
-        return result;
+        return MezzeMap.fromEntries(outK, outV, n);
     }
 
     @TruffleBoundary
@@ -583,54 +720,103 @@ public final class MapNatives {
     @TruffleBoundary
     public static MezzeMap groupByValue(MezzeMap map) {
         java.util.LinkedHashMap<Object, java.util.ArrayList<Object>> groups = new java.util.LinkedHashMap<>();
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
-            groups.computeIfAbsent(entry.value(), k -> new java.util.ArrayList<>())
-                  .add(entry.key());
-        }
-        MezzeMap result = MezzeMap.empty();
+        map.walkEntries((k, v) -> {
+            groups.computeIfAbsent(v, g -> new java.util.ArrayList<>()).add(k);
+        });
+        Object[] outK = new Object[groups.size()];
+        Object[] outV = new Object[groups.size()];
+        int n = 0;
         for (java.util.Map.Entry<Object, java.util.ArrayList<Object>> entry : groups.entrySet()) {
-            result = result.put(entry.getKey(), MezzeList.of(entry.getValue().toArray()));
+            outK[n] = entry.getKey();
+            outV[n] = MezzeList.of(entry.getValue().toArray());
+            n++;
         }
-        return result;
+        return MezzeMap.fromEntries(outK, outV, n);
     }
 
     // ==================== Task #29: Key Operations ====================
 
+    /**
+     * `map_keys` that buckets by the TARGET key's equality.
+     *
+     * <p>The plain {@link #mapKeys} rebuilds through the structural
+     * `fromEntries`, so two keys a hand-written `Eq` calls one key stayed
+     * apart: mapping the distinct Int keys 10 and 11 to a newtype equal BY
+     * TENS gave a map of two. The result's keys are `'k2` and the SOURCE's
+     * instance says nothing about them — the same reasoning as `set::map`.
+     *
+     * <p>"The later entry wins" is preserved: entries are installed in walk
+     * order into a map that already carries the key's instance.
+     */
+    @TruffleBoundary
+    public static MezzeMap mapKeysWithEvidence(MezzeMap map, MezzeFunction f,
+                                               MezzeFunction hashFn, MezzeFunction eqFn,
+                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(f, "val");
+        ElementHashing hashing = ClosureHashing.of(hashFn, eqFn);
+        if (hashing == null) return mapKeys(map, f, callNode);
+        MezzeMap result = withHashing(MezzeMap.empty(), hashing);
+        var acc = new MezzeMap[]{result};
+        map.walkEntries((k, v) -> acc[0] = acc[0].put(ctx.call1(callNode, k), v));
+        return acc[0];
+    }
+
     public static MezzeMap mapKeys(MezzeMap map, MezzeFunction f,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");
-        MezzeMap result = MezzeMap.empty();
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
-            Object newKey = ctx.call1(callNode, entry.key());
-            result = result.put(newKey, entry.value());
-        }
-        return result;
+        int size = map.size();
+        Object[] outK = new Object[size];
+        Object[] outV = new Object[size];
+        int[] n = {0};
+        map.walkEntries((k, v) -> {
+            outK[n[0]] = ctx.call1(callNode, k);
+            outV[n[0]] = v;
+            n[0]++;
+        });
+        // Two keys may map to one: the later entry wins, as the puts did.
+        return MezzeMap.fromEntries(outK, outV, size);
     }
 
     public static MezzeMap filterKeys(MezzeMap map, MezzeFunction predicate,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "val");
-        MezzeMap result = MezzeMap.empty();
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
-            Object res = ctx.call1(callNode, entry.key());
+        int size = map.size();
+        Object[] outK = new Object[size];
+        Object[] outV = new Object[size];
+        int[] n = {0};
+        map.walkEntries((k, v) -> {
+            Object res = ctx.call1(callNode, k);
             if (res instanceof Boolean && (Boolean) res) {
-                result = result.put(entry.key(), entry.value());
+                outK[n[0]] = k;
+                outV[n[0]] = v;
+                n[0]++;
             }
+        });
+        if (n[0] == size) {
+            return map;
         }
-        return result;
+        return MezzeMap.fromEntries(outK, outV, n[0]);
     }
 
     public static MezzeMap filterValues(MezzeMap map, MezzeFunction predicate,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "val");
-        MezzeMap result = MezzeMap.empty();
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
-            Object res = ctx.call1(callNode, entry.value());
+        int size = map.size();
+        Object[] outK = new Object[size];
+        Object[] outV = new Object[size];
+        int[] n = {0};
+        map.walkEntries((k, v) -> {
+            Object res = ctx.call1(callNode, v);
             if (res instanceof Boolean && (Boolean) res) {
-                result = result.put(entry.key(), entry.value());
+                outK[n[0]] = k;
+                outV[n[0]] = v;
+                n[0]++;
             }
+        });
+        if (n[0] == size) {
+            return map;
         }
-        return result;
+        return MezzeMap.fromEntries(outK, outV, n[0]);
     }
 
 
@@ -642,17 +828,22 @@ public final class MapNatives {
      */
     @TruffleBoundary
     public static MezzeMap zipMaps(MezzeMap m1, MezzeMap m2) {
-        MezzeMap result = MezzeMap.empty();
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) m1) {
-            Object key = entry.key();
-            if (m2.containsKey(key)) {
-                result = result.put(key, MezzeRecord.fromFields(
+        Object[] ks = m1.keys();
+        Object[] vs = m1.values();
+        Object[] outK = new Object[ks.length];
+        Object[] outV = new Object[ks.length];
+        int n = 0;
+        for (int i = 0; i < ks.length; i++) {
+            if (m2.containsKey(ks[i])) {
+                outK[n] = ks[i];
+                outV[n] = MezzeRecord.fromFields(
                     FIELD_FST_SND,
-                    new Object[]{entry.value(), m2.get(key)}
-                ));
+                    new Object[]{vs[i], m2.get(ks[i])}
+                );
+                n++;
             }
         }
-        return result;
+        return MezzeMap.fromEntries(outK, outV, n);
     }
 
     /**
@@ -661,13 +852,22 @@ public final class MapNatives {
      */
     @TruffleBoundary
     public static MezzeMap diffMaps(MezzeMap m1, MezzeMap m2) {
-        MezzeMap result = MezzeMap.empty();
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) m1) {
-            if (!m2.containsKey(entry.key())) {
-                result = result.put(entry.key(), entry.value());
+        Object[] ks = m1.keys();
+        Object[] vs = m1.values();
+        Object[] outK = new Object[ks.length];
+        Object[] outV = new Object[ks.length];
+        int n = 0;
+        for (int i = 0; i < ks.length; i++) {
+            if (!m2.containsKey(ks[i])) {
+                outK[n] = ks[i];
+                outV[n] = vs[i];
+                n++;
             }
         }
-        return result;
+        if (n == ks.length) {
+            return m1;
+        }
+        return MezzeMap.fromEntries(outK, outV, n);
     }
 
     /**
@@ -676,13 +876,22 @@ public final class MapNatives {
      */
     @TruffleBoundary
     public static MezzeMap intersectMaps(MezzeMap m1, MezzeMap m2) {
-        MezzeMap result = MezzeMap.empty();
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) m1) {
-            if (m2.containsKey(entry.key())) {
-                result = result.put(entry.key(), entry.value());
+        Object[] ks = m1.keys();
+        Object[] vs = m1.values();
+        Object[] outK = new Object[ks.length];
+        Object[] outV = new Object[ks.length];
+        int n = 0;
+        for (int i = 0; i < ks.length; i++) {
+            if (m2.containsKey(ks[i])) {
+                outK[n] = ks[i];
+                outV[n] = vs[i];
+                n++;
             }
         }
-        return result;
+        if (n == ks.length) {
+            return m1;
+        }
+        return MezzeMap.fromEntries(outK, outV, n);
     }
 
     /**
@@ -691,18 +900,28 @@ public final class MapNatives {
      */
     @TruffleBoundary
     public static MezzeMap symmetricDiffMaps(MezzeMap m1, MezzeMap m2) {
-        MezzeMap result = MezzeMap.empty();
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) m1) {
-            if (!m2.containsKey(entry.key())) {
-                result = result.put(entry.key(), entry.value());
+        Object[] k1 = m1.keys();
+        Object[] v1 = m1.values();
+        Object[] k2 = m2.keys();
+        Object[] v2 = m2.values();
+        Object[] outK = new Object[k1.length + k2.length];
+        Object[] outV = new Object[k1.length + k2.length];
+        int n = 0;
+        for (int i = 0; i < k1.length; i++) {
+            if (!m2.containsKey(k1[i])) {
+                outK[n] = k1[i];
+                outV[n] = v1[i];
+                n++;
             }
         }
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) m2) {
-            if (!m1.containsKey(entry.key())) {
-                result = result.put(entry.key(), entry.value());
+        for (int i = 0; i < k2.length; i++) {
+            if (!m1.containsKey(k2[i])) {
+                outK[n] = k2[i];
+                outV[n] = v2[i];
+                n++;
             }
         }
-        return result;
+        return MezzeMap.fromEntries(outK, outV, n);
     }
 
     // ==================== List/SortedMap Conversions ====================
@@ -713,13 +932,10 @@ public final class MapNatives {
     @TruffleBoundary
     public static MezzeList toList(MezzeMap map) {
         Object[] entries = new Object[map.size()];
-        int i = 0;
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
-            entries[i++] = MezzeRecord.fromFields(
-                FIELD_K_V,
-                new Object[]{entry.key(), entry.value()}
-            );
-        }
+        int[] i = {0};
+        map.walkEntries((k, v) -> {
+            entries[i[0]++] = MezzeRecord.fromFields(FIELD_K_V, new Object[]{k, v});
+        });
         return MezzeList.of(entries);
     }
 
@@ -728,16 +944,17 @@ public final class MapNatives {
      */
     @TruffleBoundary
     public static MezzeMap fromList(MezzeList list) {
-        MezzeMap result = MezzeMap.empty();
+        Object[] outK = new Object[list.size()];
+        Object[] outV = new Object[list.size()];
+        int n = 0;
         for (int i = 0; i < list.size(); i++) {
-            Object elem = list.get(i);
-            if (elem instanceof MezzeRecord rec) {
-                Object k = rec.getField("k");
-                Object v = rec.getField("v");
-                result = result.put(k, v);
+            if (list.get(i) instanceof MezzeRecord rec) {
+                outK[n] = rec.getField(ENTRY_KEY);
+                outV[n] = rec.getField(ENTRY_VALUE);
+                n++;
             }
         }
-        return result;
+        return MezzeMap.fromEntries(outK, outV, n);
     }
 
     /**
@@ -747,14 +964,14 @@ public final class MapNatives {
     public static MezzeMap flatMap(MezzeMap map, MezzeFunction f,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare2(f, "k", "v");
-        MezzeMap result = MezzeMap.empty();
-        for (MezzeMap.Entry entry : (Iterable<MezzeMap.Entry>) (Object) map) {
-            Object mapped = ctx.call2(callNode, entry.key(), entry.value());
+        MezzeMap[] result = {MezzeMap.empty()};
+        map.walkEntries((k, v) -> {
+            Object mapped = ctx.call2(callNode, k, v);
             if (mapped instanceof MezzeMap innerMap) {
-                result = result.putAll(innerMap);
+                result[0] = result[0].putAll(innerMap);
             }
-        }
-        return result;
+        });
+        return result[0];
     }
 
     /**

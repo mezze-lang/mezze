@@ -1,0 +1,625 @@
+## WHAT ALLOCATES, PER ITERATION.
+##
+## Young-collection counts do NOT care about CPU contention, which makes them
+## the one kind of evidence that survives a loaded machine — and the one that
+## caught three findings in this effort already. So this case asks only "does it
+## allocate", across shapes the ledger had as UNKNOWN, and leaves the
+## picoseconds for a quiet box.
+##
+## READ IT AS: kernel 1's collection count is the floor. A kernel near it
+## allocates nothing per iteration; a kernel far above it allocates, and the
+## multiple is roughly how much.
+##
+##   MEZZE_JAVA_OPTS=-Xlog:gc ./.build/allocsurface <k> <n> 2>&1 | grep -c "Pause Young"
+##
+## Every kernel computes a checksum that depends on the operation, so none of
+## them can be folded away — but the checksums DIFFER between kernels here,
+## unlike every other case in this directory, because the operations are not
+## interchangeable. Each kernel's expected value is stated beside it.
+use std::collections::seq
+use std::collections::map
+use std::collections::bytes
+use std::collections::list
+use std::collections::set
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::str
+use std::int
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+## 1. CONTROL — nothing allocates. sum = n*(n+1)/2.
+let go_c = { i, acc } ->
+  if i <= 0 then acc
+  else go_c { i = i - 1, acc = acc + i }
+let k_control = { n } -> go_c { i = n, acc = 0 }
+
+## 2. RECORD UPDATE per iteration: `{ ...r, a = … }` where the record OUTLIVES
+##    the expression, so none of the record passes can erase it. This is the
+##    shape every "update one field of my state" writes.
+let go_u = { i, acc, r } ->
+  if i <= 0 then acc + r.a
+  else go_u { i = i - 1, acc = acc + r.a, r = { ...r, a = i } }
+let k_update = { n } -> go_u { i = n, acc = 0, r = { a = 0, b = 7 } }
+
+## 3. STRING CONCAT per iteration. Two fixed strings, so the result is the same
+##    every time and only the allocation varies. sum = n (one per length-2).
+let go_s = { i, acc } ->
+  if i <= 0 then acc
+  else go_s { i = i - 1, acc = acc + str::size { s = str::concat { l = "a", r = "b" } } }
+let k_concat = { n } -> go_s { i = n, acc = 0 }
+
+## 4. STRING INTERPOLATION per iteration — the same two characters, built the
+##    way a program actually builds strings.
+let go_p = { i, acc } ->
+  if i <= 0 then acc
+  else go_p { i = i - 1, acc = acc + str::size { s = "a$("b")" } }
+let k_interp = { n } -> go_p { i = n, acc = 0 }
+
+## 5. MAP GET per iteration against a map built ONCE. A lookup should allocate
+##    nothing except the `Option` it returns — which, per the variant fold, is
+##    exactly the shape that should now disappear.
+let go_m = { i, acc, m } ->
+  if i <= 0 then acc
+  else go_m { i = i - 1, acc = acc + (match map::get { m = m, k = 1 } is
+                                       Some { val } -> val
+                                       None -> 0), m = m }
+let k_map_get = { n } -> go_m { i = n, acc = 0, m = map::insert { m = map::empty {}, k = 1, v = 1 } }
+
+## 6. MAP INSERT per iteration, each one producing a new map. A persistent map
+##    must allocate here; the question is how much.
+let go_i = { i, acc } ->
+  if i <= 0 then acc
+  else go_i { i = i - 1, acc = acc + map::size { m = map::insert { m = map::empty {}, k = i, v = i } } }
+let k_map_insert = { n } -> go_i { i = n, acc = 0 }
+
+## 7. SEQ INDEX per iteration against a seq built once. Should allocate nothing
+##    beyond the Option.
+let go_g = { i, acc, xs } ->
+  if i <= 0 then acc
+  else go_g { i = i - 1, acc = acc + (match seq::get { xs = xs, i = 0 } is
+                                        Some { val } -> val
+                                        None -> 0), xs = xs }
+let k_seq_get = { n } -> go_g { i = n, acc = 0, xs = seq::range { start = 1, end = 3 } }
+
+## 8. MAP CONTAINS_KEY per iteration — the DISCRIMINATOR for kernel 5. Same map,
+##    same key, same hash-and-probe native; the only difference is that this one
+##    returns a Bool where `get` returns an `Option`. If this sits at the control
+##    and kernel 5 does not, the allocation in kernel 5 is the Option and not the
+##    lookup.
+let go_k = { i, acc, m } ->
+  if i <= 0 then acc
+  else go_k { i = i - 1, acc = acc + (if map::contains_key { m = m, k = 1 } then 1 else 0), m = m }
+let k_map_has = { n } -> go_k { i = n, acc = 0, m = map::insert { m = map::empty {}, k = 1, v = 1 } }
+
+## 9. MAP SIZE per iteration — a native call that does NO lookup and returns an
+##    Int. This is the "does calling a native in a loop allocate at all" control,
+##    so that kernel 8 reading low cannot be mistaken for the call being free
+##    while kernel 5 reading high is blamed on the wrong thing.
+let go_z = { i, acc, m } ->
+  if i <= 0 then acc
+  else go_z { i = i - 1, acc = acc + map::size { m = m }, m = m }
+let k_map_size = { n } -> go_z { i = n, acc = 0, m = map::insert { m = map::empty {}, k = 1, v = 1 } }
+
+## 10. TIER CONTROL — the arity cliff, isolated.
+##
+## Kernel 1 is on the FUSED tail-loop tier: the whole loop runs as Java with no
+## per-iteration bytecode. Every kernel from 2 onwards is off that tier, so
+## "kernel N minus kernel 1" charges the tier gap to whatever N was testing. This
+## kernel is off the tier too, for a reason that has nothing to do with anything
+## else here: it takes FOUR parameters, and `BytecodeCompiler` dispatches the
+## fused tier only for paramCount 1, 2 and 3. Its body is pure arithmetic over
+## its own parameters — no call, no native, no record, no string, nothing that
+## can allocate — and `MEZZE_TRACE_SELFTAIL` confirms it compiles to exactly
+## FOUR params, so nothing else differs from kernel 1.
+##
+## MEASURED: 568 ps/iter against kernel 1's 216, and 3 young collections against
+## 2. So the arity cliff costs ~2.6x in TIME and nothing in allocation. An
+## off-fused-tier loop does NOT allocate per iteration.
+##
+## sum = n*(n+1)/2, the same as kernel 1.
+let go_4 = { i, acc, p, q } ->
+  if i <= 0 then acc
+  else go_4 { i = i - 1, acc = acc + i, p = p, q = q }
+let k_tier = { n } -> go_4 { i = n, acc = 0, p = 0, q = 0 }
+
+## 11. THE SAME LOOP, with TWO MORE ADDS IN THE BASE CASE. Nothing else changes:
+##     same four parameters, same condition, same per-iteration updates. The only
+##     edit is `then acc` becoming `then acc + p + q`, in the branch that runs
+##     ONCE, after the loop is over.
+##
+## MEASURED: 29 178 ps/iter and 33 young collections, against kernel 10's 568 ps
+## and 3. Fifty-two times slower and eleven times the allocation, decided by a
+## branch that executes once.
+##
+## WHY. `MEZZE_TRACE_SELFTAIL` reports `go_5 params=6` where the source declares
+## four. The two extra are `__dict_` parameters: the extra adds raise more
+## `NumAdd` constraints than monomorphisation discharges, the function stays
+## dictionary-passing, and a dictionary-passing loop allocates per iteration and
+## loses every tier. Kernel 10 with the single add compiles to params=4 and no
+## dictionaries.
+##
+## This pair is why the case has a kernel 10 at all. The first version of kernel
+## 10 WAS this kernel — the base case was written `acc + p + q` without a
+## thought — and its 33 collections were read as "the off-tier loop allocates
+## per iteration", which then explained every other row in the case. It was the
+## dictionaries. Both spellings are kept here so the difference is a measurement
+## rather than a memory.
+##
+## sum = n*(n+1)/2, the same as kernel 1, because p and q are 0.
+let go_5 = { i, acc, p, q } ->
+  if i <= 0 then acc + p + q
+  else go_5 { i = i - 1, acc = acc + i, p = p, q = q }
+let k_dict = { n } -> go_5 { i = n, acc = 0, p = 0, q = 0 }
+
+## 12. THE SAME SHAPE AS KERNEL 9, ON THE SCALAR NATIVE ABI. `str::size` of a
+##     string carried as a loop parameter: a native call returning an Int that
+##     allocates nothing, exactly like `map::size` in kernel 9. The ONLY
+##     difference is which ABI the call uses.
+##
+## `__native_string_size` is declared in the NativeOp DSL, so
+## `NativeSignatures.signatureOf` returns a signature and `TypedASTCompiler`
+## emits `CallNativeIR(arg=UnitLitIR, args=[s], argKinds=[OBJECT])` — positional,
+## typed, no record. `__native_map_size` is NOT declared (the table holds 128
+## signatures: float, int, string, nat, char, bool, and nothing for map, seq,
+## list or set), so kernel 9 emits
+## `CallNativeIR(arg=MakeRecordIR(...), args=[], argKinds=[])` — a MezzeRecord
+## allocated per call and looked up by field name.
+##
+## Kernel 9 minus kernel 12 is therefore the cost of the argument record, with
+## everything else held equal. Both are semantically allocation-free, so kernel
+## 12 should sit near the off-tier control at 3 collections.
+##
+## sum = n, the same as kernel 9, because the string is one character.
+let go_y = { i, acc, s } ->
+  if i <= 0 then acc
+  else go_y { i = i - 1, acc = acc + str::size { s = s }, s = s }
+## THE STRING MUST NOT BE A LITERAL, and this is the whole point of the kernel.
+##
+## The first version passed `s = "a"`. A literal is a compile-time constant and
+## `__native_string_size` is declared `pure`, so the entire call folded to 1 and
+## the kernel stopped measuring a native call at all: it read 577 ps and 3 young
+## collections, sitting exactly on the off-tier control, and that reading was
+## written up as "a native call on the scalar ABI is free" — and a 13x record-ABI
+## penalty derived from it. A no-op probe handler proved the error: with a handler
+## that touched nothing, `map::size` still read 13 collections while this kernel
+## read 3, which cannot be true of the shared machinery.
+##
+## `n` arrives from argv, so `int::to_str { n = n }` is opaque to the compiler;
+## taking one character keeps the size 1 and the checksum n, as kernel 9.
+let k_str_size = { n } -> go_y {
+  i = n, acc = 0,
+  s = str::substring { s = int::to_str { n = n }, start = 0, end = 1 },
+}
+
+## 13. LIST GET per iteration against a list built ONCE. Same shape as kernel 7
+##     (`seq::get`): a lookup returning an `Option`, nothing it must allocate.
+##     `list::get` routes to `__native_list_get`, whose declared field is
+##     `index` rather than `i` — a positional port that guessed `i` would miss
+##     the all-params-present check and fall back to the record path in silence,
+##     so this kernel is also what proves the field name right.
+let go_l = { i, acc, xs } ->
+  if i <= 0 then acc
+  else go_l { i = i - 1, acc = acc + (match list::get { xs = xs, index = 0 } is
+                                        Some { val } -> val
+                                        None -> 0), xs = xs }
+let k_list_get = { n } -> go_l { i = n, acc = 0, xs = list::from_seq { xs = seq::range { start = 1, end = 3 } } }
+
+## 14. SET CONTAINS per iteration against a set built ONCE. Returns a `Bool`, so
+##     like kernel 8 it has no `Option` in the way, and nothing it must allocate.
+let go_st = { i, acc, s } ->
+  if i <= 0 then acc
+  else go_st { i = i - 1, acc = acc + (if set::contains { s = s, x = 1 } then 1 else 0), s = s }
+let k_set_has = { n } -> go_st { i = n, acc = 0, s = set::from_seq { xs = seq::range { start = 1, end = 2 } } }
+
+## 15. BYTES GET per iteration against a Bytes built ONCE — the same shape as
+##     kernels 5/7/8 (a native lookup returning an Option), for the bytes
+##     accessors ported to the scalar ABI. `bytes::get` is declared;
+##     `bytes::from_seq` is not, so the constructor stays on the record path and
+##     only the per-iteration lookup is measured.
+let go_b = { i, acc, b } ->
+  if i <= 0 then acc
+  else go_b { i = i - 1, acc = acc + (match bytes::get { b = b, i = 0 } is
+                                        Some { val } -> val
+                                        None -> 0), b = b }
+let k_bytes_get = { n } -> go_b {
+  i = n, acc = 0,
+  b = bytes::from_seq { arr = seq::range { start = 1, end = 3 } },
+}
+
+
+## 16/17. THE SAME OPERATION TWICE PER ITERATION — a discriminator, not a row.
+##
+## `map::size` costs 8 846 ps and `str::size` 532 for the same shape of work:
+## one declared native, one operand, a stored count out of a container, both on
+## a dedicated PE-transparent operation. The ledger has carried that 17x as an
+## open puzzle with the ABI and the storage interface call both RULED OUT by
+## measurement, and it was read as a per-call cost all along.
+##
+## It need not be one. A loop-invariant receiver means a PURE read can be
+## HOISTED OUT of the loop entirely, in which case kernel 12 measures an add and
+## not a call at all — and the whole 17x would be an artefact of comparing a
+## hoisted operation against one that cannot be.
+##
+## CALLING IT TWICE SPLITS THAT. If the call is hoisted, two calls cost what one
+## does. If it is paid per call, two cost twice. Nothing else about the loop
+## changes: same parameters, same condition, one extra add either way (and
+## kernel 1 says an add is ~0.2 ns, so the add cannot carry the result).
+let go_y2 = { i, acc, s } ->
+  if i <= 0 then acc
+  else go_y2 { i = i - 1, acc = acc + str::size { s = s } + str::size { s = s }, s = s }
+let k_str_size_2x = { n } -> go_y2 {
+  i = n, acc = 0,
+  s = str::substring { s = int::to_str { n = n }, start = 0, end = 1 },
+}
+
+let go_z2 = { i, acc, m } ->
+  if i <= 0 then acc
+  else go_z2 { i = i - 1, acc = acc + map::size { m = m } + map::size { m = m }, m = m }
+let k_map_size_2x = { n } -> go_z2 { i = n, acc = 0, m = map::insert { m = map::empty {}, k = 1, v = 1 } }
+
+
+## 18/19. `size` ON A CONCRETE TYPE AGAINST `size` ON A GENERIC ONE.
+##
+## JFR says the `map::size` loop allocates a `MezzeRecord` PER ITERATION, which
+## means the call is not reaching `InlineMapSize` at all — it is building the
+## argument record the scalar ABI exists to avoid. `str::size` in the same loop
+## shape allocates nothing and costs 0.5 ns against map's 8.8.
+##
+## The two signatures differ in ONE way:
+##
+##     pub let size: { s: Str }        -> Int        -- concrete
+##     pub let size: { m: Map 'k 'v }  -> Int        -- generic
+##
+## so the question is whether a GENERIC callee is what loses the scalar call.
+## `bytes::size` settles it: `Bytes` is concrete and has no type parameters, so
+## if genericity is the cause this row sits with `str::size`, and if it does not
+## this row sits with `map::size` and the cause is something about collections.
+## `seq::size` is the generic control beside it.
+let go_bs = { i, acc, b } ->
+  if i <= 0 then acc
+  else go_bs { i = i - 1, acc = acc + bytes::size { b = b }, b = b }
+let k_bytes_size = { n } -> go_bs {
+  i = n, acc = 0, b = bytes::from_seq { arr = seq::range { start = 1, end = 2 } },
+}
+
+let go_ss = { i, acc, xs } ->
+  if i <= 0 then acc
+  else go_ss { i = i - 1, acc = acc + seq::size { xs = xs }, xs = xs }
+let k_seq_size = { n } -> go_ss { i = n, acc = 0, xs = seq::range { start = 1, end = 2 } }
+
+
+## 20. ONE CALL AND TWO ADDS — which splits kernel 16's cliff in half.
+##
+## Kernel 12 (`acc + str::size { s }`) is 505 ps and kernel 16
+## (`acc + str::size { s } + str::size { s }`) is 41 715. Two things changed at
+## once: a second ADD and a second CALL. This changes only the add:
+##
+##     k12   acc + str::size { s = s }
+##     k20   acc + str::size { s = s } + i          <- one call, two adds
+##     k16   acc + str::size { s = s } + str::size { s = s }
+##
+## `+ i` and not `+ 1`, because a literal folds into the constant and the extra
+## add would vanish. `i` is already a parameter of this loop and already read
+## by the condition, so nothing else is added to the body.
+##
+## If k20 sits with k16 the trigger is the ARITHMETIC — kernel 11's cliff, where
+## two more adds in the base case cost 52x. If k20 sits with k12 the trigger is
+## the second CALL, and JFR's stacks for k16 (CallIndirect -> TrampolineRootNode
+## -> normalizeArgs -> unpackRecord, plus a MezzeFunction.hasPartialArgs guard
+## per call) say what that call fell back to.
+##
+## sum = n + n*(n+1)/2.
+let go_y3 = { i, acc, s } ->
+  if i <= 0 then acc
+  else go_y3 { i = i - 1, acc = acc + str::size { s = s } + i, s = s }
+let k_str_size_add = { n } -> go_y3 {
+  i = n, acc = 0,
+  s = str::substring { s = int::to_str { n = n }, start = 0, end = 1 },
+}
+
+
+## 21/22. THE NESTING, with the call taken out of the question.
+##
+## Kernel 20 said the trigger for kernel 16's cliff is the extra ADD and not the
+## extra CALL. The lowered IR of both, dumped with `MEZZE_DUMP_FN=*`, differs in
+## exactly one way: `ADD(acc, call)` against `ADD(ADD(acc, call), i)`. Both are
+## already `InlineBinaryOpIR`, both land on the same self-tail tier
+## (direct-while), and both reach the same record-ABI native call.
+##
+## 21 removes the call entirely: three parameters, pure arithmetic, one nested
+## add. If it is slow then the nesting alone is the cliff and nothing about
+## natives, strings or collections is involved.
+##
+## 22 keeps the call but nests to the RIGHT: `acc + (size + i)`. Same operations,
+## same count, only the tree shape differs — so 21 against 22 says whether it is
+## nesting as such or nesting on the ACCUMULATOR side.
+##
+## sum for 21 = n + n*(n+1)/2; for 22 the same.
+let go_n1 = { i, acc, k } ->
+  if i <= 0 then acc
+  else go_n1 { i = i - 1, acc = acc + i + k, k = k }
+let k_nest_arith = { n } -> go_n1 { i = n, acc = 0, k = 1 }
+
+let go_n2 = { i, acc, s } ->
+  if i <= 0 then acc
+  else go_n2 { i = i - 1, acc = acc + (str::size { s = s } + i), s = s }
+let k_nest_right = { n } -> go_n2 {
+  i = n, acc = 0,
+  s = str::substring { s = int::to_str { n = n }, start = 0, end = 1 },
+}
+
+
+## 23. KERNEL 21 WITH THE TYPES WRITTEN DOWN, as a DIAGNOSTIC.
+##
+## Kernel 21 (`acc + i + k`) costs 41 214 ps and 89 young collections where
+## kernel 22 (`acc + (size + i)`) costs 3 915 and 3. `MEZZE_TRACE_COMPILATION`
+## says what the difference is: the left-nested arm compiles
+## `TrampolineRootNode[add]` FIFTEEN times — the `Num.add` ability method called
+## as a real function per iteration — one of those compilations bails out with
+## "FrameWithoutBoxing should not be materialized (must not pass virtual object
+## into an invoke that cannot be inlined)", and the loop is OSR-recompiled ten
+## times. The right-nested arm never compiles `add` at all.
+##
+## So the outer `+` is not reaching `DirectAdd`. This row writes the types out
+## explicitly. AN ANNOTATION IS NOT A FIX — if this is fast, the receiver type
+## of the outer `+` was inferable and was not inferred, and the bug is in
+## lowering or inference, not in the user's parentheses.
+##
+## sum = n + n*(n+1)/2, the same as kernel 21.
+let go_n3: { i: Int, acc: Int, k: Int } -> Int = { i, acc, k } ->
+  if i <= 0 then acc
+  else go_n3 { i = i - 1, acc = acc + i + k, k = k }
+let k_nest_annot = { n } -> go_n3 { i = n, acc = 0, k = 1 }
+
+
+## 24/25. WHICH OPERAND IS UNGROUNDED — nesting, or a parameter seeded only by
+## an integer LITERAL?
+##
+## Kernel 21 (`acc + i + k`) is 40 783 ps and kernel 23 (the same with the types
+## written out) is 651. Two hypotheses survive: the nesting itself, or that
+## nothing in the loop GROUNDS the arithmetic to `Int` — `i` arrives from argv
+## so it is an `Int`, but `k` is seeded with the literal `1` and `acc` with `0`,
+## and a numeric literal is `Num 'a`.
+##
+## 24 is `acc + i + i`: the same nesting, the same two adds, but the only
+## operands are `acc` and `i`, and `i` traces to argv. If this is FAST the
+## nesting is innocent and an ungrounded parameter is the cause.
+##
+## 25 keeps the third parameter and the nesting but grounds it by passing `i`
+## rather than a literal — `k = i` at the seed. Same shape, same arity.
+##
+## sum for 24 = 2 * n*(n+1)/2 = n*(n+1); for 25 = n + n*(n+1)/2 ... read the
+## printed checksum rather than trusting this line.
+let go_n4 = { i, acc } ->
+  if i <= 0 then acc
+  else go_n4 { i = i - 1, acc = acc + i + i }
+let k_nest_grounded = { n } -> go_n4 { i = n, acc = 0 }
+
+let go_n5 = { i, acc, k } ->
+  if i <= 0 then acc
+  else go_n5 { i = i - 1, acc = acc + i + k, k = k }
+let k_nest_seeded = { n } -> go_n5 { i = n, acc = 0, k = n }
+
+
+## 26/27. `is_empty`, which is `size`'s Bool peer and was in the same position.
+##
+## All eight container `is_empty` natives are DECLARED and none of them had a
+## dedicated operation — so the per-call `MezzeRecord` was already gone and the
+## generic scalar native's `@TruffleBoundary` was not. That is exactly where
+## `size` sat between its declaration and its operation: 4 107 ps for
+## `seq::size` against 2 182 once the operation existed.
+##
+## Two rows because the answer must not be foldable: both containers are built
+## outside the timed loop from argv-derived data, so neither emptiness is a
+## compile-time constant. The accumulator counts the `False`s, so a row that
+## stopped calling would read a different checksum.
+let go_ie = { i, acc, xs } ->
+  if i <= 0 then acc
+  else go_ie { i = i - 1, xs = xs,
+               acc = acc + (if seq::is_empty { xs = xs } then 0 else 1) }
+let k_seq_is_empty = { n } -> go_ie { i = n, acc = 0, xs = seq::range { start = 1, end = 3 } }
+
+let go_ib = { i, acc, b } ->
+  if i <= 0 then acc
+  else go_ib { i = i - 1, b = b,
+               acc = acc + (if bytes::is_empty { b = b } then 0 else 1) }
+let k_bytes_is_empty = { n } -> go_ib {
+  i = n, acc = 0, b = bytes::from_seq { arr = seq::range { start = 1, end = 3 } },
+}
+
+
+## 28. THE CEILING FOR AN ELEMENT READ, before any more is spent trying to
+##     close kernel 7.
+##
+## `seq::get` is 3 650 ps, 16x the counted loop, and the two obvious fixes are
+## spent: removing `InlineSeqGetRaw`'s boundary measured 0.78x (a REGRESSION)
+## and naming the storage type inside `MezzeSeq.get` measured null. So the
+## question is no longer "how do I make `get` faster" but "what does reading
+## one element cost AT ALL here".
+##
+## A SEQ PATTERN answers it, because it reads the element through a completely
+## different route: `SeqSizeEquals` and `SeqGetAt`, both boundary-free
+## operations with a compile-time index, and no `Option` anywhere — where
+## `seq::get` goes through `InlineSeqGetRaw` behind a `@TruffleBoundary` and a
+## fused `Some`/`None` match. Same seq, same element, same accumulator.
+##
+## If this row is near the control, the ~3 000 ps is the ROUTE and not the read,
+## and the fix is to route a constant-index read through the pattern ops. If it
+## is also ~3 000, `seq::get` is near its floor and the band is somewhere else
+## entirely. Either answer is worth more than a third guess.
+##
+## An EXACT-length pattern, not `[a, ...rest]`: a rest binding allocates a drop
+## view per iteration and would measure that instead. The seq has two elements,
+## so `[a, b]` matches and `b` is deliberately unused.
+let go_pat = { i, acc, xs } ->
+  if i <= 0 then acc
+  else go_pat { i = i - 1, xs = xs,
+                acc = acc + (match xs is
+                               [a, b] -> a
+                               _ -> 0) }
+let k_seq_pattern = { n } -> go_pat { i = n, acc = 0, xs = seq::range { start = 1, end = 3 } }
+
+
+## 29. IS IT THE LAZY RANGE? One line, and it splits the last question.
+##
+## Kernel 28 retired route-shaving, and the numbers left a narrower question
+## than "why is `seq::get` slow": `bytes::get` is 2 206 ps and `seq::get` 3 526
+## for reads that go through the SAME fused machinery, with the `Option` elided
+## in both. So ~1 300 ps separates a seq element read from a `byte[]` one, and
+## there are only three candidates — the `SeqStorage` interface call (naming the
+## type inside `MezzeSeq.get` measured NULL, so not this), the boxing of the
+## `long` into an `Object`, or the LAZY RANGE.
+##
+## `seq::range` never materialises an array: `LongSeqStorage.getLong` tests
+## `data == null` and computes `lazyStart + index * lazyStep`. Every other seq
+## row on this bench is built the same way, so if that branch is the cost then
+## every one of them has been measuring it.
+##
+## This row is kernel 7 with ONE difference: a seq LITERAL, which is
+## materialised, so `getLong` reads `data[offset + index]`. Same two elements,
+## same index, same match, same accumulator. Kernel 7 minus this row is the lazy
+## branch and nothing else.
+let go_lit = { i, acc, xs } ->
+  if i <= 0 then acc
+  else go_lit { i = i - 1, acc = acc + (match seq::get { xs = xs, i = 0 } is
+                                          Some { val } -> val
+                                          None -> 0), xs = xs }
+let k_seq_get_literal = { n } -> go_lit { i = n, acc = 0, xs = [1, 2] }
+
+let report = { name, n, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
+
+pub let main = {} -> perform Console in perform SystemArgs in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  let n = arg_at { args = args, i = 1, def = 20000000 }
+  if k == 1 then do
+    k_control { n = n }
+    report { name = "1 control      ", n = n, r = time_it { f = {} -> k_control { n = n } } }
+    report { name = "1 control      ", n = n, r = time_it { f = {} -> k_control { n = n } } }
+  else if k == 2 then do
+    k_update { n = n }
+    report { name = "2 record update", n = n, r = time_it { f = {} -> k_update { n = n } } }
+    report { name = "2 record update", n = n, r = time_it { f = {} -> k_update { n = n } } }
+  else if k == 3 then do
+    k_concat { n = n }
+    report { name = "3 str concat   ", n = n, r = time_it { f = {} -> k_concat { n = n } } }
+    report { name = "3 str concat   ", n = n, r = time_it { f = {} -> k_concat { n = n } } }
+  else if k == 4 then do
+    k_interp { n = n }
+    report { name = "4 str interp   ", n = n, r = time_it { f = {} -> k_interp { n = n } } }
+    report { name = "4 str interp   ", n = n, r = time_it { f = {} -> k_interp { n = n } } }
+  else if k == 5 then do
+    k_map_get { n = n }
+    report { name = "5 map get      ", n = n, r = time_it { f = {} -> k_map_get { n = n } } }
+    report { name = "5 map get      ", n = n, r = time_it { f = {} -> k_map_get { n = n } } }
+  else if k == 6 then do
+    k_map_insert { n = n }
+    report { name = "6 map insert   ", n = n, r = time_it { f = {} -> k_map_insert { n = n } } }
+    report { name = "6 map insert   ", n = n, r = time_it { f = {} -> k_map_insert { n = n } } }
+  else if k == 7 then do
+    k_seq_get { n = n }
+    report { name = "7 seq get      ", n = n, r = time_it { f = {} -> k_seq_get { n = n } } }
+    report { name = "7 seq get      ", n = n, r = time_it { f = {} -> k_seq_get { n = n } } }
+  else if k == 8 then do
+    k_map_has { n = n }
+    report { name = "8 map has      ", n = n, r = time_it { f = {} -> k_map_has { n = n } } }
+    report { name = "8 map has      ", n = n, r = time_it { f = {} -> k_map_has { n = n } } }
+  else if k == 9 then do
+    k_map_size { n = n }
+    report { name = "9 map size     ", n = n, r = time_it { f = {} -> k_map_size { n = n } } }
+    report { name = "9 map size     ", n = n, r = time_it { f = {} -> k_map_size { n = n } } }
+  else if k == 10 then do
+    k_tier { n = n }
+    report { name = "10 tier control", n = n, r = time_it { f = {} -> k_tier { n = n } } }
+    report { name = "10 tier control", n = n, r = time_it { f = {} -> k_tier { n = n } } }
+  else if k == 11 then do
+    k_dict { n = n }
+    report { name = "11 dict-passing", n = n, r = time_it { f = {} -> k_dict { n = n } } }
+    report { name = "11 dict-passing", n = n, r = time_it { f = {} -> k_dict { n = n } } }
+  else if k == 12 then do
+    k_str_size { n = n }
+    report { name = "12 str size    ", n = n, r = time_it { f = {} -> k_str_size { n = n } } }
+    report { name = "12 str size    ", n = n, r = time_it { f = {} -> k_str_size { n = n } } }
+  else if k == 13 then do
+    k_list_get { n = n }
+    report { name = "13 list get    ", n = n, r = time_it { f = {} -> k_list_get { n = n } } }
+    report { name = "13 list get    ", n = n, r = time_it { f = {} -> k_list_get { n = n } } }
+  else if k == 14 then do
+    k_set_has { n = n }
+    report { name = "14 set has     ", n = n, r = time_it { f = {} -> k_set_has { n = n } } }
+    report { name = "14 set has     ", n = n, r = time_it { f = {} -> k_set_has { n = n } } }
+  else if k == 15 then do
+    k_bytes_get { n = n }
+    report { name = "15 bytes get   ", n = n, r = time_it { f = {} -> k_bytes_get { n = n } } }
+    report { name = "15 bytes get   ", n = n, r = time_it { f = {} -> k_bytes_get { n = n } } }
+  else if k == 16 then do
+    k_str_size_2x { n = n }
+    report { name = "16 str size x2 ", n = n, r = time_it { f = {} -> k_str_size_2x { n = n } } }
+    report { name = "16 str size x2 ", n = n, r = time_it { f = {} -> k_str_size_2x { n = n } } }
+  else if k == 17 then do
+    k_map_size_2x { n = n }
+    report { name = "17 map size x2 ", n = n, r = time_it { f = {} -> k_map_size_2x { n = n } } }
+    report { name = "17 map size x2 ", n = n, r = time_it { f = {} -> k_map_size_2x { n = n } } }
+  else if k == 18 then do
+    k_bytes_size { n = n }
+    report { name = "18 bytes size  ", n = n, r = time_it { f = {} -> k_bytes_size { n = n } } }
+    report { name = "18 bytes size  ", n = n, r = time_it { f = {} -> k_bytes_size { n = n } } }
+  else if k == 19 then do
+    k_seq_size { n = n }
+    report { name = "19 seq size    ", n = n, r = time_it { f = {} -> k_seq_size { n = n } } }
+    report { name = "19 seq size    ", n = n, r = time_it { f = {} -> k_seq_size { n = n } } }
+  else if k == 20 then do
+    k_str_size_add { n = n }
+    report { name = "20 str size +add", n = n, r = time_it { f = {} -> k_str_size_add { n = n } } }
+    report { name = "20 str size +add", n = n, r = time_it { f = {} -> k_str_size_add { n = n } } }
+  else if k == 21 then do
+    k_nest_arith { n = n }
+    report { name = "21 nest arith  ", n = n, r = time_it { f = {} -> k_nest_arith { n = n } } }
+    report { name = "21 nest arith  ", n = n, r = time_it { f = {} -> k_nest_arith { n = n } } }
+  else if k == 22 then do
+    k_nest_right { n = n }
+    report { name = "22 nest right  ", n = n, r = time_it { f = {} -> k_nest_right { n = n } } }
+    report { name = "22 nest right  ", n = n, r = time_it { f = {} -> k_nest_right { n = n } } }
+  else if k == 23 then do
+    k_nest_annot { n = n }
+    report { name = "23 nest annot  ", n = n, r = time_it { f = {} -> k_nest_annot { n = n } } }
+    report { name = "23 nest annot  ", n = n, r = time_it { f = {} -> k_nest_annot { n = n } } }
+  else if k == 24 then do
+    k_nest_grounded { n = n }
+    report { name = "24 nest grounded", n = n, r = time_it { f = {} -> k_nest_grounded { n = n } } }
+    report { name = "24 nest grounded", n = n, r = time_it { f = {} -> k_nest_grounded { n = n } } }
+  else if k == 25 then do
+    k_nest_seeded { n = n }
+    report { name = "25 nest seeded ", n = n, r = time_it { f = {} -> k_nest_seeded { n = n } } }
+    report { name = "25 nest seeded ", n = n, r = time_it { f = {} -> k_nest_seeded { n = n } } }
+  else if k == 26 then do
+    k_seq_is_empty { n = n }
+    report { name = "26 seq is_empty", n = n, r = time_it { f = {} -> k_seq_is_empty { n = n } } }
+    report { name = "26 seq is_empty", n = n, r = time_it { f = {} -> k_seq_is_empty { n = n } } }
+  else if k == 27 then do
+    k_bytes_is_empty { n = n }
+    report { name = "27 bytes is_empty", n = n, r = time_it { f = {} -> k_bytes_is_empty { n = n } } }
+    report { name = "27 bytes is_empty", n = n, r = time_it { f = {} -> k_bytes_is_empty { n = n } } }
+  else if k == 28 then do
+    k_seq_pattern { n = n }
+    report { name = "28 seq pattern ", n = n, r = time_it { f = {} -> k_seq_pattern { n = n } } }
+    report { name = "28 seq pattern ", n = n, r = time_it { f = {} -> k_seq_pattern { n = n } } }
+  else if k == 29 then do
+    k_seq_get_literal { n = n }
+    report { name = "29 seq get (lit)", n = n, r = time_it { f = {} -> k_seq_get_literal { n = n } } }
+    report { name = "29 seq get (lit)", n = n, r = time_it { f = {} -> k_seq_get_literal { n = n } } }
+  else println { msg = "unknown kernel" }

@@ -128,7 +128,150 @@ class EmitFileSizeRatchetTest {
             // derived-decoder table and so never fired for an entry op. The
             // reasoning is in `DictEvidence.kt` with the lookup; what stayed here
             // is the condition itself, which is the expression being changed.
-            C + "TypedASTCompiler.kt" to 4511,   // was 5,580; +2 for carrying a `...spread` through ability-op receiver injection
+            // +31 for `collectionKindOf`, which decides WHICH COLLECTION a native
+            // call returns from the call's solved type and hands it to the IR.
+            // `ChainCanonicalizer` used to ask the native's NAME instead —
+            // `startsWith("__native_seq_")` taken to mean "produces a Seq" — and
+            // a native's module is not its return type: the six `seq::to_*`
+            // conversions hand back a different collection, so a fused loop read
+            // a MezzeSet with SeqSize and `seq::size { xs = set::to_seq { s =
+            // seq::to_set { xs } } }` CRASHED. It sits directly beside
+            // `ordKindOf`, the function whose pattern it copies — the same
+            // "decision carried from where the type was known" — and moving it
+            // away from its one sibling would cost more than the bound.
+            // +7 for running RecordScalarizer in the lowering pipeline: one call
+            // plus the comment recording that it only pays with boxing
+            // elimination on AND an inlined producer, because it was written,
+            // measured flat and reverted twice before that order was known.
+            // The pass itself lives in ast/truffleir; what is here is the
+            // pipeline, which is this file's subject.
+            // +4 for carrying `ownerKind` and `opKind` on each native call — two
+            // lines per construction, and there are two constructions. Same
+            // reason as `collectionKindOf` above and the same one line of
+            // history: a `__native_…` name is a LABEL, so it is resolved once,
+            // here, where the binding is in hand. `ChainCanonicalizer` and
+            // `ChainLetInliner` asked the label 44 more times downstream —
+            // `isAnyElementCollection(name, OP_MAP)` builds six native names and
+            // compares all six, so one visit could construct and compare nearly
+            // two hundred strings to learn what this resolution already knew.
+            // They now read these two fields; the spelling predicates in
+            // `NativeHofNames` are private, which is the compiler's proof that
+            // nothing downstream consults the name any more.
+            // +10 to run BytesMapArithRewriter: the loop, and the note that
+            // `bytes::reverse` is the measured ceiling. A one-operation mapper
+            // over bytes was costing a guest call PER BYTE — 5 136 ps/byte
+            // against reverse's 298, which is the same shape without a
+            // callback. The pass and all of its reasoning live in
+            // ast/truffleir beside FoldToSumRewriter, whose idea it reuses;
+            // what is here is the pass SEQUENCE, which is this file's subject.
+            // +6 for routing `seq::unique` to its evidence form — one entry in
+            // `evidenceNativeForm` and the comment saying why it belongs there.
+            // `unique` buckets to find duplicates, so it needs the element's
+            // own hashing for the same reason `set::from_seq` does: bucketing
+            // by the compiler's hashing while the author's `Eq` decides
+            // equality keeps BOTH of two values the author calls equal. The
+            // table IS this file's subject — it is the one place that says
+            // which natives take evidence — so the bound moves rather than the
+            // code.
+            // +68 for `ordNativeCall`: upgrading `seq::sort` to the
+            // comparator-free native where the element was PROVED directly
+            // comparable. 10.5x self-A/B, and the gate is the whole point — a
+            // newtype over Int with a reversed `Ord` sorts as a long and
+            // silently contradicts its author (known-bugs.md BUG 10), proven by
+            // removing the gate and watching three tests fail. It reads as the
+            // sibling of `evidenceNativeCall` directly above it: the same shape
+            // of decision, a table keyed on the native's NAME, taken where the
+            // solved type is in hand and nowhere downstream. Splitting the two
+            // apart would scatter one family, so the bound moves.
+            // +16 to bring `list` into the two tables `seq` already uses.
+            // `list::sort` carried `seq::sort`'s defect VERBATIM — the same
+            // `sort_by` route and the same dead `__native_list_sort` whose
+            // comparator ended `return 0` — so it joins `ordNativeFastForm`
+            // (2.35x), and `seqElementType` now admits List beside Seq. And
+            // `list::unique`, which had NO constraint at all and ignored a
+            // hand-written `Eq`, joins `evidenceNativeForm` so the two
+            // `unique`s finally agree about what a duplicate is. Both tables
+            // ARE this file's subject — they are the one place that says which
+            // natives take evidence and which may drop their comparator — so
+            // the bound moves rather than the code.
+            // +9 for `sorted_set::from_seq`. known-bugs.md BUG 44: the
+            // type-based fast paths in `MezzeSortedSet.compareElements`
+            // answered before consulting the element's own `Ord`, so a
+            // descending newtype was merged as ascending and `union`
+            // CONCATENATED — size 6 while `contains` denied three elements.
+            // Gating those paths is correct but cost 8.2x on union, because a
+            // Mezze set always supplies a comparator. Dropping it where the
+            // element is `OrdKind.DIRECT` restores the fast path, and that
+            // decision belongs to `ordNativeFastForm` — this file's subject is
+            // the one place that says which natives may shed an operand.
+            // +22 for the `sorted_set` merges, known-bugs.md BUG 44's second
+            // half. A SortedSet cannot be trusted to carry its own order —
+            // `empty {}` threads no comparator while `add` places elements by
+            // the author's `Ord` via a guest search, so the array is right and
+            // the label is wrong. The merges therefore TAKE the order, and
+            // drop it where the element is `OrdKind.DIRECT`, which is what
+            // keeps the native fast paths and holds the cost to ~10% instead
+            // of the 8.2x that gating alone measured. Four entries plus the
+            // note recording why `map` and `filter_map` are deliberately
+            // ABSENT (BUG 46: their target type is not readable here in
+            // argument position, so upgrading would be guessing). The table is
+            // this file's subject — the one place that says which natives may
+            // shed an operand — so the bound moves rather than the code.
+            // +3 for `from_set`, `from_list` and `set::to_sorted_set`, the last
+            // three of the seven places a hand-written `Ord` was being
+            // overridden today. Each now threads its comparator and drops it
+            // where the element is directly comparable, which is this table's
+            // whole job.
+            // +6 for `sorted_map::map_keys` and `invert`, the last two of the
+            // nine places a hand-written `Ord` was being overridden today.
+            // Their natives set the order to null outright, with a comment
+            // calling it "primitive-only (tracked with the sorted-container
+            // gap)" — the gap was this. Threading the comparator is only
+            // affordable because this table can drop it again where the key is
+            // directly comparable, which is the table's whole purpose.
+            // +4 for the four conversions INTO a sorted container —
+            // `seq::to_sorted_set`/`to_sorted_map` and the deque pair — which
+            // built their result with no comparator and so ignored a
+            // hand-written `Ord`. Each now threads one and drops it where the
+            // element is directly comparable, which is this table's purpose.
+            // +8 for `nonemptylist::sort`, the THIRD collection to carry
+            // `seq::sort`'s defect: one more row in the table and
+            // `NonEmptyList` added to `seqElementType`, which had known only
+            // SEQ/LIST/SORTED_SET and so would have DECLINED the rewrite
+            // silently — the fix would have looked applied and measured
+            // unchanged.
+            // +4 for `set::map`'s evidence form. The table is where a native
+            // that must consult the ELEMENT's instance is named, and
+            // `set::map` belonged in it: it collapses by the TARGET's equality,
+            // its result's elements being `'b`, and structurally it kept two
+            // values a hand-written `Eq` calls one element. Same table, same
+            // reason as `set::from_seq` four rows above.
+            // +4 for `set::filter_map` and `map::map_keys`, the two siblings of
+            // `set::map`: each produces a container whose elements or KEYS are
+            // the target type and collapsed by representation without the
+            // instance. Found by asking which other operations have that shape.
+            // +14 for the SEVEN conversions into a hash container — the four
+            // `to_set` and three `to_map` spellings. They create the container,
+            // so they must bucket by the element's or key's own instance, and
+            // declared nothing. Their SORTED twins were fixed the same day
+            // under BUG 45 and these were missed; the table is where that
+            // obligation is recorded.
+            // +3 for `deque::unique`, `map::invert` and `sorted_map::to_map`
+            // (BUG 50), the three remaining operations that CREATE a hash
+            // container while declaring no evidence. Found by one grep over
+            // every module's signatures rather than by a ratio, and each was
+            // the sibling tell: `unique` was the only such op in `deque` with
+            // no `with`, `to_map` sits a line under `from_map` which always
+            // carried its `Ord`, and `invert`'s own comment promised behaviour
+            // it never reached. `invert`'s pair is on the VALUE, because
+            // inverting keys the result by the old values — the one constraint
+            // in the family not on the obvious type parameter, which is why
+            // the table entry is the record of it.
+            // MERGE integration/all-three: the type-soundness branch bounded this
+            // at 4511 and the perf branch at 4910, and the merged file is 5042 —
+            // both sides grew it, in different places, and both sets of reasons are
+            // kept above. The number is the measured merged size, not a slackening.
+            C + "TypedASTCompiler.kt" to 5042,   // was 5,580 before the split
             // +42 for `contextRowWithBodyAssocTypes`: an INLINE lambda was stamped
             // with the row from the pushed CONTEXT, so a callback's associated
             // type was the CALLEE's variable rather than what the body threw, and

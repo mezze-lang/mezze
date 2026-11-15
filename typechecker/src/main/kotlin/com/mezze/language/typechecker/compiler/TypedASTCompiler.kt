@@ -45,6 +45,33 @@ class TypedASTCompiler(
      * keep the existing dict-passing path. Empty by default → mono is off.
      */
     private val monoCallSiteRewrites: Map<com.mezze.language.parsedast.Loc, Hash> = emptyMap(),
+    /**
+     * callLoc -> the callee's arrow AS INSTANTIATED AT THAT SITE.
+     *
+     * Read ONLY when resolving dictionaries. `fn.type` on the emitted node is
+     * the callee's DECLARATION SCHEME — `resolveIdentifierType` builds it from
+     * `constraintResults[name].type` — so every call site of one polymorphic
+     * function shows the same scheme vars and the final substitution says
+     * nothing about them. The solver did instantiate and resolve them per site;
+     * this is where that answer is kept.
+     *
+     * Without it a callee's `with` constraint operand arrives here unresolved
+     * and the dictionary is picked from the only thing visible, the RECEIVER —
+     * right by luck for a homogeneous add, and for `Float + Int` it hands
+     * Float's `impl NumAdd Float for Float` the callback's Long:
+     * `CallNativeDDD [FloatOps$$Lambda, 0.5, 21]`.
+     *
+     * Substituted and filtered to fully-concrete by the caller, which makes
+     * that one decision for mono and for here alike.
+     *
+     * DELIBERATELY NOT stamped over `fn.type` in emit, which was tried and
+     * reverted: that type is read by much more than dictionary resolution, and
+     * replacing a scheme with a concrete arrow changed who was judged to need a
+     * dictionary at all. Seven interpreter tests failed with "no dictionary was
+     * supplied for ability operation `default`", the receiver-less family. A
+     * per-site side table changes one decision instead of everyone's view.
+     */
+    private val callSiteArrows: Map<com.mezze.language.parsedast.Loc, MezzeType.FunctionType> = emptyMap(),
     /** callLoc -> `decode` op hash of the derived codec impl matching that
      *  `from_json` call's USAGE-inferred target (DecodeTargetResolver). Wires the
      *  right decoder per call site where the target is a bare var in the type. */
@@ -263,6 +290,48 @@ class TypedASTCompiler(
      */
     private val localConstrainedLambdas = mutableMapOf<String, Hash>()
 
+    /**
+     * Local slot of a `let`-bound lambda that captures nothing and carries no
+     * `with` constraints → the hash of the function it is. Such a lambda is the
+     * SAME function at every call through its name, so the call need not read the
+     * slot and dispatch on the value: it can be a direct call by hash, which is
+     * what makes the callee reachable to [tryInlineDirectCall] and so to the
+     * record scalarizer — a record a local helper builds and the caller only
+     * reads fields of is erased only once the two sit in one function.
+     *
+     * Keyed by SLOT rather than by name, which is what makes it exact:
+     * [forceAllocLocal] mints a fresh slot for every `let`, so a shadowing
+     * rebinding cannot alias an older entry, and nothing has to be saved and
+     * restored per block. Cleared per FUNCTION, where slot numbering restarts.
+     */
+    private val plainLocalLambdaBySlot = mutableMapOf<Int, Hash>()
+
+    /**
+     * The same fact, carried across a closure boundary: capture INDEX in the
+     * function being compiled → the hash of the capture-free lambda that slot
+     * holds. A helper is usually called from a nested lambda rather than from
+     * the frame it was bound in —
+     *
+     *     let split = { i } -> { lo = i - 1, add = i }
+     *     let go = { i, acc } -> … split { i = i } …
+     *
+     * — where `split` is a CAPTURE of `go`, so [plainLocalLambdaBySlot], which
+     * only knows the current frame's slots, cannot answer. Built in
+     * [compileLambda] from the parent's two maps before the body is compiled,
+     * which also chains: a capture whose parent entry is itself a capture
+     * carries through to any depth.
+     *
+     * Passed INTO [compileFunctionBody] rather than set around it, so a body
+     * that is not a closure gets the empty default and cannot read a stale
+     * parent's indices as its own.
+     */
+    private var currentCaptureLambdaHashes = mapOf<Int, Hash>()
+
+    /** Kill switch, as [emitCallDirect] has for the scalar ABI and
+     *  [tryInlineDirectCall] for inlining. An A/B of a compile-time pass is two
+     *  BUILDS otherwise, and measuring one build while believing it is the other
+     *  is how two wrong numbers reached PERF-LOG. */
+
     private data class RecursiveLetInfo(
         val hash: Hash,
         val captureKinds: List<SlotKind>
@@ -278,6 +347,14 @@ class TypedASTCompiler(
      * to ability methods that require static resolution via dictionary passing.
      */
     fun getDictMethodsForHash(): Map<Hash, Set<String>> = dictMethodsForHash.toMap()
+
+    /** The callee's per-site arrow for the call at [loc], already substituted,
+     *  or null when the solver recorded none or it is still open. Only a FULLY
+     *  resolved arrow is offered: `holdsTypeVar` walks a FunctionType's ability
+     *  constraints too, so one whose constraint operand is still a var is no
+     *  improvement on the scheme and is withheld. */
+    internal fun callSiteArrow(loc: com.mezze.language.parsedast.Loc): MezzeType.FunctionType? =
+        callSiteArrows[loc]
 
     fun getDeclaredDictMethodsForHash(): Map<Hash, Set<String>> = declaredDictMethodsForHash.toMap()
 
@@ -405,6 +482,7 @@ class TypedASTCompiler(
                 hashToParamNames[spec.specializedHash] = body.params.map { it.name }
             }
         }
+        specsByGeneric = monoSpecializations.groupBy { it.genericHash }
 
         val functions = mutableListOf<FunctionIR>()
         val compiledHashes = mutableSetOf<Hash>()
@@ -572,6 +650,47 @@ class TypedASTCompiler(
             // `comptime`'s `{ eval } -> eval {}` body, which is a textbook trivial
             // wrapper. As an effect operation there is no wrapper to delete.
             else com.mezze.language.truffleir.TrivialWrapperInliner.inline(erasedMap)
+        // A record that never escapes its binding is not built: its fields
+        // become locals. AFTER the inliner, because the shape it matches —
+        // `let p = { … }` with every use a field read — is what a helper
+        // returning a record looks like once that helper is inlined. It needs
+        // boxing elimination on to pay, and an inlined producer to see anything
+        // A variant built as the scrutinee of the match that destructures it is
+        // not built: the match folds to the case carrying its tag and the
+        // payload's fields bind straight to that case's slots. BEFORE the
+        // record scalarizer, because the fold's result is ordinary `let`s that
+        // the passes below then handle — and in a loop branch that is exactly
+        // what LetCopyPropagation collapses, after which the tier fuses.
+        val variantFoldedMap = com.mezze.language.truffleir.VariantMatchFolder.fold(inlinedMap)
+        val scalarizedMap = com.mezze.language.truffleir.RecordScalarizer.scalarize(variantFoldedMap)
+        // A binding read once, holding a value that can be recomputed at the
+        // read, is substituted and dropped. AFTER the scalarizer, whose
+        // per-field locals are exactly that shape, and before canonicalization
+        // so the chain matcher sees the collapsed form. The point is not the
+        // slot: the fastest self-tail-loop tier matches on the branch BEING the
+        // tail call, and a `do` block around it declined the whole tier — 3x on
+        // a formatting choice. Off with MEZZE_LET_PROPAGATE=0.
+        // FOLD AGAIN AFTER PROPAGATING, then propagate the fold's own output. The
+        // fold above runs BEFORE propagation by design, so a variant BOUND TO A
+        // NAME is not yet adjacent to its match when the folder first looks, and
+        // propagation is what makes it so. Worth 5.9x and 10.4x — the
+        // measurement is in LetCopyPropagation's note on constructions.
+        val p0 = com.mezze.language.truffleir.LetCopyPropagation.propagate(scalarizedMap)
+        val refolded = com.mezze.language.truffleir.VariantMatchFolder.fold(p0)
+        val propagatedMap = if (refolded !== p0)
+            com.mezze.language.truffleir.LetCopyPropagation.propagate(refolded) else p0
+        // A parameter only ever FIELD-READ becomes one parameter per field, and
+        // the record its callers built stops existing — the loop-state shape
+        // `go { st = { i = …, acc = … } }`, which allocates once per iteration
+        // and costs 12x. Changing a function's arity is sound only if every
+        // caller is rewritten with it, so this one takes the WHOLE map and
+        // refuses any candidate whose references it cannot classify.
+        val paramScalarizedMap = com.mezze.language.truffleir.ParamScalarizer.scalarize(propagatedMap)
+
+        // A pipeline step bound to a `let` is still a pipeline step. Must run
+        // BEFORE the canonicalizer; see ChainLetInliner.
+        val chainInlinedMap = com.mezze.language.truffleir.ChainLetInliner.inline(paramScalarizedMap)
+
         // #446 — canonicalize iter chains into FusedChainIR so the BDSL
         // fusion peel matches one shape. Only user-compiled functions
         // go through; stdlib was already canonicalized at precompile time
@@ -582,13 +701,30 @@ class TypedASTCompiler(
         // runtime (list::sum → BuiltinSumLongSeq with List input).
         val userHashes = deduped.map { it.hash }.toHashSet()
         val userFunctions = HashMap<Hash, FunctionIR>(userHashes.size)
-        for ((h, fn) in inlinedMap) {
+        for ((h, fn) in chainInlinedMap) {
             if (h in userHashes) userFunctions[h] = fn
         }
+        // Before the canonicalizer, so a rewritten `sum` takes its ordinary sum
+        // handling. See FoldToSumRewriter for the measurements and the guard.
+        for ((h, fn) in userFunctions.entries.toList()) {
+            val nb = com.mezze.language.truffleir.FoldToSumRewriter.rewrite(fn.body, chainInlinedMap)
+            if (nb !== fn.body) userFunctions[h] = fn.copy(body = nb)
+        }
+        // Same idea for a bytes map whose mapper is one arithmetic operation
+        // against a literal: recognise it instead of calling it per byte.
+        // 17.2x, with `bytes::reverse` as the measured ceiling — see
+        // BytesMapArithRewriter, which also records the via-seq route that
+        // looks like the answer and is 1.63x WORSE.
+        for ((h, fn) in userFunctions.entries.toList()) {
+            val nb = com.mezze.language.truffleir.BytesMapArithRewriter
+                .rewrite(fn.body, chainInlinedMap)
+            if (nb !== fn.body) userFunctions[h] = fn.copy(body = nb)
+        }
+
         val canonicalizedUser = com.mezze.language.truffleir.ChainCanonicalizer
-            .canonicalize(userFunctions, inlinedMap)
+            .canonicalize(userFunctions, chainInlinedMap)
         // Merge back: canonicalized user functions over the full inlined map.
-        val canonicalizedMap = HashMap(inlinedMap)
+        val canonicalizedMap = HashMap(chainInlinedMap)
         canonicalizedMap.putAll(canonicalizedUser)
         // Dead-let elimination is opt-in: MEZZE_DEAD_LET_ELIMINATION=1.
         // The pass exists but its purity check needs work — see
@@ -669,7 +805,10 @@ class TypedASTCompiler(
         loc: Loc,
         captureInfo: List<Pair<String, SlotKind>> = emptyList(),
         // Enclosing impl's associated-type bindings (see paramConcreteReceiverTypes).
-        assocBindings: Map<String, MezzeType> = emptyMap()
+        assocBindings: Map<String, MezzeType> = emptyMap(),
+        // Capture index → capture-free lambda hash, for devirtualising a call
+        // to a captured helper. See [currentCaptureLambdaHashes].
+        captureLambdaHashes: Map<Int, Hash> = emptyMap()
     ): FunctionIR {
         // Save and reset state
         val prevParamConcrete = paramConcreteReceiverTypes.toMap()
@@ -678,6 +817,8 @@ class TypedASTCompiler(
         val prevLocals = localsByName.toMap()
         val prevParamNames = currentParamNames
         val prevCaptureNames = currentCaptureNames
+        val prevCaptureLambdaHashes = currentCaptureLambdaHashes
+        currentCaptureLambdaHashes = captureLambdaHashes
         val prevCaptureCount = currentCaptureCount
         val prevDictParams = currentDictParams
         val prevFunctionHash = currentFunctionHash
@@ -710,6 +851,8 @@ class TypedASTCompiler(
         localsByName.clear()
         val prevSlotToName = slotToNameForCurrentFn.toMap()
         slotToNameForCurrentFn.clear()
+        val prevPlainLambdas = plainLocalLambdaBySlot.toMap()
+        plainLocalLambdaBySlot.clear()
         currentParamNames = allParamNames
         // Note: currentCaptureNames is set by compileLambda BEFORE calling this.
         // For non-lambda functions (called from compileLetDecl), it should be empty.
@@ -745,6 +888,8 @@ class TypedASTCompiler(
         // Restore parent fn's slot-name map (nested lambdas save/restore).
         slotToNameForCurrentFn.clear()
         slotToNameForCurrentFn.putAll(prevSlotToName)
+        plainLocalLambdaBySlot.clear()
+        plainLocalLambdaBySlot.putAll(prevPlainLambdas)
 
         // Restore state
         currentParamCount = prevParamCount
@@ -752,6 +897,7 @@ class TypedASTCompiler(
         localsByName.clear()
         localsByName.putAll(prevLocals)
         currentCaptureNames = prevCaptureNames
+        currentCaptureLambdaHashes = prevCaptureLambdaHashes
         currentParamNames = prevParamNames
         currentCaptureCount = prevCaptureCount
         currentDictParams = prevDictParams
@@ -798,6 +944,36 @@ class TypedASTCompiler(
         is MezzeType.VarType -> null // unsolved here; caller treats null as INSTANCE
         else -> OrdKind.INSTANCE
     }
+
+    /**
+     * WHICH COLLECTION [type] is, as a carried decision rather than something a
+     * later pass re-derives. Same shape as [ordKindOf] and for the same reason:
+     * the type is known HERE and nowhere downstream.
+     *
+     * The alternative, which this replaces, was to ask the native's NAME —
+     * `startsWith("__native_seq_")` taken to mean "produces a Seq". A native's
+     * module is not its return type, and the six `seq::to_*` conversions
+     * disprove it; see [com.mezze.language.truffleir.CollectionKind].
+     */
+    private fun collectionKindOf(type: MezzeType): com.mezze.language.truffleir.CollectionKind? =
+        when (type) {
+            is MezzeType.VarType -> null // unsolved; caller treats null as OTHER
+            is MezzeType.BytesType -> com.mezze.language.truffleir.CollectionKind.BYTES
+            is MezzeType.TypeApplication -> when (type.constructor) {
+                com.mezze.language.ast.BuiltinTypes.SEQ -> com.mezze.language.truffleir.CollectionKind.SEQ
+                com.mezze.language.ast.BuiltinTypes.ITER -> com.mezze.language.truffleir.CollectionKind.ITER
+                com.mezze.language.ast.BuiltinTypes.LIST -> com.mezze.language.truffleir.CollectionKind.LIST
+                com.mezze.language.ast.BuiltinTypes.SET -> com.mezze.language.truffleir.CollectionKind.SET
+                com.mezze.language.ast.BuiltinTypes.SORTED_SET ->
+                    com.mezze.language.truffleir.CollectionKind.SORTED_SET
+                com.mezze.language.ast.BuiltinTypes.DEQUE -> com.mezze.language.truffleir.CollectionKind.DEQUE
+                com.mezze.language.ast.BuiltinTypes.MAP -> com.mezze.language.truffleir.CollectionKind.MAP
+                com.mezze.language.ast.BuiltinTypes.SORTED_MAP ->
+                    com.mezze.language.truffleir.CollectionKind.SORTED_MAP
+                else -> com.mezze.language.truffleir.CollectionKind.OTHER
+            }
+            else -> com.mezze.language.truffleir.CollectionKind.OTHER
+        }
 
     private fun compilePerformerDecl(pd: TypedPerformerDecl) {
         val opHashes = mutableListOf<String>()
@@ -1220,7 +1396,15 @@ class TypedASTCompiler(
                 // Referenced without being called — hand back the function the
                 // dictionary slot holds. Named directly because an operation with no
                 // receiver has no value whose type could point at the slot.
-                ReadLocalIR(abilityOpDictSlot(binding), SlotKind.OBJECT, src)
+                //
+                // No slot inside a specialization, where the op's output is
+                // concrete and it can be resolved outright. `expr.type` here is
+                // the op's ARROW, so what chooses the impl is its return.
+                abilityOpDictSlotOrNull(binding)
+                    ?.let { ReadLocalIR(it, SlotKind.OBJECT, src) }
+                    ?: receiverlessOpRef(
+                        binding, (expr.type as? MezzeType.FunctionType)?.returnType, src)
+                    ?: ReadLocalIR(abilityOpDictSlot(binding), SlotKind.OBJECT, src)
             }
             is BindingRef.Local -> {
                 // Names contributed by the effect-handler runtime inside op
@@ -1891,7 +2075,17 @@ class TypedASTCompiler(
                     // it computes — the only difference is that the argument record is
                     // passed through unchanged, there being no receiver to fold in.
                     census.methodDictCallee++
-                    DictMethodCallIR(abilityOpDictSlot(binding), compileExpr(expr.arg), src)
+                    val slot = abilityOpDictSlotOrNull(binding)
+                    if (slot != null) {
+                        DictMethodCallIR(slot, compileExpr(expr.arg), src)
+                    } else {
+                        // No slot: inside a specialization the result type is
+                        // concrete, and for a receiver-less op that IS the
+                        // dispatch. `expr.type` is the call's result here.
+                        val ref = receiverlessOpRef(binding, expr.type, src)
+                        if (ref != null) CallIndirectIR(ref, compileExpr(expr.arg), false, src)
+                        else DictMethodCallIR(abilityOpDictSlot(binding), compileExpr(expr.arg), src)
+                    }
                 }
                 is BindingRef.ByHash -> {
                     val calleeHash = binding.hash
@@ -1972,6 +2166,11 @@ class TypedASTCompiler(
                     // native exactly as it was, so a `Set Int` keeps its specialised
                     // storage and iteration order.
                     evidenceNativeCall(binding.name, argIR, src)?.let { return it }
+                    // `seq::sort` with no comparator at all, when the element was
+                    // proved directly comparable. An UPGRADE only — declining
+                    // leaves the element's own `le` in place, which is correct
+                    // for everything. See [ordNativeCall].
+                    ordNativeCall(binding.name, argIR, expr.type, src)?.let { return it }
                     // Scalar-ABI emission: if the native is declared in the
                     // NativeOp DSL, transpose the user record into positional
                     // args in the registry's declared order. The interpreter
@@ -2004,6 +2203,9 @@ class TypedASTCompiler(
                                 argKinds = sig.argKinds,
                                 isPure = sig.pure,
                                 inlineOp = sig.inlineOp,
+                                producesKind = collectionKindOf(expr.type),
+                                ownerKind = NativeHofNames.ownerOf(binding.name),
+                                opKind = NativeHofNames.opOf(binding.name),
                             )
                         }
                     }
@@ -2011,6 +2213,9 @@ class TypedASTCompiler(
                     CallNativeIR(binding.name, argIR, src,
                         isPure = nativeSig?.pure == true,
                         inlineOp = nativeSig?.inlineOp,
+                        producesKind = collectionKindOf(expr.type),
+                        ownerKind = NativeHofNames.ownerOf(binding.name),
+                        opKind = NativeHofNames.opOf(binding.name),
                     )
                 }
                 is BindingRef.Local -> {
@@ -2062,6 +2267,19 @@ class TypedASTCompiler(
                         return emitCallDirect(aliasTargetHash, enrichedArgIR, expr.isTailCall, src)
                     }
                     if (resolvedSlot >= 0) {
+                        // Devirtualise a call through a capture-free let-bound
+                        // lambda. `depth == 0` is required: at depth > 0 the name
+                        // resolves in an ENCLOSING scope and the index it yields
+                        // is not this map's — captures and locals share one index
+                        // space, so a name-keyed or depth-blind lookup could answer
+                        // for an unrelated slot. A site the monomorphiser rewrote
+                        // is left exactly as it was.
+                        val devirtTarget = if (binding.depth == 0)
+                            plainLocalLambdaBySlot[resolvedSlot] else null
+                        if (devirtTarget != null && monoCallSiteRewrites[expr.loc] == null) {
+                            census.byHashPlain++
+                            return emitCallDirect(devirtTarget, argIR, expr.isTailCall, src)
+                        }
                         census.indirect++
                         emitCallIndirect(ReadLocalIR(resolvedSlot, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
                     } else {
@@ -2079,6 +2297,20 @@ class TypedASTCompiler(
                         if (recursiveLet != null && expr.isTailCall) {
                             census.byHashPlain++
                             return emitCallDirect(recursiveLet.hash, argIR, true, src)
+                        }
+                        // A call to a CAPTURED capture-free helper. `fnIR` is
+                        // what says so: `compileVar` has already resolved this
+                        // name, and only a genuine capture read reaches here as
+                        // ReadCaptureIR — a by-name lookup would answer for an
+                        // unrelated declaration that shares the name, which is
+                        // the bug the comment below this records.
+                        val capturedFn = fnIR
+                        if (capturedFn is ReadCaptureIR &&
+                            monoCallSiteRewrites[expr.loc] == null) {
+                            currentCaptureLambdaHashes[capturedFn.index]?.let { ownHash ->
+                                census.byHashPlain++
+                                return emitCallDirect(ownHash, argIR, expr.isTailCall, src)
+                            }
                         }
                         // If depth > 0 and not found locally, check if it's a top-level
                         // declaration. Use CallDirectIR for better performance.
@@ -2329,7 +2561,10 @@ class TypedASTCompiler(
         // Callee type var → type at this site (instance head / declared arrow
         // unified against the actuals); serves the per-var dict slots.
         varBindings: Map<String, MezzeType> = emptyMap(),
-        methodOwnType: Map<String, OwnConstraintTypes> = emptyMap(),  // ownTypePerMethod
+        methodOwnType: Map<String, Pair<MezzeType, Hash?>> = emptyMap(),  // ownTypePerMethod
+        // The same question answered with the WHOLE ordered tuple, which is
+        // what separates two impls sharing a receiver — see `ownTuplePerMethod`.
+        methodOwnTuple: Map<String, Pair<List<MezzeType>, Hash?>> = emptyMap(),
     ): NodeIR {
         // Collect concrete types from the argument record as fallback. Refresh
         // each field's type against the final substitution and, for a nullary
@@ -2442,7 +2677,8 @@ class TypedASTCompiler(
 
             // 2. From concrete types; see `resolveDictOp` for the order.
             val opHash = resolveDictOp(
-                dictMethod, methodOwnType, keyAbilityHash, constraintTypes, concreteTypes)
+                dictMethod, methodOwnType, keyAbilityHash, constraintTypes, concreteTypes,
+                methodOwnTuple)
             if (opHash != null) {
                 // refToDictedOp wraps the resolved op when IT needs its own dicts —
                 // e.g. `sort { xs = [[P]] }`: sort's Ord dict is the seq Ord op
@@ -2802,6 +3038,61 @@ class TypedASTCompiler(
         return MakeLambdaIR(wrapperHash, emptyList(), src)
     }
 
+    /** Mono specializations by the generic they came from; see
+     *  [resolvedSpecializationRef]. */
+    private var specsByGeneric:
+        Map<Hash, List<com.mezze.language.typechecker.mono.Monomorphizer.Specialization>> = emptyMap()
+
+    /**
+     * The specialization of [genericHash] that discharges exactly the impls
+     * [resolvedDicts] names, if there is exactly one.
+     *
+     * The match is on OP HASHES, not on types: `resolvedDicts` holds the very
+     * operations this reference would have carried in its dictionary, and a
+     * specialization records the impls it was cut against, so the two are directly
+     * comparable and no type has to be re-derived or guessed. Anything less than a
+     * unique match returns null and the caller builds its wrapper as before — two
+     * specializations whose impl sets both cover these operations are not evidence
+     * for either.
+     *
+     * A dict entry resolved by FORWARDING a caller's own dictionary slot (a
+     * `ReadLocalIR`) carries no impl identity at all, so one of those disqualifies
+     * the reference outright: the types are not known here, which is exactly the
+     * case a wrapper exists for.
+     */
+    private fun resolvedSpecializationRef(
+        genericHash: Hash,
+        resolvedDicts: List<Pair<String, NodeIR>>,
+        src: SourceInfo,
+    ): NodeIR? {
+        val candidates = specsByGeneric[genericHash] ?: return null
+        if (candidates.isEmpty()) return null
+        val wanted = HashSet<Hash>(resolvedDicts.size)
+        for ((_, node) in resolvedDicts) {
+            val ref = node as? ReadGlobalFnByHashIR ?: return null
+            wanted.add(ref.hash)
+        }
+        if (wanted.isEmpty()) return null
+        val matches = candidates.filter { spec ->
+            val specOps = HashSet<Hash>()
+            for (ref in spec.abilityImpls) {
+                val impl = abilityImpls.firstOrNull { it.hash == ref.implHash } ?: continue
+                for (opName in impl.operations.keys) {
+                    specOps.add(computeOpHash(impl.hash, opName))
+                }
+            }
+            wanted.all { it in specOps }
+        }
+        val only = matches.singleOrNull() ?: return null
+        // The copy must take the same parameters as the reference it replaces; a
+        // spec whose dead closure params were stripped does not.
+        val params = hashToParamNames[only.specializedHash] ?: return null
+        val genericParams = (declIndex?.values?.firstOrNull { it.hash == genericHash }
+            ?.value as? TypedLambda)?.params?.map { it.name } ?: return null
+        if (params != genericParams) return null
+        return ReadGlobalFnByHashIR(only.specializedHash, src)
+    }
+
     private fun tryWrapDictFunction(
         expr: TypedExpr,
         contextConcreteTypes: List<MezzeType>,
@@ -2851,6 +3142,19 @@ class TypedASTCompiler(
                 }
             }
         }
+
+        // THE SPECIALIZATION IS THE SAME FUNCTION, already built.
+        //
+        // Everything above has just decided which impls discharge this reference's
+        // obligations. If mono cut a copy of the function against exactly those
+        // impls, that copy IS this reference — with the operations compiled in
+        // rather than reached through a dictionary — and it takes the same
+        // parameters, so it drops straight in. Wrapping instead costs a closure
+        // allocation and an indirect call per invocation that nothing can
+        // devirtualise: on `bench/cases/defunc` kernel 3, `apply_fold { f = step }`
+        // runs at 82 873 ps/iter against 2 241 for the same HOF reached with a
+        // lambda literal, which is specialized in place.
+        resolvedSpecializationRef(binding.hash, resolvedDicts, src)?.let { return it }
 
         // Find the original function's regular param names (excluding dict params)
         val originalDecl = declIndex?.values?.find { it.hash == binding.hash }
@@ -3008,6 +3312,28 @@ class TypedASTCompiler(
      */
     private val evidenceNativeForm: Map<String, String> = mapOf(
         "__native_set_from_seq" to "__native_set_from_seq_with_evidence",
+        // `set::map` collapses by the TARGET's equality — its result's elements
+        // are `'b`. Structurally it kept two values a hand-written `Eq` calls
+        // one element.
+        "__native_set_map" to "__native_set_map_with_evidence",
+        // Same shape, same reason: both produce a container whose elements or
+        // keys are the TARGET type, and collapsed by representation without it.
+        "__native_set_filter_map" to "__native_set_filter_map_with_evidence",
+        "__native_map_map_keys" to "__native_map_map_keys_with_evidence",
+        // THE CONVERSIONS INTO A HASH CONTAINER, which create one and so must
+        // bucket by the element's own instance. The SORTED conversions were
+        // fixed under BUG 45; these are their hash twins and were missed.
+        "__native_seq_to_set" to "__native_seq_to_set_with_evidence",
+        "__native_list_to_set" to "__native_list_to_set_with_evidence",
+        "__native_deque_to_set" to "__native_deque_to_set_with_evidence",
+        "__native_sorted_set_to_set" to "__native_sorted_set_to_set_with_evidence",
+        // The map side of the same family. Its constraint sits on a key INSIDE
+        // a record element type, which is the shape that did not reach the
+        // constraint for `set::filter_map`'s `Option 'b` at top level — so
+        // whether it arrives here is a question for the probe, not the reader.
+        "__native_seq_to_map" to "__native_seq_to_map_with_evidence",
+        "__native_list_to_map" to "__native_list_to_map_with_evidence",
+        "__native_deque_to_map" to "__native_deque_to_map_with_evidence",
         "__native_set_insert" to "__native_set_insert_with_evidence",
         "__native_set_contains" to "__native_set_contains_with_evidence",
         "__native_set_remove" to "__native_set_remove_with_evidence",
@@ -3028,6 +3354,19 @@ class TypedASTCompiler(
         // its own instance installed, or the map buckets by representation and
         // silently disagrees with that instance.
         "__native_map_from_seq" to "__native_map_from_seq_with_evidence",
+        // `seq::unique` buckets to find duplicates, so it needs the element's
+        // instances for the same reason `set::from_seq` does: bucketing by the
+        // compiler's hashing while the author's `Eq` says two differently
+        // represented values are equal would keep BOTH. Widening `unique` to
+        // `with Eq 'a, Hash 'a` is what makes the pair available here.
+        "__native_seq_unique_hashed" to "__native_seq_unique_hashed_with_evidence",
+        // `list::unique` had the same hole and no constraint at all, so a
+        // hand-written `Eq` was ignored and the two `unique`s disagreed
+        // about what a duplicate is.
+        "__native_list_unique" to "__native_list_unique_with_evidence",
+        "__native_deque_unique" to "__native_deque_unique_with_evidence",
+        "__native_map_invert" to "__native_map_invert_with_evidence",
+        "__native_sorted_map_to_map" to "__native_sorted_map_to_map_with_evidence",
     )
 
     /**
@@ -3057,6 +3396,133 @@ class TypedASTCompiler(
             ),
             src = src,
         )
+    }
+
+    /**
+     * The comparator-free native for [nativeName] when the element was PROVED
+     * directly comparable — else null, leaving the call as the stdlib wrote it.
+     *
+     * ONLY EVER AN UPGRADE, and that is the safety property. The stdlib writes
+     * `__native_seq_sort_by_ord { xs, le }`, correct for every element because
+     * `le` is the element's own `Ord`. Were the fast native the default and
+     * this a DOWNGRADE on spotting a custom `Ord`, every decline would be a
+     * silently wrong order — and the stdlib's own generic compile, where no
+     * specialization has recorded an impl, would decline every time.
+     *
+     * A newtype over Int is INSTANCE and must decline: its `Ord` may reverse
+     * the order of the type it wraps while it is a long at runtime, so the
+     * primitive sort would contradict it. See known-bugs.md BUG 10. The
+     * measurement is in PERF-LOG; the Float/NaN rule is on `seq::sort`.
+     */
+    private fun ordNativeCall(nativeName: String, argIR: NodeIR, resultType: MezzeType,
+                              src: SourceInfo): NodeIR? {
+        val fastName = ordNativeFastForm[nativeName] ?: return null
+        if (argIR !is MakeRecordIR) return null
+        val elem = seqElementType(resultType) ?: return null
+        // Null (undecided) declines exactly like INSTANCE — never upgrade on a guess.
+        if (ordKindOf(elem) != OrdKind.DIRECT) return null
+        // Float upgrades too. Int and Str are totally ordered so dropping the
+        // comparator cannot change an answer; Float is a DECIDED RULE —
+        // `seq::sort` places NaN LAST while the comparison operators keep IEEE
+        // semantics — and `Arrays.sort(double[])` implements exactly that
+        // order. The rule, its measured justification and what it leaves
+        // unfixed are stated on `seq::sort` and beside `impl Ord for Float`,
+        // which is where someone meets the question; repeating it here would
+        // be the third copy.
+        // DROP THE ORDER OPERAND, keep everything else. This used to keep the
+        // single field named "xs", which is right only for a one-collection
+        // native: `union` is `{ s1, s2, cmp }` and would have lost both sets.
+        // Declining when there is nothing to drop matters — otherwise a native
+        // already in its fast form would be rewritten to itself forever.
+        val kept = argIR.fields.filterNot { it.name in NativeHofNames.ORDER_FIELDS }
+        if (kept.size == argIR.fields.size) return null
+        return CallNativeIR(
+            name = fastName,
+            arg = MakeRecordIR(kept, src),
+            src = src,
+            producesKind = collectionKindOf(resultType),
+            ownerKind = NativeHofNames.ownerOf(fastName),
+            opKind = NativeHofNames.opOf(fastName),
+        )
+    }
+
+    /**
+     * The general native paired with the comparator-free one that supersedes it
+     * when the element is directly comparable.
+     *
+     * Keyed on the native's NAME because that is what a native IS here, the same
+     * way [evidenceNativeForm] is keyed — a table of operations, not a dispatch
+     * on any type's spelling.
+     */
+    private val ordNativeFastForm: Map<String, String> = mapOf(
+        "__native_seq_sort_by_ord" to "__native_seq_sort",
+        // `list::sort` carried the same defect as `seq::sort`, down to an
+        // identical dead `__native_list_sort` whose comparator ended
+        // `return 0`. Same rewrite, same gate.
+        "__native_list_sort_by_ord" to "__native_list_sort",
+        // THIRD in the family, found by sweeping for the dead-and-wrong shape
+        // rather than by a report: `__native_nel_sort` was registered, called
+        // from nowhere, and ended `return 0`. A NonEmptyList is `Object[]` of
+        // boxed elements, so this upgrade buys `Arrays.sort(Object[])` through
+        // `Comparable` and not seq's primitive tier — list's ceiling, without
+        // list's cons walk at either end.
+        "__native_nel_sort_by_ord" to "__native_nel_sort",
+        // SAME NATIVE, ONE FIELD FEWER. A `SortedSet` whose element is DIRECT
+        // needs no comparator: the one `from_seq` passes IS natural order,
+        // written as a guest closure. Dropping it lets the set be built
+        // natural-ordered, which is what re-enables `compareElements`' fast
+        // paths — gated since BUG 44 because they silently overrode a
+        // hand-written `Ord`. `fromArray` already reads `cmp` with
+        // `getFunctionOrNull`, so the same native handles both.
+        "__native_sorted_set_from_seq" to "__native_sorted_set_from_seq",
+        "__native_sorted_set_from_set" to "__native_sorted_set_from_set",
+        "__native_set_to_sorted_set" to "__native_set_to_sorted_set",
+        "__native_seq_to_sorted_set" to "__native_seq_to_sorted_set",
+        "__native_seq_to_sorted_map" to "__native_seq_to_sorted_map",
+        "__native_deque_to_sorted_set" to "__native_deque_to_sorted_set",
+        "__native_deque_to_sorted_map" to "__native_deque_to_sorted_map",
+        // `sorted_map::map_keys` and `invert` produce keys of a NEW type, so
+        // the order is the target's and is threaded; dropped where that key
+        // is directly comparable. Their natives previously set it to null
+        // outright — see known-bugs.md BUG 45.
+        "__native_sorted_map_map_keys" to "__native_sorted_map_map_keys",
+        "__native_sorted_map_invert" to "__native_sorted_map_invert",
+        "__native_sorted_set_from_list" to "__native_sorted_set_from_list",
+        // The merges take their order as an operand (BUG 44), so a directly
+        // comparable element drops it and they keep the native fast paths.
+        "__native_sorted_set_union" to "__native_sorted_set_union",
+        "__native_sorted_set_intersect" to "__native_sorted_set_intersect",
+        "__native_sorted_set_difference" to "__native_sorted_set_difference",
+        "__native_sorted_set_symmetric_difference"
+            to "__native_sorted_set_symmetric_difference",
+        // `map` and `filter_map` are DELIBERATELY ABSENT. They construct the
+        // order rather than use it — their result is `SortedSet 'b` — and the
+        // element type this rewrite reads off `expr.type` is NOT RELIABLE for
+        // them: with the call bound to a `let` it resolves to `'b`, but in
+        // ARGUMENT position it came back directly comparable and the operand
+        // was dropped, leaving a naturally-ordered set for a descending `Ord`.
+        // Measured both ways. Until the target type can be read soundly here
+        // they always carry their comparator — slower for a plain Int map, and
+        // never a wrong order. Never upgrade on a guess.
+    )
+
+    /**
+     * The element type of a Seq or a List, or null for anything else —
+     * including one whose element the solver left unsolved, which must decline.
+     *
+     * Both are admitted because both have a `sort` with the same shape and the
+     * same comparator cost. Naming the two constructors here rather than
+     * accepting any single-argument application keeps a `Set` or an `Iter`,
+     * whose sorts do not exist or do not mean this, from reaching the rewrite.
+     */
+    private fun seqElementType(type: MezzeType): MezzeType? {
+        val app = type as? MezzeType.TypeApplication ?: return null
+        val c = app.constructor
+        if (c != com.mezze.language.ast.BuiltinTypes.SEQ &&
+            c != com.mezze.language.ast.BuiltinTypes.LIST &&
+            c != com.mezze.language.ast.BuiltinTypes.NON_EMPTY_LIST &&
+            c != com.mezze.language.ast.BuiltinTypes.SORTED_SET) return null
+        return app.args.firstOrNull()
     }
 
     /** True when the author wrote this impl rather than the compiler deriving it. */
@@ -3314,6 +3780,56 @@ class TypedASTCompiler(
         if (e != null && e !is VarType) listOf(e, t) else listOf(t)
     }
 
+    /**
+     * A receiver-less operation resolved from the type the call PRODUCES.
+     *
+     * Such an op has no receiver to dispatch on, so its impl is chosen by its
+     * output — which is exactly what the refusal in [abilityOpDictSlot] says.
+     * Outside a specialization that output is usually a variable and a caller
+     * has to hand the dictionary over in a frame slot.
+     *
+     * INSIDE A SPECIALIZATION IT IS CONCRETE, and that is the whole point of
+     * specializing: the spec carries no dictionary parameters, so a body that
+     * still reaches for a slot finds none. Before this, mono specializing such a
+     * caller turned a working program into
+     *
+     *     'mk7' takes no receiver, so the type it produces is what chooses the
+     *     implementation — and nothing here determines that type
+     *
+     * thrown during LOWERING, which is how it surfaced as a TypeCheckError on a
+     * program that had already type-checked. Resolving it here is also better
+     * code than the slot was: a static reference rather than a dictionary read.
+     *
+     * Goes through [refToDictedOp], so an op that needs dictionaries OF ITS OWN
+     * still gets them wrapped.
+     */
+    private fun receiverlessOpRef(
+        binding: BindingRef.AbilityOp,
+        produced: MezzeType?,
+        src: SourceInfo,
+    ): NodeIR? {
+        // THE SPEC'S OWN TYPE ARGUMENTS first, which is what the enclosing
+        // specialization was keyed on and so the only thing here that says which
+        // impl this body was specialized FOR. Ability-filtered, unlike
+        // `resolveDictFromSpecTypeArgs`, so an op name two abilities share
+        // cannot cross over.
+        specTypeArgs?.let { args ->
+            val deeper = elementFirst(args)
+            resolveOpHashFromConcreteTypes(binding.opName, deeper, binding.abilityHash)
+                ?.let { return refToDictedOp(it, deeper, src) }
+        }
+        // Then the type the call produces, when that type IS the class type.
+        //
+        // NOT its nested parts. Searching them picks whichever impl claims any
+        // part first, and the order is incidental: it resolved the wrong impl and
+        // handed back a record where a function was expected.
+        val resolved = produced?.let { substitution.apply(it) } ?: return null
+        if (resolved is VarType || containsVarTypeDeep(resolved)) return null
+        val types = elementFirst(listOf(resolved))
+        return resolveOpHashFromConcreteTypes(binding.opName, types, binding.abilityHash)
+            ?.let { refToDictedOp(it, types, src) }
+    }
+
     /** Last-resort dict resolution inside a mono-spec compile (see [specTypeArgs]). */
     private fun resolveDictFromSpecTypeArgs(methodName: String, src: SourceInfo): NodeIR? {
         val args = specTypeArgs ?: return null
@@ -3390,54 +3906,7 @@ class TypedASTCompiler(
         val parentCaptureCount = currentCaptureCount
         val parentParamNames = currentParamNames
 
-        // #195 B3: scan the lambda body for VarType ability method calls
-        // (e.g. `x.encode { config = config }` inside a `seq::fold` callback). The
-        // lambda needs its own dict params for each method whose receiver is
-        // a TyVar. These dicts can't come through the indirect-call signature
-        // (it's `f : {acc, x} -> 'b`, no room for extra args), so we capture
-        // them from the PARENT's dict-param slots. The parent already gained
-        // those slots via the B2 scanner-descent fix.
-        val lambdaDictMethods = sortedSetOf<String>()
-        // The lambda's own arrow might not carry `with <Ability>` constraints,
-        // but the PARENT scope may (e.g. `{ a, b } with Ord 'a -> ({ x, y } -> x <= y)…`).
-        // If the parent has dict params, the lambda body may reference VarType ops
-        // that need those dicts captured. Derive arrowIsConstrained from both the
-        // lambda's own type AND whether the parent scope carries dicts.
-        val parentHasDicts = currentParamNames.any { it.startsWith("__dict_") }
-        val lambdaConstrained = parentHasDicts || arrowHasAbilityConstraint(expr.type)
-        // A lambda with its OWN dictionary parameters captures none: its callers
-        // supply every dictionary it needs.
-        if (ownDicts.isEmpty()) scanExprForVarTypeMethods(expr.body, lambdaDictMethods, lambdaConstrained)
-        // Only keep dicts the parent actually has — otherwise we'd try to
-        // capture a slot that doesn't exist.
-        val dictsToCapture = lambdaDictMethods.mapNotNull { method ->
-            // Raw `method@var` keys resolve to whichever slot the PARENT holds for
-            // that (method, var) — per-var when it has one, else the plain one.
-            // C.5: no unqualified-name fallback. This used to drop the type var
-            // and retry under the bare `__dict_<method>` name when the per-var
-            // lookup missed — a name-keyed guess of exactly the kind C.2
-            // replaced. Measured dead: zero hits across a full forced rerun of
-            // the interpreter suite (8m38s, no caching), because
-            // `enclosingDictSlotIn` already matches an ability-qualified slot for
-            // an unqualified request. A dict we cannot locate is not captured.
-            val dictName = enclosingDictSlotIn(
-                parentParamNames,
-                parentCaptureNames,
-                com.mezze.language.ast.MagicParams.methodOfKey(method),
-                com.mezze.language.ast.MagicParams.typeVarOfKey(method),
-                // S-11: without the ability segment this misses the exact per-variable
-                // slot, and the PREFIX scan below answers with whichever comes first —
-                // two keys from one lambda collapsing onto ONE captured dictionary.
-                com.mezze.language.ast.MagicParams.abilityOfKey(method),
-            ) ?: return@mapNotNull null
-            val parentParamIdx = parentParamNames.indexOf(dictName)
-            if (parentParamIdx >= 0) {
-                dictName to (parentCaptureCount + parentParamIdx)
-            } else {
-                val parentCaptureIdx = parentCaptureNames[dictName]
-                if (parentCaptureIdx != null) dictName to parentCaptureIdx else null
-            }
-        }.distinctBy { it.first }
+        val dictsToCapture = dictCapturesFor(expr, ownDicts)
         // Register the lambda's dict needs so compileFunctionBody adds them as
         // captures (not params — params are fixed by the indirect-call ABI).
         // We DON'T put them in dictMethodsForHash here because that would make
@@ -3462,13 +3931,27 @@ class TypedASTCompiler(
         if (ownDicts.isNotEmpty()) dictMethodsForHash[lambdaHash] = ownDicts
         val lambdaCaptureInfo = expr.captures.map { c -> c.name to typeToSlotKind(c.type) } +
             dictsToCapture.map { it.first to SlotKind.OBJECT }
+        // Which of this lambda's captures are capture-free helpers, by the index
+        // the body will read them at. Resolved against the PARENT's frame, which
+        // is still the current one here — `compileFunctionBody` has not yet
+        // cleared it — and from the parent's capture map too, so a helper two
+        // closures out carries through. Built before the body compiles because
+        // the body is what reads it; the positional capture list below is built
+        // after, from the same `expr.captures`, so the two stay aligned.
+        val captureLambdaHashes = mutableMapOf<Int, Hash>()
+        for ((i, c) in expr.captures.withIndex()) {
+            val fromLocal = localsByName[c.name]?.let { plainLocalLambdaBySlot[it] }
+            val fromParentCapture = parentCaptureNames[c.name]?.let { currentCaptureLambdaHashes[it] }
+            (fromLocal ?: fromParentCapture)?.let { captureLambdaHashes[i] = it }
+        }
         val fnIR = compileFunctionBody(
             hash = lambdaHash,
             name = "lambda",
             params = expr.params,
             body = expr.body,
             loc = expr.loc,
-            captureInfo = lambdaCaptureInfo
+            captureInfo = lambdaCaptureInfo,
+            captureLambdaHashes = captureLambdaHashes
         )
         extractedFunctions.add(fnIR)
 
@@ -3559,13 +4042,20 @@ class TypedASTCompiler(
                     // Registered BEFORE the body compiles, so a recursive call inside
                     // it injects (forwards) its own dictionaries too.
                     val ownDicts = ownDictMethodsOf(stmtValue)
+                    // The SAME dict-capture list the emission will fold into the
+                    // hash — see `dictCapturesFor`. Predicting it as empty here is
+                    // what made a recursive local lambda call a hash that is never
+                    // emitted.
+                    val letDictCaptures = (stmtValue as? TypedLambda)
+                        ?.let { dictCapturesFor(it, ownDicts) } ?: emptyList()
                     if (ownDicts.isNotEmpty()) {
-                        localConstrainedLambdas[stmt.name] = saltedLambdaHash(stmtValue, ownDicts = ownDicts)
+                        localConstrainedLambdas[stmt.name] =
+                            saltedLambdaHash(stmtValue, letDictCaptures, ownDicts)
                     } else {
                         localConstrainedLambdas.remove(stmt.name)
                     }
                     if (stmt.isRecursive && stmtValue is TypedLambda) {
-                        val lambdaHash = saltedLambdaHash(stmtValue, ownDicts = ownDicts)
+                        val lambdaHash = saltedLambdaHash(stmtValue, letDictCaptures, ownDicts)
                         val captureKinds = stmtValue.captures.map { typeToSlotKind(it.type) }
                         recursiveLetLambdas[stmt.name] = RecursiveLetInfo(lambdaHash, captureKinds)
                     }
@@ -3635,6 +4125,29 @@ class TypedASTCompiler(
                         }
                     } else {
                         compileExpr(stmtValue)
+                    }
+                    // A capture-free, unconstrained, non-recursive let-bound
+                    // lambda: record its hash against its slot so a call through
+                    // the name goes direct (see [plainLocalLambdaBySlot]), and
+                    // publish its FunctionIR, which only top-level decls are in —
+                    // without it the devirtualised call cannot be INLINED, and
+                    // the direct call alone leaves the callee building a record
+                    // and returning it where nothing can erase it.
+                    //
+                    // Published only for the shape being devirtualised, so no
+                    // other direct-call path (the recursive-let tail call) starts
+                    // resolving param names it did not resolve before and silently
+                    // changes ABI.
+                    val plainLambdaIR = valueIR as? MakeLambdaIR
+                    if (!stmt.isRecursive && ownDicts.isEmpty() && stmtValue is TypedLambda &&
+                        plainLambdaIR != null && plainLambdaIR.captures.isEmpty()) {
+                        val calleeIR = hashToFunctionIR[plainLambdaIR.functionHash]
+                            ?: extractedFunctions.lastOrNull { it.hash == plainLambdaIR.functionHash }
+                        if (calleeIR != null) {
+                            hashToFunctionIR.putIfAbsent(calleeIR.hash, calleeIR)
+                            hashToParamNames.putIfAbsent(calleeIR.hash, calleeIR.paramNames)
+                            plainLocalLambdaBySlot[slot] = calleeIR.hash
+                        }
                     }
                     // The let has completed: from here the name is its own slot.
                     if (!stmt.isRecursive) localsByName[stmt.name] = slot
@@ -4353,6 +4866,26 @@ class TypedASTCompiler(
         is CallNativeIR -> (node.isPure || isPureNative(node.name)) && isInlinable(node.arg, paramCount) &&
             node.args.all { isInlinable(it, paramCount) }
         is CallDirectIR -> !node.isTailCall && node.args.all { isInlinable(it, paramCount) }
+        // A field read is pure. Reading one off a param is how any helper that
+        // takes a record works, and without this arm none of them inlines.
+        is ReadFieldIR -> isInlinable(node.record, paramCount)
+        // `i - 1` where `i`'s type is still a variable lowers to `i.sub { r = 1 }`
+        // — a call THROUGH a field read, which the bytecode compiler turns back
+        // into arithmetic once it knows the receiver. A local helper's params are
+        // generic (let-generalisation hands the body one compilation for all
+        // types), so this is the shape nearly every local helper's body is in,
+        // and refusing it refused the helper.
+        //
+        // Inlining is what makes it concrete: spliced into a caller whose
+        // receiver is a known Int, the op the callee could not resolve resolves.
+        // That is monomorphisation by substitution, and it is why the generic
+        // shape is worth accepting rather than requiring the type to be known
+        // before the body was compiled.
+        //
+        // Not a tail call, for the same reason a CallDirectIR may not be: the
+        // caller's position is not the callee's.
+        is CallIndirectIR -> !node.isTailCall && node.function is ReadFieldIR &&
+            isInlinable(node.function, paramCount) && isInlinable(node.arg, paramCount)
         else -> false
     }
 
@@ -4396,7 +4929,17 @@ class TypedASTCompiler(
                 }
                 used
             }
-            else -> 1
+            // Anything else: count it and its children through the walker, so
+            // widening [isInlinable] cannot smuggle a large body past the budget.
+            // The arms above are the hot shapes, kept for their early bail-out.
+            else -> {
+                var used = 1
+                node.transformChildren { c ->
+                    if (used < max) used += countNodes(c, max - used)
+                    c
+                }
+                used
+            }
         }
     }
 
@@ -4411,37 +4954,25 @@ class TypedASTCompiler(
     private fun substituteArgs(node: NodeIR, args: List<NodeIR>, depth: Int = 0): NodeIR = when (node) {
         is ReadArgIR -> args.getOrNull(node.index) ?: node
         is ReadLocalIR -> if (node.slot < args.size) args[node.slot] else node
-        is InlineBinaryOpIR -> InlineBinaryOpIR(
-            node.op, substituteArgs(node.left, args, depth), substituteArgs(node.right, args, depth), node.src
+        is CallNativeIR -> maybeCollapseInlineOp(
+            node.transformChildren { substituteArgs(it, args, depth) }
         )
-        is IfIR -> IfIR(
-            substituteArgs(node.cond, args, depth),
-            substituteArgs(node.thenBr, args, depth),
-            substituteArgs(node.elseBr, args, depth),
-            node.src
-        )
-        is MakeRecordIR -> MakeRecordIR(
-            node.fields.map { f ->
-                when (f) {
-                    is FieldIR -> FieldIR(f.name, substituteArgs(f.value, args, depth))
-                    else -> f
-                }
-            },
-            node.src, node.typeTag
-        )
-        is CallNativeIR -> {
-            val newArg = substituteArgs(node.arg, args, depth)
-            val newArgs = node.args.map { substituteArgs(it, args, depth) }
-            maybeCollapseInlineOp(
-                node.copy(arg = newArg, args = newArgs)
-            )
-        }
         is CallDirectIR -> {
             val newArgs = node.args.map { substituteArgs(it, args, depth) }
             val recursed = tryInlineDirectCall(node.targetHash, newArgs, depth + 1)
             recursed ?: node.copy(args = newArgs)
         }
-        else -> node
+        // STRUCTURAL, not a list of node types. This `when` and [isInlinable]
+        // must accept exactly the same set: a shape the whitelist allows and
+        // this one does not rewrite keeps the CALLEE's param reads — bare slot
+        // indices — in the CALLER's frame, where they name whatever happens to
+        // live there. That is a wrong value, not a crash, so it would not show
+        // up as a failure anywhere near the cause.
+        //
+        // `transformChildren` reaches every child slot of every node type, and
+        // IRWalkTest pins that, so the only thing [isInlinable] now has to
+        // decide is what is SAFE to inline — never what this can rewrite.
+        else -> node.transformChildren { substituteArgs(it, args, depth) }
     }
 
     /** After substitution, if we produce a CallNativeIR whose signature

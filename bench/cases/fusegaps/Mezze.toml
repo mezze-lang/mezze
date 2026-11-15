@@ -1,0 +1,12 @@
+[package]
+name = "fusegaps"
+version = "0.1.0"
+
+[[app]]
+name = "fusegaps"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

@@ -145,6 +145,15 @@ class ExpressionConstraintGenerator {
         val referencedBindings = mutableSetOf<DefinitionRef.ByName>()
         val methodCallResolutions = mutableMapOf<Pair<Loc, String>, ConstraintResult.MethodCallInfo>()
         val callReturnTypes = mutableMapOf<Loc, MezzeType>()
+        // Per-call-site INSTANTIATED callee arrow, merged up like
+        // callReturnTypes. A reference to a polymorphic function is emitted with
+        // the DECLARATION'S SCHEME as its type (`resolveIdentifierType` reads
+        // `constraintResults[name].type`), so every call site of one function
+        // shows the same scheme vars and the final substitution says nothing
+        // about them — while the solver DID instantiate and resolve them here.
+        // That lost answer is what left a callee's `with` constraint operand
+        // unresolved at lowering, which picks a dictionary by the receiver alone.
+        val callFunctionTypes = mutableMapOf<Loc, MezzeType>()
         // BUG D (#332): scrutinee-loc → inference-time scrutinee type, propagated
         // up so exhaustiveness can see every match scrutinee (not just params).
         val matchScrutineeTypes = mutableMapOf<Loc, MezzeType>()
@@ -208,6 +217,7 @@ class ExpressionConstraintGenerator {
             referencedBindings.addAll(result.referencedBindings)
             methodCallResolutions.putAll(result.methodCallResolutions)
             callReturnTypes.putAll(result.callReturnTypes)
+            callFunctionTypes.putAll(result.callFunctionTypes)
             matchScrutineeTypes.putAll(result.matchScrutineeTypes)
             pendingClosureArgEffects.addAll(result.pendingClosureArgEffects)
             duplicateBindings.addAll(result.duplicateBindings)
@@ -241,6 +251,7 @@ class ExpressionConstraintGenerator {
             referencedBindings = referencedBindings,
             methodCallResolutions = methodCallResolutions,
             callReturnTypes = callReturnTypes,
+            callFunctionTypes = callFunctionTypes,
             lambdaParamTypes = lambdaParamTypes,
             lambdaRowInstances = lambdaRowInstances,
             matchScrutineeTypes = matchScrutineeTypes,

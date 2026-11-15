@@ -79,6 +79,23 @@ public final class HandlerChainRegistry {
         // during op dispatch. Per-thread, so no cross-thread contention.
         Object currentScope;
 
+        // ONE-ELEMENT MEMO FOR THE PER-EFFECT ASSUMPTION, keyed by IDENTITY.
+        //
+        // `invalidateAssumptions` ran `EFFECT_ASSUMPTIONS.get(effectHash)` on
+        // every push AND every pop — a ConcurrentHashMap lookup keyed on a
+        // 64-byte Hash, which a CPU profile of the per-iteration install found
+        // in 307 of ~700 steady-state samples, the single largest frame. A loop
+        // that installs a handler therefore paid two of them per iteration.
+        //
+        // At any one push site the effect's Hash is the SAME OBJECT every time,
+        // so reference equality hits and the lookup disappears; a miss falls
+        // back to the map and re-arms the memo, so a chain that alternates
+        // between effects is correct, just not memoised. These live here rather
+        // than in a static because this state is per-thread by construction —
+        // see `currentScope` above — so there is no sharing and no contention.
+        com.mezze.language.typedast.Hash lastAssumptionHash;
+        StabilityAssumption lastAssumption;
+
         HandlerChainRegistry dispatching;
         HandlerChainRegistry dispatchPool;
 
@@ -88,6 +105,40 @@ public final class HandlerChainRegistry {
         HandlerChainEntry[] cachedSnapshot;
         int cachedSnapshotDepth;
         long cachedSnapshotGen;
+
+        // ONE-ENTRY MEMO for peekHandlerForEffect, which is the hot path of
+        // PerformD's verify dispatch tier — the tier every effect op takes
+        // once its per-effect assumption has churned past CHURN_LIMIT, which
+        // is for the life of the process. Measured: that tier costs 9 768 ps
+        // against 815 for a pristine one, and replacing this lookup's BODY
+        // with a one-entry memo read 1 723 — so the body, not the boundary
+        // crossing, is ~8 of the ~9 ns. Removing the boundary instead was
+        // 5.8x WORSE.
+        //
+        // Keyed on (effect hash IDENTITY, depth, generation). Sound because
+        // every site that changes chain CONTENTS also changes depth,
+        // generation or both: each slot write is paired with a depth change,
+        // and the two depth changes that skip the generation bump
+        // (clearHandlerChain, popHandlerChain) both move depth. That is the
+        // same invariant the snapshot cache immediately above already relies
+        // on. Identity rather than equality on the hash is deliberate: a
+        // different-but-equal Hash object MISSES and rescans, which is slower
+        // and never wrong.
+        //
+        // A null result is memoised too — "no handler in scope" is the answer
+        // PerformD's guard needs most cheaply when it is about to fall through
+        // to the generic path.
+        com.mezze.language.typedast.Hash memoHash;
+        MezzeRecord memoHandler;
+        int memoDepth = -1;
+        long memoGeneration = -1;
+
+        // Consecutive hits on the memo above. A hit proves depth and
+        // generation have not moved, so a RUN of them is proof the chain has
+        // been stable for that many operations — which is exactly the
+        // quiescence signal recovery needs, available for the price of one
+        // increment on per-thread state already behind the boundary.
+        int memoHits;
 
         // Reusable ScopedPopResult — avoids one allocation per scoped
         // handler pop. Safe because BDSL PopHandlerChainScoped reads the
@@ -268,6 +319,57 @@ public final class HandlerChainRegistry {
         return getOrCreateEffectAssumption(effectHash).get();
     }
 
+    /**
+     * The assumption the churned dispatch tier caches against — see
+     * {@link StabilityAssumption#tierAssumption()}. Churn leaves it alone;
+     * recovery invalidates it to force a re-specialization.
+     */
+    @TruffleBoundary
+    public static Assumption getChurnedTierAssumption(com.mezze.language.typedast.Hash effectHash) {
+        return getOrCreateEffectAssumption(effectHash).tierAssumption();
+    }
+
+    /**
+     * How many consecutive memo hits prove an effect's handler chain has
+     * settled. At a few nanoseconds an operation this is a fraction of a
+     * millisecond of steady running, and it is paid once per churn episode.
+     */
+    private static final int RECOVERY_HITS = 1 << 16;
+
+    /**
+     * A run of stable lookups has proved this effect quiescent, so forgive its
+     * churn and let dispatch return to the tier that needs no check at all.
+     *
+     * <p>Self-limiting by construction: a loop that installs a handler every
+     * iteration changes the generation every iteration, so the memo never hits,
+     * the counter never arms, and there is no tier thrash to pay for. An effect
+     * that never gave up is left alone rather than handed a pointless
+     * deoptimization.
+     */
+    @TruffleBoundary
+    private static void noteStableRun(com.mezze.language.typedast.Hash effectHash) {
+        StabilityAssumption ea = EFFECT_ASSUMPTIONS.get(effectHash);
+        if (ea != null && ea.hasGivenUp()) ea.reset();
+    }
+
+    /** Whether this effect has churned past its limit. Tests only. */
+    public static boolean hasGivenUpForTests(com.mezze.language.typedast.Hash effectHash) {
+        StabilityAssumption ea = EFFECT_ASSUMPTIONS.get(effectHash);
+        return ea != null && ea.hasGivenUp();
+    }
+
+    /**
+     * How many effects have currently churned past their limit. Tests only —
+     * recovery is invisible from inside the language (it changes which
+     * dispatch tier runs, never an answer), so this is the only way a test can
+     * assert that a quiescent effect got its free tier back.
+     */
+    public static int givenUpCountForTests() {
+        int n = 0;
+        for (StabilityAssumption a : EFFECT_ASSUMPTIONS.values()) if (a.hasGivenUp()) n++;
+        return n;
+    }
+
     private static StabilityAssumption getOrCreateEffectAssumption(
             com.mezze.language.typedast.Hash effectHash) {
         StabilityAssumption existing = EFFECT_ASSUMPTIONS.get(effectHash);
@@ -289,12 +391,44 @@ public final class HandlerChainRegistry {
 
     /** Invalidate both per-effect and global assumptions. */
     private static void invalidateAssumptions(com.mezze.language.typedast.Hash effectHash) {
+        invalidateAssumptions(STATE.get(), effectHash);
+    }
+
+    /**
+     * The same thing for a caller that already holds the state, which the hot
+     * push/pop pair does — see {@code EffectState.lastAssumptionHash} for why
+     * the map lookup is worth memoising.
+     */
+    private static void invalidateAssumptions(
+            EffectState s, com.mezze.language.typedast.Hash effectHash) {
         noteEffectStateThread();
         HANDLER_CHAIN_STABLE.invalidate();
-        if (effectHash != null) {
-            StabilityAssumption ea = EFFECT_ASSUMPTIONS.get(effectHash);
-            if (ea != null) ea.invalidate();
+        if (effectHash == null) return;
+        StabilityAssumption ea;
+        if (effectHash == s.lastAssumptionHash) {
+            ea = s.lastAssumption;
+        } else {
+            ea = EFFECT_ASSUMPTIONS.get(effectHash);
+            // ONLY A NON-NULL RESULT MAY BE MEMOISED, and this is a soundness
+            // condition rather than a tuning choice. An effect has no entry
+            // until a perform site for it specializes — the assumptions are
+            // created lazily by `@Cached("getEffectStableAssumption(...)")` —
+            // so a push that happens first legitimately looks up null. Caching
+            // that null would make every later push for the same effect take
+            // the memo and skip invalidating the assumption created in the
+            // meantime, leaving a perform node holding cached dispatch across
+            // a handler change: the WRONG HANDLER, not merely a slow one.
+            //
+            // A non-null entry can never go stale: `getOrCreateEffectAssumption`
+            // only ever computeIfAbsent's, nothing removes or replaces an
+            // entry, and `resetStabilityForTests` resets the object in place.
+            // So once armed, the memo is valid for the life of the process.
+            if (ea != null) {
+                s.lastAssumptionHash = effectHash;
+                s.lastAssumption = ea;
+            }
         }
+        if (ea != null) ea.invalidate();
     }
 
     // ----------------------------------------------------------------
@@ -323,7 +457,7 @@ public final class HandlerChainRegistry {
         s.depth = d + 1;
         s.generation++;
         s.bdslHandleDepth++;
-        invalidateAssumptions(effectHash);
+        invalidateAssumptions(s, effectHash);
     }
 
     /**
@@ -341,7 +475,7 @@ public final class HandlerChainRegistry {
         s.depth = d;
         s.generation++;
         s.bdslHandleDepth--;
-        invalidateAssumptions(effectHash);
+        invalidateAssumptions(s, effectHash);
     }
 
     /**
@@ -595,14 +729,31 @@ public final class HandlerChainRegistry {
     public static MezzeRecord peekHandlerForEffect(
             com.mezze.language.typedast.Hash effectHash) {
         EffectState s = STATE.get();
+        // The memo, and why the scan below is worth skipping: `Hash.equals`
+        // fast-rejects on a precomputed int, but on a MATCH — the case this
+        // method's hot caller always takes — it falls through to a 128-char
+        // String.equals. See EffectState.memoHash for the key's soundness.
+        if (effectHash == s.memoHash
+                && s.depth == s.memoDepth
+                && s.generation == s.memoGeneration) {
+            if (++s.memoHits == RECOVERY_HITS) noteStableRun(effectHash);
+            return s.memoHandler;
+        }
+        MezzeRecord found = null;
         // Walk from top of stack (innermost handler) outward.
         for (int i = s.depth - 1; i >= 0; i--) {
             com.mezze.language.typedast.Hash eh = s.effectHashes[i];
             if (eh != null && eh.equals(effectHash)) {
-                return s.handlers[i];
+                found = s.handlers[i];
+                break;
             }
         }
-        return null;
+        s.memoHash = effectHash;
+        s.memoDepth = s.depth;
+        s.memoGeneration = s.generation;
+        s.memoHandler = found;
+        s.memoHits = 0;
+        return found;
     }
 
     @TruffleBoundary

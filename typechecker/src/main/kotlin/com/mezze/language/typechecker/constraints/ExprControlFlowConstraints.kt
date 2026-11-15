@@ -731,15 +731,35 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                         val fromThisValue = exprResult.abilityConstraints.toHashSet()
                         collector.abilityConstraints.removeAll { c ->
                             if (c !in fromThisValue) return@removeAll false
-                            val v = (localSubst.apply(MezzeType.VarType(c.typeVar)) as? MezzeType.VarType)?.variable
-                                ?: return@removeAll false
+                            // The scheme carrying this same ability on this same
+                            // variable IS the safety property — the obligation
+                            // travels in the scheme and every use re-demands it, so
+                            // nothing is lost by taking it off the enclosing body.
+                            //
+                            // Match on the variable the obligation was RECORDED
+                            // against, which is the name the scheme's `typeParam`
+                            // holds. Following `localSubst` first and requiring the
+                            // landing variable to be one of `quantifiedVars` missed
+                            // the case that matters: the local solve generally
+                            // SOLVES the recorded variable (`'f8` → the scheme's own
+                            // `'e8`/`out`), so `apply` returned a non-variable, the
+                            // old code bailed to "keep", and the surviving obligation
+                            // was then written in the scheme's QUANTIFIED variables —
+                            // which are free at the enclosing level by construction.
+                            // It rode out onto the enclosing signature as
+                            // `({n: Int} -> Int) with <NumMul Int 'e8 having out='out>`:
+                            // a phantom type parameter on a fully concrete function,
+                            // which `MonoDriver` reads as generic and can therefore
+                            // never seed. See DoBlockLetPhantomConstraintTest.
+                            val recordedName = c.typeVar.name
+                            val landedName = (localSubst.apply(MezzeType.VarType(c.typeVar))
+                                as? MezzeType.VarType)?.variable?.name
                             owned.any { scheme ->
-                                scheme.quantifiedVars.any { it.id == v.id } &&
-                                    scheme.constraints.any { sc ->
-                                        sc.typeParam == v.name &&
-                                            if (sc.abilityHash != null && c.abilityHash != null) sc.abilityHash == c.abilityHash
-                                            else sc.abilityName == c.abilityName
-                                    }
+                                scheme.constraints.any { sc ->
+                                    (sc.typeParam == recordedName || sc.typeParam == landedName) &&
+                                        if (sc.abilityHash != null && c.abilityHash != null) sc.abilityHash == c.abilityHash
+                                        else sc.abilityName == c.abilityName
+                                }
                             }
                         }
                     }

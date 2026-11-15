@@ -4,6 +4,7 @@ import com.mezze.datastructures.deque.MezzeDeque;
 import com.mezze.datastructures.map.MezzeMap;
 import com.mezze.datastructures.list.MezzeList;
 import com.mezze.datastructures.seq.MezzeSeq;
+import com.mezze.datastructures.set.ElementHashing;
 import com.mezze.datastructures.set.MezzeSet;
 import com.mezze.datastructures.sorted.MezzeSortedMap;
 import com.mezze.datastructures.sorted.MezzeSortedSet;
@@ -18,6 +19,11 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
  * All operations are immutable (return new deques).
  */
 public final class DequeNatives {
+    /** `{ fst, snd }`, hoisted: this was allocated per call. Names from
+     *  {@link com.mezze.language.truffleir.NativeHofNames} so a rename reaches every spelling. */
+    private static final String[] FIELD_FST_SND =
+        {com.mezze.language.truffleir.NativeHofNames.PAIR_FST, com.mezze.language.truffleir.NativeHofNames.PAIR_SND};
+
 
     private DequeNatives() {}
 
@@ -374,6 +380,71 @@ public final class DequeNatives {
         return deque.drop((int) n);
     }
 
+    /**
+     * `unique` under the ELEMENT's own hash and equality.
+     *
+     * <p>The plain {@link #unique} below de-duplicates through a
+     * {@code LinkedHashSet}, i.e. by Java {@code hashCode}/{@code equals}. For a
+     * newtype or record whose `Eq` the author wrote, that is the wrong question:
+     * two values that author calls one element are represented differently, so
+     * structural bucketing never puts them in the same bucket to compare, and
+     * both survive. `list::unique` and `seq::unique` were already fixed this
+     * way; this is their sibling, and it was the only one left.
+     *
+     * <p>{@link ClosureHashing} supplies the pair or nothing: null means the
+     * instances are derived and the structural walk below is already right.
+     *
+     * <p>An open-addressed table of INDICES rather than a wrapper per element,
+     * so the author's `hash` runs once per element and the author's `eq` only
+     * when two land in the same slot. Same shape as
+     * {@code ListNatives.uniqueWithEvidence}.
+     */
+    @TruffleBoundary
+    public static MezzeDeque uniqueWithEvidence(MezzeDeque deque, MezzeFunction hashFn,
+                                                MezzeFunction eqFn) {
+        ElementHashing hashing = ClosureHashing.of(hashFn, eqFn);
+        if (hashing == null) return unique(deque);
+
+        Object[] src = deque.toArray();
+        int n = src.length;
+        if (n <= 1) return deque;
+
+        int cap = Integer.highestOneBit(Math.max(4, n)) << 2;   // load factor <= 0.5
+        int mask = cap - 1;
+        int[] slots = new int[cap];          // 0 = empty, else 1 + index into out
+        int[] hashes = new int[n];
+        Object[] out = new Object[n];
+        int kept = 0;
+
+        for (int i = 0; i < n; i++) {
+            Object elem = src[i];
+            int h = hashing.hashOf(elem);
+            int slot = (h ^ (h >>> 16)) & mask;
+            boolean duplicate = false;
+            while (slots[slot] != 0) {
+                int at = slots[slot] - 1;
+                // The stored hash is checked first so the author's `eq` runs
+                // only for a genuine collision, not for every probe.
+                if (hashes[at] == h && hashing.eq(out[at], elem)) {
+                    duplicate = true;
+                    break;
+                }
+                slot = (slot + 1) & mask;
+            }
+            if (!duplicate) {
+                hashes[kept] = h;
+                out[kept] = elem;
+                slots[slot] = kept + 1;
+                kept++;
+            }
+        }
+
+        if (kept == n) return deque;
+        MezzeDeque result = MezzeDeque.empty();
+        for (int i = 0; i < kept; i++) result = result.pushBack(out[i]);
+        return result;
+    }
+
     @TruffleBoundary
     public static MezzeDeque unique(MezzeDeque deque) {
         java.util.LinkedHashSet<Object> seen = new java.util.LinkedHashSet<>();
@@ -479,18 +550,25 @@ public final class DequeNatives {
     // ==================== Indexed Access ====================
 
     @TruffleBoundary
+    /**
+     * Indexed access, in O(1).
+     *
+     * <p>This used to WALK THE ITERATOR to the index, which made it O(n) for an
+     * operation the structure supports in constant time: a Deque is a ring
+     * buffer, and {@code MezzeDeque.get(int)} is one bounds check and
+     * {@code buffer[(head + index) & mask]}. The cost showed up as a slope —
+     * `bench/cases/dsmore` measured 71 933 / 221 294 / 839 410 ps at 250 /
+     * 1 000 / 4 000 elements, which is linear in the size of the deque for a
+     * lookup by position.
+     *
+     * <p>Every other iterating native in this file visits each element because
+     * its answer depends on all of them. This one never did.
+     */
     public static MezzeVariant get(MezzeDeque deque, long index) {
         if (index < 0 || index >= deque.size()) {
             return MezzeVariant.none();
         }
-        int i = 0;
-        for (Object elem : deque) {
-            if (i == index) {
-                return MezzeVariant.some(elem);
-            }
-            i++;
-        }
-        return MezzeVariant.none();
+        return MezzeVariant.some(deque.get((int) index));
     }
 
     @TruffleBoundary
@@ -674,7 +752,7 @@ public final class DequeNatives {
         java.util.Iterator<Object> it2 = d2.iterator();
         while (it1.hasNext() && it2.hasNext()) {
             result = result.pushBack(MezzeRecord.fromFields(
-                new String[]{"fst", "snd"},
+                FIELD_FST_SND,
                 new Object[]{it1.next(), it2.next()}
             ));
         }
@@ -730,8 +808,9 @@ public final class DequeNatives {
 
     @TruffleBoundary
     @SuppressWarnings({"unchecked", "rawtypes"})
-    public static MezzeSortedSet toSortedSet(MezzeDeque deque) {
-        MezzeSortedSet result = MezzeSortedSet.empty();
+    public static MezzeSortedSet toSortedSet(MezzeDeque deque, MezzeFunction cmpFn) {
+        // The order comes from the caller — see SeqNatives.toSortedSet.
+        MezzeSortedSet result = MezzeSortedSet.empty(ElementComparator.of(cmpFn));
         for (Object elem : deque) {
             result = result.addObject(elem);
         }
@@ -755,9 +834,9 @@ public final class DequeNatives {
     }
 
     @TruffleBoundary
-    public static MezzeSortedMap toSortedMap(MezzeDeque deque) {
+    public static MezzeSortedMap toSortedMap(MezzeDeque deque, MezzeFunction cmpFn) {
         // Expects deque of {k, v} records.
-        MezzeSortedMap result = MezzeSortedMap.empty();
+        MezzeSortedMap result = MezzeSortedMap.empty(ElementComparator.of(cmpFn));
         for (Object elem : deque) {
             if (elem instanceof MezzeRecord rec) {
                 int keyIdx = rec.getFieldIndex("k");

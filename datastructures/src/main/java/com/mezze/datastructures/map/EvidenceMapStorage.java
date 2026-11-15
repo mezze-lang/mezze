@@ -157,6 +157,20 @@ public final class EvidenceMapStorage implements MapStorage {
     }
 
     @Override
+    public MapStorage withValues(Object[] newValues) {
+        // `values()` compacts, skipping the empty slots, so the walk has to
+        // expand again in the same order. The probe sequence depends on the
+        // keys and the hashes, both of which are shared untouched, so no key is
+        // hashed and no slot moves.
+        Object[] vs = new Object[values.length];
+        int n = 0;
+        for (int i = 0; i < keys.length; i++) {
+            if (keys[i] != EMPTY) vs[i] = newValues[n++];
+        }
+        return new EvidenceMapStorage(keys, vs, hashes, size, hashing);
+    }
+
+    @Override
     public byte getStrategyTag() {
         return TAG_HASH;
     }

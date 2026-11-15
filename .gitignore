@@ -101,3 +101,8 @@ website/wasm-build/.binaryen-*/
 website/wasm-build/.graalvm-*/
 website/wasm-build/.jars/
 **/.build/
+# A/B measurement builds: bench/scripts/ab.sh makes .build, and a measurement
+# keeps variants of it side by side (.build-head, .build-expa, …) so two
+# runtimes can be interleaved in one session. They are launchers, jars and CDS
+# archives — 283 MB of them got committed before this line existed.
+**/.build-*/

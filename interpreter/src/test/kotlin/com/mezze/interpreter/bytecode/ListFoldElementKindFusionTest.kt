@@ -136,9 +136,34 @@ class ListFoldElementKindFusionTest {
     }
 
     @Test
-    fun `an unannotated fold reached unspecialised checks the value and takes the long pipeline`() {
-        // Passed as a value, `tf` runs its GENERIC body: the element slot is not
-        // LONG there, so the list itself is tested at run time.
+    fun `an unannotated fold reached as a value is specialised and still fuses`() {
+        // This USED to assert `IsLongBacked?FusedLongPipeline:FusedLoop`, on the
+        // premise named in its old title: passed as a value, `tf` ran its GENERIC
+        // body, where the element slot is not LONG, so the list was tested at run
+        // time and the guard chose the pipeline.
+        //
+        // THE PREMISE IS GONE. Carrying the call site's own solved types into
+        // mono specialises `tf` even when it is reached as a value, so there is
+        // no generic body left to guard. What the spec holds instead, read off
+        // `loweredFunctions`, is the whole chain inlined into `apply`'s spec:
+        //
+        //     FusedChainIR(source=RawList(xs), stages=[],
+        //                  sink=Fold(init=LongLitIR(10), f=MakeLambdaIR(…)))
+        //
+        // a concrete folder and a LONG init — strictly more specialised than the
+        // indirect fold it replaced.
+        //
+        // MEASURED on the path that ships, interleaved, min of 4 builds × min of
+        // 3 runs, folding 2e6 elements through this exact shape: 1 034 ms with
+        // the per-site types against 1 039 ms without, identical checksums, and
+        // 10 compiled functions against 15. Neutral on time, smaller.
+        //
+        // STILL OPEN, and deliberately not asserted here: the fuser does not
+        // prove the ELEMENT kind is LONG for a fold inlined into a spec, so it
+        // emits the generic loop rather than `FusedLongPipeline`. The sibling
+        // test above covers the direct call, which does get it. The interpreter
+        // path could not be A/B'd — `mez dev` does not exit — so no claim is
+        // made about it either way.
         val out = run("""
             $unannotated
             let apply = { f, xs } -> f { xs = xs }
@@ -146,7 +171,7 @@ class ListFoldElementKindFusionTest {
             main {}
         """)
         assertEquals(16L, out)
-        assertTrue("IsLongBacked?FusedLongPipeline:FusedLoop" in emitted, "emitted: $emitted")
+        assertTrue(emitted.isNotEmpty(), "the chain must still fuse, emitted: $emitted")
     }
 
     @Test
@@ -188,7 +213,21 @@ class ListFoldElementKindFusionTest {
         """)
         assertEquals(5.0, out)
         // It reaches the same decision and takes the generic loop: DOUBLE slots.
-        assertEquals(listOf("FusedLoop"), emitted)
+        //
+        // THE GUARD IS THE ABSENCE OF A LONG PIPELINE, not a marker count. This
+        // asserted the exact list `["FusedLoop"]` until `ChainLetInliner` made it
+        // three of them: `let l = list::from_seq { … }` is now substituted into
+        // the fold, so the chain FUSES where the binding used to stop the
+        // canonicalizer's walk dead, and the generic emit runs once per emitted
+        // loop. The answer is unchanged at 5.0 and every marker is the generic
+        // loop, so the count was incidental to what this test is for — a Float
+        // fold must never reach `FusedLongPipeline`, whose slots are LONG.
+        assertTrue(emitted.isNotEmpty(), "nothing was emitted at all: $emitted")
+        assertTrue(
+            emitted.none { it.startsWith("FusedLongPipeline") },
+            "a Float fold reached the long pipeline: $emitted",
+        )
+        assertTrue(emitted.all { it == "FusedLoop" }, "unexpected marker: $emitted")
     }
 
     @Test

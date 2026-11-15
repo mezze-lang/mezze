@@ -42,9 +42,19 @@ public final class SortedSetNatives {
         return result;
     }
 
+    /**
+     * ORDERED BY THE ELEMENT'S `Ord`, which the caller supplies — as
+     * {@link #fromList} has always done.
+     *
+     * <p>`sorted_set::from_set` declared `with Ord 'a` and then called this
+     * bare, so the result was built with no comparator and came out naturally
+     * ordered whatever that `Ord` said. A declared constraint that is never
+     * passed on is worse than a missing one: it tells the reader the order is
+     * handled. See known-bugs.md BUG 45.
+     */
     @TruffleBoundary
-    public static MezzeSortedSet fromSet(MezzeSet set) {
-        MezzeSortedSet result = MezzeSortedSet.empty();
+    public static MezzeSortedSet fromSet(MezzeSet set, MezzeFunction cmpFn) {
+        MezzeSortedSet result = MezzeSortedSet.empty(ElementComparator.of(cmpFn));
         for (Object elem : set) {
             result = result.addObject(elem);
         }
@@ -62,18 +72,29 @@ public final class SortedSetNatives {
     }
 
     @TruffleBoundary
-    public static boolean contains(MezzeSortedSet set, Object element, MezzeFunction cmpFn) {
-        return set.withComparator(ElementComparator.of(cmpFn)).containsObject(element);
+    /**
+     * The element at a position in sort order — the probe the guest-side binary
+     * search in `std::collections::sorted_set` drives. See
+     * {@link MezzeSortedSet#elementAt}.
+     */
+    public static Object elementAt(MezzeSortedSet set, Object index) {
+        return set.elementAt((int) (long) (Long) index);
     }
 
+    /**
+     * Add at a position the GUEST search already computed. Takes no comparator
+     * because it makes no comparison — see
+     * {@code SortedMapNatives.setAt} for why the search belongs in guest code.
+     */
     @TruffleBoundary
-    public static MezzeSortedSet add(MezzeSortedSet set, Object element, MezzeFunction cmpFn) {
-        return set.withComparator(ElementComparator.of(cmpFn)).addObject(element);
+    public static MezzeSortedSet addAt(MezzeSortedSet set, Object index, Object element) {
+        return set.addAt((int) (long) (Long) index, element);
     }
 
+    /** See {@link #addAt}. Reached only when the element IS present. */
     @TruffleBoundary
-    public static MezzeSortedSet remove(MezzeSortedSet set, Object element, MezzeFunction cmpFn) {
-        return set.withComparator(ElementComparator.of(cmpFn)).removeObject(element);
+    public static MezzeSortedSet removeAt(MezzeSortedSet set, Object index) {
+        return set.removeAt((int) (long) (Long) index);
     }
 
     // ==================== Min/Max Operations ====================
@@ -97,19 +118,39 @@ public final class SortedSetNatives {
     // ==================== Set Operations ====================
 
     @TruffleBoundary
-    public static MezzeSortedSet union(MezzeSortedSet set1, MezzeSortedSet set2) {
-        return set1.union(set2);
+    /**
+     * Merged against the order the CALLER supplies, not the one the set
+     * carries. A set from `sorted_set::empty {}` holds its elements in the
+     * author's order while its comparator says natural — correct array, wrong
+     * label — so asking the set is wrong. Relabelling is O(1) and shares the
+     * array; see {@code MezzeSortedSet.withComparator} and known-bugs.md
+     * BUG 44.
+     *
+     * <p>`cmpFn` is null when the compiler proved the element directly
+     * comparable and dropped the operand, which is natural order and keeps the
+     * fast paths.
+     */
+    public static MezzeSortedSet union(MezzeSortedSet set1, MezzeSortedSet set2,
+                                      MezzeFunction cmpFn) {
+        var order = ElementComparator.of(cmpFn);
+        return set1.withComparator(order).union(set2.withComparator(order));
     }
 
     @TruffleBoundary
-    public static MezzeSortedSet intersect(MezzeSortedSet set1, MezzeSortedSet set2) {
-        return set1.intersect(set2);
+    /** See {@link #union}. */
+    public static MezzeSortedSet intersect(MezzeSortedSet set1, MezzeSortedSet set2,
+                                          MezzeFunction cmpFn) {
+        var order = ElementComparator.of(cmpFn);
+        return set1.withComparator(order).intersect(set2.withComparator(order));
     }
 
     @TruffleBoundary
     @SuppressWarnings("unchecked")
-    public static MezzeSortedSet difference(MezzeSortedSet set1, MezzeSortedSet set2) {
-        return set1.difference(set2);
+    /** See {@link #union}. */
+    public static MezzeSortedSet difference(MezzeSortedSet set1, MezzeSortedSet set2,
+                                           MezzeFunction cmpFn) {
+        var order = ElementComparator.of(cmpFn);
+        return set1.withComparator(order).difference(set2.withComparator(order));
     }
 
     /**
@@ -192,7 +233,10 @@ public final class SortedSetNatives {
     public static MezzeSortedSet filter(MezzeSortedSet set, MezzeFunction predicate,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "val");
-        MezzeSortedSet result = MezzeSortedSet.empty();
+        // Inherits the SOURCE's order. Rebuilding through a bare
+        // `empty()` dropped it — the failure `slice`'s doc already
+        // names for `take`/`drop`. See known-bugs.md BUG 45.
+        MezzeSortedSet result = MezzeSortedSet.empty(set.customComparator());
         for (Object element : set) {
             Object res = ctx.call1(callNode, element);
             if (res instanceof Boolean && (Boolean) res) {
@@ -212,13 +256,47 @@ public final class SortedSetNatives {
         return acc;
     }
 
+    /**
+     * ORDERED BY THE TARGET'S `Ord`, which only the caller has.
+     *
+     * The result's element type is `'b`, so the source set's order says nothing
+     * about it — this built `MezzeSortedSet.empty()` with no comparator and
+     * produced a NATURALLY ordered result whatever `'b`'s `Ord` was. Mapping
+     * into a descending newtype gave `1, 3, 5` and a `contains` that could not
+     * find two of the three. known-bugs.md BUG 44's sibling, reached by
+     * construction rather than by merging.
+     *
+     * <p>`cmpFn` is null when the compiler proved `'b` directly comparable.
+     */
     public static MezzeSortedSet map(MezzeSortedSet set, MezzeFunction f,
+                                     MezzeFunction cmpFn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");
-        MezzeSortedSet result = MezzeSortedSet.empty();
+        MezzeSortedSet result = MezzeSortedSet.empty(ElementComparator.of(cmpFn));
+        java.util.List<Object> dbgMapped = System.getenv("MEZZE_DICT_DEBUG") != null
+                ? new java.util.ArrayList<>() : null;
         for (Object element : set) {
             Object mapped = ctx.call1(callNode, element);
+            if (dbgMapped != null) dbgMapped.add(mapped);
             result = result.addObject(mapped);
+        }
+        if (dbgMapped != null) {
+            // ASK THE COMPARATOR THAT ACTUALLY ARRIVED which way it orders the
+            // first two mapped elements. A wrong ANSWER here means the
+            // typechecker handed over the wrong Ord; a right answer with a
+            // wrong RESULT means the container is at fault.
+            String verdict;
+            if (cmpFn == null) {
+                verdict = "cmpFn=NULL -> natural order";
+            } else if (dbgMapped.size() >= 2) {
+                var c2 = ScalarCall.prepare2(cmpFn, "a", "b");
+                Object sign = c2.call2(callNode, dbgMapped.get(0), dbgMapped.get(1));
+                verdict = "cmpFn(" + dbgMapped.get(0) + ", " + dbgMapped.get(1) + ") = " + sign;
+            } else {
+                verdict = "cmpFn present, fewer than two elements";
+            }
+            System.err.println("[ssmap] in=" + dbgMapped + " " + verdict
+                + " result=" + result.toArray().length);
         }
         return result;
     }
@@ -369,8 +447,11 @@ public final class SortedSetNatives {
     public static MezzeRecord partition(MezzeSortedSet set, MezzeFunction predicate,
                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "val");
-        MezzeSortedSet passSet = MezzeSortedSet.empty();
-        MezzeSortedSet failSet = MezzeSortedSet.empty();
+        // Inherits the SOURCE's order. Rebuilding through a bare
+        // `empty()` dropped it — the failure `slice`'s doc already
+        // names for `take`/`drop`. See known-bugs.md BUG 45.
+        MezzeSortedSet passSet = MezzeSortedSet.empty(set.customComparator());
+        MezzeSortedSet failSet = MezzeSortedSet.empty(set.customComparator());
         for (Object elem : set) {
             Object result = ctx.call1(callNode, elem);
             if (result instanceof Boolean && (Boolean) result) {
@@ -419,36 +500,26 @@ public final class SortedSetNatives {
         return MezzeVariant.some(maxElem);
     }
 
+    /**
+     * A contiguous run of the sort order. See
+     * {@code SortedMapNatives.slice}; the set's {@code take} and {@code drop}
+     * were worse than the map's — they rebuilt through
+     * {@code MezzeSortedSet.empty()} with NO comparator, so the result lost the
+     * ordering it was sliced from as well as paying a search per element.
+     */
     @TruffleBoundary
-    public static MezzeSortedSet take(MezzeSortedSet set, long n) {
-        MezzeSortedSet result = MezzeSortedSet.empty();
-        int count = 0;
-        for (Object elem : set) {
-            if (count >= n) break;
-            result = result.addObject(elem);
-            count++;
-        }
-        return result;
-    }
-
-    @TruffleBoundary
-    public static MezzeSortedSet drop(MezzeSortedSet set, long n) {
-        MezzeSortedSet result = MezzeSortedSet.empty();
-        int count = 0;
-        for (Object elem : set) {
-            if (count >= n) {
-                result = result.addObject(elem);
-            }
-            count++;
-        }
-        return result;
+    public static MezzeSortedSet slice(MezzeSortedSet set, Object from, Object to) {
+        return set.slice((int) (long) (Long) from, (int) (long) (Long) to);
     }
 
     @TruffleBoundary
     public static MezzeSortedSet range(MezzeSortedSet set, Object lo, Object hi) {
         var order = set.comparator();
         // Range is inclusive on both ends: [lo, hi]
-        MezzeSortedSet result = MezzeSortedSet.empty();
+        // Inherits the SOURCE's order. Rebuilding through a bare
+        // `empty()` dropped it — the failure `slice`'s doc already
+        // names for `take`/`drop`. See known-bugs.md BUG 45.
+        MezzeSortedSet result = MezzeSortedSet.empty(set.customComparator());
         for (Object elem : set) {
             if (order.compare(elem, lo) >= 0 && order.compare(elem, hi) <= 0) {
                 result = result.addObject(elem);
@@ -460,8 +531,16 @@ public final class SortedSetNatives {
     // ==================== Advanced Operations (Task #14) ====================
 
     @TruffleBoundary
-    public static MezzeSortedSet symmetricDifference(MezzeSortedSet s1, MezzeSortedSet s2) {
-        MezzeSortedSet result = MezzeSortedSet.empty();
+    /** See {@link #union}; `containsObject` searches by the set's order too. */
+    public static MezzeSortedSet symmetricDifference(MezzeSortedSet src1, MezzeSortedSet src2,
+                                                     MezzeFunction cmpFn) {
+        var order = ElementComparator.of(cmpFn);
+        MezzeSortedSet s1 = src1.withComparator(order);
+        MezzeSortedSet s2 = src2.withComparator(order);
+        // Inherits the SOURCE's order. Rebuilding through a bare
+        // `empty()` dropped it — the failure `slice`'s doc already
+        // names for `take`/`drop`. See known-bugs.md BUG 45.
+        MezzeSortedSet result = MezzeSortedSet.empty(order);
         for (Object elem : s1) {
             if (!s2.containsObject(elem)) result = result.addObject(elem);
         }
@@ -475,7 +554,10 @@ public final class SortedSetNatives {
     public static MezzeSortedSet headSet(MezzeSortedSet set, Object toElement) {
         var order = set.comparator();
         // headSet is strictly less than toElement (Java standard behavior)
-        MezzeSortedSet result = MezzeSortedSet.empty();
+        // Inherits the SOURCE's order. Rebuilding through a bare
+        // `empty()` dropped it — the failure `slice`'s doc already
+        // names for `take`/`drop`. See known-bugs.md BUG 45.
+        MezzeSortedSet result = MezzeSortedSet.empty(set.customComparator());
         for (Object elem : set) {
             if (order.compare(elem, toElement) < 0) {
                 result = result.addObject(elem);
@@ -488,7 +570,10 @@ public final class SortedSetNatives {
     public static MezzeSortedSet tailSet(MezzeSortedSet set, Object fromElement) {
         var order = set.comparator();
         // above returns elements greater than, but tailSet should include fromElement
-        MezzeSortedSet result = MezzeSortedSet.empty();
+        // Inherits the SOURCE's order. Rebuilding through a bare
+        // `empty()` dropped it — the failure `slice`'s doc already
+        // names for `take`/`drop`. See known-bugs.md BUG 45.
+        MezzeSortedSet result = MezzeSortedSet.empty(set.customComparator());
         for (Object elem : set) {
             if (order.compare(elem, fromElement) >= 0) {
                 result = result.addObject(elem);
@@ -509,10 +594,16 @@ public final class SortedSetNatives {
      * Apply a function that returns Option to each element and collect only the Some values.
      * Similar to flatMap but specifically for Option-returning functions.
      */
+    /** See {@link #map}: the result's element type is `'b`, so its order is
+     *  the target's and comes from the caller. */
     public static MezzeSortedSet filterMap(MezzeSortedSet set, MezzeFunction f,
+                                           MezzeFunction cmpFn,
                                            com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");
-        MezzeSortedSet result = MezzeSortedSet.empty();
+        // USES the order it is given. This took `cmpFn` and ignored it for one
+        // commit — the signature read as handled while the body still built a
+        // naturally-ordered set.
+        MezzeSortedSet result = MezzeSortedSet.empty(ElementComparator.of(cmpFn));
         for (Object elem : set) {
             Object mapped = ctx.call1(callNode, elem);
             if (mapped instanceof MezzeVariant v && v.isSome()) {

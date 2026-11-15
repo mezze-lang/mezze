@@ -358,26 +358,12 @@ public final class NativeDispatch extends MezzeNode {
             Double.toString(getDouble(r, "n")));
         HANDLERS.put("__native_float_from_int", (r, c) ->
             (double) getLong(r, "n"));
-        HANDLERS.put("__native_float_from_string", (r, c) ->
-            floatFromString(getString(r, "s")));
         HANDLERS.put("__native_float_abs", (r, c) ->
             PrimitiveNatives.floatAbs(getDouble(r, "n")));
         HANDLERS.put("__native_float_min", (r, c) ->
             PrimitiveNatives.floatMin(getDouble(r, "l"), getDouble(r, "r")));
         HANDLERS.put("__native_float_max", (r, c) ->
             PrimitiveNatives.floatMax(getDouble(r, "l"), getDouble(r, "r")));
-        HANDLERS.put("__native_float_clamp", (r, c) ->
-            PrimitiveNatives.floatClamp(getDouble(r, "n"), getDouble(r, "min"), getDouble(r, "max")));
-        HANDLERS.put("__native_float_sign", (r, c) ->
-            PrimitiveNatives.floatSignum(getDouble(r, "n")));
-        HANDLERS.put("__native_float_to_int", (r, c) ->
-            PrimitiveNatives.floatToInt(getDouble(r, "n")));
-        HANDLERS.put("__native_float_is_nan", (r, c) ->
-            PrimitiveNatives.floatIsNaN(getDouble(r, "n")));
-        HANDLERS.put("__native_float_is_infinite", (r, c) ->
-            PrimitiveNatives.floatIsInfinite(getDouble(r, "n")));
-        HANDLERS.put("__native_float_is_finite", (r, c) ->
-            PrimitiveNatives.floatIsFinite(getDouble(r, "n")));
         HANDLERS.put("__native_float_floor", (r, c) ->
             PrimitiveNatives.floatFloor(getDouble(r, "n")));
         HANDLERS.put("__native_float_ceil", (r, c) ->
@@ -388,12 +374,6 @@ public final class NativeDispatch extends MezzeNode {
             PrimitiveNatives.floatSqrt(getDouble(r, "n")));
         HANDLERS.put("__native_float_pow", (r, c) ->
             PrimitiveNatives.floatPow(getDouble(r, "base"), getDouble(r, "exp")));
-        HANDLERS.put("__native_float_ln", (r, c) ->
-            PrimitiveNatives.floatLog(getDouble(r, "n")));
-        HANDLERS.put("__native_float_log10", (r, c) ->
-            PrimitiveNatives.floatLog10(getDouble(r, "n")));
-        HANDLERS.put("__native_float_exp", (r, c) ->
-            PrimitiveNatives.floatExp(getDouble(r, "n")));
         // Trig operations - use PrimitiveNatives for consistency
         HANDLERS.put("__native_float_sin", (r, c) ->
             PrimitiveNatives.floatSin(getDouble(r, "n")));
@@ -401,14 +381,6 @@ public final class NativeDispatch extends MezzeNode {
             PrimitiveNatives.floatCos(getDouble(r, "n")));
         HANDLERS.put("__native_float_tan", (r, c) ->
             PrimitiveNatives.floatTan(getDouble(r, "n")));
-        HANDLERS.put("__native_float_asin", (r, c) ->
-            PrimitiveNatives.floatAsin(getDouble(r, "n")));
-        HANDLERS.put("__native_float_acos", (r, c) ->
-            PrimitiveNatives.floatAcos(getDouble(r, "n")));
-        HANDLERS.put("__native_float_atan", (r, c) ->
-            PrimitiveNatives.floatAtan(getDouble(r, "n")));
-        HANDLERS.put("__native_float_atan2", (r, c) ->
-            PrimitiveNatives.floatAtan2(getDouble(r, "y"), getDouble(r, "x")));
         // Float arithmetic
         HANDLERS.put("__native_float_add", (r, c) ->
             PrimitiveNatives.floatAdd(getDouble(r, "l"), getDouble(r, "r")));
@@ -535,11 +507,68 @@ public final class NativeDispatch extends MezzeNode {
         return idx >= 0 ? MezzeVariant.some((long) idx) : MezzeVariant.none();
     }
 
+    /**
+     * Literal split on {@code indexOf}. No regular expression is involved.
+     *
+     * <p>This was {@code s.split(Pattern.quote(delimiter))}. The quoting was
+     * right — {@code str::split} takes a LITERAL delimiter, and {@code std::fs}
+     * splits paths on {@code "."}, which as a regex matches everything — but
+     * {@code Pattern.quote(" ")} is {@code \Q \E}, five characters, and
+     * {@code String.split}'s fast path only fires for a single non-meta
+     * character or a two-character escape. So the quoting DEFEATED the fast
+     * path and every call compiled a {@code Pattern}: measured at 310 ns to cut
+     * a 64-char string into 12 pieces, 26 ns a piece against ~10 ns to allocate
+     * a 65-char string. See PERF-LOG and {@code bench/cases/surface} row 5.
+     *
+     * <p>{@code indexOf} needs no escaping to be literal, so this is both
+     * faster and a more direct statement of the contract.
+     *
+     * <p>THE OBSERVABLE BEHAVIOUR IS UNCHANGED, and it is the behaviour of
+     * {@code String.split(regex, 0)}, which is not obvious in three places —
+     * all three are pinned by {@code StringSplitSemanticsTest}:
+     * <ul>
+     *   <li>TRAILING empty parts are dropped, so {@code "a,b,"} is 2 parts and
+     *       {@code ",,"} is ZERO;
+     *   <li>a LEADING empty part is kept, so {@code ",a"} is 2 parts;
+     *   <li>an empty INPUT is one empty part, not zero parts, and that holds
+     *       for an empty delimiter too.
+     * </ul>
+     */
     @TruffleBoundary
     private static MezzeSeq stringSplit(String s, String delimiter) {
-        String[] parts = s.split(java.util.regex.Pattern.quote(delimiter));
-        Object[] result = new Object[parts.length];
-        System.arraycopy(parts, 0, result, 0, parts.length);
+        // An empty input is one empty part. Pattern.split reaches this by its
+        // "no match found" branch, which returns the input whole and so never
+        // applies the trailing-empty removal below.
+        if (s.isEmpty()) return MezzeSeq.fromArray(new Object[] { "" });
+
+        // An empty delimiter matches between every character, so every
+        // character becomes a part: "abc" -> [a, b, c].
+        if (delimiter.isEmpty()) {
+            int len = s.length();
+            Object[] chars = new Object[len];
+            for (int i = 0; i < len; i++) chars[i] = String.valueOf(s.charAt(i));
+            return MezzeSeq.fromArray(chars);
+        }
+
+        int hit = s.indexOf(delimiter);
+        // No occurrence: the whole string, and no trailing-empty removal.
+        if (hit < 0) return MezzeSeq.fromArray(new Object[] { s });
+
+        java.util.ArrayList<String> parts = new java.util.ArrayList<>();
+        int from = 0;
+        int dlen = delimiter.length();
+        while (hit >= 0) {
+            parts.add(s.substring(from, hit));
+            from = hit + dlen;
+            hit = s.indexOf(delimiter, from);
+        }
+        parts.add(s.substring(from));
+
+        // Trailing empty parts are dropped, which can empty the array entirely.
+        int end = parts.size();
+        while (end > 0 && parts.get(end - 1).isEmpty()) end--;
+        Object[] result = new Object[end];
+        for (int i = 0; i < end; i++) result[i] = parts.get(i);
         return MezzeSeq.fromArray(result);
     }
 
@@ -651,12 +680,23 @@ public final class NativeDispatch extends MezzeNode {
             SeqNatives.contains(getSeq(r, "xs"), getField(r, "x")));
         HANDLERS.put("__native_seq_index_of", (r, c) ->
             SeqNatives.indexOf(getSeq(r, "xs"), getField(r, "x")));
+        // `seq::sort` with no comparator. LIVE as of this change: the native was
+        // registered here and in `SeqOps.kt` and called from nowhere, while
+        // `seq::sort` routed through `sort_by` and paid a guest lambda per
+        // comparison. The compiler picks between the two forms from the
+        // element's `OrdKind` — see `TypedASTCompiler.ordNativeCall`.
         HANDLERS.put("__native_seq_sort", (r, c) ->
             SeqNatives.sort(getSeq(r, "xs")));
-        HANDLERS.put("__native_seq_unique", (r, c) ->
-            SeqNatives.unique(getSeq(r, "xs"), getFunction(r, "eq"), c));
-        HANDLERS.put("__native_seq_distinct", (r, c) ->
-            SeqNatives.distinct(getSeq(r, "xs"), getFunction(r, "eq"), c));
+        HANDLERS.put("__native_seq_sort_by_ord", (r, c) ->
+            SeqNatives.sortByOrd(getSeq(r, "xs"), getFunction(r, "le"), c));
+        // `seq::unique` in O(n). The quadratic it replaces is gone, not
+        // deprecated: `__native_seq_unique` had exactly one caller, the
+        // `unique_with_eq` helper, which is deleted with it.
+        HANDLERS.put("__native_seq_unique_hashed", (r, c) ->
+            SeqNatives.uniqueHashed(getSeq(r, "xs")));
+        HANDLERS.put("__native_seq_unique_hashed_with_evidence", (r, c) ->
+            SeqNatives.uniqueHashedWithEvidence(getSeq(r, "xs"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
         HANDLERS.put("__native_seq_flatten", (r, c) ->
             SeqNatives.flatten(getSeq(r, "xs")));
         HANDLERS.put("__native_seq_equals", (r, c) ->
@@ -879,11 +919,11 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_seq_to_deque", (r, c) ->
             SeqNatives.toDeque(getSeq(r, "xs")));
         HANDLERS.put("__native_seq_to_sorted_set", (r, c) ->
-            SeqNatives.toSortedSet(getSeq(r, "xs")));
+            SeqNatives.toSortedSet(getSeq(r, "xs"), getFunctionOrNull(r, "cmp")));
         HANDLERS.put("__native_seq_to_map", (r, c) ->
             SeqNatives.toMap(getSeq(r, "xs")));
         HANDLERS.put("__native_seq_to_sorted_map", (r, c) ->
-            SeqNatives.toSortedMap(getSeq(r, "xs")));
+            SeqNatives.toSortedMap(getSeq(r, "xs"), getFunctionOrNull(r, "cmp")));
         HANDLERS.put("__native_seq_from_list", (r, c) ->
             SeqNatives.fromList(getList(r, "xs")));
         HANDLERS.put("__native_seq_from_set", (r, c) ->
@@ -1032,6 +1072,11 @@ public final class NativeDispatch extends MezzeNode {
             ListNatives.drop(getList(r, "xs"), getLong(r, "n")));
         HANDLERS.put("__native_list_reverse", (r, c) ->
             ListNatives.reverse(getList(r, "xs")));
+        // `list::sort` with no comparator, and its general form. LIVE as of
+        // this change: `__native_list_sort` was registered here and in
+        // `ListOps.kt` and called from nowhere, exactly as the seq one was.
+        HANDLERS.put("__native_list_sort_by_ord", (r, c) ->
+            ListNatives.sortByOrd(getList(r, "xs"), getFunction(r, "le"), c));
         HANDLERS.put("__native_list_sort", (r, c) ->
             ListNatives.sort(getList(r, "xs")));
         HANDLERS.put("__native_list_range", (r, c) ->
@@ -1040,8 +1085,6 @@ public final class NativeDispatch extends MezzeNode {
             ListNatives.repeat(getField(r, "x"), getLong(r, "n")));
         HANDLERS.put("__native_list_intersperse", (r, c) ->
             ListNatives.intersperse(getList(r, "xs"), getField(r, "sep")));
-        HANDLERS.put("__native_list_to_seq", (r, c) ->
-            ListNatives.toSeq(getList(r, "xs")));
         HANDLERS.put("__native_list_zip", (r, c) ->
             ListNatives.zip(getList(r, "xs"), getList(r, "ys")));
         HANDLERS.put("__native_list_unzip", (r, c) ->
@@ -1082,12 +1125,8 @@ public final class NativeDispatch extends MezzeNode {
             ListNatives.maxBy(getList(r, "xs"), getFunction(r, "f"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_list_sum", (r, c) ->
             ListNatives.sum(getList(r, "xs")));
-        HANDLERS.put("__native_list_sum_float", (r, c) ->
-            ListNatives.sumFloat(getList(r, "xs")));
         HANDLERS.put("__native_list_product", (r, c) ->
             ListNatives.product(getList(r, "xs")));
-        HANDLERS.put("__native_list_product_float", (r, c) ->
-            ListNatives.productFloat(getList(r, "xs")));
 
         // Group By
         HANDLERS.put("__native_list_group_by", (r, c) ->
@@ -1146,10 +1185,13 @@ public final class NativeDispatch extends MezzeNode {
             ListNatives.count(getList(r, "xs"), getFunction(r, "p"), c));
 
         // Unique/Distinct/Flatten
+        // `list::distinct` is an ALIAS and now shares this native, the way
+        // `seq::distinct` does; `__native_list_distinct` only delegated.
+        HANDLERS.put("__native_list_unique_with_evidence", (r, c) ->
+            ListNatives.uniqueWithEvidence(getList(r, "xs"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
         HANDLERS.put("__native_list_unique", (r, c) ->
             ListNatives.unique(getList(r, "xs")));
-        HANDLERS.put("__native_list_distinct", (r, c) ->
-            ListNatives.distinct(getList(r, "xs")));
         HANDLERS.put("__native_list_flatten", (r, c) ->
             ListNatives.flatten(getList(r, "xss")));
 
@@ -1268,6 +1310,38 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_set_remove_with_evidence", (r, c) ->
             SetNatives.removeWithEvidence(getSet(r, "s"), getField(r, "x"),
                 getFunction(r, "hash"), getFunction(r, "eq")));
+        // THE CONVERSIONS INTO A HASH CONTAINER. Each collects its source to
+        // an array and hands it to the builder that already installs an
+        // element instance — see SetNatives.toSetWithEvidence.
+        HANDLERS.put("__native_seq_to_set_with_evidence", (r, c) ->
+            SetNatives.toSetWithEvidence(getSeq(r, "xs").toArray(),
+                getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_list_to_set_with_evidence", (r, c) ->
+            SetNatives.toSetWithEvidence(getList(r, "xs").toArray(),
+                getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_deque_to_set_with_evidence", (r, c) ->
+            SetNatives.toSetWithEvidence(getDeque(r, "d").toArray(),
+                getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_sorted_set_to_set_with_evidence", (r, c) ->
+            SetNatives.toSetWithEvidence(getSortedSet(r, "s").toArray(),
+                getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_seq_to_map_with_evidence", (r, c) ->
+            MapNatives.fromSeqWithEvidence(getSeq(r, "xs"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_list_to_map_with_evidence", (r, c) ->
+            MapNatives.fromSeqWithEvidence(
+                com.mezze.datastructures.seq.MezzeSeq.fromArray(getList(r, "xs").toArray()),
+                getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_deque_to_map_with_evidence", (r, c) ->
+            MapNatives.fromSeqWithEvidence(
+                com.mezze.datastructures.seq.MezzeSeq.fromArray(getDeque(r, "d").toArray()),
+                getFunction(r, "hash"), getFunction(r, "eq")));
+        HANDLERS.put("__native_set_filter_map_with_evidence", (r, c) ->
+            SetNatives.filterMapWithEvidence(getSet(r, "set"), getFunction(r, "f"),
+                getFunction(r, "hash"), getFunction(r, "eq"), c));
+        HANDLERS.put("__native_set_map_with_evidence", (r, c) ->
+            SetNatives.mapWithEvidence(getSet(r, "s"), getFunction(r, "f"),
+                getFunction(r, "hash"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_set_from_seq_with_evidence", (r, c) ->
             SetNatives.fromArrayWithEvidence(getArray(r, "xs"),
                 getFunction(r, "hash"), getFunction(r, "eq")));
@@ -1291,8 +1365,6 @@ public final class NativeDispatch extends MezzeNode {
             SetNatives.equals(getSet(r, "s1"), getSet(r, "s2")));
         HANDLERS.put("__native_set_for_each", (r, c) ->
             SetNatives.forEach(getSet(r, "s"), getFunction(r, "f"), c));
-        HANDLERS.put("__native_set_to_seq", (r, c) ->
-            SetNatives.toArray(getSet(r, "s")));
         HANDLERS.put("__native_set_to_list", (r, c) ->
             SetNatives.toList(getSet(r, "s")));
         HANDLERS.put("__native_set_from_seq", (r, c) ->
@@ -1362,7 +1434,7 @@ public final class NativeDispatch extends MezzeNode {
 
         // SortedSet conversions
         HANDLERS.put("__native_set_to_sorted_set", (r, c) ->
-            SetNatives.toSortedSet(getSet(r, "s")));
+            SetNatives.toSortedSet(getSet(r, "s"), getFunctionOrNull(r, "cmp")));
         HANDLERS.put("__native_set_from_sorted_set", (r, c) ->
             SetNatives.fromSortedSet(getSortedSet(r, "s")));
     }
@@ -1375,24 +1447,33 @@ public final class NativeDispatch extends MezzeNode {
             SortedSetNatives.singleton(getField(r, "x"), getFunction(r, "cmp")));
         HANDLERS.put("__native_sorted_set_size", (r, c) ->
             SortedSetNatives.size(getSortedSet(r, "s")));
+        HANDLERS.put("__native_sorted_set_element_at", (r, c) ->
+            SortedSetNatives.elementAt(getSortedSet(r, "s"), getField(r, "i")));
         HANDLERS.put("__native_sorted_set_is_empty", (r, c) ->
             SortedSetNatives.isEmpty(getSortedSet(r, "s")));
-        HANDLERS.put("__native_sorted_set_contains", (r, c) ->
-            SortedSetNatives.contains(getSortedSet(r, "s"), getField(r, "x"), getFunction(r, "cmp")));
-        HANDLERS.put("__native_sorted_set_add", (r, c) ->
-            SortedSetNatives.add(getSortedSet(r, "s"), getField(r, "x"), getFunction(r, "cmp")));
-        HANDLERS.put("__native_sorted_set_remove", (r, c) ->
-            SortedSetNatives.remove(getSortedSet(r, "s"), getField(r, "x"), getFunction(r, "cmp")));
+        HANDLERS.put("__native_sorted_set_add_at", (r, c) ->
+            SortedSetNatives.addAt(getSortedSet(r, "s"), getField(r, "i"), getField(r, "x")));
+        HANDLERS.put("__native_sorted_set_remove_at", (r, c) ->
+            SortedSetNatives.removeAt(getSortedSet(r, "s"), getField(r, "i")));
+        HANDLERS.put("__native_sorted_set_slice", (r, c) ->
+            SortedSetNatives.slice(getSortedSet(r, "s"), getField(r, "from"), getField(r, "to")));
         HANDLERS.put("__native_sorted_set_min", (r, c) ->
             SortedSetNatives.min(getSortedSet(r, "s")));
         HANDLERS.put("__native_sorted_set_max", (r, c) ->
             SortedSetNatives.max(getSortedSet(r, "s")));
+        // The ORDER comes from the caller: a set built by `empty {}` + `add`
+        // holds its elements in the author's order while its comparator says
+        // natural. `cmp` is absent when the compiler proved the element
+        // directly comparable. See known-bugs.md BUG 44.
         HANDLERS.put("__native_sorted_set_union", (r, c) ->
-            SortedSetNatives.union(getSortedSet(r, "s1"), getSortedSet(r, "s2")));
+            SortedSetNatives.union(getSortedSet(r, "s1"), getSortedSet(r, "s2"),
+                getFunctionOrNull(r, "cmp")));
         HANDLERS.put("__native_sorted_set_intersect", (r, c) ->
-            SortedSetNatives.intersect(getSortedSet(r, "s1"), getSortedSet(r, "s2")));
+            SortedSetNatives.intersect(getSortedSet(r, "s1"), getSortedSet(r, "s2"),
+                getFunctionOrNull(r, "cmp")));
         HANDLERS.put("__native_sorted_set_difference", (r, c) ->
-            SortedSetNatives.difference(getSortedSet(r, "s1"), getSortedSet(r, "s2")));
+            SortedSetNatives.difference(getSortedSet(r, "s1"), getSortedSet(r, "s2"),
+                getFunctionOrNull(r, "cmp")));
         HANDLERS.put("__native_sorted_set_equals", (r, c) ->
             SortedSetNatives.equals(getSortedSet(r, "s1"), getSortedSet(r, "s2"),
                 getFunction(r, "eq"), c));
@@ -1402,10 +1483,14 @@ public final class NativeDispatch extends MezzeNode {
             SortedSetNatives.toList(getSortedSet(r, "s")));
         HANDLERS.put("__native_sorted_set_to_set", (r, c) ->
             SortedSetNatives.toSet(getSortedSet(r, "s")));
+        // `getFunctionOrNull`, NOT `getFunction`: every native listed in
+        // `ordNativeFastForm` has its order operand DROPPED when the element is
+        // directly comparable, so demanding the field throws `Missing field
+        // 'cmp'` for every Int set. That is how this one announced itself.
         HANDLERS.put("__native_sorted_set_from_list", (r, c) ->
-            SortedSetNatives.fromList(getList(r, "xs"), getFunction(r, "cmp")));
+            SortedSetNatives.fromList(getList(r, "xs"), getFunctionOrNull(r, "cmp")));
         HANDLERS.put("__native_sorted_set_from_set", (r, c) ->
-            SortedSetNatives.fromSet(getSet(r, "s")));
+            SortedSetNatives.fromSet(getSet(r, "s"), getFunctionOrNull(r, "cmp")));
 
         // HOF operations
         HANDLERS.put("__native_sorted_set_filter", (r, c) ->
@@ -1413,7 +1498,8 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_sorted_set_fold", (r, c) ->
             SortedSetNatives.fold(getSortedSet(r, "s"), getField(r, "init"), getFunction(r, "f"), c));
         HANDLERS.put("__native_sorted_set_map", (r, c) ->
-            SortedSetNatives.map(getSortedSet(r, "s"), getFunction(r, "f"), c));
+            SortedSetNatives.map(getSortedSet(r, "s"), getFunction(r, "f"),
+                getFunctionOrNull(r, "cmp"), c));
         HANDLERS.put("__native_sorted_set_any", (r, c) ->
             SortedSetNatives.any(getSortedSet(r, "s"), getFunction(r, "p"), c));
         HANDLERS.put("__native_sorted_set_all", (r, c) ->
@@ -1454,16 +1540,13 @@ public final class NativeDispatch extends MezzeNode {
             SortedSetNatives.minBy(getSortedSet(r, "s"), getFunction(r, "f"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_sorted_set_max_by", (r, c) ->
             SortedSetNatives.maxBy(getSortedSet(r, "s"), getFunction(r, "f"), getFunction(r, "cmp"), c));
-        HANDLERS.put("__native_sorted_set_take", (r, c) ->
-            SortedSetNatives.take(getSortedSet(r, "s"), getLong(r, "n")));
-        HANDLERS.put("__native_sorted_set_drop", (r, c) ->
-            SortedSetNatives.drop(getSortedSet(r, "s"), getLong(r, "n")));
         HANDLERS.put("__native_sorted_set_range", (r, c) ->
             SortedSetNatives.range(getSortedSet(r, "s"), getField(r, "lo"), getField(r, "hi")));
 
         // Task #14: Advanced operations
         HANDLERS.put("__native_sorted_set_symmetric_difference", (r, c) ->
-            SortedSetNatives.symmetricDifference(getSortedSet(r, "s1"), getSortedSet(r, "s2")));
+            SortedSetNatives.symmetricDifference(getSortedSet(r, "s1"), getSortedSet(r, "s2"),
+                getFunctionOrNull(r, "cmp")));
         HANDLERS.put("__native_sorted_set_head_set", (r, c) ->
             SortedSetNatives.headSet(getSortedSet(r, "s"), getField(r, "to")));
         HANDLERS.put("__native_sorted_set_tail_set", (r, c) ->
@@ -1471,7 +1554,8 @@ public final class NativeDispatch extends MezzeNode {
 
         // Task #30: Collect operations
         HANDLERS.put("__native_sorted_set_filter_map", (r, c) ->
-            SortedSetNatives.filterMap(getSortedSet(r, "set"), getFunction(r, "f"), c));
+            SortedSetNatives.filterMap(getSortedSet(r, "set"), getFunction(r, "f"),
+                getFunctionOrNull(r, "cmp"), c));
         HANDLERS.put("__native_sorted_set_collect_seq", (r, c) ->
             SortedSetNatives.collectArray(getSortedSet(r, "set"), getFunction(r, "f"), c));
         HANDLERS.put("__native_sorted_set_collect_list", (r, c) ->
@@ -1528,6 +1612,8 @@ public final class NativeDispatch extends MezzeNode {
             MapNatives.filter(getMap(r, "m"), getFunction(r, "p"), c));
         HANDLERS.put("__native_map_map_values", (r, c) ->
             MapNatives.mapValues(getMap(r, "m"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_map_sum_values", (r, c) ->
+            MapNatives.sumValues(getMap(r, "m")));
         HANDLERS.put("__native_map_fold", (r, c) ->
             MapNatives.fold(getMap(r, "m"), getField(r, "init"), getFunction(r, "f"), c));
         HANDLERS.put("__native_map_merge_with", (r, c) ->
@@ -1559,6 +1645,9 @@ public final class NativeDispatch extends MezzeNode {
         // back a value whose runtime shape was not its declared type.
         HANDLERS.put("__native_map_from_seq", (r, c) ->
             MapNatives.fromSeq(getSeq(r, "xs")));
+        HANDLERS.put("__native_map_map_keys_with_evidence", (r, c) ->
+            MapNatives.mapKeysWithEvidence(getMap(r, "m"), getFunction(r, "f"),
+                getFunction(r, "hash"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_map_from_seq_with_evidence", (r, c) ->
             MapNatives.fromSeqWithEvidence(getSeq(r, "xs"),
                 getFunction(r, "hash"), getFunction(r, "eq")));
@@ -1580,6 +1669,9 @@ public final class NativeDispatch extends MezzeNode {
             MapNatives.minValue(getMap(r, "m"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_map_max_value", (r, c) ->
             MapNatives.maxValue(getMap(r, "m"), getFunction(r, "cmp"), c));
+        HANDLERS.put("__native_map_invert_with_evidence", (r, c) ->
+            MapNatives.invertWithEvidence(getMap(r, "m"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
         HANDLERS.put("__native_map_invert", (r, c) ->
             MapNatives.invert(getMap(r, "m")));
 
@@ -1628,16 +1720,21 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_sorted_map_empty", (r, c) -> SortedMapNatives.empty());
         HANDLERS.put("__native_sorted_map_size", (r, c) ->
             SortedMapNatives.size(getSortedMap(r, "m")));
+        HANDLERS.put("__native_sorted_map_key_at", (r, c) ->
+            SortedMapNatives.keyAt(getSortedMap(r, "m"), getField(r, "i")));
+        HANDLERS.put("__native_sorted_map_value_at", (r, c) ->
+            SortedMapNatives.valueAt(getSortedMap(r, "m"), getField(r, "i")));
+        HANDLERS.put("__native_sorted_map_set_at", (r, c) ->
+            SortedMapNatives.setAt(getSortedMap(r, "m"), getField(r, "i"), getField(r, "v")));
+        HANDLERS.put("__native_sorted_map_insert_at", (r, c) ->
+            SortedMapNatives.insertAt(getSortedMap(r, "m"), getField(r, "i"),
+                getField(r, "k"), getField(r, "v")));
+        HANDLERS.put("__native_sorted_map_remove_at", (r, c) ->
+            SortedMapNatives.removeAt(getSortedMap(r, "m"), getField(r, "i")));
+        HANDLERS.put("__native_sorted_map_slice", (r, c) ->
+            SortedMapNatives.slice(getSortedMap(r, "m"), getField(r, "from"), getField(r, "to")));
         HANDLERS.put("__native_sorted_map_is_empty", (r, c) ->
             SortedMapNatives.isEmpty(getSortedMap(r, "m")));
-        HANDLERS.put("__native_sorted_map_contains_key", (r, c) ->
-            SortedMapNatives.containsKey(getSortedMap(r, "m"), getField(r, "k"), getFunction(r, "cmp")));
-        HANDLERS.put("__native_sorted_map_get", (r, c) ->
-            SortedMapNatives.get(getSortedMap(r, "m"), getField(r, "k"), getFunction(r, "cmp")));
-        HANDLERS.put("__native_sorted_map_insert", (r, c) ->
-            SortedMapNatives.insert(getSortedMap(r, "m"), getField(r, "k"), getField(r, "v"), getFunction(r, "cmp")));
-        HANDLERS.put("__native_sorted_map_remove", (r, c) ->
-            SortedMapNatives.remove(getSortedMap(r, "m"), getField(r, "k"), getFunction(r, "cmp")));
         HANDLERS.put("__native_sorted_map_keys", (r, c) ->
             SortedMapNatives.keys(getSortedMap(r, "m")));
         HANDLERS.put("__native_sorted_map_values", (r, c) ->
@@ -1654,12 +1751,17 @@ public final class NativeDispatch extends MezzeNode {
             SortedMapNatives.minEntry(getSortedMap(r, "m")));
         HANDLERS.put("__native_sorted_map_max_entry", (r, c) ->
             SortedMapNatives.maxEntry(getSortedMap(r, "m")));
+        HANDLERS.put("__native_sorted_map_to_map_with_evidence", (r, c) ->
+            SortedMapNatives.toMapWithEvidence(getSortedMap(r, "m"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
         HANDLERS.put("__native_sorted_map_to_map", (r, c) ->
             SortedMapNatives.toMap(getSortedMap(r, "m")));
 
         // HOF operations
         HANDLERS.put("__native_sorted_map_filter", (r, c) ->
             SortedMapNatives.filter(getSortedMap(r, "m"), getFunction(r, "p"), c));
+        HANDLERS.put("__native_sorted_map_sum_values", (r, c) ->
+            SortedMapNatives.sumValues(getSortedMap(r, "m")));
         HANDLERS.put("__native_sorted_map_fold", (r, c) ->
             SortedMapNatives.fold(getSortedMap(r, "m"), getField(r, "init"), getFunction(r, "f"), c));
         HANDLERS.put("__native_sorted_map_map_values", (r, c) ->
@@ -1716,20 +1818,17 @@ public final class NativeDispatch extends MezzeNode {
             SortedMapNatives.tailMap(getSortedMap(r, "m"), getField(r, "from")));
         HANDLERS.put("__native_sorted_map_sub_map", (r, c) ->
             SortedMapNatives.subMap(getSortedMap(r, "m"), getField(r, "lo"), getField(r, "hi")));
-        HANDLERS.put("__native_sorted_map_take", (r, c) ->
-            SortedMapNatives.take(getSortedMap(r, "m"), getLong(r, "n")));
-        HANDLERS.put("__native_sorted_map_drop", (r, c) ->
-            SortedMapNatives.drop(getSortedMap(r, "m"), getLong(r, "n")));
 
         // Additional higher-order functions
         HANDLERS.put("__native_sorted_map_map_keys", (r, c) ->
-            SortedMapNatives.mapKeys(getSortedMap(r, "m"), getFunction(r, "f"), c));
+            SortedMapNatives.mapKeys(getSortedMap(r, "m"), getFunction(r, "f"),
+                getFunctionOrNull(r, "cmp"), c));
         HANDLERS.put("__native_sorted_map_filter_keys", (r, c) ->
             SortedMapNatives.filterKeys(getSortedMap(r, "m"), getFunction(r, "p"), c));
         HANDLERS.put("__native_sorted_map_filter_values", (r, c) ->
             SortedMapNatives.filterValues(getSortedMap(r, "m"), getFunction(r, "p"), c));
         HANDLERS.put("__native_sorted_map_invert", (r, c) ->
-            SortedMapNatives.invert(getSortedMap(r, "m")));
+            SortedMapNatives.invert(getSortedMap(r, "m"), getFunctionOrNull(r, "cmp")));
 
         // List conversion
         HANDLERS.put("__native_sorted_map_to_list", (r, c) ->
@@ -1770,8 +1869,6 @@ public final class NativeDispatch extends MezzeNode {
             DequeNatives.compare(getDeque(r, "d1"), getDeque(r, "d2"), getFunction(r, "cmp"), c));
         HANDLERS.put("__native_deque_to_list", (r, c) ->
             DequeNatives.toList(getDeque(r, "d")));
-        HANDLERS.put("__native_deque_to_seq", (r, c) ->
-            DequeNatives.toArray(getDeque(r, "d")));
         HANDLERS.put("__native_deque_from_list", (r, c) ->
             DequeNatives.fromList(getList(r, "xs")));
 
@@ -1818,6 +1915,9 @@ public final class NativeDispatch extends MezzeNode {
             DequeNatives.take(getDeque(r, "d"), getLong(r, "n")));
         HANDLERS.put("__native_deque_drop", (r, c) ->
             DequeNatives.drop(getDeque(r, "d"), getLong(r, "n")));
+        HANDLERS.put("__native_deque_unique_with_evidence", (r, c) ->
+            DequeNatives.uniqueWithEvidence(getDeque(r, "d"),
+                getFunction(r, "hash"), getFunction(r, "eq")));
         HANDLERS.put("__native_deque_unique", (r, c) ->
             DequeNatives.unique(getDeque(r, "d")));
         HANDLERS.put("__native_deque_sort", (r, c) ->
@@ -1873,11 +1973,11 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_deque_to_set", (r, c) ->
             DequeNatives.toSet(getDeque(r, "d")));
         HANDLERS.put("__native_deque_to_sorted_set", (r, c) ->
-            DequeNatives.toSortedSet(getDeque(r, "d")));
+            DequeNatives.toSortedSet(getDeque(r, "d"), getFunctionOrNull(r, "cmp")));
         HANDLERS.put("__native_deque_to_map", (r, c) ->
             DequeNatives.toMap(getDeque(r, "d")));
         HANDLERS.put("__native_deque_to_sorted_map", (r, c) ->
-            DequeNatives.toSortedMap(getDeque(r, "d")));
+            DequeNatives.toSortedMap(getDeque(r, "d"), getFunctionOrNull(r, "cmp")));
         HANDLERS.put("__native_deque_from_set", (r, c) ->
             DequeNatives.fromSet(getSet(r, "s")));
         HANDLERS.put("__native_deque_from_sorted_set", (r, c) ->
@@ -1909,6 +2009,8 @@ public final class NativeDispatch extends MezzeNode {
             NonEmptyListNatives.fromArray(getArray(r, "xs")));
         HANDLERS.put("__native_nel_size", (r, c) ->
             NonEmptyListNatives.length(getNonEmptyList(r, "xs")));
+        HANDLERS.put("__native_nel_sum", (r, c) ->
+            NonEmptyListNatives.sum(getNonEmptyList(r, "xs")));
         HANDLERS.put("__native_nel_head", (r, c) ->
             NonEmptyListNatives.head(getNonEmptyList(r, "xs")));
         HANDLERS.put("__native_nel_tail", (r, c) ->
@@ -1955,6 +2057,8 @@ public final class NativeDispatch extends MezzeNode {
             NonEmptyListNatives.all(getNonEmptyList(r, "xs"), getFunction(r, "p"), c));
         HANDLERS.put("__native_nel_sort_by", (r, c) ->
             NonEmptyListNatives.sortBy(getNonEmptyList(r, "xs"), getFunction(r, "cmp"), c));
+        HANDLERS.put("__native_nel_sort_by_ord", (r, c) ->
+            NonEmptyListNatives.sortByOrd(getNonEmptyList(r, "xs"), getFunction(r, "le"), c));
         HANDLERS.put("__native_nel_equals", (r, c) ->
             NonEmptyListNatives.equals(getNonEmptyList(r, "xs"), getNonEmptyList(r, "ys"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_nel_compare", (r, c) ->
@@ -2131,11 +2235,25 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_bytes_to_base64", (r, c) ->
             BytesNatives.toBase64(getBytes(r, "b")));
         HANDLERS.put("__native_bytes_to_seq", (r, c) ->
-            BytesNatives.toArray(getBytes(r, "b")));
+            BytesNatives.toSeq(getBytes(r, "b")));
 
         // HOF operations
         HANDLERS.put("__native_bytes_map", (r, c) ->
             BytesNatives.map(getBytes(r, "b"), getFunction(r, "f"), c));
+        // The mapper RECOGNISED instead of called — see BytesNatives.mapAdd for
+        // the measurements. One name per operation, so the handler lookup is
+        // the only dispatch and nothing re-reads a tag per call.
+        // `BytesMapArithRewriter` emits these; no stdlib surface declares them.
+        HANDLERS.put("__native_bytes_map_add", (r, c) ->
+            BytesNatives.mapAdd(getBytes(r, "b"), getLong(r, "k")));
+        HANDLERS.put("__native_bytes_map_sub", (r, c) ->
+            BytesNatives.mapSub(getBytes(r, "b"), getLong(r, "k")));
+        HANDLERS.put("__native_bytes_map_mul", (r, c) ->
+            BytesNatives.mapMul(getBytes(r, "b"), getLong(r, "k")));
+        HANDLERS.put("__native_bytes_map_div", (r, c) ->
+            BytesNatives.mapDiv(getBytes(r, "b"), getLong(r, "k")));
+        HANDLERS.put("__native_bytes_map_mod", (r, c) ->
+            BytesNatives.mapMod(getBytes(r, "b"), getLong(r, "k")));
         HANDLERS.put("__native_bytes_fold", (r, c) ->
             BytesNatives.fold(getBytes(r, "b"), getField(r, "init"), getFunction(r, "f"), c));
         HANDLERS.put("__native_bytes_equals", (r, c) ->
@@ -2436,7 +2554,11 @@ public final class NativeDispatch extends MezzeNode {
     }
 
     private static MezzeList getList(MezzeRecord r, String name) {
-        Object val = getField(r, name);
+        return coerceList(getField(r, name), name);
+    }
+
+    /** See {@link #coerceSeq}; a list has THREE representations, not two. */
+    public static MezzeList coerceList(Object val, String name) {
         if (val instanceof MezzeList list) return list;
         // Handle array literals (Object[]) - convert to MezzeList
         if (val instanceof Object[] arr) {
@@ -2541,9 +2663,19 @@ public final class NativeDispatch extends MezzeNode {
     }
 
     private static MezzeSeq getSeq(MezzeRecord r, String name) {
-        Object val = getField(r, name);
+        return coerceSeq(getField(r, name), name);
+    }
+
+    /**
+     * A SEQ HAS MORE THAN ONE RUNTIME REPRESENTATION: the canonical
+     * {@link MezzeSeq}, and a bare {@code Object[]} for a literal that was
+     * never wrapped. This is the one place that decides what counts as a seq,
+     * so that every route which reads one agrees -- including
+     * {@code MezzeBytecodeRootNode.InlineSeqGetRaw}, which fuses the read and
+     * has to accept exactly what this accepts.
+     */
+    public static MezzeSeq coerceSeq(Object val, String name) {
         if (val instanceof MezzeSeq seq) return seq;
-        // Also handle Object[] - convert to MezzeSeq
         if (val instanceof Object[] arr) return MezzeSeq.fromArray(arr);
         throw new NativeTypeMismatchException("Expected MezzeSeq for field '" + name + "', got: " +
             (val == null ? "null" : val.getClass().getSimpleName()));
@@ -2562,7 +2694,11 @@ public final class NativeDispatch extends MezzeNode {
     }
 
     private static BytesNatives.MezzeBytes getBytes(MezzeRecord r, String name) {
-        Object val = getField(r, name);
+        return coerceBytes(getField(r, name), name);
+    }
+
+    /** See {@link #coerceSeq}; bytes has ONE representation. */
+    public static BytesNatives.MezzeBytes coerceBytes(Object val, String name) {
         if (val instanceof BytesNatives.MezzeBytes bytes) return bytes;
         throw new NativeTypeMismatchException("Expected MezzeBytes for field '" + name + "'");
     }
@@ -2625,7 +2761,8 @@ public final class NativeDispatch extends MezzeNode {
 
     @TruffleBoundary
     private static String toScreamingSnakeCase(String s) {
-        return toSnakeCase(s).toUpperCase();
+        // Locale.ROOT: SCREAMING_SNAKE_CASE of an identifier is ASCII folding.
+        return toSnakeCase(s).toUpperCase(java.util.Locale.ROOT);
     }
 
     @TruffleBoundary
@@ -4723,7 +4860,7 @@ public final class NativeDispatch extends MezzeNode {
             return makeDecodeError("Expected Json value, got " + (jsonObj == null ? "null" : jsonObj.getClass().getSimpleName()));
         }
 
-        if (!"JObject".equals(jv.getConstructorName())) {
+        if (jv.getTag() != com.mezze.interpreter.nodes.builtin.io.DslJsonCodec.TAG_JOBJECT) {
             return makeDecodeError("Expected JObject, got " + jv.getConstructorName());
         }
 
@@ -4787,15 +4924,22 @@ public final class NativeDispatch extends MezzeNode {
         if (!(json instanceof MezzeVariant jv)) {
             return makeDecodeError("Expected Json variant");
         }
-        String tag = jv.getConstructorName();
-        return switch (tag) {
-            case "JString", "JInt", "JFloat", "JBool" -> jv.getPayloadFieldByName("val");
-            case "JNull" -> {
-                int noneTag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("None");
-                yield MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), noneTag);
-            }
-            default -> makeDecodeError("Unsupported Json type: " + tag);
-        };
+        // THE TAG, not the name. This ran once per decoded FIELD, and
+        // `getConstructorName` reverse-resolves by SCANNING the global
+        // name-to-tag map — see the note on DslJsonCodec's tags, where the same
+        // shape in the serializer measured 2.74x.
+        int tag = jv.getTag();
+        if (tag == com.mezze.interpreter.nodes.builtin.io.DslJsonCodec.TAG_JSTRING || tag == com.mezze.interpreter.nodes.builtin.io.DslJsonCodec.TAG_JINT
+                || tag == com.mezze.interpreter.nodes.builtin.io.DslJsonCodec.TAG_JFLOAT || tag == com.mezze.interpreter.nodes.builtin.io.DslJsonCodec.TAG_JBOOL) {
+            return jv.getPayloadFieldByName("val");
+        }
+        if (tag == com.mezze.interpreter.nodes.builtin.io.DslJsonCodec.TAG_JNULL) {
+            int noneTag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("None");
+            return MezzeVariant.noPayload(MezzeVariant.TagRegistry.getGlobal(), noneTag);
+        }
+        // The name is resolved only for the error, where it is what the reader
+        // needs and the cost does not matter.
+        return makeDecodeError("Unsupported Json type: " + jv.getConstructorName());
     }
 
     /**

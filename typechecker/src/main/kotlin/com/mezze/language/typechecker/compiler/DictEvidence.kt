@@ -408,6 +408,78 @@ internal fun TypedASTCompiler.normalizeDictKeys(raw: Set<String>): Set<String> =
 /** The dict slot NAME an enclosing function holds for [method] at type var
  *  [typeVar]: the per-var slot when it has one, else the plain slot, else any
  *  per-var slot of that method (a caller that only holds one). Null if none. */
+/**
+ * The dictionaries [expr] has to capture from the enclosing frame, as
+ * (name, parent slot index).
+ *
+ * ONE computation, because TWO callers have to agree on it EXACTLY. A
+ * recursive do-block `let` lambda registers the hash its self-calls will
+ * target before its body compiles, and the emission computes the hash it is
+ * actually stored under; `saltedLambdaHash` folds the dict-capture list into
+ * both. While the registration predicted that list as EMPTY, any recursive
+ * local lambda whose arithmetic dictionary comes from the ENCLOSING
+ * function's dict parameter emitted under one hash and called itself at
+ * another — a target resolvable nowhere, so BDSL rejected the lambda and the
+ * program died with `CallDirectIR:target-not-compiled`, having type-checked
+ * clean. `bench/cases/hofcapture` is the 20-line reproducer.
+ *
+ * Reads the CURRENT frame, so it is only valid while the parent's frame is
+ * still installed — true at both call sites.
+ */
+internal fun TypedASTCompiler.dictCapturesFor(
+expr: TypedLambda,
+ownDicts: Set<String>,
+): List<Pair<String, Int>> {
+        // #195 B3: scan the lambda body for VarType ability method calls
+        // (e.g. `x.encode { config = config }` inside a `seq::fold` callback). The
+        // lambda needs its own dict params for each method whose receiver is
+        // a TyVar. These dicts can't come through the indirect-call signature
+        // (it's `f : {acc, x} -> 'b`, no room for extra args), so we capture
+        // them from the PARENT's dict-param slots. The parent already gained
+        // those slots via the B2 scanner-descent fix.
+        val lambdaDictMethods = sortedSetOf<String>()
+        // The lambda's own arrow might not carry `with <Ability>` constraints,
+        // but the PARENT scope may (e.g. `{ a, b } with Ord 'a -> ({ x, y } -> x <= y)…`).
+        // If the parent has dict params, the lambda body may reference VarType ops
+        // that need those dicts captured. Derive arrowIsConstrained from both the
+        // lambda's own type AND whether the parent scope carries dicts.
+        val parentHasDicts = currentParamNames.any { it.startsWith("__dict_") }
+        val lambdaConstrained = parentHasDicts || arrowHasAbilityConstraint(expr.type)
+        // A lambda with its OWN dictionary parameters captures none: its callers
+        // supply every dictionary it needs.
+        if (ownDicts.isEmpty()) scanExprForVarTypeMethods(expr.body, lambdaDictMethods, lambdaConstrained)
+        // Only keep dicts the parent actually has — otherwise we'd try to
+        // capture a slot that doesn't exist.
+        return lambdaDictMethods.mapNotNull { method ->
+            // Raw `method@var` keys resolve to whichever slot the PARENT holds for
+            // that (method, var) — per-var when it has one, else the plain one.
+            // C.5: no unqualified-name fallback. This used to drop the type var
+            // and retry under the bare `__dict_<method>` name when the per-var
+            // lookup missed — a name-keyed guess of exactly the kind C.2
+            // replaced. Measured dead: zero hits across a full forced rerun of
+            // the interpreter suite (8m38s, no caching), because
+            // `enclosingDictSlotIn` already matches an ability-qualified slot for
+            // an unqualified request. A dict we cannot locate is not captured.
+            val dictName = enclosingDictSlotIn(
+                currentParamNames,
+                currentCaptureNames,
+                com.mezze.language.ast.MagicParams.methodOfKey(method),
+                com.mezze.language.ast.MagicParams.typeVarOfKey(method),
+                // S-11: without the ability segment this misses the exact per-variable
+                // slot, and the PREFIX scan below answers with whichever comes first —
+                // two keys from one lambda collapsing onto ONE captured dictionary.
+                com.mezze.language.ast.MagicParams.abilityOfKey(method),
+            ) ?: return@mapNotNull null
+            val parentParamIdx = currentParamNames.indexOf(dictName)
+            if (parentParamIdx >= 0) {
+                dictName to (currentCaptureCount + parentParamIdx)
+            } else {
+                val parentCaptureIdx = currentCaptureNames[dictName]
+                if (parentCaptureIdx != null) dictName to parentCaptureIdx else null
+            }
+        }.distinctBy { it.first }
+}
+
 internal fun TypedASTCompiler.enclosingDictSlotIn(
     params: List<String>,
     captures: Map<String, Int>,
@@ -457,9 +529,16 @@ internal fun TypedASTCompiler.dictSlotIndex(name: String): Int? {
  *  loud failure: the reference exists only because the enclosing function
  *  declared the constraint that supplies it, so a miss is a compiler defect,
  *  never something to paper over. */
+/** The frame slot holding this receiver-less op's dictionary, or null when the
+ *  frame has none — which inside a mono SPECIALIZATION is the ordinary case, not
+ *  a defect: the spec's types are concrete, so the op can be resolved outright
+ *  instead of being handed over. See `receiverlessOpRef`. */
+internal fun TypedASTCompiler.abilityOpDictSlotOrNull(binding: BindingRef.AbilityOp): Int? =
+    enclosingDictSlot(binding.opName, binding.typeVarName, binding.abilityHash.hex)
+        ?.let { dictSlotIndex(it) }
+
 internal fun TypedASTCompiler.abilityOpDictSlot(binding: BindingRef.AbilityOp): Int {
-    val name = enclosingDictSlot(binding.opName, binding.typeVarName, binding.abilityHash.hex)
-    val index = name?.let { dictSlotIndex(it) }
+    val index = abilityOpDictSlotOrNull(binding)
     return index ?: throw com.mezze.language.typechecker.TypeCheckError(
         message = "'${binding.opName}' takes no receiver, so the type it produces is what " +
             "chooses the implementation — and nothing here determines that type. Say what " +
@@ -685,9 +764,12 @@ internal fun TypedASTCompiler.bindImplVarsForOp(opHash: Hash, types: List<MezzeT
  * Declines rather than guesses when one ability would answer twice with
  * different types (`with Eq 'a, Eq 'b`), leaving the existing path to decide.
  *
- * BUG 40: [OwnConstraintTypes.tuple] carries EVERY type arg, in the ability's
- * declaration order, because for a CLASS-PARAM ability no single one of them
- * identifies the impl. `with Make 'b 'a` at `[Str, Src]` reduced to its first
+ * BUG 40 is answered NEXT DOOR, by [ownTuplePerMethod], which carries EVERY type
+ * arg in the ability's declaration order — because for a CLASS-PARAM ability no
+ * single one of them identifies the impl. (The type-soundness branch had the
+ * tuple folded into this function's return; the perf branch split it out. The
+ * split shape won the merge because its call sites are the more numerous. The
+ * reasoning below is why either exists.) `with Make 'b 'a` at `[Str, Src]` reduced to its first
  * resolvable arg — `Str` — which matches no `Make _ for Str`, so resolution
  * fell through to the flattened list, found `Src`, and took the first of the
  * two impls sharing that receiver. `via` typed `-> 'b` and called at `Str`
@@ -697,30 +779,21 @@ internal fun TypedASTCompiler.bindImplVarsForOp(opHash: Hash, types: List<MezzeT
 internal fun TypedASTCompiler.ownTypePerMethod(
     constraints: List<MezzeType.FunctionAbilityConstraint>,
     varBindings: Map<String, MezzeType>,
-): Map<String, OwnConstraintTypes> {
+): Map<String, Pair<MezzeType, Hash?>> {
     if (constraints.isEmpty()) return emptyMap()
-    val found = HashMap<String, OwnConstraintTypes>()
+    val found = HashMap<String, Pair<MezzeType, Hash?>>()
     val declined = HashSet<String>()
     for (c in constraints) {
         val ops = c.abilityHash?.let { abilityOpNames[it] } ?: continue
-        // Each type arg resolved, or null where nothing determines it. The
-        // ORDER is the ability's, so a complete list is positional against an
-        // impl's `targetTypes`.
-        val resolved = c.typeArgs.map { arg ->
-            (arg as? VarType)?.variable?.name?.let { v -> varBindings[v] ?: varBindings["'$v"] }
-                ?: substitution.apply(arg).takeIf { it !is VarType && !containsVarType(it) }
-        }
-        val bound = resolved.firstOrNull { it != null } ?: continue
-        val entry = OwnConstraintTypes(
-            primary = bound,
-            // Only a COMPLETE tuple can be matched positionally; one hole and
-            // every impl would agree at that slot.
-            tuple = resolved.filterNotNull().takeIf { it.size == resolved.size && it.size > 1 },
-            abilityHash = c.abilityHash,
-        )
+        val bound = c.typeArgs.asSequence()
+            .mapNotNull { arg ->
+                (arg as? VarType)?.variable?.name?.let { v -> varBindings[v] ?: varBindings["'$v"] }
+                    ?: substitution.apply(arg).takeIf { it !is VarType && !containsVarType(it) }
+            }
+            .firstOrNull() ?: continue
         for (op in ops) {
             val prev = found[op]
-            if (prev != null && prev.primary != bound) declined.add(op) else found[op] = entry
+            if (prev != null && prev.first != bound) declined.add(op) else found[op] = bound to c.abilityHash
         }
     }
     declined.forEach { found.remove(it) }
@@ -728,19 +801,50 @@ internal fun TypedASTCompiler.ownTypePerMethod(
 }
 
 /**
- * What ONE of a callee's `with` constraints says, resolved at a call site.
+ * Operation name → the FULL ordered class-arg tuple its own constraint resolves
+ * to here, for the callee whose declared [constraints] these are.
  *
- * [primary] is the first determined type arg — the single type every dict
- * resolution used before BUG 40, kept so nothing that already resolves changes.
- * [tuple] is every type arg in the ability's declaration order, present only
- * when all of them are determined and there is more than one, which is exactly
- * when a class-param ability needs the whole tuple to name its impl.
+ * [ownTypePerMethod] answers the same question with ONE type, taking the first
+ * type arg that resolves. That is enough to pick between impls for different
+ * receivers, and not enough to pick between impls that share one:
+ * `NumAdd Float for Float` and `NumAdd Int for Float` differ ONLY in the
+ * operand, so a single type picks whichever is indexed first and the dictionary
+ * holds a DIFFERENT OPERATION. A `Float + Int` reached through a dictionary got
+ * Float's homogeneous `add` and handed it a Long:
+ *
+ *     UnsupportedSpecializationException … CallNativeDDD
+ *         [FloatOps$$Lambda, 0.5, 21]        <- Double, Double, Long
+ *
+ * Only FULLY concrete tuples are kept. A tuple with a hole matches more than
+ * one impl, which is the ambiguity this exists to remove — the same rule
+ * [obligationDispatchTypes] applies — and those fall through to the existing
+ * per-type resolution unchanged.
+ *
+ * Declines on conflict for the reason [ownTypePerMethod] does: one ability
+ * answering twice with different tuples says nothing about which slot is which.
  */
-internal data class OwnConstraintTypes(
-    val primary: MezzeType,
-    val tuple: List<MezzeType>?,
-    val abilityHash: Hash?,
-)
+internal fun TypedASTCompiler.ownTuplePerMethod(
+    constraints: List<MezzeType.FunctionAbilityConstraint>,
+    varBindings: Map<String, MezzeType>,
+): Map<String, Pair<List<MezzeType>, Hash?>> {
+    if (constraints.isEmpty()) return emptyMap()
+    val found = HashMap<String, Pair<List<MezzeType>, Hash?>>()
+    val declined = HashSet<String>()
+    for (c in constraints) {
+        val ops = c.abilityHash?.let { abilityOpNames[it] } ?: continue
+        val tuple = c.typeArgs.map { arg ->
+            (arg as? VarType)?.variable?.name?.let { v -> varBindings[v] ?: varBindings["'$v"] }
+                ?: substitution.apply(arg)
+        }
+        if (tuple.isEmpty() || tuple.any { it is VarType || containsVarType(it) }) continue
+        for (op in ops) {
+            val prev = found[op]
+            if (prev != null && prev.first != tuple) declined.add(op) else found[op] = tuple to c.abilityHash
+        }
+    }
+    declined.forEach { found.remove(it) }
+    return found
+}
 
 /**
  * The operation to put in a dictionary slot for [dictMethod].
@@ -753,22 +857,23 @@ internal data class OwnConstraintTypes(
  */
 internal fun TypedASTCompiler.resolveDictOp(
     dictMethod: String,
-    methodOwnType: Map<String, OwnConstraintTypes>,
+    methodOwnType: Map<String, Pair<MezzeType, Hash?>>,
     keyAbilityHash: Hash?,
     constraintTypes: List<MezzeType>,
     concreteTypes: List<MezzeType>,
+    methodOwnTuple: Map<String, Pair<List<MezzeType>, Hash?>> = emptyMap(),
 ): Hash? {
-    // THIS operation's own constraint first — and as a TUPLE before a single
-    // type, since for a class-param ability only the whole tuple names the impl
-    // (BUG 40). The tuple is present only when every arg is determined, and it
-    // declines unless exactly one impl matches, so the single-type pass below
-    // still answers everything it answered before.
-    methodOwnType[dictMethod]?.let { own ->
-        own.tuple?.let { tuple ->
-            tryResolveAbilityOpByTuple(dictMethod, tuple, keyAbilityHash ?: own.abilityHash)
-                ?.let { return it }
-        }
-        resolveOpHashFromConcreteTypes(dictMethod, listOf(own.primary), keyAbilityHash ?: own.abilityHash)
+    // THIS operation's own constraint, matched POSITION BY POSITION, before
+    // anything below gets to decide it from a single type. Only a fully
+    // concrete tuple arrives here (see `ownTuplePerMethod`), and matching the
+    // whole of it is the only way to separate two impls that share a receiver.
+    methodOwnTuple[dictMethod]?.let { (tuple, ability) ->
+        resolveOpFromObligation(dictMethod, keyAbilityHash ?: ability, tuple)
+            ?.let { return it }
+    }
+    // THIS operation's own constraint first.
+    methodOwnType[dictMethod]?.let { (own, ability) ->
+        resolveOpHashFromConcreteTypes(dictMethod, listOf(own), keyAbilityHash ?: ability)
             ?.let { return it }
     }
     // Then the callee's constraint types, then the argument types — both
@@ -826,23 +931,23 @@ internal fun TypedASTCompiler.planWrappedDictSlots(
     concreteTypes: List<MezzeType>,
 ): List<WrappedDictSlot> {
     val arrow = implOpLambdaForHash(opHash)?.type as? MezzeType.FunctionType
-    val ownTypes = ownTypePerMethod(
-        arrow?.abilityConstraints.orEmpty(),
-        bindImplVarsForOp(opHash, concreteTypes),
-    )
+    val implBindings = bindImplVarsForOp(opHash, concreteTypes)
+    val constraints = arrow?.abilityConstraints.orEmpty()
+    val ownTypes = ownTypePerMethod(constraints, implBindings)
+    val ownTuples = ownTuplePerMethod(constraints, implBindings)
     return needed.sorted().mapNotNull { key ->
         val dictMethod = com.mezze.language.ast.MagicParams.methodOfKey(key)
         val own = ownTypes[dictMethod]
-        val subTypes = own?.let { listOf(it.primary) } ?: deeper
+        val subTypes = own?.let { listOf(it.first) } ?: deeper
         // BUG 40: the whole class-arg tuple first, for the same reason as in
         // `resolveDictOp`. The slot records the TUPLE it was resolved from when
         // that is what answered, so what the slot says and what chose it agree.
-        val byTuple = own?.tuple?.let { tuple ->
-            tryResolveAbilityOpByTuple(dictMethod, tuple, own.abilityHash)
+        val byTuple = ownTuples[dictMethod]?.let { (tuple, ability) ->
+            tryResolveAbilityOpByTuple(dictMethod, tuple, ability)
                 ?.let { it to tuple }
         }
         val resolved = byTuple
-            ?: resolveOpHashFromConcreteTypes(dictMethod, subTypes, own?.abilityHash)?.let { it to subTypes }
+            ?: resolveOpHashFromConcreteTypes(dictMethod, subTypes, own?.second)?.let { it to subTypes }
         resolved?.let { (subHash, from) ->
             WrappedDictSlot(com.mezze.language.ast.MagicParams.dictParamName(key), subHash, from)
         }
@@ -1454,6 +1559,32 @@ internal fun TypedASTCompiler.dictEnrichedArg(
         if (fromImpl.isNotEmpty()) return@run fromImpl
         val fromArrow = HashMap<String, MezzeType>()
         rawFnType?.let { harvestVarBindings(it.paramType, substitution.apply(expr.arg.type), fromArrow) }
+        // THE SITE'S OWN SOLVED PARAMETER TYPES, for the vars the line above
+        // could not reach. It harvests the callee's SCHEME against the
+        // ARGUMENT, and when the argument is a reference to another polymorphic
+        // function the argument's recorded type is ITS scheme too — so a
+        // callback's result meets a variable and binds nothing. That left a
+        // `with` constraint's operand open, and the dictionary was then picked
+        // from the only resolved position, the RECEIVER: right by luck for a
+        // homogeneous add, and Float's `impl NumAdd Float for Float` handed a
+        // Long for `Float + Int`.
+        //
+        // `callSiteArrows` keeps what the solver concluded about THIS site, and
+        // only a fully resolved arrow is offered, so harvesting the scheme
+        // against it binds those same vars to concrete types:
+        //
+        //   scheme   { n: Int, f: { x: Int } -> 'a, zero: 'b }
+        //   per-site { n: Int, f: { x: Int } -> Int, zero: Float }
+        //   gives    'a = Int, 'b = Float   -> the tuple [Int, Float] is whole
+        //
+        // ADDED, never overriding: a var the existing sources bound keeps that
+        // binding. Replacing them was not tried because the failure here is
+        // always a MISSING binding, never a wrong one.
+        callSiteArrow(expr.loc)?.let { arrow ->
+            val fromSite = HashMap<String, MezzeType>()
+            rawFnType?.let { harvestVarBindings(it.paramType, arrow.paramType, fromSite) }
+            for ((k, v) in fromSite) fromArrow.putIfAbsent(k, v)
+        }
         fromArrow
     }
     // The callee's `with` constraints. `fn.type` carries them for an ordinary
@@ -1488,7 +1619,14 @@ internal fun TypedASTCompiler.dictEnrichedArg(
     return injectDictFields(
         argIR, expr.arg, calleeDictMethods, constraintTypes, calleeConstraintsAreGeneric, src,
         calleeVarBindings,
+        // `returnBindings` as well as the argument bindings, in BOTH: a class
+        // param can be reachable from the RETURN and from no argument at all
+        // (`Into 'b for 'a`), which is what BUG 39/40 were about. Without it the
+        // tuple is short exactly where it matters, and a generic hop loses the
+        // param. The perf branch passed only `calleeVarBindings`; this is the
+        // type-soundness side's addition, kept across the merge.
         ownTypePerMethod(calleeConstraints, returnBindings + calleeVarBindings),
+        ownTuplePerMethod(calleeConstraints, returnBindings + calleeVarBindings),
     )
 }
 

@@ -429,6 +429,13 @@ fun ErrorCode.explain(): String = when (this) {
         "If the ability op uses `<E, ...>`, the impl must include E but may add others. " +
         "Only `<...>` (fully polymorphic) allows the impl to choose freely."
 
+    ErrorCode.V0423_IMPL_OP_UNKNOWN_PARAM ->
+        "An ability impl operation binds a parameter name the ability does not declare. " +
+        "Arguments in Mezze are records matched by NAME, so a parameter the ability never " +
+        "declares is never supplied: the body binds a field that does not arrive, and the " +
+        "operation becomes a partial application instead of returning its declared type. " +
+        "Rename the parameter to the one the ability declares (e.g. `Eq.eq` takes `{ it, r }`)."
+
     ErrorCode.V0501_EFFECT_NOT_HANDLED ->
         "A performed effect is not handled. " +
         "Wrap the expression in a `handle` block that provides a handler for this effect."

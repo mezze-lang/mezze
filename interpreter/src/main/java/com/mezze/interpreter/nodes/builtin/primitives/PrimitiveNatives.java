@@ -355,12 +355,16 @@ public final class PrimitiveNatives {
 
     @TruffleBoundary
     public static String stringToLowerCase(String s) {
-        return s.toLowerCase();
+        // Locale.ROOT: a language primitive must not vary by host locale.
+        // See MezzeBytecodeRootNode's TO_UPPER case for the Turkish-locale
+        // demonstration.
+        return s.toLowerCase(java.util.Locale.ROOT);
     }
 
     @TruffleBoundary
     public static String stringToUpperCase(String s) {
-        return s.toUpperCase();
+        // Locale.ROOT — same reason as strToLower above.
+        return s.toUpperCase(java.util.Locale.ROOT);
     }
 
     @TruffleBoundary
@@ -493,7 +497,7 @@ public final class PrimitiveNatives {
      * The STRUCTURAL hash of a value — what a derived {@code Hash} instance means.
      *
      * This is already what every hash container computes for its keys
-     * ({@code HashSetStorage} calls {@code elem.hashCode()}), so a type whose
+     * (the hash containers call {@code elem.hashCode()}), so a type whose
      * {@code Hash} is derived hashes exactly as it does today: adding the ability
      * changes no behaviour and costs no performance for the common case. A type
      * that writes its own {@code Hash} overrides this, which is the point — a

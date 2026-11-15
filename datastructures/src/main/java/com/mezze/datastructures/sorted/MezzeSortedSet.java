@@ -39,12 +39,53 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
     @CompilationFinal
     private final Comparator<Object> comparator;
 
+    /**
+     * Whether this set is ordered by the NATURAL order of its elements — true
+     * exactly when no comparator was supplied at construction.
+     *
+     * It gates the type-based fast paths in {@link #compareElements}. Those
+     * answer from `Long.compare` and friends WITHOUT consulting
+     * {@link #comparator}, which is only sound when the two agree. A
+     * `newtype R = Int` is a boxed Long at runtime, so a set ordered by a
+     * hand-written descending `Ord` took the ascending fast path and `union`
+     * concatenated instead of merging — see known-bugs.md BUG 44, where the
+     * result reported size 6 while `contains` denied three of its elements.
+     */
+    @CompilationFinal
+    private final boolean naturalOrder;
+
+    /**
+     * The comparator AS SUPPLIED — null when the order is the natural one.
+     *
+     * Held apart from {@link #comparator}, which is the EFFECTIVE one and is
+     * never null after construction. A derived set must inherit this and not
+     * that: passing the effective comparator along made every set derived from
+     * a natural-ordered one look custom, which turned the fast path off for
+     * the rest of its life.
+     */
+    private final Comparator<?> customComparator;
+
+    /**
+     * The comparator AS SUPPLIED — null when this set is naturally ordered.
+     *
+     * What a derived set must inherit. {@link #comparator()} returns the
+     * EFFECTIVE one, which is never null, so rebuilding with it marks the
+     * result custom-ordered and forfeits the fast paths — measured at 8.2x on
+     * union in known-bugs.md BUG 44.
+     */
+    public Comparator<?> customComparator() {
+        return customComparator;
+    }
+
+
     private final Object[] ownerToken;
 
     @SuppressWarnings("unchecked")
     private MezzeSortedSet(Object[] elements, Comparator<?> comparator) {
         this.elements = elements;
         this.length = elements.length;
+        this.naturalOrder = comparator == null;
+        this.customComparator = comparator;
         this.comparator = comparator != null
                 ? (Comparator<Object>) comparator
                 : (a, b) -> ((Comparable<Object>) a).compareTo(b);
@@ -55,26 +96,23 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
     private MezzeSortedSet(Object[] elements, int length, Comparator<?> comparator, Object[] ownerToken) {
         this.elements = elements;
         this.length = length;
+        this.naturalOrder = comparator == null;
+        this.customComparator = comparator;
         this.comparator = comparator != null
                 ? (Comparator<Object>) comparator
                 : (a, b) -> ((Comparable<Object>) a).compareTo(b);
         this.ownerToken = ownerToken;
     }
 
-    /** Latched flag — see HashMapStorage.ownershipRevoked for rationale. */
-    @CompilationFinal
-    private boolean ownershipRevoked;
-
+    /**
+     * Whether this set may still write into its own array — only ever the
+     * append in {@link #appendInPlace}, at index {@code length}. Reading does
+     * NOT revoke it; see {@code MezzeSortedMap.isOwner} for why that is sound
+     * and for what it was protecting against before the middle-insert path was
+     * deleted as BUG 40.
+     */
     private boolean isOwner() {
-        return !ownershipRevoked && ownerToken != null && ownerToken[0] == this;
-    }
-
-    private void revokeOwnership() {
-        if (ownershipRevoked) return;
-        if (ownerToken != null && ownerToken[0] == this) {
-            ownerToken[0] = null;
-        }
-        ownershipRevoked = true;
+        return ownerToken != null && ownerToken[0] == this;
     }
 
     // ===== CONSTRUCTION =====
@@ -172,6 +210,24 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
     /**
      * Returns the number of elements.
      */
+    /**
+     * The element at a position in sort order, for a search driven from
+     * OUTSIDE this class — the Set peer of {@code MezzeSortedMap.keyAt}, and
+     * for the same reason: a lookup running in here put the COMPARISON in host
+     * code, which could only reach the program's `Ord` by calling back out,
+     * and Graal cannot inline a guest function into host code.
+     *
+     * <p>This probe does NOT revoke ownership, though it used to: it is
+     * bounded by {@code length} and the only in-place write lands AT
+     * {@code length}. See {@code MezzeSortedMap.isOwner}.
+     */
+    public Object elementAt(int i) {
+        if (i < 0 || i >= length) {
+            throw new IndexOutOfBoundsException("sorted set index " + i + " of " + length);
+        }
+        return elements[i];
+    }
+
     public int size() {
         return length;
     }
@@ -187,7 +243,6 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
      * Returns true if the element is present.
      */
     public boolean contains(A elem) {
-        revokeOwnership();
         return binarySearch(elem) >= 0;
     }
 
@@ -244,11 +299,14 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
      */
     public MezzeSortedSet<A> withComparator(Comparator<? super A> cmp) {
         if (cmp == null || cmp == this.comparator) return this;
+        // Hands the array over, and the result can escape sharing it:
+        // `addObject` of a present element and `removeObject` of an absent one
+        // both return `this`. Sound because the only in-place write lands
+        // outside the window either set reads.
         return new MezzeSortedSet<>(elements, length, cmp, null);
     }
 
     public boolean containsObject(Object elem) {
-        revokeOwnership();
         return binarySearchObject(elem) >= 0;
     }
 
@@ -264,26 +322,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
 
         int insertPos = -(idx + 1);
 
-        if (isOwner() && length < elements.length && insertPos == length) {
-            // O(1) fast path: appending at end with spare capacity
-            elements[length] = elem;
-            Object[] token = ownerToken;
-            @SuppressWarnings("unchecked")
-            MezzeSortedSet<A> result = new MezzeSortedSet<>(elements, length + 1, comparator, token);
-            token[0] = result;
-            return result;
-        }
-
-        if (isOwner() && length < elements.length) {
-            // Spare capacity, inserting in middle — shift in-place
-            System.arraycopy(elements, insertPos, elements, insertPos + 1, length - insertPos);
-            elements[insertPos] = elem;
-            Object[] token = ownerToken;
-            @SuppressWarnings("unchecked")
-            MezzeSortedSet<A> result = new MezzeSortedSet<>(elements, length + 1, comparator, token);
-            token[0] = result;
-            return result;
-        }
+        if (insertPos == length && canAppendInPlace()) return appendInPlace(elem);
 
         // Allocate with spare capacity
         int newCapacity = Math.max(length + 1, length + (length >> 1) + 4);
@@ -294,7 +333,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
 
         Object[] token = new Object[1];
         @SuppressWarnings("unchecked")
-        MezzeSortedSet<A> result = new MezzeSortedSet<>(newElements, length + 1, comparator, token);
+        MezzeSortedSet<A> result = new MezzeSortedSet<>(newElements, length + 1, customComparator, token);
         token[0] = result;
         return result;
     }
@@ -317,7 +356,35 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
         System.arraycopy(elements, 0, newElements, 0, idx);
         System.arraycopy(elements, idx + 1, newElements, idx, length - idx - 1);
 
-        return new MezzeSortedSet<>(newElements, comparator);
+        return new MezzeSortedSet<>(newElements, customComparator);
+    }
+
+    /**
+     * Remove the element at a position in sort order, for a caller that has
+     * ALREADY located it. Makes no comparison; see
+     * {@code MezzeSortedMap.removeAt}.
+     */
+    public MezzeSortedSet<A> removeAt(int i) {
+        if (i < 0 || i >= length) {
+            throw new IndexOutOfBoundsException("sorted set remove index " + i + " of " + length);
+        }
+        if (length == 1) return empty();
+
+        Object[] newElements = new Object[length - 1];
+        System.arraycopy(elements, 0, newElements, 0, i);
+        System.arraycopy(elements, i + 1, newElements, i, length - i - 1);
+        return new MezzeSortedSet<>(newElements, customComparator);
+    }
+
+    /**
+     * The elements at {@code [from, to)} of the sort order, as a new set. One
+     * array copy and no comparison; see {@code MezzeSortedMap.slice}.
+     */
+    public MezzeSortedSet<A> slice(int from, int to) {
+        int lo = Math.max(0, Math.min(from, length));
+        int hi = Math.max(lo, Math.min(to, length));
+        if (lo == hi) return empty(comparator);
+        return new MezzeSortedSet<>(Arrays.copyOfRange(elements, lo, hi), customComparator);
     }
 
     /**
@@ -371,6 +438,60 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
         return addObject(elem);
     }
 
+    /** Whether {@link #appendInPlace} may run. */
+    private boolean canAppendInPlace() {
+        return isOwner() && length < elements.length;
+    }
+
+    /**
+     * Append at index {@code length} without copying, handing the token to the
+     * result. The only in-place write in this class, and sound by
+     * ADDRESSABILITY: every set holding this array reads {@code [0, length)},
+     * so none of them can address the slot. See
+     * {@code MezzeSortedMap.appendInPlace} for the middle-insert sibling that
+     * was deleted as BUG 40.
+     */
+    @SuppressWarnings("unchecked")
+    private MezzeSortedSet<A> appendInPlace(Object elem) {
+        elements[length] = elem;
+        Object[] token = ownerToken;
+        MezzeSortedSet<A> result = new MezzeSortedSet<>(elements, length + 1, comparator, token);
+        token[0] = result;
+        return result;
+    }
+
+    /**
+     * Add an element at a position in sort order, for a caller that has ALREADY
+     * established it is absent and where it goes — the guest-side binary search
+     * in {@code std::collections::sorted_set}. Makes no comparison and so needs
+     * no comparator; the native search cost ~30 ns a comparison.
+     *
+     * <p>THE CALLER OWNS THE ORDERING: {@code insertPos} must be the index that
+     * keeps the array sorted, which the guest search returns encoded as
+     * {@code -(insertPos + 1)} when the element is absent. A wrong position
+     * silently produces an unsorted array that every later search misreads.
+     */
+    public MezzeSortedSet<A> addAt(int insertPos, Object elem) {
+        if (insertPos < 0 || insertPos > length) {
+            throw new IndexOutOfBoundsException(
+                    "sorted set insert position " + insertPos + " of " + length);
+        }
+        if (insertPos == length && canAppendInPlace()) return appendInPlace(elem);
+
+        int newCapacity = Math.max(length + 1, length + (length >> 1) + 4);
+        Object[] newElements = new Object[newCapacity];
+        System.arraycopy(elements, 0, newElements, 0, insertPos);
+        newElements[insertPos] = elem;
+        System.arraycopy(elements, insertPos, newElements, insertPos + 1, length - insertPos);
+
+        Object[] token = new Object[1];
+        @SuppressWarnings("unchecked")
+        MezzeSortedSet<A> result =
+                new MezzeSortedSet<>(newElements, length + 1, customComparator, token);
+        token[0] = result;
+        return result;
+    }
+
     /**
      * Returns a new sorted set with the element removed.
      */
@@ -388,7 +509,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
         System.arraycopy(elements, 0, newElements, 0, idx);
         System.arraycopy(elements, idx + 1, newElements, idx, length - idx - 1);
 
-        return new MezzeSortedSet<>(newElements, comparator);
+        return new MezzeSortedSet<>(newElements, customComparator);
     }
 
     // ===== RANGE OPERATIONS =====
@@ -411,7 +532,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
             return empty();
         }
 
-        return new MezzeSortedSet<>(Arrays.copyOfRange(elements, fromIdx, toIdx), comparator);
+        return new MezzeSortedSet<>(Arrays.copyOfRange(elements, fromIdx, toIdx), customComparator);
     }
 
     /**
@@ -425,7 +546,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
             return empty();
         }
 
-        return new MezzeSortedSet<>(Arrays.copyOfRange(elements, idx, length), comparator);
+        return new MezzeSortedSet<>(Arrays.copyOfRange(elements, idx, length), customComparator);
     }
 
     /**
@@ -443,7 +564,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
             return empty();
         }
 
-        return new MezzeSortedSet<>(Arrays.copyOfRange(elements, 0, idx), comparator);
+        return new MezzeSortedSet<>(Arrays.copyOfRange(elements, 0, idx), customComparator);
     }
 
     // ===== NAVIGATION =====
@@ -522,19 +643,22 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
      */
     @SuppressWarnings("unchecked")
     private int compareElements(Object a, Object b) {
-        // Fast path for Long (common case)
-        if (a instanceof Long la && b instanceof Long lb) {
-            return Long.compare(la, lb);
+        // THE TYPE-BASED FAST PATHS ARE GATED ON NATURAL ORDER. They answer
+        // without consulting `comparator`, which is sound only where the two
+        // agree. A newtype over Int is a boxed Long here, so an author's
+        // descending `Ord` was silently overridden by `Long.compare` —
+        // known-bugs.md BUG 44.
+        if (naturalOrder) {
+            if (a instanceof Long la && b instanceof Long lb) {
+                return Long.compare(la, lb);
+            }
+            if (a instanceof Integer ia && b instanceof Integer ib) {
+                return Integer.compare(ia, ib);
+            }
+            if (a instanceof String sa && b instanceof String sb) {
+                return sa.compareTo(sb);
+            }
         }
-        // Fast path for Integer
-        if (a instanceof Integer ia && b instanceof Integer ib) {
-            return Integer.compare(ia, ib);
-        }
-        // Fast path for String
-        if (a instanceof String sa && b instanceof String sb) {
-            return sa.compareTo(sb);
-        }
-        // General case
         return comparator.compare(a, b);
     }
 
@@ -569,7 +693,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
             result[k++] = other.elements[j++];
         }
 
-        return new MezzeSortedSet<>(Arrays.copyOf(result, k), comparator);
+        return new MezzeSortedSet<>(Arrays.copyOf(result, k), customComparator);
     }
 
     /**
@@ -595,7 +719,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
         }
 
         if (k == 0) return empty();
-        return new MezzeSortedSet<>(Arrays.copyOf(result, k), comparator);
+        return new MezzeSortedSet<>(Arrays.copyOf(result, k), customComparator);
     }
 
     /**
@@ -626,7 +750,7 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
         }
 
         if (k == 0) return empty();
-        return new MezzeSortedSet<>(Arrays.copyOf(result, k), comparator);
+        return new MezzeSortedSet<>(Arrays.copyOf(result, k), customComparator);
     }
 
     // ===== ITERATION =====
@@ -658,49 +782,6 @@ public final class MezzeSortedSet<A> implements TruffleObject, Iterable<A> {
     @SuppressWarnings("unchecked")
     public A[] toArray() {
         return (A[]) Arrays.copyOf(elements, length);
-    }
-
-    // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
-
-    /**
-     * Creates a mutable copy of this sorted set.
-     * Used by to_mut to get a fresh copy that can be mutated.
-     */
-    public MezzeSortedSet<A> copyToMutable() {
-        return new MezzeSortedSet<>(elements.clone(), comparator);
-    }
-
-    /**
-     * Returns the internal elements array (for building mutable sorted sets).
-     * Only for internal use within LocalMut context.
-     */
-    public Object[] getElementsInternal() {
-        return elements;
-    }
-
-    /**
-     * In-place set at index - replaces element at given position.
-     * Note: Does NOT maintain sort order - caller is responsible for that.
-     * Only safe within LocalMut context.
-     */
-    public void mutSet(int index, A value) {
-        if (index < 0 || index >= length) {
-            throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + length);
-        }
-        elements[index] = value;
-    }
-
-    /**
-     * In-place swap elements at indices i and j.
-     * Only safe within LocalMut context.
-     */
-    public void mutSwap(int i, int j) {
-        if (i < 0 || i >= length || j < 0 || j >= length) {
-            throw new IndexOutOfBoundsException("Indices: " + i + ", " + j + ", Size: " + length);
-        }
-        Object tmp = elements[i];
-        elements[i] = elements[j];
-        elements[j] = tmp;
     }
 
     // ===== OBJECT METHODS =====

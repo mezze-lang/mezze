@@ -119,6 +119,12 @@ object MonoDriver {
          *  the specialized decl. Populated for HOF call sites whose
          *  callee's closure params were dead-code eliminated. */
         val stripBySiteLoc: Map<Loc, Set<String>> = emptyMap(),
+        /**
+         * The entry module's decls with polymorphic LOCAL lambdas monomorphised
+         * in place. Null when the pass did not run. The caller compiles THESE
+         * rather than the module it passed in — see [LocalLambdaSpecializer].
+         */
+        val entryDecls: List<com.mezze.language.typedast.TypedDecl>? = null,
     ) {
         val specializations get() = mono.specializations
         val fallbacks get() = mono.fallbacks
@@ -137,6 +143,26 @@ object MonoDriver {
         /** Declared generic record / variant shapes by name: name → (type-param
          *  names, shape over those params). See [openDeclaredTarget]. */
         declShapes: Map<String, Pair<List<String>, MezzeType>> = emptyMap(),
+        /**
+         * callLoc -> the callee's arrow AS INSTANTIATED AT THAT SITE, already
+         * substituted and already known to be fully concrete.
+         *
+         * `fn.type` on the emitted node is per-site in its ordinary positions
+         * but NOT in the ones only an ability constraint mentions: a callback's
+         * RESULT type stays the var the solver left, because
+         * `resolveIdentifierType` builds a reference's type from the
+         * declaration's scheme and the argument is another scheme. So
+         * `deriveTypeArgs` saw `f: {x: Int} -> 'out#1983` at two different call
+         * sites of one HOF and refused both — `apply_fold` compiled as
+         * `[n, f, __dict_add]`, and kernel 3 of `bench/cases/defunc` differed
+         * from kernel 7 only in whether its callback carried an annotation.
+         *
+         * The solver HAD resolved it per site; this is that answer, recorded at
+         * the call site and carried here rather than stamped onto `fn.type`,
+         * which is read by much more than mono (measured: seven receiver-less
+         * dictionary tests fail when that type changes).
+         */
+        callSiteArrows: Map<Loc, MezzeType.FunctionType> = emptyMap(),
     ): Result {
         // Index ordinary let decls.
         val declIndex = HashMap<Hash, TypedLetDecl>()
@@ -233,26 +259,12 @@ object MonoDriver {
         // Off by default. The gate exists so we can measure the coverage
         // lift without risking a default-on regression on the ~496 generic
         // decls in stdlib (bulk unification cost).
-        val seeds = ArrayList<Monomorphizer.SpecRequest>()
-        val seedLocs = ArrayList<Loc>()
-        val counters = Counters()
-        val seedStdlib = System.getenv("MEZZE_MONO_SEED_STDLIB") == "1"
-        val seedFrom = if (seedStdlib) listOf(entry) + imported + resolutionOnly
-                       else            listOf(entry) + imported
-        for (m in seedFrom) {
-            for (d in m.decls) {
-                if (d !is TypedLetDecl) continue
-                if (d.typeParams.isNotEmpty()) continue
-                collectSeedsFromExpr(d.value, declIndex, abilityOpIndex, abilityImpls, seeds, seedLocs, counters, recordShapeByHash)
-            }
-        }
-
         // Index impls by their content hash so the constraint-aware
         // rewriter (Piece 2 of #267) can look up operation names from the
         // AbilityImplRefs in each SpecRequest.
         val implIndex = HashMap<Hash, TypedAbilityImpl>(abilityImpls.size)
         for (impl in abilityImpls) implIndex[impl.hash] = impl
-        val result = Monomorphizer(
+        val monomorphizer = Monomorphizer(
             resolveDecl = declIndex::get,
             implIndex = implIndex,
             // C.1 — let a transitive specialization resolve its OWN constraints
@@ -262,7 +274,72 @@ object MonoDriver {
             resolveEvidence = { decl, args ->
                 resolveAbilityConstraints(decl, args, abilityImpls, recordShapeByHash)
             },
-        ).run(seeds)
+            // The same `having 'out` filler the seed path uses, so the TRANSITIVE
+            // path resolves an out-var it cannot reach from the parameter type.
+            // One rule for completing type args, not two.
+            fillHavingOut = { decl, args -> fillHavingOutTypeArgs(decl, args, abilityImpls) },
+        )
+
+        // Monomorphise POLYMORPHIC LOCAL LAMBDAS before seeding.
+        //
+        // Monomorphizer specializes DECLS, keyed by content hash, and emits new
+        // ones. A do-block `let` bound to a lambda generalizes (#76), which makes
+        // a local polymorphic function that is not a decl and sits inside a
+        // function that is already concrete — so no specialization of it is ever
+        // produced and its body keeps its dictionary. That is worth two orders of
+        // magnitude on a named pipeline step; see [LocalLambdaSpecializer].
+        //
+        // BEFORE the seed walk, not after, and that ordering is the whole point.
+        // Making the body concrete is only half the job: the `iter::map` inside it
+        // must then be SEEDED at the now-known element type, or it stays a generic
+        // call, never lowers to `__native_iter_map`, and the chain the pass was
+        // meant to free still cannot fuse. Seeding therefore walks the specialized
+        // decls.
+        //
+        // It also reuses `rewriteConstrainedMethodCalls`, the same step the decl
+        // path uses to turn a constraint-driven method call into a direct one, so
+        // there is one rule for discharging a constraint and not two.
+        val entryDecls = LocalLambdaSpecializer.specializeDecls(
+            entry.decls, abilityImpls, recordShapeByHash,
+        ) { expr, impls -> monomorphizer.rewriteConstrainedMethodCalls(expr, impls) }
+        // Point the index at the specialized bodies so a TRANSITIVE
+        // specialization is cloned from one too. `resolveDecl` is a function
+        // reference into this same map, so updating it now is seen by the
+        // monomorphizer constructed above. The pass preserves each decl's hash —
+        // it rewrites a local binding inside a body, not the decl's identity — so
+        // these replace rather than add.
+        for (d in entryDecls) if (d is TypedLetDecl) declIndex[d.hash] = d
+
+        // Seed only from concrete (non-generic) decls. Track per-seed call
+        // site loc in a parallel list so we can map back from each
+        // SpecRequest to the originating TypedCall after mono runs.
+        //
+        // #441 Day 8 (Mono Gap B): env-gated stdlib seed walk. When
+        // MEZZE_MONO_SEED_STDLIB=1, also walk stdlib CONCRETE decls
+        // (typeParams.isEmpty()) for callsites — no seeding from generic
+        // decls' bodies (still polymorphic; would produce VarType bindings).
+        // Off by default. The gate exists so we can measure the coverage
+        // lift without risking a default-on regression on the ~496 generic
+        // decls in stdlib (bulk unification cost).
+        val seeds = ArrayList<Monomorphizer.SpecRequest>()
+        val seedLocs = ArrayList<Loc>()
+        val counters = Counters()
+        val seedStdlib = System.getenv("MEZZE_MONO_SEED_STDLIB") == "1"
+        // Decl LISTS, not modules: the entry's contribution is the specialized
+        // list above, which no TypedModule holds.
+        val seedFrom: List<List<com.mezze.language.typedast.TypedDecl>> =
+            if (seedStdlib) listOf(entryDecls) + (imported + resolutionOnly).map { it.decls }
+            else            listOf(entryDecls) + imported.map { it.decls }
+        for (declList in seedFrom) {
+            for (d in declList) {
+                if (d !is TypedLetDecl) continue
+                if (d.typeParams.isNotEmpty()) continue
+                collectSeedsFromExpr(d.value, declIndex, abilityOpIndex, abilityImpls, seeds, seedLocs, counters, recordShapeByHash,
+                    callSiteArrows)
+            }
+        }
+
+        val result = monomorphizer.run(seeds)
 
         // Build the per-call-site lookup the compiler consumes. For each
         // seed loc, look up the SpecRequest in the rewrite map; if mono
@@ -310,7 +387,7 @@ object MonoDriver {
                 }
             }
         }
-        return Result(mono = result, bySiteLoc = bySiteLoc, stripBySiteLoc = stripBySiteLoc)
+        return Result(mono = result, bySiteLoc = bySiteLoc, stripBySiteLoc = stripBySiteLoc, entryDecls = entryDecls)
     }
 
     private data class AbilityOpEntry(val impl: TypedAbilityImpl, val opHash: Hash)
@@ -359,6 +436,7 @@ object MonoDriver {
         outLocs: MutableList<Loc>,
         counters: Counters,
         recordShapes: Map<Hash, Map<String, MezzeType>>,
+        callSiteArrows: Map<Loc, MezzeType.FunctionType> = emptyMap(),
     ) {
         if (expr is TypedCall) {
             val fn = expr.function
@@ -369,8 +447,32 @@ object MonoDriver {
                 val callee = declIndex[calleeHash]
                 if (callee != null && callee.typeParams.isNotEmpty()) {
                     counters.byHashGenericVisited++
-                    val fromFn = deriveTypeArgs(callee.scheme.type, callee.typeParams, fn.type)
-                        ?.takeIf { it.all { t -> isConcrete(t) } }
+                    // `fn.type` decides every position it already knows, and the
+                    // site's own arrow fills ONLY the ones it left open.
+                    //
+                    // NOT a wholesale preference for the arrow, which is what I
+                    // tried first on the theory that it differs from `fn.type`
+                    // only where `fn.type` is open. It also differs in
+                    // IDENTITY: a record literal reaching a generic parameter is
+                    // EXPANDED and anonymous in the arrow where `fn.type` has
+                    // the nominal type. `resolveAbilityConstraints` matches an
+                    // impl target by nominal identity, so taking the arrow's
+                    // version dropped the impl ref, and a dropped ref makes
+                    // `x.op {}` fall back to a raw field read — `Field not
+                    // found: speak` on the second of two same-named constraints,
+                    // while the first still resolved.
+                    val siteArrow = callSiteArrows[expr.loc]
+                    val fromNode = deriveTypeArgs(callee.scheme.type, callee.typeParams, fn.type)
+                    val fromArrow = siteArrow
+                        ?.let { deriveTypeArgs(callee.scheme.type, callee.typeParams, it) }
+                    val fromFn = when {
+                        fromNode == null -> fromArrow
+                        fromArrow == null -> fromNode
+                        fromNode.size != fromArrow.size -> fromNode
+                        else -> fromNode.zip(fromArrow).map { (node, arrow) ->
+                            if (isConcrete(node)) node else arrow
+                        }
+                    }?.takeIf { it.all { t -> isConcrete(t) } }
                     val args = if (fromFn != null) {
                         counters.byHashFnTypeOk++
                         fromFn
@@ -404,8 +506,8 @@ object MonoDriver {
                         val closureArgs: Map<String, com.mezze.language.typedast.Hash>
                         val closureBodies: Map<String, com.mezze.language.typedast.TypedLambda>
                         if (Monomorphizer.closuresEnabled) {
-                            closureArgs = Monomorphizer.closureArgsAt(expr)
-                            closureBodies = Monomorphizer.closureBodiesAt(expr)
+                            closureArgs = Monomorphizer.closureArgsAt(expr, declIndex)
+                            closureBodies = Monomorphizer.closureBodiesAt(expr, declIndex)
                         } else {
                             closureArgs = emptyMap()
                             closureBodies = emptyMap()
@@ -415,6 +517,8 @@ object MonoDriver {
                         ))
                         outLocs.add(expr.loc)
                         counters.byHashSeeded++
+                        seedFunctionValuedArgs(
+                            callee, args, expr, declIndex, allImpls, recordShapes, out, outLocs)
                     } else {
                         counters.byHashUnifyFail++
                         DebugLogger.debug(DebugLogger.Category.Monomorphization) {
@@ -435,58 +539,58 @@ object MonoDriver {
                 seedFromMethodCall(fn, expr, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
             }
 
-            collectSeedsFromExpr(fn, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-            collectSeedsFromExpr(expr.arg, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+            collectSeedsFromExpr(fn, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+            collectSeedsFromExpr(expr.arg, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
             return
         }
         // Recurse through every other expression shape.
         when (expr) {
-            is TypedLambda -> collectSeedsFromExpr(expr.body, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+            is TypedLambda -> collectSeedsFromExpr(expr.body, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
             is TypedRecord -> for (e in expr.entries) when (e) {
-                is TypedRecordEntry.Field -> collectSeedsFromExpr(e.value, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-                is TypedRecordEntry.Spread -> collectSeedsFromExpr(e.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                is TypedRecordEntry.Field -> collectSeedsFromExpr(e.value, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+                is TypedRecordEntry.Spread -> collectSeedsFromExpr(e.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
             }
             is TypedRecordUpdate -> {
-                collectSeedsFromExpr(expr.record, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                collectSeedsFromExpr(expr.record, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
                 for (e in expr.updates) when (e) {
-                    is TypedRecordEntry.Field -> collectSeedsFromExpr(e.value, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-                    is TypedRecordEntry.Spread -> collectSeedsFromExpr(e.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                    is TypedRecordEntry.Field -> collectSeedsFromExpr(e.value, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+                    is TypedRecordEntry.Spread -> collectSeedsFromExpr(e.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
                 }
             }
-            is TypedFieldAccess -> collectSeedsFromExpr(expr.record, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-            is TypedVariantConstruct -> expr.payload?.let { collectSeedsFromExpr(it, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes) }
+            is TypedFieldAccess -> collectSeedsFromExpr(expr.record, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+            is TypedVariantConstruct -> expr.payload?.let { collectSeedsFromExpr(it, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows) }
             is TypedMatch -> {
-                collectSeedsFromExpr(expr.scrutinee, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                collectSeedsFromExpr(expr.scrutinee, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
                 for (c in expr.cases) {
-                    c.guard?.let { collectSeedsFromExpr(it, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes) }
-                    collectSeedsFromExpr(c.body, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                    c.guard?.let { collectSeedsFromExpr(it, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows) }
+                    collectSeedsFromExpr(c.body, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
                 }
             }
             is TypedIf -> {
-                collectSeedsFromExpr(expr.condition, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-                collectSeedsFromExpr(expr.thenBranch, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-                collectSeedsFromExpr(expr.elseBranch, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                collectSeedsFromExpr(expr.condition, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+                collectSeedsFromExpr(expr.thenBranch, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+                collectSeedsFromExpr(expr.elseBranch, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
             }
             is TypedBlock -> {
                 for (s in expr.statements) when (s) {
-                    is TypedStatement.Let -> collectSeedsFromExpr(s.value, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-                    is TypedStatement.Expr -> collectSeedsFromExpr(s.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                    is TypedStatement.Let -> collectSeedsFromExpr(s.value, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+                    is TypedStatement.Expr -> collectSeedsFromExpr(s.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
                 }
-                collectSeedsFromExpr(expr.result, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                collectSeedsFromExpr(expr.result, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
             }
             is TypedSeq -> for (el in expr.elements) when (el) {
-                is TypedSeqElement.Regular -> collectSeedsFromExpr(el.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-                is TypedSeqElement.Spread -> collectSeedsFromExpr(el.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                is TypedSeqElement.Regular -> collectSeedsFromExpr(el.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+                is TypedSeqElement.Spread -> collectSeedsFromExpr(el.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
             }
             is TypedPipe -> {
-                collectSeedsFromExpr(expr.left, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-                collectSeedsFromExpr(expr.right, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                collectSeedsFromExpr(expr.left, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+                collectSeedsFromExpr(expr.right, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
             }
-            is TypedPerform -> collectSeedsFromExpr(expr.body, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-            is TypedPerformOp -> collectSeedsFromExpr(expr.arg, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
-            is com.mezze.language.typedast.TypedBuildTime -> collectSeedsFromExpr(expr.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+            is TypedPerform -> collectSeedsFromExpr(expr.body, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+            is TypedPerformOp -> collectSeedsFromExpr(expr.arg, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
+            is com.mezze.language.typedast.TypedBuildTime -> collectSeedsFromExpr(expr.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
             is TypedStringLit -> for (part in expr.parts) {
-                if (part is TypedStringPart.Interpolation) collectSeedsFromExpr(part.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes)
+                if (part is TypedStringPart.Interpolation) collectSeedsFromExpr(part.expr, declIndex, abilityOpIndex, allImpls, out, outLocs, counters, recordShapes, callSiteArrows)
             }
             else -> Unit
         }
@@ -560,6 +664,24 @@ object MonoDriver {
                 entry.impl.targetTypes.any { anonymousRecordMatchesDeclaredRecord(receiverType, it, recordShapes) }
             } ?: run {
                 counters.methodNoMatchingImpl++
+                // NOT NECESSARILY A MISS, despite the counter's name. A
+                // receiver whose impl is CONCRETE (`impl NumAdd Int for Int`)
+                // has no entry in `genericCandidates` at all — only impls with
+                // `forallVars` are candidates — so it lands here legitimately,
+                // needing no specialisation. Measured on a dispatch benchmark:
+                // 105 of 110 method sites land here and the top entries are
+                // `add`/`ge`/`eq` on Int, Float and Str against Seq/Option/List
+                // candidates, i.e. primitives already resolved statically
+                // (`via_ability` costs 0.30 ns/iter, the same as a direct call).
+                // Read this trace before treating the count as a gap: it cost
+                // one wrong hypothesis already.
+                DebugLogger.debug(DebugLogger.Category.Monomorphization) {
+                    "[mono-trace] method-noImpl field=${fa.field} " +
+                        "receiver=${detailed(receiverType)} " +
+                        "candidates=" + genericCandidates.joinToString("; ") { c ->
+                            c.impl.targetTypes.joinToString(",") { detailed(it) }
+                        }
+                }
                 return
             }
         }
@@ -647,6 +769,85 @@ object MonoDriver {
         } else {
             counters.methodUnifyFail++
         }
+    }
+
+    /**
+     * A generic function PASSED AS AN ARGUMENT is needed at the type the callee
+     * declares for that parameter, so seed it there.
+     *
+     * Nothing else will. A seed comes from a CALL, and a function handed over as a
+     * value is not called at the site that hands it over — so `apply_fold { n = n,
+     * f = step }` seeded `apply_fold` and left `step` generic. The compiler then
+     * cannot reference an instantiation that does not exist and builds
+     * `dict_wrapper_step` instead: a closure capturing the resolved operations,
+     * forwarding to the generic function, indirect on every call of the callback.
+     *
+     * The type to seed at is not a guess — the callee's own signature states it.
+     * `apply_fold`'s parameter record declares `f: {x: Int} -> 'd`, and `'d` is
+     * among the type args just derived for this site, so substituting them in gives
+     * `{x: Int} -> Int` and `step`'s arguments follow by ordinary derivation. A
+     * declared field that is still open after substitution is skipped: then the site
+     * genuinely does not say what the function is needed at.
+     *
+     * MEASURED, `bench/cases/defunc` kernel 3 at n=2e7, min of 3: 82 873 -> 12 537
+     * ps/iter with the reference pointed at the specialization, level with kernel 7
+     * (the same HOF with the callback's type written down). Before this seeding,
+     * that only happened when some OTHER call site had already caused the
+     * specialization to exist — in the bench, `k_named` calling `step` directly —
+     * so the win was incidental. A program that only ever passes the function got
+     * nothing.
+     */
+    private fun seedFunctionValuedArgs(
+        callee: TypedLetDecl,
+        calleeArgs: List<MezzeType>,
+        call: TypedCall,
+        declIndex: Map<Hash, TypedLetDecl>,
+        allImpls: List<TypedAbilityImpl>,
+        recordShapes: Map<Hash, Map<String, MezzeType>>,
+        out: MutableList<Monomorphizer.SpecRequest>,
+        outLocs: MutableList<Loc>,
+    ) {
+        val argRec = call.arg as? com.mezze.language.typedast.TypedRecord ?: return
+        val paramRec = (callee.scheme.type as? MezzeType.FunctionType)?.paramType
+            as? MezzeType.RecordType ?: return
+        val nameToArg = HashMap<String, MezzeType>(callee.typeParams.size)
+        for (i in callee.typeParams.indices) {
+            calleeArgs.getOrNull(i)?.let { nameToArg[callee.typeParams[i].name] = it }
+        }
+        for (entry in argRec.entries) {
+            if (entry !is com.mezze.language.typedast.TypedRecordEntry.Field) continue
+            val v = entry.value as? com.mezze.language.typedast.TypedVar ?: continue
+            val b = v.binding as? BindingRef.ByHash ?: continue
+            val target = declIndex[b.hash] ?: continue
+            if (target.typeParams.isEmpty()) continue
+            val declared = paramRec.fields[entry.name] ?: continue
+            val wanted = substituteByName(declared, nameToArg)
+            if (!isConcrete(wanted)) continue
+            val targs = deriveTypeArgs(target.scheme.type, target.typeParams, wanted)
+                ?.let { fillHavingOutTypeArgs(target, it, allImpls) } ?: continue
+            if (!targs.all { isConcrete(it) }) continue
+            out.add(Monomorphizer.SpecRequest(
+                b.hash,
+                targs,
+                resolveAbilityConstraints(target, targs, allImpls, recordShapes),
+                emptyMap(),
+                emptyMap(),
+            ))
+            outLocs.add(v.loc)
+        }
+    }
+
+    /** Substitute by type-param NAME, the convention mono uses throughout: the
+     *  solver hands out a fresh id per binding site, so the same parameter appears
+     *  as several [TypeVar] instances sharing one name. */
+    private fun substituteByName(t: MezzeType, nameToArg: Map<String, MezzeType>): MezzeType {
+        if (nameToArg.isEmpty()) return t
+        val map = HashMap<TypeVar, MezzeType>()
+        for (tv in com.mezze.language.ast.collectTypeVarsInOrder(t, sortFields = false)) {
+            nameToArg[tv.name]?.let { map[tv] = it }
+        }
+        if (map.isEmpty()) return t
+        return TypeSubstitution.applyType(t, map)
     }
 
     /** TypedAstBuilder wraps method-call args as a record with the
@@ -741,7 +942,24 @@ object MonoDriver {
         if (t == null) return "null"
         return when (t) {
             is MezzeType.VarType -> "'${t.variable.name}#${t.variable.id}"
-            is MezzeType.FunctionType -> "(${detailed(t.paramType)} -> ${detailed(t.returnType)})"
+            // Print the ability constraints. They are part of what the seed gate
+            // reads: `collectTypeVarsInOrder` walks `abilityConstraints[].typeArgs`,
+            // so a constraint on a variable the signature never mentions still
+            // becomes a decl typeParam. Omitting them here printed
+            // `typeParams=['n11] scheme=({n: Int} -> Int)` — a phantom parameter
+            // beside a type with nowhere to put it, which reads as a printer bug
+            // rather than the leak it is.
+            is MezzeType.FunctionType -> buildString {
+                append("(${detailed(t.paramType)} -> ${detailed(t.returnType)})")
+                if (t.abilityConstraints.isNotEmpty()) {
+                    append(t.abilityConstraints.joinToString(", ", prefix = " with <", postfix = ">") { c ->
+                        c.abilityName + c.typeArgs.joinToString("") { " ${detailed(it)}" } +
+                            c.associatedTypeBindings.entries.joinToString("") {
+                                " having ${it.key}=${detailed(it.value)}"
+                            }
+                    })
+                }
+            }
             is MezzeType.RecordType -> t.fields.entries.joinToString(prefix = "{", postfix = "}") { "${it.key}: ${detailed(it.value)}" }
             is MezzeType.VariantType -> t.constructors.entries.joinToString(prefix = "V<${t.identity.displayNameOrNull() ?: "?"}: ", postfix = ">") { "${it.key}(${detailed(it.value ?: MezzeType.RecordType(emptyMap()))})" }
             is MezzeType.NewtypeType -> "New(${t.name})[${detailed(t.wrappedType)}]"
@@ -993,60 +1211,247 @@ object MonoDriver {
     ): List<MezzeType> {
         // Nothing to do if everything is already concrete.
         if (derived.all { isConcrete(it) }) return derived
-        // The MONO scheme's `type` is constraint-less; the ability constraints live
-        // on `scheme.abilityConstraints` (abilityHash + typeArgs — the typedast
-        // TypedAbilityConstraint has NO associated-type bindings, so we recover the
-        // `out` type structurally from the resolved IMPL, not the constraint).
-        val schemeConstraints = callee.scheme.abilityConstraints
-        if (schemeConstraints.isEmpty()) return derived
+        // THE CONSTRAINTS OFF THE TYPE, not off the mono scheme. Both carry
+        // abilityHash + typeArgs, but only the type-level `AbilityConstraint`
+        // carries `associatedTypeBindings` — the `having 'out = 'c` map whose
+        // VALUE is the var this constraint's output IS. Without it there is
+        // nothing to say WHICH param a resolved impl's `out` belongs to, and the
+        // previous version guessed: "the first unresolved param that is not among
+        // this constraint's own args".
+        //
+        // That guess is right for one constraint and wrong for a chain. In
+        //
+        //     { i } -> i + 0 + 0 + …
+        //     'y12 -> NumAdd Int 'y12 having 'out = 'b13
+        //             NumAdd Int 'b13 having 'out = 'e13        … -> 'out
+        //
+        // the typeParams are ['y12, out, 'b13, 'e13, …] and the first unresolved
+        // one is the function's RETURN, so constraint #1's output was assigned to
+        // the return instead of to `'b13`. `'b13` then stayed a variable, every
+        // later constraint was skipped for having a non-concrete argument, the
+        // all-concrete gate failed, and nothing was specialised.
+        //
+        // MEASURED, `bench/cases/letcost` kernel 6 at n=2e7: the unspecialised
+        // form costs 161 285 ps/iter with ~400 young collections — eight
+        // dictionary PARAMETERS and eight DictMethodCallIR, each allocating a
+        // three-field record — against 222 ps for the same function written
+        // `{ i: Int } -> Int`. 700x, on an annotation.
+        //
+        // AND TO A FIXPOINT, because one constraint's `out` is the next one's
+        // operand: each fill is fed back into `nameToConcrete` so the following
+        // round can read it as concrete. Order-independent, so it does not matter
+        // which order the constraints arrive in.
+        val typeConstraints = (callee.scheme.type as? MezzeType.FunctionType)
+            ?.abilityConstraints ?: return derived
+        if (typeConstraints.isEmpty()) return derived
 
         // name -> concrete, from what we've derived so far.
         val nameToConcrete = HashMap<String, MezzeType>(callee.typeParams.size)
         for (i in callee.typeParams.indices) nameToConcrete[callee.typeParams[i].name] = derived[i]
+        val indexOfParam = HashMap<String, Int>(callee.typeParams.size)
+        for (i in callee.typeParams.indices) indexOfParam[callee.typeParams[i].name] = i
 
-        // The set of typeParams still unresolved (candidates for an `out` fill).
-        val unresolvedParamNames = callee.typeParams
-            .filter { nameToConcrete[it.name]?.let { t -> t is MezzeType.VarType && !isConcrete(t) } == true }
-            .map { it.name }
-            .toMutableSet()
-        if (unresolvedParamNames.isEmpty()) return derived
+        val filled = derived.toMutableList()
+        val settled = HashSet<Int>()
+        var progress = true
+        while (progress && filled.any { !isConcrete(it) }) {
+            progress = false
+            for ((ci, c) in typeConstraints.withIndex()) {
+                if (ci in settled) continue
+                val abilityHash = c.abilityHash ?: continue
+                val concreteArgs = c.typeArgs.map { ta ->
+                    if (ta is MezzeType.VarType) nameToConcrete[ta.variable.name] ?: ta else ta
+                }
+                if (concreteArgs.isEmpty()) continue
+                if (concreteArgs.any { !isConcrete(it) }) {
+                    // BACKWARD, and only here in mono, where every caller is known.
+                    if (fillOperandsFromEvidence(
+                            c, concreteArgs, abilityHash, abilityImpls, callee,
+                            nameToConcrete, indexOfParam, filled)) {
+                        progress = true
+                    }
+                    continue
+                }
+                // The FORWARD direction reads the impl's `having out`, so it needs
+                // one. The backward direction above does not — and must be tried
+                // first, because an obligation inherited from a callee whose own out
+                // was already discharged arrives with an EMPTY binding map, which is
+                // exactly the one type param this was left unable to fill.
+                if (c.associatedTypeBindings.isEmpty()) continue
+                val candidates = abilityImpls.filter {
+                    it.abilityHash == abilityHash && it.targetTypes.size == concreteArgs.size
+                }
+                val m = candidates.firstOrNull { impl ->
+                    impl.targetTypes.zip(concreteArgs).all { (target, concrete) -> typeMatchesTarget(concrete, target, MonoDriver::variantDeclHasConstructors) }
+                } ?: continue
+                settled.add(ci)
+                // Each binding names its own target var, so there is no guessing
+                // even when an ability has several associated types.
+                for ((assocName, boundTo) in c.associatedTypeBindings) {
+                    val target = (boundTo as? MezzeType.VarType) ?: continue
+                    val idx = indexOfParam[target.variable.name] ?: continue
+                    if (isConcrete(filled[idx])) continue
+                    val implOut = m.associatedTypeBindings[assocName]
+                        ?: m.associatedTypeBindings["'" + assocName.removePrefix("'")]
+                        ?: m.associatedTypeBindings[assocName.removePrefix("'")]
+                        ?: continue
+                    if (!isConcrete(implOut)) continue
+                    filled[idx] = implOut
+                    nameToConcrete[target.variable.name] = implOut
+                    progress = true
+                }
+            }
+        }
+        return filled
+    }
 
-        // For each constraint whose class/receiver args are all concrete, resolve the
-        // impl and read its associated `out`. Fill the unresolved return typeParam.
-        val outFills = HashMap<String, MezzeType>()
-        for (c in schemeConstraints) {
-            val abilityHash = c.abilityHash
-            val concreteArgs = c.typeArgs.map { ta ->
-                if (ta is MezzeType.VarType) nameToConcrete[ta.variable.name] ?: ta else ta
-            }
-            if (concreteArgs.isEmpty() || concreteArgs.any { !isConcrete(it) }) continue
-            val candidates = abilityImpls.filter {
-                it.abilityHash == abilityHash && it.targetTypes.size == concreteArgs.size
-            }
-            val match = candidates.firstOrNull { impl ->
-                impl.targetTypes.zip(concreteArgs).all { (target, concrete) -> typeMatchesTarget(concrete, target, MonoDriver::variantDeclHasConstructors) }
-            }
-            val m = match ?: continue
-            // The impl's associatedTypeBindings hold the concrete `out` for this
-            // (receiver, class-args) instantiation. There is typically one `out`.
-            val implOut = m.associatedTypeBindings["out"]
-                ?: m.associatedTypeBindings["'out"]
-                ?: m.associatedTypeBindings.values.firstOrNull()
-                ?: continue
-            if (!isConcrete(implOut)) continue
-            // Assign it to the still-unresolved return typeParam. When exactly one param
-            // is unresolved, it IS the `out` (the return); otherwise assign to any
-            // unresolved param that does not appear among the constraint's own args (so
-            // we never clobber a receiver/class-arg var).
-            val argVarNames = c.typeArgs.filterIsInstance<MezzeType.VarType>().map { it.variable.name }.toSet()
-            val target = unresolvedParamNames.firstOrNull { it !in argVarNames } ?: continue
-            outFills[target] = implOut
-            unresolvedParamNames.remove(target)
+    /**
+     * Determine a type param from the OTHER side of a constraint — the output, or a
+     * concrete co-operand — for the params a call site can never supply.
+     *
+     * THIS IS THE MONO-ONLY HALF OF THE RULE, and the distinction matters. The
+     * typechecker does the same thing but refuses to default on a concrete OPERAND,
+     * because `nested = {a,b} -> do { let inner = do { let temp = a + b; temp * 2 };
+     * inner + 10 }` is structurally identical to the chain this unlocks and its `a`
+     * and `b` belong to a caller that has not arrived yet. HERE every caller HAS
+     * arrived: this runs against one specialization request, for a type param that
+     * appears nowhere in the callee's surface type, so there is no call site that
+     * could ever say what it is and no other instantiation to be wrong about. The
+     * only thing left to be consistent with is the specialization's own body, and
+     * the answer is self-consistent by construction — choosing Float for the
+     * operands also chooses Float's impls for the operations that PRODUCE them,
+     * which produce Floats.
+     *
+     * Restricted to non-surface params for the same reason the typechecker
+     * restricts it: a surface param is the call site's to supply, and if the site
+     * did not supply it the gate should refuse the site rather than invent one.
+     *
+     * MEASURED, `bench/cases/mandelannot` kernel 1: `grid_poly` reaches the gate
+     * with `span` concrete and two intermediates open; filling them lets it
+     * specialize, which makes the `pixel_poly` call inside it concrete, which makes
+     * the `escape_poly` call inside THAT concrete — the root unblocks the leaves,
+     * and the leaves are where the loop is.
+     *
+     * Returns true when it bound something.
+     */
+    private fun fillOperandsFromEvidence(
+        c: MezzeType.FunctionAbilityConstraint,
+        concreteArgs: List<MezzeType>,
+        abilityHash: Hash,
+        abilityImpls: List<TypedAbilityImpl>,
+        callee: TypedLetDecl,
+        nameToConcrete: MutableMap<String, MezzeType>,
+        indexOfParam: Map<String, Int>,
+        filled: MutableList<MezzeType>,
+    ): Boolean {
+        val open = concreteArgs.indices.filter { !isConcrete(concreteArgs[it]) }
+        if (open.isEmpty()) return false
+        // Every open position must name a type param of this callee that the
+        // surface type does not mention. One that does is the site's to supply.
+        val surface = surfaceTypeParamNames(callee)
+        val openParams = ArrayList<Pair<Int, Int>>(open.size)   // (position, param index)
+        for (i in open) {
+            val v = c.typeArgs.getOrNull(i) as? MezzeType.VarType ?: return false
+            val idx = indexOfParam[v.variable.name] ?: return false
+            if (v.variable.name in surface) return false
+            openParams.add(i to idx)
         }
-        if (outFills.isEmpty()) return derived
-        return callee.typeParams.indices.map { i ->
-            outFills[callee.typeParams[i].name] ?: derived[i]
+        // EVIDENCE: a concrete co-operand or a known output. With neither, the impl
+        // table is the only input and that is not resolution.
+        val knownOuts = HashMap<String, MezzeType>(c.associatedTypeBindings.size)
+        for ((assocName, boundTo) in c.associatedTypeBindings) {
+            val resolved = if (boundTo is MezzeType.VarType)
+                nameToConcrete[boundTo.variable.name] ?: boundTo else boundTo
+            if (isConcrete(resolved)) knownOuts[assocName] = resolved
         }
+        if (open.size == concreteArgs.size && knownOuts.isEmpty()) return false
+
+        val answers = ArrayList<List<MezzeType>>(2)
+        for (impl in abilityImpls) {
+            if (impl.abilityHash != abilityHash) continue
+            if (impl.targetTypes.size != concreteArgs.size) continue
+            var ok = true
+            for (i in concreteArgs.indices) {
+                if (i in open) continue
+                if (!typeMatchesTarget(concreteArgs[i], impl.targetTypes[i],
+                        MonoDriver::variantDeclHasConstructors)) {
+                    ok = false
+                    break
+                }
+            }
+            if (!ok) continue
+            for ((assocName, want) in knownOuts) {
+                val implOut = implAssociatedBinding(impl, assocName)
+                if (implOut == null || !isConcrete(implOut) || implOut != want) {
+                    ok = false
+                    break
+                }
+            }
+            if (!ok) continue
+            // ONE answer per variable: `zr * zr` is `NumMul 's 's`, so an impl whose
+            // two targets differ cannot serve it at all.
+            val perVar = HashMap<String, MezzeType>(open.size)
+            val determined = ArrayList<MezzeType>(concreteArgs.size)
+            for (i in concreteArgs.indices) {
+                if (i !in open) {
+                    determined.add(concreteArgs[i])
+                    continue
+                }
+                val t = impl.targetTypes[i]
+                if (!isConcrete(t)) {
+                    ok = false
+                    break
+                }
+                val name = (c.typeArgs[i] as MezzeType.VarType).variable.name
+                val prior = perVar.put(name, t)
+                if (prior != null && prior != t) {
+                    ok = false
+                    break
+                }
+                determined.add(t)
+            }
+            if (!ok) continue
+            if (answers.none { it == determined }) answers.add(determined)
+        }
+        val answer = answers.singleOrNull()
+            // Several impls fit. Prefer the HOMOGENEOUS one — `Float + Float` over
+            // the mixed-mode adds that are written down precisely because they are
+            // the exception. Same default the typechecker applies; see
+            // AbilityChecker.chooseDeterminedTuple.
+            ?: answers.filter { d -> d.all { it == d[0] } }.singleOrNull()
+            ?: return false
+
+        var bound = false
+        for ((pos, idx) in openParams) {
+            if (isConcrete(filled[idx])) continue
+            filled[idx] = answer[pos]
+            nameToConcrete[(c.typeArgs[pos] as MezzeType.VarType).variable.name] = answer[pos]
+            bound = true
+        }
+        return bound
+    }
+
+    /** One associated binding off an impl, under the spellings the two sides use. */
+    private fun implAssociatedBinding(impl: TypedAbilityImpl, assocName: String): MezzeType? =
+        impl.associatedTypeBindings[assocName]
+            ?: impl.associatedTypeBindings["'" + assocName.removePrefix("'")]
+            ?: impl.associatedTypeBindings[assocName.removePrefix("'")]
+
+    /**
+     * The callee's type params that its PARAMETER and RETURN types mention — the
+     * ones a call site can supply.
+     *
+     * Its own `abilityConstraints` are deliberately not walked: a param that occurs
+     * only there is exactly the kind no caller can reach, which is the whole
+     * distinction [fillOperandsFromEvidence] turns on.
+     */
+    private fun surfaceTypeParamNames(callee: TypedLetDecl): Set<String> {
+        val ft = callee.scheme.type as? MezzeType.FunctionType
+            ?: return callee.typeParams.map { it.name }.toSet()
+        val names = HashSet<String>(callee.typeParams.size)
+        for (tv in com.mezze.language.ast.collectTypeVarsInOrder(ft.paramType, sortFields = false)) names.add(tv.name)
+        for (tv in com.mezze.language.ast.collectTypeVarsInOrder(ft.returnType, sortFields = false)) names.add(tv.name)
+        return names
     }
 
     /**
@@ -1084,7 +1489,7 @@ object MonoDriver {
      * but no `TypedLetDecl` behind it, so it could not reach the decl-shaped entry
      * point above and recorded NO evidence at all.
      */
-    private fun resolveAbilityConstraintsOf(
+    internal fun resolveAbilityConstraintsOf(
         fnType: MezzeType.FunctionType?,
         typeParamNames: List<String>,
         typeArgs: List<MezzeType>,

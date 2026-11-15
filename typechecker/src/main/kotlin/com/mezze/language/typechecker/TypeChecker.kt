@@ -923,6 +923,7 @@ class TypeChecker(
                     mustBeOpenRowVars = mustBeOpenRowVars,
                     methodCallResolutions = aggregated.methodCallResolutions,
                     callReturnTypes = aggregated.callReturnTypes,
+                    callFunctionTypes = aggregated.callFunctionTypes,
                     matchCaseBindings = aggregated.matchCaseBindings,
                     matchScrutineeTypes = aggregated.matchScrutineeTypes,
                     doBindingSolvedTypes = aggregated.doBindingSolvedTypes,
@@ -1066,6 +1067,7 @@ class TypeChecker(
         val tailCallLocations: Set<Loc>,
         val methodCallResolutions: Map<Pair<Loc, String>, ConstraintResult.MethodCallInfo>,
         val callReturnTypes: Map<Loc, MezzeType>,
+        val callFunctionTypes: Map<Loc, MezzeType>,
         val matchCaseBindings: Map<Loc, Map<String, MezzeType>>,
         val matchScrutineeTypes: Map<Loc, MezzeType>,
         val expectedTypeAt: Map<Loc, MezzeType>,
@@ -1097,6 +1099,8 @@ class TypeChecker(
         // that a per-binding solve's bindings were being lost; they are not.
         val callReturnTypes = constraintResults.values
             .overlayAll { it.callReturnTypes }
+        val callFunctionTypes = constraintResults.values
+            .overlayAll { it.callFunctionTypes }
         val matchCaseBindings = constraintResults.values
             .overlayAll { it.matchCaseBindings }
             .mapValues { (_, bindings) -> bindings.mapValues { (_, ty) -> substitution.apply(ty) } }
@@ -1138,6 +1142,7 @@ class TypeChecker(
             tailCallLocations = tailCallLocations,
             methodCallResolutions = methodCallResolutions,
             callReturnTypes = callReturnTypes,
+            callFunctionTypes = callFunctionTypes,
             matchCaseBindings = matchCaseBindings,
             matchScrutineeTypes = matchScrutineeTypes,
             expectedTypeAt = expectedTypeAt,

@@ -226,6 +226,7 @@ object FunctionIRReachability {
                         collectHashesFromNode(s.step, queue)
                     }
                     is com.mezze.language.truffleir.SourceIR.RawSeq -> collectHashesFromNode(s.xs, queue)
+                    is com.mezze.language.truffleir.SourceIR.RawBytes -> collectHashesFromNode(s.xs, queue)
                     is com.mezze.language.truffleir.SourceIR.RawList -> collectHashesFromNode(s.xs, queue)
                     is com.mezze.language.truffleir.SourceIR.Opaque -> collectHashesFromNode(s.expr, queue)
                 }
@@ -242,6 +243,27 @@ object FunctionIRReachability {
                         is com.mezze.language.truffleir.StageIR.Drop -> collectHashesFromNode(stage.n, queue)
                         is com.mezze.language.truffleir.StageIR.TakeWhile -> queue.add(stage.p.functionHash)
                         is com.mezze.language.truffleir.StageIR.DropWhile -> queue.add(stage.p.functionHash)
+                        // No lambda and no expression, so nothing to keep reachable.
+                        com.mezze.language.truffleir.StageIR.Enumerate -> {}
+                        // THE SECOND SOURCE IS LIVE CODE. Its expressions can
+                        // name functions, and a hash not collected here is a
+                        // FunctionIR pruned from the dep graph — the chain then
+                        // calls something that was never emitted.
+                        is com.mezze.language.truffleir.StageIR.Zip ->
+                            com.mezze.language.truffleir.forEachSourceNode(stage.second) { n ->
+                                collectHashesFromNode(n, queue)
+                            }
+                        // BOTH halves are live: the LAMBDA, whose FunctionIR
+                        // the emitter reads the inner bounds out of, and the
+                        // INNER SOURCE's expressions, which can name functions
+                        // of their own. Dropping either prunes something the
+                        // chain still calls.
+                        is com.mezze.language.truffleir.StageIR.FlatMap -> {
+                            queue.add(stage.f.functionHash)
+                            com.mezze.language.truffleir.forEachSourceNode(stage.inner) { n ->
+                                collectHashesFromNode(n, queue)
+                            }
+                        }
                     }
                 }
                 when (val sk = node.sink) {

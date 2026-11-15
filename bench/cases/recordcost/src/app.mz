@@ -1,0 +1,163 @@
+## WHAT A RECORD COSTS WHEN IT IS A VALUE.
+##
+## Record erasure at a direct CALL SITE is general: matching field names become
+## positional arguments, for any type. What is NOT erased is a record used as a
+## VALUE — constructed, carried, returned, updated — and that half has never
+## been measured. These kernels measure it in ordinary loop code rather than in
+## a pipeline, where the cost would be confounded with whether the chain fused.
+##
+## Kernel 1 is the control: the same work with the values carried positionally,
+## which §1 of PERF-LOG brought to ~1 ns/iter. Everything else carries the same
+## two numbers through a record in some way, so the difference IS the record.
+##
+## Reported in picoseconds per iteration. Every kernel returns a checksum, and
+## all five compute the SAME sum, so a kernel that is fast because it dropped
+## work shows up as a different number.
+use std::collections::seq
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::int
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+## 1. CONTROL: two values carried positionally through a tail loop.
+let k_positional = { n } -> do
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - 1, acc = acc + i }
+  go { i = n, acc = 0 }
+
+## 2. The same loop with the state carried in a RECORD, so one record is built
+##    per iteration. This is the shape that `{...st}`-style state threading and
+##    any "struct of loop variables" produces.
+let k_record_state = { n } -> do
+  let go = { st } ->
+    if st.i <= 0 then st.acc
+    else go { st = { i = st.i - 1, acc = st.acc + st.i } }
+  go { st = { i = n, acc = 0 } }
+
+## 3. A record built ONCE outside the loop, with its fields read per iteration.
+##    Isolates field READ from construction.
+let k_field_read = { n } -> do
+  let cfg = { step = 1, bias = 0 }
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - cfg.step, acc = acc + i + cfg.bias }
+  go { i = n, acc = 0 }
+
+## 4. A function RETURNING a record per iteration, with both fields read back.
+##    The record is born and dies inside one iteration — the case escape
+##    analysis should handle and lowering should never have created.
+let k_record_return = { n } -> do
+  let split = { i } -> { lo = i - 1, add = i }
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else do
+      let p = split { i = i }
+      go { i = p.lo, acc = acc + p.add }
+  go { i = n, acc = 0 }
+
+## 5. A SPREAD update per iteration: `{...st, i = ...}`. A spread is one of the
+##    three shapes that falls back to the record ABI at a call site, so it
+##    cannot become positional even in principle.
+let k_record_spread = { n } -> do
+  let go = { st } ->
+    if st.i <= 0 then st.acc
+    else go { st = { ...st, i = st.i - 1, acc = st.acc + st.i } }
+  go { st = { i = n, acc = 0 } }
+
+## 6. Kernel 4 with the helper HAND-INLINED and no record at all — two lets in
+## a do-block, which is exactly what the scalarizer turns kernel 4 into. If this
+## is as slow as 4, the cost is the locals and the block, not the record.
+let k_hand_inlined = { n } -> do
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else do
+      let lo = i - 1
+      let add = i
+      go { i = lo, acc = acc + add }
+  go { i = n, acc = 0 }
+
+## 7. Kernel 4 with the helper and the loop at MODULE level instead of `let`-bound
+## inside the kernel. Everything else is identical. A local lambda is compiled as
+## its own function and never inlined — `split` shows up in MEZZE_DUMP_FN output —
+## so the record is built inside it and returned, which puts it out of reach of
+## anything downstream. A top-level helper goes through tryInlineDirectCall. If 7
+## is faster than 4, the gap is devirtualisation of a local call, not records.
+let split_top = { i } -> { lo = i - 1, add = i }
+let go_top = { i, acc } ->
+  if i <= 0 then acc
+  else do
+    let p = split_top { i = i }
+    go_top { i = p.lo, acc = acc + p.add }
+let k_top_level = { n } -> go_top { i = n, acc = 0 }
+
+let report = { name, n, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  let n = arg_at { args = args, i = 1, def = 20000000 }
+  if k == 1 then do
+    k_positional { n = n }
+    k_positional { n = n }
+    k_positional { n = n }
+    report { name = "1 positional   ", n = n, r = time_it { f = {} -> k_positional { n = n } } }
+    report { name = "1 positional   ", n = n, r = time_it { f = {} -> k_positional { n = n } } }
+    report { name = "1 positional   ", n = n, r = time_it { f = {} -> k_positional { n = n } } }
+  else if k == 2 then do
+    k_record_state { n = n }
+    k_record_state { n = n }
+    k_record_state { n = n }
+    report { name = "2 record state ", n = n, r = time_it { f = {} -> k_record_state { n = n } } }
+    report { name = "2 record state ", n = n, r = time_it { f = {} -> k_record_state { n = n } } }
+    report { name = "2 record state ", n = n, r = time_it { f = {} -> k_record_state { n = n } } }
+  else if k == 3 then do
+    k_field_read { n = n }
+    k_field_read { n = n }
+    k_field_read { n = n }
+    report { name = "3 field read   ", n = n, r = time_it { f = {} -> k_field_read { n = n } } }
+    report { name = "3 field read   ", n = n, r = time_it { f = {} -> k_field_read { n = n } } }
+    report { name = "3 field read   ", n = n, r = time_it { f = {} -> k_field_read { n = n } } }
+  else if k == 4 then do
+    k_record_return { n = n }
+    k_record_return { n = n }
+    k_record_return { n = n }
+    report { name = "4 record return", n = n, r = time_it { f = {} -> k_record_return { n = n } } }
+    report { name = "4 record return", n = n, r = time_it { f = {} -> k_record_return { n = n } } }
+    report { name = "4 record return", n = n, r = time_it { f = {} -> k_record_return { n = n } } }
+  else if k == 5 then do
+    k_record_spread { n = n }
+    k_record_spread { n = n }
+    k_record_spread { n = n }
+    report { name = "5 record spread", n = n, r = time_it { f = {} -> k_record_spread { n = n } } }
+    report { name = "5 record spread", n = n, r = time_it { f = {} -> k_record_spread { n = n } } }
+    report { name = "5 record spread", n = n, r = time_it { f = {} -> k_record_spread { n = n } } }
+  else if k == 6 then do
+    k_hand_inlined { n = n }
+    k_hand_inlined { n = n }
+    k_hand_inlined { n = n }
+    report { name = "6 hand-inlined ", n = n, r = time_it { f = {} -> k_hand_inlined { n = n } } }
+    report { name = "6 hand-inlined ", n = n, r = time_it { f = {} -> k_hand_inlined { n = n } } }
+    report { name = "6 hand-inlined ", n = n, r = time_it { f = {} -> k_hand_inlined { n = n } } }
+  else if k == 7 then do
+    k_top_level { n = n }
+    k_top_level { n = n }
+    k_top_level { n = n }
+    report { name = "7 top-level fns", n = n, r = time_it { f = {} -> k_top_level { n = n } } }
+    report { name = "7 top-level fns", n = n, r = time_it { f = {} -> k_top_level { n = n } } }
+    report { name = "7 top-level fns", n = n, r = time_it { f = {} -> k_top_level { n = n } } }
+  else println { msg = "unknown kernel" }

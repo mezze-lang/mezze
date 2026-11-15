@@ -220,9 +220,29 @@ object EmbeddedExec {
             // (~64 Tier 1, ~10000 Tier 2) waste hundreds of milliseconds in
             // unoptimized code. Measured on fib(35)+fib(38): ~8% wall-time
             // reduction with these settings.
-            // NOTE: boxingEliminationTypes = {} (disabled) — with boxing
-            // elimination ON, these low thresholds cause a deopt storm.
-            // If boxing elimination is re-enabled, raise to 200/1000/500.
+            // THE NOTE THIS REPLACES SAID: "boxingEliminationTypes = {}
+            // (disabled) — with boxing elimination ON, these low thresholds
+            // cause a deopt storm. If boxing elimination is re-enabled, raise to
+            // 200/1000/500." Both halves are now out of date.
+            //
+            // Boxing elimination IS on — `MezzeBytecodeRootNode` reads
+            // `boxingEliminationTypes = {long, double, boolean}` — and the
+            // instruction to raise these was then TESTED and declined.
+            // `MEZZE_ENGINE_OPTS` makes it a no-rebuild A/B, and on
+            // `mezze-benchmark`'s mandelbrot at `--scale 3` the raised set is not
+            // a win: INTERLEAVED pairs (current, raised, current, raised …, so
+            // that drift cannot favour one) came out 27.3/32.6, 14.4/38.0,
+            // 16.2/37.7 and 33.3/27.1 — three of four for the thresholds as they
+            // are. A block of five runs taken BEFORE interleaving read 34.0 then
+            // 25.9 for the raised set and looked like a 1.31x win; the same
+            // settings then produced a descending 32.8, 29.3, 25.4, 17.7, 16.7,
+            // which is the machine warming up, not the setting.
+            //
+            // So: no deopt storm materialised, and these stay. Anyone revisiting
+            // it should interleave, and should know that mezze's figure on that
+            // kernel spans 8.8-31.3 ns/unit at `--scale 3` while kotlin's holds
+            // to ±1% — the spread is JIT warmup inside a one-second window, and
+            // it only settles at `--scale 6` (24.6-26.8, ±4%).
             .apply {
                 if (jitCapable && !jitDisabled) {
                     option("engine.FirstTierCompilationThreshold", "16")

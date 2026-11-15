@@ -1,0 +1,84 @@
+## HETEROGENEOUS `+` — `impl NumAdd Int for Float`, shipped by
+## "feat(abilities): class-parameter NumAdd for heterogeneous `+`".
+##
+## `NumAdd Float for Float` and `NumAdd Int for Float` share a receiver and
+## differ ONLY in the operand, so the full positional tuple is the only thing
+## that can choose between them. Both call-site emitters built that tuple by
+## keeping just the VARIABLE positions, so `NumAdd Int Float` arrived as the
+## 1-tuple `[Int]`: too short to match a 2-annotation impl, and short enough to
+## read as a single-parameter ability, which switched off the B1 guard that
+## exists to stop receiver-only matching. What was left matched on whichever
+## var survived — the OPERAND here — picking `impl NumAdd Int for Int`:
+##
+##   error[T0201]: Type mismatch for associated type 'out':
+##                 expected Int but got Float
+##
+## The direction matters, and it is the evidence for the diagnosis:
+##
+##   n + 0.5    `NumAdd Float 'a`   first var IS the receiver   -> right, by luck
+##   0.5 + n    `NumAdd 'a Float`   first var is the OPERAND    -> wrong impl
+##
+## `HeterogeneousNumericDispatchTest` is the regression test.
+##
+## STILL OPEN, and this file does not cover it: a heterogeneous add reached
+## through a DICTIONARY — a polymorphic HOF — still dies with
+##
+##   UnsupportedSpecializationException … CallNativeDDD [FloatOps$$Lambda, 0.5, 21]
+##
+## It is NOT enough to make the dictionary lookup tuple-aware. Tried, measured,
+## reverted: `resolveOpFromObligation` already matches a tuple position by
+## position, and feeding it the callee's constraint tuple changes nothing here,
+## because the tuple is not CONCRETE at that point.
+##
+## AND THE REASON IS NOT WHAT I FIRST WROTE HERE. I claimed the callee's
+## ability-constraint vars were "not freshened per call site", from seeing one
+## var id at both sites. Two things were wrong with that. The operand is the
+## CALLBACK'S RESULT, which is Int at BOTH sites — only the accumulator differs —
+## so one var serving both is no contradiction at all. And the SOLVER does have
+## per-site vars and does resolve them: tracing the two sites shows
+##
+##   solveAssociatedTypeResolution: NumAdd primaryTypeVar='j13#2069 resolved=Int
+##     matchingImpl: NumAdd {'out = Float}   <- float.mz:10, NumAdd Int for Float
+##
+## which is the RIGHT heterogeneous impl, chosen correctly.
+##
+## The real gap is that LOWERING never sees that answer. The solver resolved
+## var 2069; lowering reads var 1983, which nothing bound:
+##
+##   [TUP] typeArgs=[VarType(out, id=1983), Float]  bindings=[]
+##   [TUP] typeArgs=[VarType(out, id=1983), Int]    bindings=[]
+##
+## `resolveIdentifierType` builds an emitted node's type from
+## `constraintResults[name].type` — the declaration's SCHEME — so the operand
+## position is the scheme's own var, shared by every site, and
+## `substitution.apply` has nothing to say about it. The per-site types the
+## solver worked out are not carried into the emitted AST. `harvestVarBindings`
+## is fine and does descend into function-typed record fields; there is nothing
+## to bind because the ARGUMENT's recorded type is `step`'s scheme too.
+##
+## So the fix is not an instantiation fix in the solver. Either emit carries the
+## solver's per-site types, or the operand is re-derived where it is needed by
+## forward-solving the ARGUMENT's own chain against the callee's parameter
+## (`f: {x: Int} -> 'a` pins `x := Int`, then `NumMul Int Int -> Int` and
+## `NumAdd Int Int -> Int` give the result). The second is sound and local; a
+## homogeneous DEFAULT is not — it would answer Float at the Float-accumulator
+## site, where the true operand is Int, and miscompile silently.
+##
+## The same missing answer is why mono cannot specialise the HOF and
+## `apply_fold` keeps `__dict_add` (see `bench/cases/defunc` kernel 3 vs 7).
+## One cause, a correctness bug and the headline perf gap.
+use std::effects::log::{ println, Console }
+use std::float
+
+## Receiver CONCRETE (Float), operand a VAR the call site pins to Int.
+let direct = { n } -> 0.5 + n
+
+## The other direction: receiver a var, operand concrete.
+let other = { n } -> n + 0.5
+
+pub let main = {} -> perform Console in do
+  ## Both 21.5. The CONSUMER is the trigger: `float::to_str` pins `out` to
+  ## Float before the resolution runs. Without it `out` stays open, nothing
+  ## conflicts, and the wrong impl goes unnoticed.
+  println { msg = float::to_str { n = direct { n = 21 } } }
+  println { msg = float::to_str { n = other { n = 21 } } }

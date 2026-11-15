@@ -1443,12 +1443,14 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
                     (bound as? MezzeType.VarType)?.let { name to it.variable }
                 }.toMap()
                 if (assocVars.isEmpty()) return@mapNotNull null
-                val classArgVars = constraint.typeArgs.mapNotNull { (it as? MezzeType.VarType)?.variable }
+                // The WHOLE tuple, concrete positions included — see
+                // `Constraint.AssociatedTypeResolution.classArgTypes`.
+                val classArgs = constraint.typeArgs
                 Constraint.AssociatedTypeResolution(
                     abilityName = constraint.abilityName,
                     primaryTypeVar = primary,
                     associatedTypeVars = assocVars,
-                    classArgTypeVars = classArgVars,
+                    classArgTypes = classArgs,
                     abilityHash = context.abilityDeclarations[constraint.abilityName]?.contentHash,
                     context = "Call-site associated type resolution for ${constraint.abilityName}",
                     loc = expr.loc
@@ -1461,6 +1463,14 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
     if (tailCallLocation != null) collector.tailCalls.add(tailCallLocation)
 
     collector.callReturnTypes[expr.loc] = returnType
+    // The callee's arrow AS INSTANTIATED HERE. Emit otherwise re-derives the
+    // function node's type from the declaration's scheme, and the per-site
+    // vars the solver resolved — including a `with` constraint's operand — are
+    // lost. Only a function type is worth recording; anything else is not an
+    // arrow emit could stamp.
+    (functionResult.type as? MezzeType.FunctionType)?.let {
+        collector.callFunctionTypes[expr.loc] = it
+    }
     return collector.toResult(returnType)
 }
 

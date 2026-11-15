@@ -1,0 +1,265 @@
+## THE TEST `mezze-benchmark/RESULTS.md` ASKED FOR AND MARKED UNVERIFIED.
+##
+## That file measures mandelbrot at 2 212.5 ns/px against Scala's 18.1, Kotlin's
+## 22.2 and C's 22.9 — 122x, where eight of ten languages land within 1.8x of
+## each other. Its stated hypothesis:
+##
+##   "the escape loop carries unresolved `NumMul 'd 'd having 'out = 'f`, and a
+##    `NumSub Float 'a having 'out = Float` leaks all the way out to main's
+##    signature. If `Float * Float` is not monomorphising to a native float
+##    multiply, every operation stays a generic ability call and no amount of
+##    JIT fixes it. **Unverified** — it is a hypothesis with a clear test, and it
+##    lives in the mezze repo, not here."
+##
+## This is that test. Both kernels are the SAME escape loop, byte for byte,
+## except that kernel 2's parameters carry their types. Un-annotated, `zr * zr`
+## is `NumMul 'a 'a having 'out = 'b` and the function takes dictionaries;
+## annotated, it is a Float multiply. Same arithmetic, same checksum, same
+## recursion — the only difference is whether the operations are concrete.
+##
+## It is NOT a recommendation to annotate. An annotation that changes
+## performance means inference is leaving something on the table; the point of
+## measuring it is to size that, and `bench/cases/defunc` already puts the same
+## effect at 57x for a callback passed as a value.
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::collections::seq
+use std::collections::iter
+use std::float
+use std::int
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+let limit = 50
+
+## ── 1. AS THE BENCHMARK HAS IT: no annotations anywhere.
+let escape_poly = { cr, ci, zr, zi, i } ->
+  if i >= limit then i
+  else do
+    let zr2 = zr * zr
+    let zi2 = zi * zi
+    if zr2 + zi2 > 4.0 then i
+    else escape_poly {
+      cr = cr,
+      ci = ci,
+      zr = zr2 - zi2 + cr,
+      zi = 2.0 * zr * zi + ci,
+      i = i + 1,
+    }
+
+let pixel_poly = { p, side, span } -> do
+  let px = float::from_int { n = p % side }
+  let py = float::from_int { n = p / side }
+  escape_poly {
+    cr = px * 3.0 / span - 2.0,
+    ci = py * 3.0 / span - 1.5,
+    zr = 0.0,
+    zi = 0.0,
+    i = 0,
+  }
+
+## ── 2. THE SAME LOOP with its types written down. Nothing else differs.
+let escape_mono: { cr: Float, ci: Float, zr: Float, zi: Float, i: Int } -> Int =
+  { cr, ci, zr, zi, i } ->
+    if i >= limit then i
+    else do
+      let zr2 = zr * zr
+      let zi2 = zi * zi
+      if zr2 + zi2 > 4.0 then i
+      else escape_mono {
+        cr = cr,
+        ci = ci,
+        zr = zr2 - zi2 + cr,
+        zi = 2.0 * zr * zi + ci,
+        i = i + 1,
+      }
+
+let pixel_mono: { p: Int, side: Int, span: Float } -> Int = { p, side, span } -> do
+  let px = float::from_int { n = p % side }
+  let py = float::from_int { n = p / side }
+  escape_mono {
+    cr = px * 3.0 / span - 2.0,
+    ci = py * 3.0 / span - 1.5,
+    zr = 0.0,
+    zi = 0.0,
+    i = 0,
+  }
+
+## The grid walk is `iter::range().fold()` in both — the shape
+## `mezze-benchmark/mezze/src/mandelbrot.mz` uses, so these numbers sit beside
+## its 2 212.5 ns/px directly rather than needing a translation.
+##
+## A plain tail loop was tried here first and the POLY side would not compile:
+## `[BDSL] compile failed for lambda reason=unsupported
+## (node=CallDirectIR:target-not-compiled)`. That is its own bug — a shape that
+## type-checks and does not compile — and it is recorded rather than chased,
+## because it is not what this bench is for.
+## ── 3. THE SAME LOOP, SINGLE EXIT — AND THE HYPOTHESIS IT DISPROVES.
+##
+## `MEZZE_TRACE_SELFTAIL` reports `params=5 tier=not-fused` for kernels 1 and 2.
+## Their recursing branch is a `do` block ending in a NESTED `if`, and the
+## direct-while tier accepts only a block ending in the self call itself, so the
+## obvious reading is that both fall to the flag-based fallback — ~27 BDSL ops an
+## iteration against direct-while's ~13 — and that the remaining gap to Scala is
+## the tier.
+##
+## This kernel folds the two exits into one condition, so the else branch IS the
+## self call: the shape the tier accepts. It does slightly MORE arithmetic (the
+## squares are computed in the guard and again in the update), so a win would have
+## been the tier's.
+##
+## MEASURED at side 1800: all three kernels 62 ns/px, identical checksums. **The
+## tier is not the cause.** Whatever the remaining 3.2x against Scala is, it is not
+## self-tail-loop dispatch, and `tier=not-fused` in the trace is not evidence of a
+## slow loop — the diagnostic prints BEFORE the direct-while attempt, so it reports
+## only on the three fused-LONG tiers.
+let escape_one: { cr: Float, ci: Float, zr: Float, zi: Float, i: Int } -> Int =
+  { cr, ci, zr, zi, i } ->
+    if i >= limit || zr * zr + zi * zi > 4.0 then i
+    else escape_one {
+      cr = cr,
+      ci = ci,
+      zr = zr * zr - zi * zi + cr,
+      zi = 2.0 * zr * zi + ci,
+      i = i + 1,
+    }
+
+let pixel_one: { p: Int, side: Int, span: Float } -> Int = { p, side, span } -> do
+  let px = float::from_int { n = p % side }
+  let py = float::from_int { n = p / side }
+  escape_one {
+    cr = px * 3.0 / span - 2.0,
+    ci = py * 3.0 / span - 1.5,
+    zr = 0.0,
+    zi = 0.0,
+    i = 0,
+  }
+
+let grid_one = { side, span } ->
+  iter::range { start = 0, end = side * side }
+    .fold { init = 0, f = { acc, x } -> acc + pixel_one { p = x, side = side, span = span } }
+
+let grid_poly = { side, span } ->
+  iter::range { start = 0, end = side * side }
+    .fold { init = 0, f = { acc, x } -> acc + pixel_poly { p = x, side = side, span = span } }
+
+let grid_mono = { side, span } ->
+  iter::range { start = 0, end = side * side }
+    .fold { init = 0, f = { acc, x } -> acc + pixel_mono { p = x, side = side, span = span } }
+
+## ── 4. THE SAME PIXEL WORK, GRID WALKED BY A TAIL LOOP instead of
+##      `iter::range().fold()`. Kernels 1-3 all walk the grid lazily through the
+##      iter machinery, which is one `fold` callback dispatch, one `pixel` call and
+##      one `escape` trampoline entry PER PIXEL.
+##
+## The arithmetic is not the suspect any more. `bench/cases/floatloop` kernel 2 is
+## a two-parameter float tail loop at 811 ps/iter against the same loop written in
+## Java at 806 — parity. At ~12 escape iterations a pixel that puts the loop at
+## ~18 ns of mandelbrot's 69, so ~50 ns a pixel is being spent somewhere that is
+## not arithmetic. This kernel removes the iter/fold half of it.
+let grid_loop = { side, span } -> do
+  let go: { p: Int, acc: Int } -> Int = { p, acc } ->
+    if p >= side * side then acc
+    else go { p = p + 1, acc = acc + pixel_mono { p = p, side = side, span = span } }
+  go { p = 0, acc = 0 }
+
+## ── 5 and 6. THE SAME TWO GRID WALKS WITH THE PIXEL WORK REMOVED.
+##
+## Kernel 2 against kernel 4 says `iter::range().fold()` costs 26 ns a pixel over
+## a tail loop. That could be the iter protocol itself — a step per element, an
+## Option per step — or it could be that the callback's body is too big to inline
+## at the fold's call site, since the callback calls `pixel_mono` which calls
+## `escape_mono`. These two isolate it: same walk, same shapes, a callback small
+## enough that nothing could refuse to inline it.
+##
+## (5 - 6) is the iter/fold overhead for a SMALL callback. If that is a couple of
+## nanoseconds while kernel 2 - kernel 4 is 26, then the protocol is not the cost
+## and the callback's SIZE is.
+##
+## Their checksums are sums of `p % 7`, so they agree with each other and with
+## nothing else; what matters is that each is stable across runs. The `% 7` is
+## there because a plain `acc + p` HAS A CLOSED FORM and both kernels measured
+## 0-1 ns/px — the JVM folded the loop away, which this file's own method notes
+## warn about and which I walked into anyway.
+let grid_trivial_iter = { side, span } ->
+  iter::range { start = 0, end = side * side }
+    .fold { init = 0, f = { acc, x } -> do
+      let m = x % 7
+      acc + m
+    }
+
+let grid_trivial_loop = { side, span } -> do
+  let go: { p: Int, acc: Int } -> Int = { p, acc } ->
+    if p >= side * side then acc
+    else do
+      let m = p % 7
+      go { p = p + 1, acc = acc + m }
+  go { p = 0, acc = 0 }
+
+## ── 7. THE SAME TRIVIAL FOLD WITH NO `let` IN THE CALLBACK.
+##
+## The chain DOES fuse — the lowered IR is
+## `FusedChainIR(source=RangeSeq(0, side*side), stages=[], sink=Fold(0, MakeLambdaIR))`
+## for kernels 1, 2 and 5 alike — so the 20 ns an element is not a refusal to
+## fuse. It is how the SINK is emitted. `BytecodeCompiler` carries a gate that
+## accepts "a fold body that is a pure arithmetic tree over the folder's two
+## parameters and integer literals" and inlines it into the loop; anything else
+## gets a call per element.
+##
+## Kernel 5's callback is `do { let m = x % 7; acc + m }` — a block with a
+## binding, so not a tree. This one is `acc + (x % 7)`: same arithmetic, same
+## checksum, no binding. If it drops from 21 ns/px to ~1, the gate is the cause
+## and widening it is the fix.
+let grid_tree_iter = { side, span } ->
+  iter::range { start = 0, end = side * side }
+    .fold { init = 0, f = { acc, x } -> acc + (x % 7) }
+
+let report = { name, px, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns / px }) ns/px  sum=$(int::to_str { n = r.result })" }
+
+pub let main = {} -> perform Console in perform SystemArgs in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  let side = arg_at { args = args, i = 1, def = 400 }
+  let span = float::from_int { n = side }
+  let px = side * side
+  if k == 1 then do
+    grid_poly { side = 40, span = float::from_int { n = 40 } }
+    report { name = "1 escape POLY (no annot)", px = px, r = time_it { f = {} -> grid_poly { side = side, span = span } } }
+    report { name = "1 escape POLY (no annot)", px = px, r = time_it { f = {} -> grid_poly { side = side, span = span } } }
+  else if k == 2 then do
+    grid_mono { side = 40, span = float::from_int { n = 40 } }
+    report { name = "2 escape MONO (annot)   ", px = px, r = time_it { f = {} -> grid_mono { side = side, span = span } } }
+    report { name = "2 escape MONO (annot)   ", px = px, r = time_it { f = {} -> grid_mono { side = side, span = span } } }
+  else if k == 3 then do
+    grid_one { side = 40, span = float::from_int { n = 40 } }
+    report { name = "3 escape ONE EXIT       ", px = px, r = time_it { f = {} -> grid_one { side = side, span = span } } }
+    report { name = "3 escape ONE EXIT       ", px = px, r = time_it { f = {} -> grid_one { side = side, span = span } } }
+  else if k == 4 then do
+    grid_loop { side = 40, span = float::from_int { n = 40 } }
+    report { name = "4 grid TAIL LOOP (annot)", px = px, r = time_it { f = {} -> grid_loop { side = side, span = span } } }
+    report { name = "4 grid TAIL LOOP (annot)", px = px, r = time_it { f = {} -> grid_loop { side = side, span = span } } }
+  else if k == 5 then do
+    grid_trivial_iter { side = 40, span = float::from_int { n = 40 } }
+    report { name = "5 iter/fold, no pixel   ", px = px, r = time_it { f = {} -> grid_trivial_iter { side = side, span = span } } }
+    report { name = "5 iter/fold, no pixel   ", px = px, r = time_it { f = {} -> grid_trivial_iter { side = side, span = span } } }
+  else if k == 6 then do
+    grid_trivial_loop { side = 40, span = float::from_int { n = 40 } }
+    report { name = "6 tail loop, no pixel   ", px = px, r = time_it { f = {} -> grid_trivial_loop { side = side, span = span } } }
+    report { name = "6 tail loop, no pixel   ", px = px, r = time_it { f = {} -> grid_trivial_loop { side = side, span = span } } }
+  else do
+    grid_tree_iter { side = 40, span = float::from_int { n = 40 } }
+    report { name = "7 iter/fold, flat body  ", px = px, r = time_it { f = {} -> grid_tree_iter { side = side, span = span } } }
+    report { name = "7 iter/fold, flat body  ", px = px, r = time_it { f = {} -> grid_tree_iter { side = side, span = span } } }

@@ -5,6 +5,7 @@ import com.mezze.datastructures.map.MezzeMap;
 import com.mezze.datastructures.list.MezzeList;
 import com.mezze.datastructures.seq.*;
 import com.mezze.datastructures.set.MezzeSet;
+import com.mezze.datastructures.set.ElementHashing;
 import com.mezze.datastructures.sorted.MezzeSortedMap;
 import com.mezze.datastructures.sorted.MezzeSortedSet;
 import com.mezze.datastructures.nodes.*;
@@ -34,15 +35,18 @@ public final class SeqNatives {
     private static final String[] FIELD_I = {"i"};
     private static final String[] FIELD_ACC_X = {"acc", "x"};
     private static final String[] FIELD_A_B = {"a", "b"};
-    private static final String[] FIELD_FST_SND = {"fst", "snd"};
+    private static final String[] FIELD_FST_SND =
+        {com.mezze.language.truffleir.NativeHofNames.PAIR_FST, com.mezze.language.truffleir.NativeHofNames.PAIR_SND};
     private static final String[] FIELD_VALUE_INDEX = {"value", "index"};
     private static final String[] FIELD_FSTS_SNDS = {"fsts", "snds"};
     private static final String[] FIELD_PASS_FAIL = {"pass", "fail"};
     private static final String[] FIELD_KEY_VALUES = {"key", "values"};
     private static final String[] FIELD_L_R = {"l", "r"};
     private static final String[] FIELD_START_END = {"start", "end"};
-    private static final String[] FIELD_FST_SND_THD = {"fst", "snd", "thd"};
-    private static final String[] FIELD_FST_SND_THD_FTH = {"fst", "snd", "thd", "fth"};
+    private static final String[] FIELD_FST_SND_THD =
+        {com.mezze.language.truffleir.NativeHofNames.PAIR_FST, com.mezze.language.truffleir.NativeHofNames.PAIR_SND, com.mezze.language.truffleir.NativeHofNames.PAIR_THD};
+    private static final String[] FIELD_FST_SND_THD_FTH =
+        {com.mezze.language.truffleir.NativeHofNames.PAIR_FST, com.mezze.language.truffleir.NativeHofNames.PAIR_SND, com.mezze.language.truffleir.NativeHofNames.PAIR_THD, com.mezze.language.truffleir.NativeHofNames.PAIR_FTH};
 
     // ==================== Basic Operations ====================
 
@@ -385,10 +389,16 @@ public final class SeqNatives {
 
     public static MezzeSeq flatMap(MezzeSeq seq, MezzeFunction mapper,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        // `ScalarCall` resolves the scalar-ABI bypass ONCE and reuses one args
+        // array; `prepareArgs` allocated an `Object[]` and a
+        // `MezzeRecord.wrapX` per element. At 27 765 ps per input element this
+        // was the most expensive seq operation still unfixed apart from
+        // `unique`, and above `group_by`'s 20 588 — which is where the
+        // prediction had it below.
+        var ctx = ScalarCall.prepare1(mapper, "x");
         java.util.ArrayList<Object> results = new java.util.ArrayList<>();
         for (int i = 0; i < seq.size(); i++) {
-            Object mapped = callNode.call(mapper.getCallTarget(),
-                prepareArgs(mapper, seq.get(i)));
+            Object mapped = ctx.call1(callNode, seq.get(i));
             if (mapped instanceof MezzeSeq innerSeq) {
                 for (int j = 0; j < innerSeq.size(); j++) {
                     results.add(innerSeq.get(j));
@@ -688,64 +698,235 @@ public final class SeqNatives {
 
     // ==================== Sort Operations ====================
 
+    /**
+     * Natural-order sort with NO guest call and NO boxing — the whole point.
+     *
+     * <p>WHAT THIS REPLACES. `seq::sort` routed through `sort_by`, so each of the
+     * roughly n log n comparisons ran a guest lambda. MEASURED at a hundred
+     * descending elements: 1 291 024 ps, against 68 387 for `Arrays.sort(long[])`
+     * over the same input and 266 065 for boxed TimSort. The comparator was the
+     * cost, not the sort.
+     *
+     * <p>Reached ONLY when the compiler proved the element directly comparable —
+     * {@code OrdKind.DIRECT}, which is Int, Float and Str and nothing else. For
+     * every other element {@code TypedASTCompiler} rewrites the call to
+     * {@code __native_seq_sort_by_ord} and hands over that element's own `le`.
+     * That gate is not a nicety: a `newtype R = Int` with a reversed `Ord`
+     * compares as a long here and would silently contradict the order its author
+     * wrote. See known-bugs.md BUG 10, which is this bug in min_by's clothing.
+     *
+     * <p>THE PREVIOUS BODY WAS DEAD AND WRONG. `__native_seq_sort` was registered
+     * in both {@code NativeDispatch} and {@code SeqOps.kt} and called from
+     * nowhere, and its comparator ended {@code return 0} — so had anything
+     * reached it with a record, TimSort would have treated every pair as
+     * equal and handed back the original order as sorted. An unreachable
+     * wrong answer is still a wrong answer waiting for a caller.
+     *
+     * <p>The tag switch is a carried decision, not a type guess: the storage
+     * tier IS the element representation. Anything else throws, because the
+     * compiler promised DIRECT and a broken promise is a compiler bug — there is
+     * no sensible order to fall back to, and inventing one is what the old
+     * {@code return 0} did.
+     */
     @TruffleBoundary
     public static MezzeSeq sort(MezzeSeq seq) {
+        int n = seq.size();
+        if (n <= 1) return seq;
+        byte tag = seq.getStrategyTag();
+        if (tag == SeqStorage.TAG_LONG) {
+            long[] arr = seq.toLongArray();        // already a defensive copy
+            Arrays.sort(arr);                      // dual-pivot quicksort, no comparator
+            return MezzeSeq.fromStorage(new LongSeqStorage(arr));
+        }
+        if (tag == SeqStorage.TAG_DOUBLE) {
+            double[] arr = seq.toDoubleArray();
+            Arrays.sort(arr);
+            return MezzeSeq.fromStorage(new DoubleSeqStorage(arr));
+        }
+        // The object tier holds whatever the element is, so Str is CHECKED here
+        // rather than assumed. The scan is O(n) against the sort's O(n log n),
+        // and it buys an error that names the broken promise instead of a
+        // ClassCastException from inside TimSort.
         Object[] arr = seq.toArray();
-        Arrays.sort(arr, (a, b) -> {
-            if (a instanceof Long && b instanceof Long) {
-                return Long.compare((Long) a, (Long) b);
+        for (Object elem : arr) {
+            if (!(elem instanceof String)) {
+                throw new IllegalStateException(
+                    "__native_seq_sort reached a " + (elem == null ? "null" : elem.getClass().getName())
+                    + " element: this native sorts only the directly comparable elements"
+                    + " (Int, Float, Str). Anything else must have been rewritten to"
+                    + " __native_seq_sort_by_ord by TypedASTCompiler, so this is a"
+                    + " compiler bug, not a program error.");
             }
-            if (a instanceof Double && b instanceof Double) {
-                return Double.compare((Double) a, (Double) b);
-            }
-            if (a instanceof String && b instanceof String) {
-                return ((String) a).compareTo((String) b);
-            }
-            return 0;
-        });
+        }
+        Arrays.sort(arr);
         return MezzeSeq.fromArray(arr);
     }
 
+    /**
+     * Natural-order sort through the element's OWN `Ord` — the general path.
+     *
+     * <p>This is where every element the compiler could not prove directly
+     * comparable goes: records, variants, and above all a newtype whose `Ord`
+     * disagrees with the type it wraps. `le` is `Ord`'s own operation and
+     * answers True when `it` should come before `r`, which is exactly the
+     * contract {@code sortBy} already documents, so the normalisation to
+     * -1 / 1 happens here rather than in a guest wrapper.
+     *
+     * <p>ONE `le` per comparison, which is what this path already cost: the
+     * stdlib wrapped the comparator as `if cmp { ... } then 0 - 1 else 1` and
+     * `sort` went through it. That shape never answers 0, so two equal elements
+     * compare as -1 in BOTH directions and TimSort's "Comparison method
+     * violates its general contract" check can in principle fire. The property
+     * is inherited, not introduced — `le(a,b) ? (le(b,a) ? 0 : -1) : 1` would
+     * fix it at about 1.5 guest calls per comparison, which is a change to the
+     * general path's cost and belongs with its own measurement, not here.
+     *
+     * <p>Through {@link ScalarCall} for the same reason {@code sortBy} is: it
+     * resolves the scalar-ABI bypass once and reuses one args array for the
+     * whole sort, where a per-comparison {@code prepareArgsComparator} allocates
+     * an {@code Object[]} and a {@code MezzeRecord} every time.
+     */
+    public static MezzeSeq sortByOrd(MezzeSeq seq, MezzeFunction leFn,
+                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        int n = seq.size();
+        if (n <= 1) return seq;
+        var ctx = ScalarCall.prepare2(leFn, "it", "r");
+        Object[] arr = seq.toArray();
+        Arrays.sort(arr, (a, b) -> ctx.callBool(callNode, a, b) ? -1 : 1);
+        return MezzeSeq.fromArray(arr);
+    }
+
+    /**
+     * Sort by a guest comparator — through {@link ScalarCall}, which is what
+     * every other native HOF here uses and what this one skipped.
+     *
+     * <p>It used to call {@code prepareArgsComparator} per comparison, and that
+     * allocates TWICE every time: a fresh {@code Object[] args} and a
+     * {@code MezzeRecord.wrapAB} to hold the pair. A sort does about
+     * {@code n log n} comparisons, so a thousand elements paid roughly twenty
+     * thousand allocations for argument passing alone.
+     *
+     * <p>{@code ScalarCall} exists for exactly this: it resolves the scalar-ABI
+     * bypass ONCE and then reuses one positional args array for the whole sort,
+     * so the scalar path allocates nothing per comparison. {@link
+     * ScalarCall#callCmp} is even written for this caller — "keeps a sort stable
+     * instead of corrupting it", says its doc — and had every collection's
+     * min/max/compare as users while the sort it names did not use it.
+     *
+     * <p>{@code callCmp} also normalises with {@code Long.signum} where this
+     * read {@code intValue()}, which is strictly safer but is NOT a bug fix
+     * today and should not be sold as one: {@code intValue()} narrows, so a
+     * comparator answering a magnitude could have its sign flipped or zeroed —
+     * but `std::collections::seq` wraps every comparator as
+     * {@code if cmp {...} then 0 - 1 else 1}, so the only values reaching here
+     * are -1 and 1. It matters if a caller ever hands this native a raw
+     * three-way comparator.
+     */
     public static MezzeSeq sortBy(MezzeSeq seq, MezzeFunction cmpFn,
                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare2(cmpFn, "a", "b");
         Object[] arr = seq.toArray();
-        Arrays.sort(arr, (elemA, elemB) -> {
-            Object cmpResult = callNode.call(cmpFn.getCallTarget(),
-                prepareArgsComparator(cmpFn, elemA, elemB));
-            if (cmpResult instanceof Long) {
-                return ((Long) cmpResult).intValue();
-            }
-            return 0;
-        });
+        Arrays.sort(arr, (elemA, elemB) -> ctx.callCmp(callNode, elemA, elemB));
         return MezzeSeq.fromArray(arr);
     }
 
     // ==================== Unique/Flatten Operations ====================
+    //
+    // `seq::unique` WAS O(n^2), and its own comment said why: "Eq is not
+    // required to be hashable (only equatable)", so every element was compared
+    // against every survivor through a guest call. MEASURED at two element
+    // counts, which is what distinguishes a quadratic from an expensive
+    // constant: 40 243 498 ps at a hundred elements and 4 169 669 450 at a
+    // thousand — 103.6x for a tenfold n, an exponent of 2.02, where
+    // `seq::dedup` over the same input grew 9.45x.
+    //
+    // The signature is now `with Eq 'a, Hash 'a`. That is a user-facing
+    // decision and not a performance one: a caller whose element has a
+    // hand-written `Eq` and no `Hash` stops compiling, which is the honest
+    // outcome, because that combination is precisely what the quadratic paid
+    // for.
 
-    public static MezzeSeq unique(MezzeSeq seq, MezzeFunction eqFn,
-                                  com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        return distinct(seq, eqFn, callNode);
+    /**
+     * First occurrence of each element, bucketing STRUCTURALLY — O(n).
+     *
+     * <p>`LinkedHashSet` is not an approximation of the structural set here, it
+     * is the same semantics: a structurally-bucketed `MezzeSet` hashes with
+     * `hashCode()` through `TrieHash.mix32` and compares with
+     * `Objects.equals`, which is what `HashSet` does, and `LinkedHashSet` adds
+     * exactly the insertion order that "keeps the first occurrence" requires.
+     *
+     * <p>Correct only when the element's `Eq` and `Hash` are the compiler's
+     * own. When the author wrote them, `TypedASTCompiler.evidenceNativeForm`
+     * routes to {@link #uniqueHashedWithEvidence} instead, under the rule it
+     * already applies to `set::from_seq`.
+     */
+    @TruffleBoundary
+    public static MezzeSeq uniqueHashed(MezzeSeq seq) {
+        int n = seq.size();
+        if (n <= 1) return seq;
+        java.util.LinkedHashSet<Object> seen = new java.util.LinkedHashSet<>(n * 2);
+        for (int i = 0; i < n; i++) {
+            seen.add(seq.get(i));
+        }
+        if (seen.size() == n) return seq;      // nothing to remove
+        return MezzeSeq.fromArray(seen.toArray());
     }
 
-    // Keeps the first occurrence of each element; O(n^2) in the worst case because
-    // Eq is not required to be hashable (only equatable). The primitive/structural
-    // fast path (seq.distinct()) can't be used: it would ignore a custom Eq impl.
-    public static MezzeSeq distinct(MezzeSeq seq, MezzeFunction eqFn,
-                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        if (seq.isEmpty()) return seq;
-        java.util.ArrayList<Object> result = new java.util.ArrayList<>();
-        for (int i = 0; i < seq.size(); i++) {
+    /**
+     * The same, bucketing by the element's OWN `hash` and `eq` — O(n).
+     *
+     * <p>{@link ClosureHashing} supplies the pair or nothing: it returns null
+     * unless both closures are present, because "a container that hashed by the
+     * element's instance but compared structurally would be worse than either
+     * alone" — equal values would land in one bucket and fail the comparison, or
+     * land apart and never be compared. Null means the instances are derived
+     * and the structural walk above is the right answer.
+     *
+     * <p>An open-addressed table of indices rather than a wrapper object per
+     * element: the author's `hash` is then called once per element and the
+     * author's `eq` only when two elements land in the same slot.
+     */
+    @TruffleBoundary
+    public static MezzeSeq uniqueHashedWithEvidence(MezzeSeq seq, MezzeFunction hashFn,
+                                                    MezzeFunction eqFn) {
+        ElementHashing hashing = ClosureHashing.of(hashFn, eqFn);
+        if (hashing == null) return uniqueHashed(seq);
+
+        int n = seq.size();
+        if (n <= 1) return seq;
+
+        int cap = Integer.highestOneBit(Math.max(4, n)) << 2;   // load factor <= 0.5
+        int mask = cap - 1;
+        int[] slots = new int[cap];          // 0 = empty, else 1 + index into out
+        int[] hashes = new int[n];
+        Object[] out = new Object[n];
+        int kept = 0;
+
+        for (int i = 0; i < n; i++) {
             Object elem = seq.get(i);
-            boolean seen = false;
-            for (int j = 0; j < result.size(); j++) {
-                if (eqCall(eqFn, result.get(j), elem, callNode)) {
-                    seen = true;
+            int h = hashing.hashOf(elem);
+            int slot = (h ^ (h >>> 16)) & mask;
+            boolean duplicate = false;
+            while (slots[slot] != 0) {
+                int at = slots[slot] - 1;
+                // The stored hash is checked first so the author's `eq` is only
+                // called for a genuine collision, not for every probe.
+                if (hashes[at] == h && hashing.eq(out[at], elem)) {
+                    duplicate = true;
                     break;
                 }
+                slot = (slot + 1) & mask;
             }
-            if (!seen) result.add(elem);
+            if (!duplicate) {
+                hashes[kept] = h;
+                out[kept] = elem;
+                slots[slot] = kept + 1;
+                kept++;
+            }
         }
-        return MezzeSeq.fromArray(result.toArray());
+
+        if (kept == n) return seq;
+        return MezzeSeq.fromArray(java.util.Arrays.copyOf(out, kept));
     }
 
     @TruffleBoundary
@@ -968,10 +1149,16 @@ public final class SeqNatives {
 
     public static MezzeSeq groupBy(MezzeSeq seq, MezzeFunction keyFn,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        // `ScalarCall` resolves the scalar-ABI bypass ONCE and reuses one args
+        // array for the whole walk. This used to call `prepareArgs` per
+        // element, which allocates an `Object[]` AND a `MezzeRecord.wrapX` to
+        // carry a single value — two allocations an element, where `map`,
+        // `fold` and `forEach` all hoist theirs out of the loop.
+        var ctx = ScalarCall.prepare1(keyFn, "x");
         java.util.LinkedHashMap<Object, java.util.ArrayList<Object>> groups = new java.util.LinkedHashMap<>();
         for (int i = 0; i < seq.size(); i++) {
             Object elem = seq.get(i);
-            Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
+            Object key = ctx.call1(callNode, elem);
             groups.computeIfAbsent(key, k -> new java.util.ArrayList<>()).add(elem);
         }
         Object[] result = new Object[groups.size()];
@@ -1220,20 +1407,38 @@ public final class SeqNatives {
 
     public static MezzeSeq sortByKey(MezzeSeq seq, MezzeFunction keyFn, MezzeFunction cmpFn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        // Both callbacks go through `ScalarCall`, which resolves the scalar-ABI
+        // bypass ONCE and reuses one args array. This used to call
+        // `prepareArgs` per element for the key and `cmpInt` per comparison,
+        // and each of those allocates twice — an `Object[]` and a
+        // `MezzeRecord` wrapper. At a hundred elements that is two hundred
+        // allocations for the keys and about thirteen hundred for the
+        // comparisons, which is most of what made this the worst seq operation
+        // except `unique`.
+        var keyCall = ScalarCall.prepare1(keyFn, "x");
+        var cmp = ScalarCall.prepare2(cmpFn, "a", "b");
+
         // Pre-compute keys to avoid calling keyFn multiple times per element
         int size = seq.size();
         Object[] elements = new Object[size];
         Object[] keys = new Object[size];
         for (int i = 0; i < size; i++) {
             elements[i] = seq.get(i);
-            keys[i] = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elements[i]));
+            keys[i] = keyCall.call1(callNode, elements[i]);
         }
 
         // Sort indices by key, comparing keys via the threaded comparator
         // (the key type's Ord impl), not the primitive-only compare().
+        //
+        // `Integer[]` stays: `indices[i] = i` looks like an allocation an
+        // element and is not, because `Integer.valueOf` caches -128..127 —
+        // checked on this JVM, identity holds at 99 and 127 and fails at 128.
+        // Above 127 it would allocate, and `Arrays.sort` takes no comparator
+        // over `int[]`, so replacing it means a hand-written index sort: its
+        // own change, with its own measurement at a size where it bites.
         Integer[] indices = new Integer[size];
         for (int i = 0; i < size; i++) indices[i] = i;
-        Arrays.sort(indices, (a, b) -> cmpInt(cmpFn, keys[a], keys[b], callNode));
+        Arrays.sort(indices, (a, b) -> cmp.callCmp(callNode, keys[a], keys[b]));
 
         // Reorder elements
         Object[] result = new Object[size];
@@ -1651,8 +1856,12 @@ public final class SeqNatives {
     // Threads the caller's element comparator so a custom Ord is honoured.
     public static boolean isSorted(MezzeSeq seq, MezzeFunction cmpFn,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        // `ScalarCall` hoists the args array out of the walk; `cmpInt`
+        // allocated an `Object[]` and a `MezzeRecord` per PAIR. 16 086
+        // ps/element before, against a 496 ps/element one-pass control.
+        var cmp = ScalarCall.prepare2(cmpFn, "a", "b");
         for (int i = 1; i < seq.size(); i++) {
-            if (cmpInt(cmpFn, seq.get(i - 1), seq.get(i), callNode) > 0) {
+            if (cmp.callCmp(callNode, seq.get(i - 1), seq.get(i)) > 0) {
                 return false;
             }
         }
@@ -1671,10 +1880,17 @@ public final class SeqNatives {
     public static boolean isSortedBy(MezzeSeq seq, MezzeFunction keyFn, MezzeFunction cmpFn,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (seq.size() <= 1) return true;
-        Object prevKey = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, seq.get(0)));
+        // FOUR allocations an element before this: `prepareArgs` for the key
+        // and `cmpInt` for the comparison, each allocating an `Object[]` and a
+        // `MezzeRecord`. At 34 109 ps/element it was the most expensive of the
+        // five family members measured, and 2.12x `isSorted` — which is the
+        // 4-against-2 allocation ratio showing up in the number.
+        var keyCall = ScalarCall.prepare1(keyFn, "x");
+        var cmp = ScalarCall.prepare2(cmpFn, "a", "b");
+        Object prevKey = keyCall.call1(callNode, seq.get(0));
         for (int i = 1; i < seq.size(); i++) {
-            Object currKey = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, seq.get(i)));
-            if (cmpInt(cmpFn, prevKey, currKey, callNode) > 0) {
+            Object currKey = keyCall.call1(callNode, seq.get(i));
+            if (cmp.callCmp(callNode, prevKey, currKey) > 0) {
                 return false;
             }
             prevKey = currKey;
@@ -1684,8 +1900,13 @@ public final class SeqNatives {
 
     public static boolean isSortedDescending(MezzeSeq seq, MezzeFunction cmpFn,
                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        // The twin of `isSorted`, and it gets the same treatment for the
+        // same reason — it is unbenched, so no number is claimed for it, but
+        // leaving one of an identical pair on the slow path is how the two
+        // drift apart.
+        var cmp = ScalarCall.prepare2(cmpFn, "a", "b");
         for (int i = 1; i < seq.size(); i++) {
-            if (cmpInt(cmpFn, seq.get(i - 1), seq.get(i), callNode) < 0) {
+            if (cmp.callCmp(callNode, seq.get(i - 1), seq.get(i)) < 0) {
                 return false;
             }
         }
@@ -1826,12 +2047,30 @@ public final class SeqNatives {
         return MezzeDeque.fromIterable(java.util.Arrays.asList(seq.toArray()));
     }
 
+    /**
+     * ORDERED BY THE ELEMENT'S `Ord`, which the caller supplies.
+     *
+     * <p>TWO BUGS LIVED HERE. It built through a bare `empty()`, so a
+     * hand-written `Ord` was ignored and the result came out naturally ordered
+     * — measured as `1, 3, 5` for a descending newtype, with `contains`
+     * finding one element of three.
+     *
+     * <p>And it cast: `add((Comparable) seq.get(i))`. {@code add(A)} is
+     * UNBOUNDED and delegates to {@code addObject}, so the cast bought nothing
+     * and reintroduced at this call site the very checkcast
+     * `MezzeSortedSet`'s class comment records removing — "ClassCastException
+     * for any Mezze record or variant, so a sorted set of user values could not
+     * even be iterated". A fix to the container's type parameter, undone by one
+     * of its callers. Confirmed by running it, not read off the source.
+     *
+     * <p>The newtype-over-Int case survived that cast because a boxed Long IS
+     * Comparable, which is why only record and variant elements crashed.
+     */
     @TruffleBoundary
-    @SuppressWarnings("unchecked")
-    public static MezzeSortedSet toSortedSet(MezzeSeq seq) {
-        MezzeSortedSet result = MezzeSortedSet.empty();
+    public static MezzeSortedSet toSortedSet(MezzeSeq seq, MezzeFunction cmpFn) {
+        MezzeSortedSet result = MezzeSortedSet.empty(ElementComparator.of(cmpFn));
         for (int i = 0; i < seq.size(); i++) {
-            result = result.add((Comparable) seq.get(i));
+            result = result.addObject(seq.get(i));
         }
         return result;
     }
@@ -1850,9 +2089,10 @@ public final class SeqNatives {
         return result;
     }
 
+    /** See {@link #toSortedSet}: the key's `Ord` comes from the caller. */
     @TruffleBoundary
-    public static MezzeSortedMap toSortedMap(MezzeSeq seq) {
-        MezzeSortedMap result = MezzeSortedMap.empty();
+    public static MezzeSortedMap toSortedMap(MezzeSeq seq, MezzeFunction cmpFn) {
+        MezzeSortedMap result = MezzeSortedMap.empty(ElementComparator.of(cmpFn));
         for (int i = 0; i < seq.size(); i++) {
             Object elem = seq.get(i);
             if (elem instanceof MezzeRecord rec) {

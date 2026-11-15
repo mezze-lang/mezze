@@ -1,0 +1,12 @@
+[package]
+name = "tailannot"
+version = "0.1.0"
+
+[[app]]
+name = "tailannot"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

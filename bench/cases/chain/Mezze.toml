@@ -1,0 +1,12 @@
+[package]
+name = "chain"
+version = "0.1.0"
+
+[[app]]
+name = "chain"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

@@ -113,6 +113,9 @@ pub let filter
   = { m, p } -> __native_map_filter { m = m, p = p }
 
 ## Folds over all entries with an accumulator.
+## Returns the sum of all integer values.
+pub let sum_values: { m: Map 'k Int } -> Int = { m } -> __native_map_sum_values { m = m }
+
 pub let fold
   : { m: Map 'k 'v, init: 'acc, f: { acc: 'acc, k: 'k, v: 'v } -> 'acc <...> }
   -> 'acc <...>
@@ -242,7 +245,16 @@ pub let max_value: { m: Map 'k 'v } with Ord 'v -> Option 'v = { m } ->
   max_value_with_cmp { m = m, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
 
 ## Swaps keys and values. Duplicate values keep one arbitrary key.
-pub let invert: { m: Map 'k 'v } -> Map 'v 'k = { m } -> __native_map_invert { m = m }
+## `Eq 'v, Hash 'v` — on the VALUE, because inverting keys the result BY the
+## values. Without it the new map bucketed structurally, so "duplicate values
+## keep one arbitrary key" was never reached for a type whose `Eq` the author
+## wrote: two such values both survived as separate keys.
+pub let invert: { m: Map 'k 'v } with Eq 'v, Hash 'v -> Map 'v 'k = { m } ->
+  __native_map_invert { m = m }
+
+pub let invert_with_evidence:
+  { m: Map 'k 'v, hash: { it: 'v } -> Int, eq: { it: 'v, r: 'v } -> Bool } -> Map 'v 'k =
+  { m, hash, eq } -> __native_map_invert_with_evidence { m = m, hash = hash, eq = eq }
 
 ## Keeps only the specified keys.
 pub let select_keys: { m: Map 'k 'v, ks: ['k] } with Eq 'k -> Map 'k 'v = { m, ks } ->
@@ -263,8 +275,20 @@ pub let group_by_value: { m: Map 'k 'v } -> Map 'v (List 'k) = { m } ->
   __native_map_group_by_value { m = m }
 
 ## Transforms all keys using f.
-pub let map_keys: { m: Map 'k 'v, f: { val: 'k } -> 'k2 <...> } -> Map 'k2 'v <...> = { m, f } ->
+## `Eq 'k2, Hash 'k2`, NOT the source key's: the result's keys are `'k2`, so
+## the source's equality says nothing about which of them are the same key.
+## Without it the result bucketed by REPRESENTATION — mapping the distinct Int
+## keys 10 and 11 to a newtype equal by tens gave a map of two.
+pub let map_keys
+  : { m: Map 'k 'v, f: { val: 'k } -> 'k2 <...> } with Eq 'k2, Hash 'k2
+  -> Map 'k2 'v <...> = { m, f } ->
   __native_map_map_keys { m = m, f = f }
+
+pub let map_keys_with_evidence:
+  { m: Map 'k 'v, f: { val: 'k } -> 'k2 <...>,
+    hash: { it: 'k2 } -> Int, eq: { it: 'k2, r: 'k2 } -> Bool } -> Map 'k2 'v <...> =
+  { m, f, hash, eq } ->
+    __native_map_map_keys_with_evidence { m = m, f = f, hash = hash, eq = eq }
 
 ## Keeps only entries where the key matches the predicate.
 pub let filter_keys
@@ -369,6 +393,22 @@ impl Sized for Map 'k 'v where {
   size = { it } -> size { m = it },
   is_empty = { it } -> is_empty { m = it },
 }
+
+## Collects an `Iter` into a Map.
+##
+## `Iter` has seven ways IN -- `range`, `from_seq`, `from_list`, `unfold`,
+## `once`, `empty`, and `.to_iter{}` on any of the seven types implementing
+## `Iterable` -- and had only `to_seq`/`to_list` out, so reaching any other
+## collection meant spelling the intermediate yourself.
+##
+## This is ERGONOMICS, not speed: it is what you would have written. `to_seq`
+## hands its buffer to the sequence without copying it, so the intermediate is
+## a wrapper around the buffer the sink had to fill anyway.
+##
+## Lives here rather than in `iter` because `map` imports `iter` for its
+## `Iterable` impl, so the dependency only runs this way.
+pub let from_iter: { it: Iter { k: 'k, v: 'v } } with Eq 'k -> Map 'k 'v = { it } ->
+  from_list { xs = iter::to_list { it = it } }
 
 impl Iterable for Map 'k 'v having 'elem = { k: 'k, v: 'v } where {
   to_iter = { it } -> iter::from_seq { xs = to_seq { m = it } }

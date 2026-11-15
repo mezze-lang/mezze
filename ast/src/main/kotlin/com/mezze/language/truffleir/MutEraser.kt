@@ -419,6 +419,10 @@ object MutEraser {
                         val nXs = f(s.xs)
                         if (nXs !== s.xs) SourceIR.RawList(nXs) else s
                     }
+                    is SourceIR.RawBytes -> {
+                        val nXs = f(s.xs)
+                        if (nXs !== s.xs) SourceIR.RawBytes(nXs) else s
+                    }
                     is SourceIR.Opaque -> {
                         val nE = f(s.expr)
                         if (nE !== s.expr) SourceIR.Opaque(nE) else s
@@ -428,8 +432,19 @@ object MutEraser {
                 val newStages = node.stages.map { stage ->
                     when (stage) {
                         is StageIR.Map, is StageIR.Filter, is StageIR.TakeWhile, is StageIR.DropWhile -> stage
+                        StageIR.Enumerate -> stage
                         is StageIR.Take -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Take(nn) } else stage }
                         is StageIR.Drop -> { val nn = f(stage.n); if (nn !== stage.n) { stagesChanged = true; StageIR.Drop(nn) } else stage }
+                        // The second source holds NodeIRs that this pass
+                        // rewrites like any other; rebuilt only when it changed.
+                        is StageIR.Zip -> {
+                            val ns = mapSourceIR(stage.second, f)
+                            if (ns != stage.second) { stagesChanged = true; StageIR.Zip(ns) } else stage
+                        }
+                        is StageIR.FlatMap -> {
+                            val ns = mapSourceIR(stage.inner, f)
+                            if (ns != stage.inner) { stagesChanged = true; StageIR.FlatMap(stage.f, ns) } else stage
+                        }
                     }
                 }
                 val newSink: SinkIR = when (val sk = node.sink) {

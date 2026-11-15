@@ -83,13 +83,15 @@ public final class CharNatives {
     @TruffleBoundary
     public static String toUpper(String c) {
         if (c == null || c.isEmpty()) return c;
-        return c.toUpperCase();
+        // Locale.ROOT: host-independent, like the Str primitives.
+        return c.toUpperCase(java.util.Locale.ROOT);
     }
 
     @TruffleBoundary
     public static String toLower(String c) {
         if (c == null || c.isEmpty()) return c;
-        return c.toLowerCase();
+        // Locale.ROOT: host-independent, like the Str primitives.
+        return c.toLowerCase(java.util.Locale.ROOT);
     }
 
     // ==================== Digit Conversion ====================

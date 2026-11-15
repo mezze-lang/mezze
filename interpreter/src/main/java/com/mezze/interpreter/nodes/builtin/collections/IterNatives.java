@@ -20,6 +20,11 @@ import com.oracle.truffle.api.nodes.IndirectCallNode;
  * slow-path fallback and the constructors that don't need specialization.
  */
 public final class IterNatives {
+    /** `{ fst, snd }`, hoisted: this was allocated per call. Names from
+     *  {@link com.mezze.language.truffleir.NativeHofNames} so a rename reaches every spelling. */
+    private static final String[] FIELD_FST_SND =
+        {com.mezze.language.truffleir.NativeHofNames.PAIR_FST, com.mezze.language.truffleir.NativeHofNames.PAIR_SND};
+
 
     private IterNatives() {}
 
@@ -594,7 +599,7 @@ public final class IterNatives {
                 Object b = right.next();
                 if (b == IterCursor.END) return true;
                 if (!consumer.accept(MezzeRecord.fromFields(
-                        new String[]{"fst", "snd"}, new Object[]{a, b}))) {
+                        FIELD_FST_SND, new Object[]{a, b}))) {
                     return false;
                 }
             }
@@ -744,7 +749,8 @@ public final class IterNatives {
     private static Object foldWalk(IterNode node, Object acc, MezzeFunction folder,
                                    IndirectCallNode callNode) {
         if (node instanceof RangeIterNode range) {
-            return foldRange(range, acc, folder, callNode, /*mapper*/ null, /*filter*/ null);
+            return foldRange(range, acc, folder, callNode,
+                    /*mapper*/ null, /*filter*/ null, /*filterAfterMap*/ false);
         }
         if (node instanceof SeqIterNode || node instanceof TakeIterNode || node instanceof DropIterNode
                 || node instanceof ListIterNode || node instanceof OnceIterNode || node instanceof EmptyIterNode
@@ -762,6 +768,15 @@ public final class IterNatives {
             // coded.
             MezzeFunction mapper = null;
             MezzeFunction pred = null;
+            // WHICH STAGE IS OUTERMOST, i.e. which the user wrote LAST.
+            // `xs.map(f).filter(p)` builds Filter(Map(range)), so this inward
+            // walk meets the PREDICATE first; `xs.filter(p).map(f)` builds
+            // Map(Filter(range)) and meets the MAPPER first. Without recording
+            // that, both chains peeled to the same (mapper, pred) pair and
+            // foldRange applied a fixed order — so `map(*10).filter(<40)` over
+            // 0..4 tested the predicate against the RAW element, kept
+            // everything, and summed 100 where the answer is 60. Silently.
+            boolean filterAfterMap = false;
             IterNode cursor = unary;
             while (cursor instanceof UnaryOpIterNode u) {
                 if (u.isMap()) {
@@ -770,11 +785,14 @@ public final class IterNatives {
                 } else {
                     if (pred != null) break; // multi-filter: bail
                     pred = (MezzeFunction) u.fn;
+                    // Predicate seen before any mapper on the way in: the
+                    // filter sits ABOVE the map, so it must see mapped values.
+                    if (mapper == null) filterAfterMap = true;
                 }
                 cursor = u.src;
             }
             if (cursor instanceof RangeIterNode range && !(cursor instanceof UnaryOpIterNode)) {
-                return foldRange(range, acc, folder, callNode, mapper, pred);
+                return foldRange(range, acc, folder, callNode, mapper, pred, filterAfterMap);
             }
             // Deeper stacks fall back to a per-element recursion — slow
             // but correct.
@@ -785,14 +803,22 @@ public final class IterNatives {
 
     /**
      * Range walker with optional map + optional filter peeled above it.
-     * Data-flow order matches the BDSL sink: filter first (raw element),
-     * then map, then fold. Keeping both in one loop avoids the per-stage
-     * intermediate structures that make eager collections slow.
+     *
+     * STAGE ORDER IS CARRIED, NOT ASSUMED. [filterAfterMap] says the filter
+     * sits above the map in the chain, so the predicate must run on the MAPPED
+     * element. This used to be fixed at "filter first (raw element), then map",
+     * which is right for `filter(p).map(f)` and silently wrong for
+     * `map(f).filter(p)` — the common order — because the predicate then tested
+     * a value the user never wrote a predicate for.
+     *
+     * Keeping both stages in one loop still avoids the per-stage intermediate
+     * structures that make eager collections slow.
      */
     @TruffleBoundary
     private static Object foldRange(RangeIterNode range, Object initAcc,
                                     MezzeFunction folder, IndirectCallNode callNode,
-                                    MezzeFunction mapper, MezzeFunction pred) {
+                                    MezzeFunction mapper, MezzeFunction pred,
+                                    boolean filterAfterMap) {
         Object acc = initAcc;
         long i = range.start;
         long end = range.end;
@@ -864,7 +890,8 @@ public final class IterNatives {
         while (ascending ? (i < end) : (i > end)) {
             Object x = (Object) i;
 
-            if (pred != null) {
+            // Filter BELOW the map: the predicate sees the raw element.
+            if (pred != null && !filterAfterMap) {
                 if (predInner != null) {
                     pArgs[predClosureLen] = x;
                     Object r = callNode.call(predInner, pArgs);
@@ -882,6 +909,18 @@ public final class IterNatives {
                 } else {
                     mArgs[mapperClosureLen] = MezzeRecord.wrapX(x);
                     x = callNode.call(mapperTarget, mArgs);
+                }
+            }
+            // Filter ABOVE the map: the predicate sees the mapped element.
+            if (pred != null && filterAfterMap) {
+                if (predInner != null) {
+                    pArgs[predClosureLen] = x;
+                    Object r = callNode.call(predInner, pArgs);
+                    if (!(r instanceof Boolean) || !((Boolean) r)) { i += step; continue; }
+                } else {
+                    pArgs[predClosureLen] = MezzeRecord.wrapX(x);
+                    Object r = callNode.call(predTarget, pArgs);
+                    if (!(r instanceof Boolean) || !((Boolean) r)) { i += step; continue; }
                 }
             }
             if (folderScalar) {
@@ -906,14 +945,41 @@ public final class IterNatives {
     @TruffleBoundary
     private static Object foldViaRecursion(IterNode node, Object initAcc,
                                            MezzeFunction folder, IndirectCallNode callNode) {
-        // Materialize into an ArrayList and fold — the correctness path
-        // isn't asked to be fast, only to work. Fusion is the fast
-        // path's job.
-        java.util.ArrayList<Object> buf = new java.util.ArrayList<>();
-        collect(node, buf, callNode);
+        // STREAM IT. This used to materialize the whole iterator into a
+        // `java.util.ArrayList` and fold that, under the note "the correctness
+        // path isn't asked to be fast, only to work. Fusion is the fast path's
+        // job." The second half is the problem: for a shape the emitter
+        // REFUSES there is no fast path, so the correctness path is the only
+        // one. MEASURED on `iter_perf_compare` at n=10M, min of three
+        // interleaved passes: `zip+fold` 640 ms to 237 (2.70x) and
+        // `flat_map+fold` 322 ms to 139 (2.31x), with `sum`, `filter+fold` and
+        // `count` flat beside them at 1.00x, 0.97x and 1.05x.
+        //
+        // THOSE TWO ARE THE SHAPES THAT ACTUALLY ARRIVE HERE. `chain` and
+        // `enumerate` are in the list of kinds above and measure 1.01x and
+        // 0.98x, because their chains FUSE at compile time and this native is
+        // never called; the other kinds reach it only when something else about
+        // the chain declined.
+        //
+        // At that n the buffer held ten million elements, every one retained
+        // until the fold ended, which is why the base arm also SWUNG — 603,
+        // 1283, 833, 1330 and 742 ms across five passes against the streaming
+        // arm's 252 to 261.
+        //
+        // {@link #walkElements} already pushes elements one at a time, handles
+        // every descriptor kind, and stops early when the consumer says so.
+        // `collect` was literally `walkElements(node, out::add, callNode)`, so
+        // folding inside the walk visits exactly the same elements in exactly
+        // the same order with nothing buffered.
+        //
+        // THE BUFFER BOUGHT NOTHING HERE. {@link #collectToArray} materializes
+        // on purpose — behind its boundary, so that ITS caller's loop runs
+        // outside one and the JIT can inline the callback. This path has no
+        // such caller: {@link #fold} is itself `@TruffleBoundary`, so the fold
+        // loop was already inside it either way.
         Object[] folderClosure = folder.getClosureValues();
         int folderClosureLen = folderClosure.length;
-        Object acc = initAcc;
+        Object[] accBox = {initAcc};
         CallTarget folderInner = ScalarBypass.tryResolve(folder);
         if (folderInner != null) {
             String[] params = folder.getParameterNames();
@@ -922,30 +988,22 @@ public final class IterNatives {
             int elemSlot = accFirst ? folderClosureLen + 1 : folderClosureLen;
             Object[] fArgs = new Object[folderClosureLen + 2];
             System.arraycopy(folderClosure, 0, fArgs, 0, folderClosureLen);
-            for (Object x : buf) {
-                fArgs[accSlot] = acc;
+            walkElements(node, x -> {
+                fArgs[accSlot] = accBox[0];
                 fArgs[elemSlot] = x;
-                acc = callNode.call(folderInner, fArgs);
-            }
+                accBox[0] = callNode.call(folderInner, fArgs);
+                return true;
+            }, callNode);
         } else {
             com.oracle.truffle.api.CallTarget folderTarget = folder.getCallTarget();
             Object[] fArgs = new Object[folderClosureLen + 1];
             System.arraycopy(folderClosure, 0, fArgs, 0, folderClosureLen);
-            for (Object x : buf) {
-                fArgs[folderClosureLen] = MezzeRecord.wrapAccX(acc, x);
-                acc = callNode.call(folderTarget, fArgs);
-            }
+            walkElements(node, x -> {
+                fArgs[folderClosureLen] = MezzeRecord.wrapAccX(accBox[0], x);
+                accBox[0] = callNode.call(folderTarget, fArgs);
+                return true;
+            }, callNode);
         }
-        return acc;
-    }
-
-    /**
-     * Collect all elements into an ArrayList. Delegates to walkElements
-     * for all node types — keeps a single source of truth for walking.
-     */
-    @TruffleBoundary
-    private static void collect(IterNode node, java.util.ArrayList<Object> out,
-                                IndirectCallNode callNode) {
-        walkElements(node, out::add, callNode);
+        return accBox[0];
     }
 }

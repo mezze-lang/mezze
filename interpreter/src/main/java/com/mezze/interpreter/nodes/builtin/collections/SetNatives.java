@@ -70,6 +70,25 @@ public final class SetNatives {
         return MezzeSet.fromStorage(EvidenceSetStorage.fromElements(arr, hashing));
     }
 
+    /**
+     * A conversion INTO a set, bucketed by the element's own instance.
+     *
+     * <p>`seq::to_set`, `list::to_set`, `deque::to_set` and
+     * `sorted_set::to_set` all CREATE a hash set and declared nothing about
+     * its elements, so they bucketed by representation: two values a
+     * hand-written `Eq` calls one element stayed apart. `set::from_seq` is the
+     * same operation spelled from the other side and always carried the
+     * constraint — the asymmetry is what found these.
+     *
+     * <p>Takes the elements already collected, so one method serves every
+     * source container.
+     */
+    @TruffleBoundary
+    public static MezzeSet toSetWithEvidence(Object[] elems, MezzeFunction hashFn,
+                                             MezzeFunction eqFn) {
+        return fromArrayWithEvidence(elems, hashFn, eqFn);
+    }
+
     // ==================== Factory Operations ====================
 
     public static MezzeSet empty() {
@@ -83,11 +102,11 @@ public final class SetNatives {
 
     @TruffleBoundary
     public static MezzeSet fromList(MezzeList list) {
-        MezzeSet result = MezzeSet.empty();
-        for (int i = 0; i < list.size(); i++) {
-            result = result.add(list.get(i));
+        Object[] out = new Object[list.size()];
+        for (int i = 0; i < out.length; i++) {
+            out[i] = list.get(i);
         }
-        return result;
+        return MezzeSet.fromElements(out, out.length);
     }
 
     // ==================== Basic Operations ====================
@@ -178,28 +197,74 @@ public final class SetNatives {
 
     // ==================== Transform Operations ====================
 
+    /**
+     * EVERY OPERATION THAT REBUILDS A SET COLLECTS AND BUILDS ONCE.
+     *
+     * <p>`result = result.add(e)` per element is a persistent add per element,
+     * and a persistent add allocates a node at every level of the path it
+     * touches — right for an update, wasted for a rebuild that discards the
+     * base on the very next element. {@link MezzeSet#fromElements} takes the
+     * elements already in hand and builds the trie in place instead; the map's
+     * identical change measured 3.2x on the build.
+     *
+     * <p>`filter` keeping EVERYTHING returns the set itself, because an
+     * immutable set that would be rebuilt element for element is already the
+     * answer.
+     */
     public static MezzeSet filter(MezzeSet set, MezzeFunction predicate,
                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "val");
-        MezzeSet result = MezzeSet.empty();
-        for (Object element : set) {
-            Object res = ctx.call1(callNode, element);
+        int size = set.size();
+        Object[] out = new Object[size];
+        int[] n = {0};
+        set.walkElems(e -> {
+            Object res = ctx.call1(callNode, e);
             if (res instanceof Boolean && (Boolean) res) {
-                result = result.add(element);
+                out[n[0]++] = e;
             }
+        });
+        if (n[0] == size) {
+            return set;
         }
-        return result;
+        return MezzeSet.fromElements(out, n[0]);
+    }
+
+    /**
+     * `map` that collapses by the TARGET's equality.
+     *
+     * <p>The plain {@link #map} rebuilds through the structural `fromElements`,
+     * so two results a hand-written `Eq` calls equal stayed apart: mapping the
+     * distinct Ints 10 and 11 to a newtype equal BY TENS gave a set of two
+     * where the author's `Eq` says one. Its sibling `sorted_set::map` already
+     * carries `with Ord 'b` for the same reason — the result's elements are
+     * `'b`, so the SOURCE's instance says nothing about them.
+     *
+     * <p>Reached only when `'b`'s `hash` and `eq` are hand-written; the plain
+     * form stays the default, so a set of Int keeps its specialised storage.
+     */
+    @TruffleBoundary
+    public static MezzeSet mapWithEvidence(MezzeSet set, MezzeFunction mapper,
+                                           MezzeFunction hashFn, MezzeFunction eqFn,
+                                           com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(mapper, "val");
+        int size = set.size();
+        Object[] out = new Object[size];
+        int[] n = {0};
+        set.walkElems(e -> out[n[0]++] = ctx.call1(callNode, e));
+        ElementHashing hashing = ClosureHashing.of(hashFn, eqFn);
+        if (hashing == null) return MezzeSet.fromElements(out, size);
+        return MezzeSet.fromStorage(EvidenceSetStorage.fromElements(out, hashing));
     }
 
     public static MezzeSet map(MezzeSet set, MezzeFunction mapper,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(mapper, "val");
-        MezzeSet result = MezzeSet.empty();
-        for (Object element : set) {
-            Object mapped = ctx.call1(callNode, element);
-            result = result.add(mapped);
-        }
-        return result;
+        int size = set.size();
+        Object[] out = new Object[size];
+        int[] n = {0};
+        set.walkElems(e -> out[n[0]++] = ctx.call1(callNode, e));
+        // Two elements may map to one: they collapse, as the adds did.
+        return MezzeSet.fromElements(out, size);
     }
 
     public static Object fold(MezzeSet set, Object init, MezzeFunction folder,
@@ -295,6 +360,14 @@ public final class SetNatives {
 
     @TruffleBoundary
     public static long sum(MezzeSet set) {
+        // A set of Ints already stores them in a `long[]`; the iterator and
+        // `toArray()` both hand back `Object`, so the generic walk below boxes
+        // every element only to unbox it again one line later. MEASURED: that
+        // boxing IS the set fold's remaining cost once the guest callback is
+        // gone (7 447 ps/elem on `fuseall` kernel 7).
+        if (set.storage() instanceof com.mezze.datastructures.set.LongTrieSetStorage ls) {
+            return ls.sumLongs();
+        }
         long total = 0;
         for (Object elem : set) {
             if (elem instanceof Long l) total += l;
@@ -462,20 +535,23 @@ public final class SetNatives {
         return MezzeList.of(result);
     }
 
+    /**
+     * Elements in exactly one of the two sets.
+     *
+     * <p>THIS USED TO HAVE ITS OWN WALK AND REBUILD — both sides walked while
+     * probing the other, survivors collected, then `fromElements` rehashing
+     * every one — and that is why `set::symmetric_difference` did NOT move when
+     * `set::union` became 3.6x faster: it never called
+     * {@code MezzeSet.symmetricDifference} at all, so that method was dead code
+     * for this path. The control not moving when the composition said it must
+     * is what exposed it.
+     *
+     * <p>It delegates now, and the trie pair is answered structurally in one
+     * pass by `LongTrieSetStorage.symmetricDifferenceWith`.
+     */
     @TruffleBoundary
     public static MezzeSet symmetricDifference(MezzeSet s1, MezzeSet s2) {
-        MezzeSet result = MezzeSet.empty();
-        for (Object elem : s1) {
-            if (!s2.contains(elem)) {
-                result = result.add(elem);
-            }
-        }
-        for (Object elem : s2) {
-            if (!s1.contains(elem)) {
-                result = result.add(elem);
-            }
-        }
-        return result;
+        return s1.symmetricDifference(s2);
     }
 
     // ==================== Task #30: Collect Operations ====================
@@ -484,17 +560,44 @@ public final class SetNatives {
      * Apply a function that returns Option to each element and collect only the Some values.
      * Similar to flatMap but specifically for Option-returning functions.
      */
+    /**
+     * `filter_map` that collapses by the TARGET's equality — same reasoning as
+     * {@link #mapWithEvidence}: the result's elements are `'b`, so the SOURCE's
+     * instance says nothing about which of them are the same element.
+     */
+    @TruffleBoundary
+    public static MezzeSet filterMapWithEvidence(MezzeSet set, MezzeFunction f,
+                                                 MezzeFunction hashFn, MezzeFunction eqFn,
+                                                 com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = ScalarCall.prepare1(f, "val");
+        Object[] out = new Object[set.size()];
+        int[] n = {0};
+        set.walkElems(e -> {
+            Object mapped = ctx.call1(callNode, e);
+            if (mapped instanceof MezzeVariant v && v.isSome()) {
+                out[n[0]++] = v.getPayloadFieldByName("val");
+            }
+        });
+        ElementHashing hashing = ClosureHashing.of(hashFn, eqFn);
+        if (hashing == null) return MezzeSet.fromElements(out, n[0]);
+        // Only the filled prefix is the result, so the array is trimmed before
+        // the storage buckets it — `fromElements` takes a count, this does not.
+        Object[] kept = java.util.Arrays.copyOf(out, n[0]);
+        return MezzeSet.fromStorage(EvidenceSetStorage.fromElements(kept, hashing));
+    }
+
     public static MezzeSet filterMap(MezzeSet set, MezzeFunction f,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(f, "val");
-        MezzeSet result = MezzeSet.empty();
-        for (Object elem : set) {
-            Object mapped = ctx.call1(callNode, elem);
+        Object[] out = new Object[set.size()];
+        int[] n = {0};
+        set.walkElems(e -> {
+            Object mapped = ctx.call1(callNode, e);
             if (mapped instanceof MezzeVariant v && v.isSome()) {
-                result = result.add(v.getPayloadFieldByName("val"));
+                out[n[0]++] = v.getPayloadFieldByName("val");
             }
-        }
-        return result;
+        });
+        return MezzeSet.fromElements(out, n[0]);
     }
 
     /**
@@ -533,11 +636,16 @@ public final class SetNatives {
     // ==================== SortedSet Conversions ====================
 
     /**
-     * Convert Set to SortedSet.
+     * Convert Set to SortedSet, ordered by the element's `Ord`.
+     *
+     * <p>`set::to_sorted_set` used to say "elements must be comparable" in its
+     * DOC COMMENT and carry no constraint, so nothing supplied the order and
+     * the result was naturally ordered whatever that `Ord` said. See
+     * known-bugs.md BUG 45.
      */
     @TruffleBoundary
-    public static MezzeSortedSet toSortedSet(MezzeSet set) {
-        return SortedSetNatives.fromSet(set);
+    public static MezzeSortedSet toSortedSet(MezzeSet set, MezzeFunction cmpFn) {
+        return SortedSetNatives.fromSet(set, cmpFn);
     }
 
     /**

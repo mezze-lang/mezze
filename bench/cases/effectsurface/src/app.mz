@@ -1,0 +1,343 @@
+## WHAT AN EFFECT COSTS — the parts of it, separately.
+##
+## The ledger recorded ONE effect number, ~0.38 ns for an operation reaching an
+## already-installed handler, and everything else about effects as UNKNOWN. That
+## one number is the fall-through single-return path and nothing else:
+## `PerformD` caches the handler, the operation's field index, its call target
+## and its closure values as compilation constants under a handler-chain-stable
+## assumption. Every interesting question is about what happens when one of
+## those assumptions does NOT hold.
+##
+## Every kernel computes the SAME checksum as kernel 1 — n*(n+1)/2 — so a kernel
+## that got fast by dropping work reads as a different number. Reported in
+## picoseconds per iteration, one kernel per process (see bench/scripts/ab.sh).
+use std::collections::seq
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::int
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+## One effect, returning 1 so it can be the loop's decrement.
+effect Unit1 where {
+  one: {} -> Int <Unit1>
+}
+
+## The implicit form — a bare value.
+impl Unit1 for Ones {} where {
+  one = {} -> 1
+}
+
+## NO PARAMETER LIST AT ALL, which is a different operation and not a different
+## spelling: `for OnesBare` emits LookupHandlerByHash and `for Ones {}` emits
+## LookupParameterizedHandlerByHash. Kernel 11 is kernel 5 against this one.
+impl Unit1 for OnesBare where {
+  one = {} -> 1
+}
+
+## The explicit form. `PerformD`'s comment says resume is fall-through, so this
+## should cost what Ones costs; if it does not, the two forms compile
+## differently and that is worth knowing.
+impl Unit1 for OnesResume {} where {
+  one = {} -> resume { val = 1 }
+}
+
+## A handler that ABORTS with its value instead of returning it. The perform's
+## result is still 1, so the checksum holds, and `abort` throws
+## AbortPerformException where resume falls through.
+effect Stopper where {
+  stop: {} -> Int <Stopper>
+}
+
+impl Stopper for Aborts {} where {
+  stop = {} -> abort { val = 1 }
+}
+
+## Three more effects, to put a handler CHAIN between the perform and the one
+## that answers it.
+effect Pad1 where { p1: {} -> Int <Pad1> }
+effect Pad2 where { p2: {} -> Int <Pad2> }
+effect Pad3 where { p3: {} -> Int <Pad3> }
+impl Pad1 for P1 {} where { p1 = {} -> 0 }
+impl Pad2 for P2 {} where { p2 = {} -> 0 }
+impl Pad3 for P3 {} where { p3 = {} -> 0 }
+
+## READ THIS BEFORE QUOTING A NUMBER FROM THIS CASE.
+##
+## Lifting the loops to top level (below) costs them their monomorphisation:
+## `MEZZE_TRACE_SELFTAIL` reports `go_t params=4` and `go_n params=3` where this
+## file declares TWO parameters each. The extras are `__dict_` parameters — the
+## loops are dictionary-passing generic functions, they allocate per iteration
+## (46-127 young collections against the control's 2) and they decline the fused
+## tier at `3P:update-rhs`. So every kernel from 2 onwards sits in a regime the
+## control is not in.
+##
+## THAT IS WHY KERNEL 2 EXISTS. Absolute numbers here are not comparable to
+## kernel 1 or to any other case; the DIFFERENCES are what this case measures,
+## between kernels that share the regime:
+##
+##   k3 - k2  one effect operation, handler already installed
+##   k5 - k3  installing the handler per iteration
+##   k6 - k5  aborting instead of resuming
+##   k7 - k3  three more handlers between the perform and its handler
+##
+## The dict-passing itself is a ledger row of its own (mono does not specialise
+## these), not a fact about effects.
+##
+## EVERY LOOP IS A TOP-LEVEL RECURSIVE FUNCTION, not a `let`-bound lambda.
+## BUG 35: a recursive LOCAL lambda cannot call a function that handles its own
+## effect — `go { i = i - one_installed {}, … }` is rejected because the
+## lambda's self-reference is typed without the `<*>` its body acquires, while
+## the identical loop at top level checks fine. Kernels 5 and 6 need that call,
+## and a case where some loops were local and some were not would be comparing
+## two shapes, so they are all top-level.
+##
+## 1. CONTROL: a positional tail loop, on the fused tail-loop tier.
+let go_c = { i, acc } ->
+  if i <= 0 then acc
+  else go_c { i = i - 1, acc = acc + i }
+
+let k_control = { n } -> go_c { i = n, acc = 0 }
+
+## 2. TIER CONTROL. A `perform` leaves the fused tier — the tier's "every
+##    parameter update is arithmetic over parameters" test fails — so every
+##    kernel below is off it, and comparing them against kernel 1 would charge
+##    the tier gap to effects. `heavy_one` returns 1 and is too big to inline,
+##    which fails the same test for a reason that has nothing to do with
+##    effects. Kernel 2 minus kernel 1 is the tier; anything minus kernel 2 is
+##    the effect.
+let heavy_one = { i } -> i * 0 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0
+
+let go_t = { i, acc } ->
+  if i <= 0 then acc
+  else go_t { i = i - heavy_one { i = i }, acc = acc + i }
+
+let k_tier = { n } -> go_t { i = n, acc = 0 }
+
+## 3. ONE OPERATION per iteration, handler installed ONCE outside the loop.
+##    This is the only effect number the ledger had.
+let go_o = { i, acc } ->
+  if i <= 0 then acc
+  else go_o { i = i - Unit1.one {}, acc = acc + i }
+
+let k_op = { n } -> perform Ones {} in go_o { i = n, acc = 0 }
+
+## 4. The same, with an EXPLICIT resume in the handler.
+let go_r = { i, acc } ->
+  if i <= 0 then acc
+  else go_r { i = i - Unit1.one {}, acc = acc + i }
+
+let k_resume = { n } -> perform OnesResume {} in go_r { i = n, acc = 0 }
+
+## 5. HANDLER INSTALLED PER ITERATION. The cached path is guarded by an
+##    assumption that the handler chain has not changed; a push/pop invalidates
+##    it. If installing per iteration costs what installing once costs, the
+##    caching is doing nothing here — and if it is far worse, every `perform`
+##    inside a loop pays it.
+## The install is hoisted into a helper that handles its own effect: a `perform`
+## in the recursive body gives `go` an effect row its own self-call does not
+## carry, which the checker rejects. The helper still installs once per call,
+## and it cannot be inlined (a handler is not in the inliner's whitelist), so
+## the per-iteration install survives — the extra call is what kernel 2 accounts
+## for.
+let one_installed = {} -> perform Ones {} in Unit1.one {}
+
+let go_n = { i, acc } ->
+  if i <= 0 then acc
+  else go_n { i = i - one_installed {}, acc = acc + i }
+
+let k_install = { n } -> go_n { i = n, acc = 0 }
+
+## 11. KERNEL 5 WITH A PARAMETERLESS PERFORMER, so the install resolves its
+##     handler through LookupHandlerByHash instead of the parameterized
+##     operation. Same loop, same op, same checksum — the only difference is
+##     which lookup the install pays.
+let one_bare = {} -> perform OnesBare in Unit1.one {}
+
+let go_b = { i, acc } ->
+  if i <= 0 then acc
+  else go_b { i = i - one_bare {}, acc = acc + i }
+
+let k_install_bare = { n } -> go_b { i = n, acc = 0 }
+
+## 6. ABORT instead of resume, installed per iteration. Kernel 6 minus kernel 5
+##    is what throwing AbortPerformException costs, with the install held equal.
+let one_aborted = {} -> perform Aborts {} in Stopper.stop {}
+
+let go_a = { i, acc } ->
+  if i <= 0 then acc
+  else go_a { i = i - one_aborted {}, acc = acc + i }
+
+let k_abort = { n } -> go_a { i = n, acc = 0 }
+
+## 8. IS IT THE CALL, OR IS IT `resume`? Kernel 4's body lowers to
+##    CallIndirectScalarIR(EffectBindingIR(resume), args=[1], argFieldNames=[val])
+##    — scalar ABI, so NO argument record is built, which rules out allocation
+##    as the explanation. What is left is the INDIRECT call to the singleton
+##    resume function, whose whole body is `return arg.val`.
+##
+##    This kernel replaces that indirect call with a DIRECT one to a top-level
+##    function of the same shape. If it costs what kernel 3 costs, the entire
+##    gap in kernel 4 is the indirect call and nothing about `resume` itself.
+let ident_one = { val } -> val
+
+impl Unit1 for OnesDirect {} where {
+  one = {} -> ident_one { val = 1 }
+}
+
+let go_i = { i, acc } ->
+  if i <= 0 then acc
+  else go_i { i = i - Unit1.one {}, acc = acc + i }
+
+let k_ident = { n } -> perform OnesDirect {} in go_i { i = n, acc = 0 }
+
+## 7. A CHAIN of four handlers, performing the one furthest away. If reaching a
+##    handler is a walk, depth shows here; if it is a cached constant, this
+##    costs what kernel 3 costs.
+let go_d = { i, acc } ->
+  if i <= 0 then acc
+  else go_d { i = i - Unit1.one {}, acc = acc + i }
+
+let k_depth = { n } -> perform Ones {} in perform P1 {} in perform P2 {} in perform P3 {} in go_d { i = n, acc = 0 }
+
+## 9. IS THE FAST PATH RECOVERABLE? `StabilityAssumption.CHURN_LIMIT` is 8:
+##    after eight hand-out-then-invalidate cycles the assumption returns
+##    NEVER_VALID *for good*, and `HANDLER_CHAIN_STABLE` is a `private static
+##    final` — process-global. `resetStabilityForTests` is the only way back and
+##    has no callers outside tests.
+##
+##    So this kernel churns the assumption past its limit FIRST (32 install /
+##    uninstall pairs, four times the limit), and only then measures what
+##    kernel 3 measures: one op per iteration with the handler installed once
+##    outside the loop. Kernel 3 runs in a pristine process and reads ~830
+##    ps/iter. If kernel 9 reads the same, the churn limit costs nothing beyond
+##    the loop that trips it. If it is much slower, then EIGHT handler installs
+##    permanently deoptimise every effect operation in the process — which any
+##    server installing a handler per request would trip on its eighth request.
+let churn = { i } -> if i <= 0 then 0 else churn { i = i - one_installed {} }
+
+let k_after_churn = { n } -> do
+  let _c = churn { i = 32 }
+  perform Ones {} in go_o { i = n, acc = 0 }
+
+## 10. WHICH ASSUMPTION COSTS THE 31x? There are two, invalidated together by
+##     every push and pop (`invalidateAssumptions`): a GLOBAL one that
+##     `EffectBinding` caches resume/abort singletons against, and a PER-EFFECT
+##     one that `PerformD` caches the handler against. Kernel 9 churns BOTH,
+##     because it installs and performs the same effect.
+##
+##     This kernel churns a DIFFERENT effect (Pad1) and then performs Unit1. The
+##     global assumption dies either way; Unit1's per-effect assumption is
+##     untouched. So:
+##       kernel 10 fast  -> the global/EffectBinding half is cheap, and the 31x
+##                          belongs to the per-effect/PerformD half
+##       kernel 10 slow  -> the global half is the cost, and giving EffectBinding
+##                          an assumption that tracks what it ACTUALLY needs
+##                          (whether a dispatch fiber is set — which handler
+##                          churn says nothing about) is worth the 31x
+let pad_installed = {} -> perform P1 {} in Pad1.p1 {}
+
+let churn_other = { i } -> if i <= 0 then 0
+  else churn_other { i = i - 1 - pad_installed {} }
+
+let k_churn_other = { n } -> do
+  let _c = churn_other { i = 32 }
+  perform Ones {} in go_o { i = n, acc = 0 }
+
+let report = { name, n, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
+
+pub let main = {} -> perform Console in perform SystemArgs in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  let n = arg_at { args = args, i = 1, def = 20000000 }
+  if k == 1 then do
+    k_control { n = n }
+    k_control { n = n }
+    k_control { n = n }
+    report { name = "1 control      ", n = n, r = time_it { f = {} -> k_control { n = n } } }
+    report { name = "1 control      ", n = n, r = time_it { f = {} -> k_control { n = n } } }
+    report { name = "1 control      ", n = n, r = time_it { f = {} -> k_control { n = n } } }
+  else if k == 2 then do
+    k_tier { n = n }
+    k_tier { n = n }
+    k_tier { n = n }
+    report { name = "2 tier control ", n = n, r = time_it { f = {} -> k_tier { n = n } } }
+    report { name = "2 tier control ", n = n, r = time_it { f = {} -> k_tier { n = n } } }
+    report { name = "2 tier control ", n = n, r = time_it { f = {} -> k_tier { n = n } } }
+  else if k == 3 then do
+    k_op { n = n }
+    k_op { n = n }
+    k_op { n = n }
+    report { name = "3 op, 1 install", n = n, r = time_it { f = {} -> k_op { n = n } } }
+    report { name = "3 op, 1 install", n = n, r = time_it { f = {} -> k_op { n = n } } }
+    report { name = "3 op, 1 install", n = n, r = time_it { f = {} -> k_op { n = n } } }
+  else if k == 4 then do
+    k_resume { n = n }
+    k_resume { n = n }
+    k_resume { n = n }
+    report { name = "4 explicit resume", n = n, r = time_it { f = {} -> k_resume { n = n } } }
+    report { name = "4 explicit resume", n = n, r = time_it { f = {} -> k_resume { n = n } } }
+    report { name = "4 explicit resume", n = n, r = time_it { f = {} -> k_resume { n = n } } }
+  else if k == 5 then do
+    k_install { n = n }
+    k_install { n = n }
+    k_install { n = n }
+    report { name = "5 install/iter ", n = n, r = time_it { f = {} -> k_install { n = n } } }
+    report { name = "5 install/iter ", n = n, r = time_it { f = {} -> k_install { n = n } } }
+    report { name = "5 install/iter ", n = n, r = time_it { f = {} -> k_install { n = n } } }
+  else if k == 6 then do
+    k_abort { n = n }
+    k_abort { n = n }
+    k_abort { n = n }
+    report { name = "6 abort/iter   ", n = n, r = time_it { f = {} -> k_abort { n = n } } }
+    report { name = "6 abort/iter   ", n = n, r = time_it { f = {} -> k_abort { n = n } } }
+    report { name = "6 abort/iter   ", n = n, r = time_it { f = {} -> k_abort { n = n } } }
+  else if k == 7 then do
+    k_depth { n = n }
+    k_depth { n = n }
+    k_depth { n = n }
+    report { name = "7 chain depth 4", n = n, r = time_it { f = {} -> k_depth { n = n } } }
+    report { name = "7 chain depth 4", n = n, r = time_it { f = {} -> k_depth { n = n } } }
+    report { name = "7 chain depth 4", n = n, r = time_it { f = {} -> k_depth { n = n } } }
+  else if k == 8 then do
+    k_ident { n = n }
+    k_ident { n = n }
+    k_ident { n = n }
+    report { name = "8 direct call  ", n = n, r = time_it { f = {} -> k_ident { n = n } } }
+    report { name = "8 direct call  ", n = n, r = time_it { f = {} -> k_ident { n = n } } }
+    report { name = "8 direct call  ", n = n, r = time_it { f = {} -> k_ident { n = n } } }
+  else if k == 9 then do
+    k_after_churn { n = n }
+    k_after_churn { n = n }
+    k_after_churn { n = n }
+    report { name = "9 op AFTER churn", n = n, r = time_it { f = {} -> k_after_churn { n = n } } }
+    report { name = "9 op AFTER churn", n = n, r = time_it { f = {} -> k_after_churn { n = n } } }
+    report { name = "9 op AFTER churn", n = n, r = time_it { f = {} -> k_after_churn { n = n } } }
+  else if k == 10 then do
+    k_churn_other { n = n }
+    k_churn_other { n = n }
+    k_churn_other { n = n }
+    report { name = "10 op AFTER churning ANOTHER effect", n = n, r = time_it { f = {} -> k_churn_other { n = n } } }
+    report { name = "10 op AFTER churning ANOTHER effect", n = n, r = time_it { f = {} -> k_churn_other { n = n } } }
+    report { name = "10 op AFTER churning ANOTHER effect", n = n, r = time_it { f = {} -> k_churn_other { n = n } } }
+  else if k == 11 then do
+    k_install_bare { n = n }
+    k_install_bare { n = n }
+    k_install_bare { n = n }
+    report { name = "11 install/iter, no params", n = n, r = time_it { f = {} -> k_install_bare { n = n } } }
+    report { name = "11 install/iter, no params", n = n, r = time_it { f = {} -> k_install_bare { n = n } } }
+    report { name = "11 install/iter, no params", n = n, r = time_it { f = {} -> k_install_bare { n = n } } }
+  else println { msg = "unknown kernel" }

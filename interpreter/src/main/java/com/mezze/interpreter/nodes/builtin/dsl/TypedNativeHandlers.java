@@ -23,6 +23,103 @@ public final class TypedNativeHandlers {
 
     private TypedNativeHandlers() {}
 
+    /**
+     * (Object) -> long. The first OBJECT-RECEIVER shape.
+     *
+     * WHY A SHAPE AND NOT A FLAG. Every other shape here is
+     * primitive-to-primitive, so an op taking an object receiver — which is
+     * every collection op and every mut op — had nothing to match and fell to
+     * `CallNativeScalar`: `@TruffleBoundary` over a `@Variadic Object[]`. That
+     * boundary is the per-op floor, because behind it the array BDSL packs per
+     * call cannot be scalar-replaced.
+     *
+     * The boundary cannot simply be dropped from `CallNativeScalar`, and that
+     * was MEASURED: a per-op `peSafe` flag, marking even 18 plain field-access
+     * cell ops, fails the native-image build with "Blocklisted methods are
+     * reachable for runtime compilation". The operand there is the SHARED
+     * `NativeHandler` with 300 implementations, so making it runtime-compilable
+     * makes all 300 bodies reachable — including error paths like
+     * `NativeHelpers.asLong`'s, which formats `value.javaClass.name` and pulls
+     * SVM's reflection machinery in behind it. A narrow interface bounds that
+     * to the bodies registered into it, which is why `CallNativeLL` has been
+     * boundary-free all along with its five primitive-math implementations.
+     *
+     * MEASURED on `bench/cases/mutabi` at n=2e7, min of 3, against kernel 2 —
+     * the same loop calling an ordinary Mezze function, which is the baseline
+     * in the SAME loop regime (kernel 1 fuses and is not):
+     *
+     * <pre>
+     *   2 ordinary call     658 ps/iter    3 young GCs
+     *   3 read_int boundary 4196 ps/iter   14 young GCs
+     *   3 read_int shape     659 ps/iter    7 young GCs   = 6.4x
+     * </pre>
+     *
+     * A native call ends up costing what a Mezze call costs. `nativeCompile`
+     * builds and `just native-test` passes with it.
+     *
+     * REGISTER BY METHOD REFERENCE, never through a Kotlin function type.
+     * `::seqLen` adapts straight to this SAM with a primitive `long`
+     * return; `(Any) -> Long` is `Function1<Object, java.lang.Long>` and
+     * BOXES on every call. Routing 30 ops through a convenience helper
+     * that took one measured 13-22x WORSE than the boundary it was
+     * removing (`seq::size` 3 926 to 51 492 ps, `seq::get` 7 204 to
+     * 157 109), and the same ops by method reference are 2.0-6.6x BETTER.
+     * The helper is the one thing not to build here, which is why the
+     * registrations in `MutOps` are spelled out one per line.
+     *
+     * (An earlier reading blamed the receiver classes for that regression,
+     * because `MutableSeq` and friends carry 12-18 `@TruffleBoundary`
+     * annotations where `MutableInt` carries none. Wrong: `size()`,
+     * `getSafe` and `setSafe` are plain field and array access, and those
+     * boundaries sit on other methods.)
+     */
+    @FunctionalInterface
+    public interface OL {
+        long invoke(Object a);
+    }
+
+    /** (Object) -> boolean. Emptiness tests and bool-cell reads. See {@link OL} for why a shape and not a flag. */
+    @FunctionalInterface
+    public interface OB {
+        boolean invoke(Object a);
+    }
+
+    /** (Object) -> double. Float-cell reads. See {@link OL} for why a shape and not a flag. */
+    @FunctionalInterface
+    public interface OD {
+        double invoke(Object a);
+    }
+
+    /** (Object) -> Object. One-argument ops returning a value or Unit. See {@link OL} for why a shape and not a flag. */
+    @FunctionalInterface
+    public interface OO {
+        Object invoke(Object a);
+    }
+
+    /** (Object, long) -> Object. Indexed reads and int-cell updates. See {@link OL} for why a shape and not a flag. */
+    @FunctionalInterface
+    public interface OLO {
+        Object invoke(Object a, long b);
+    }
+
+    /** (Object, double) -> Object. Float-cell updates. See {@link OL} for why a shape and not a flag. */
+    @FunctionalInterface
+    public interface ODO {
+        Object invoke(Object a, double b);
+    }
+
+    /** (Object, boolean) -> Object. Bool-cell writes. See {@link OL} for why a shape and not a flag. */
+    @FunctionalInterface
+    public interface OBO {
+        Object invoke(Object a, boolean b);
+    }
+
+    /** (Object, Object) -> boolean. Membership tests. See {@link OL} for why a shape and not a flag. */
+    @FunctionalInterface
+    public interface OOB {
+        boolean invoke(Object a, Object b);
+    }
+
     /** (long, long) -> long. */
     @FunctionalInterface
     public interface LLL {
@@ -89,6 +186,14 @@ public final class TypedNativeHandlers {
         boolean invoke(boolean a, boolean b);
     }
 
+    private static final HashMap<String, OL> ol = new HashMap<>();
+    private static final HashMap<String, OB> ob = new HashMap<>();
+    private static final HashMap<String, OD> od = new HashMap<>();
+    private static final HashMap<String, OO> oo = new HashMap<>();
+    private static final HashMap<String, OLO> olo = new HashMap<>();
+    private static final HashMap<String, ODO> odo = new HashMap<>();
+    private static final HashMap<String, OBO> obo = new HashMap<>();
+    private static final HashMap<String, OOB> oob = new HashMap<>();
     private static final HashMap<String, LLL> lll = new HashMap<>();
     private static final HashMap<String, LL> ll = new HashMap<>();
     private static final HashMap<String, LLB> llb = new HashMap<>();
@@ -101,6 +206,14 @@ public final class TypedNativeHandlers {
     private static final HashMap<String, BB> bb = new HashMap<>();
     private static final HashMap<String, BBB> bbb = new HashMap<>();
 
+    public static void registerOL(String name, OL fn) { ol.put(name, fn); }
+    public static void registerOB(String name, OB fn) { ob.put(name, fn); }
+    public static void registerOD(String name, OD fn) { od.put(name, fn); }
+    public static void registerOO(String name, OO fn) { oo.put(name, fn); }
+    public static void registerOLO(String name, OLO fn) { olo.put(name, fn); }
+    public static void registerODO(String name, ODO fn) { odo.put(name, fn); }
+    public static void registerOBO(String name, OBO fn) { obo.put(name, fn); }
+    public static void registerOOB(String name, OOB fn) { oob.put(name, fn); }
     public static void registerLLL(String name, LLL fn) { lll.put(name, fn); }
     public static void registerLL(String name, LL fn) { ll.put(name, fn); }
     public static void registerLLB(String name, LLB fn) { llb.put(name, fn); }
@@ -113,6 +226,14 @@ public final class TypedNativeHandlers {
     public static void registerBB(String name, BB fn) { bb.put(name, fn); }
     public static void registerBBB(String name, BBB fn) { bbb.put(name, fn); }
 
+    public static OL lookupOL(String name) { return ol.get(name); }
+    public static OB lookupOB(String name) { return ob.get(name); }
+    public static OD lookupOD(String name) { return od.get(name); }
+    public static OO lookupOO(String name) { return oo.get(name); }
+    public static OLO lookupOLO(String name) { return olo.get(name); }
+    public static ODO lookupODO(String name) { return odo.get(name); }
+    public static OBO lookupOBO(String name) { return obo.get(name); }
+    public static OOB lookupOOB(String name) { return oob.get(name); }
     public static LLL lookupLLL(String name) { return lll.get(name); }
     public static LL lookupLL(String name) { return ll.get(name); }
     public static LLB lookupLLB(String name) { return llb.get(name); }

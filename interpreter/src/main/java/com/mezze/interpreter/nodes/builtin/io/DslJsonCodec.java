@@ -41,9 +41,12 @@ public final class DslJsonCodec {
     );
 
     // Pre-allocated field names for variant constructors (avoid repeated allocations)
-    private static final String[] VAL_FIELD = {"val"};
-    private static final String[] ITEMS_FIELD = {"items"};
-    private static final String[] FIELDS_FIELD = {"fields"};
+    // Single field NAMES, for the fused variant constructors. These were
+    // `String[]` arrays feeding `MezzeRecord.fromFields`; nothing builds those
+    // records any more.
+    private static final String VAL_NAME = "val";
+    private static final String ITEMS_NAME = "items";
+    private static final String FIELDS_NAME = "fields";
     private static final String[] KEY_VALUE_FIELDS = {"key", "value"};
 
     // Cached tag IDs for Json variants (computed once per tag registry)
@@ -269,47 +272,62 @@ public final class DslJsonCodec {
         return new String(bytes, StandardCharsets.UTF_8);
     }
 
+
+    // ──────────────────────── constructor tags ────────────────────────
+    //
+    // THE TAG IS THE IDENTITY; THE NAME IS FOR DISPLAY, which `MezzeVariant`
+    // says in as many words and then shows how — `SOME_TAG`, `NIL_TAG` and the
+    // rest are computed once from the name and compared as ints, "instead of
+    // reverse-resolving the tag to a String and comparing spellings".
+    //
+    // This codec was doing exactly that reverse resolution, once per JSON node:
+    // `getConstructorName()` then a switch on the String. And the resolution is
+    // not a lookup — for a dynamic registry, which the global one is,
+    // `TagRegistry.getConstructorName(tag)` SCANS `nameToTagMap.entrySet()`
+    // until it finds the tag. That map holds every constructor name in the
+    // program, so a serialize walked all of them per node and its cost grew
+    // with code that has nothing to do with json.
+    //
+    // A tag is a pure function of the name, the same in every registry, so
+    // these seven are computed once here and the switch is on an int.
+    public static final int TAG_JNULL = tagOf("JNull");
+    public static final int TAG_JBOOL = tagOf("JBool");
+    public static final int TAG_JINT = tagOf("JInt");
+    public static final int TAG_JFLOAT = tagOf("JFloat");
+    public static final int TAG_JSTRING = tagOf("JString");
+    public static final int TAG_JARRAY = tagOf("JArray");
+    public static final int TAG_JOBJECT = tagOf("JObject");
+
+    static int tagOf(String constructor) {
+        return com.mezze.language.ast.BuiltinTypes.INSTANCE
+            .computeVariantTag(constructor, null);
+    }
+
     /**
      * Serialize a Json variant value (compact mode).
      * Uses DSL-JSON's NumberConverter and BoolConverter for optimal serialization.
      */
     private static void serializeValue(JsonWriter writer, MezzeVariant json) throws IOException {
-        String constructor = json.getConstructorName();
+        int tag = json.getTag();
 
-        switch (constructor) {
-            case "JNull" -> writer.writeNull();
-
-            case "JBool" -> {
-                Boolean b = (Boolean) json.getPayloadFieldByName("val");
-                BoolConverter.serialize(b, writer);
-            }
-
-            case "JInt" -> {
-                Long l = (Long) json.getPayloadFieldByName("val");
-                NumberConverter.serialize(l, writer);
-            }
-
-            case "JFloat" -> {
-                Double d = (Double) json.getPayloadFieldByName("val");
-                NumberConverter.serialize(d, writer);
-            }
-
-            case "JString" -> {
-                String s = (String) json.getPayloadFieldByName("val");
-                writer.writeString(s);
-            }
-
-            case "JArray" -> {
-                Object items = json.getPayloadFieldByName("items");
-                serializeArray(writer, items);
-            }
-
-            case "JObject" -> {
-                Object fields = json.getPayloadFieldByName("fields");
-                serializeObject(writer, fields);
-            }
-
-            default -> throw new IOException("Unknown Json variant: " + constructor);
+        if (tag == TAG_JNULL) {
+            writer.writeNull();
+        } else if (tag == TAG_JBOOL) {
+            BoolConverter.serialize((Boolean) json.getPayloadFieldByName("val"), writer);
+        } else if (tag == TAG_JINT) {
+            NumberConverter.serialize((Long) json.getPayloadFieldByName("val"), writer);
+        } else if (tag == TAG_JFLOAT) {
+            NumberConverter.serialize((Double) json.getPayloadFieldByName("val"), writer);
+        } else if (tag == TAG_JSTRING) {
+            writer.writeString((String) json.getPayloadFieldByName("val"));
+        } else if (tag == TAG_JARRAY) {
+            serializeArray(writer, json.getPayloadFieldByName("items"));
+        } else if (tag == TAG_JOBJECT) {
+            serializeObject(writer, json.getPayloadFieldByName("fields"));
+        } else {
+            // The name is resolved only HERE, where the cost does not matter and
+            // the reader needs it.
+            throw new IOException("Unknown Json variant: " + json.getConstructorName());
         }
     }
 
@@ -365,42 +383,24 @@ public final class DslJsonCodec {
      * Serialize with pretty printing.
      */
     private static void serializeValuePretty(JsonWriter writer, MezzeVariant json, int indent) throws IOException {
-        String constructor = json.getConstructorName();
+        int tag = json.getTag();
 
-        switch (constructor) {
-            case "JNull" -> writer.writeNull();
-
-            case "JBool" -> {
-                Boolean b = (Boolean) json.getPayloadFieldByName("val");
-                BoolConverter.serialize(b, writer);
-            }
-
-            case "JInt" -> {
-                Long l = (Long) json.getPayloadFieldByName("val");
-                NumberConverter.serialize(l, writer);
-            }
-
-            case "JFloat" -> {
-                Double d = (Double) json.getPayloadFieldByName("val");
-                NumberConverter.serialize(d, writer);
-            }
-
-            case "JString" -> {
-                String s = (String) json.getPayloadFieldByName("val");
-                writer.writeString(s);
-            }
-
-            case "JArray" -> {
-                Object items = json.getPayloadFieldByName("items");
-                serializeArrayPretty(writer, items, indent);
-            }
-
-            case "JObject" -> {
-                Object fields = json.getPayloadFieldByName("fields");
-                serializeObjectPretty(writer, fields, indent);
-            }
-
-            default -> throw new IOException("Unknown Json variant: " + constructor);
+        if (tag == TAG_JNULL) {
+            writer.writeNull();
+        } else if (tag == TAG_JBOOL) {
+            BoolConverter.serialize((Boolean) json.getPayloadFieldByName("val"), writer);
+        } else if (tag == TAG_JINT) {
+            NumberConverter.serialize((Long) json.getPayloadFieldByName("val"), writer);
+        } else if (tag == TAG_JFLOAT) {
+            NumberConverter.serialize((Double) json.getPayloadFieldByName("val"), writer);
+        } else if (tag == TAG_JSTRING) {
+            writer.writeString((String) json.getPayloadFieldByName("val"));
+        } else if (tag == TAG_JARRAY) {
+            serializeArrayPretty(writer, json.getPayloadFieldByName("items"), indent);
+        } else if (tag == TAG_JOBJECT) {
+            serializeObjectPretty(writer, json.getPayloadFieldByName("fields"), indent);
+        } else {
+            throw new IOException("Unknown Json variant: " + json.getConstructorName());
         }
     }
 
@@ -535,34 +535,67 @@ public final class DslJsonCodec {
         return MezzeVariant.noPayload(getTagRegistry(), getTagJNull());
     }
 
+    // ─────────────────── node construction, FUSED ───────────────────
+    //
+    // Each of these used to build a MezzeRecord and an `Object[]` to hold one
+    // field, then wrap it:
+    //
+    //     MezzeRecord payload = MezzeRecord.fromFields(VAL_FIELD, new Object[]{val});
+    //     MezzeVariant.singlePayload(getTagRegistry(), tag, payload);
+    //
+    // `MezzeVariant`'s fused constructors allocate none of that, and their own
+    // comment says why they exist: "the compiler skips MakeRecord for 1-field
+    // variant payloads and stores the raw value directly ... these factories
+    // record the original field name so getPayloadValue() can lazily
+    // materialize the MezzeRecord wrapper for cold paths". The parser was the
+    // one builder of single-field variants not using them.
+    //
+    // MEASURED AGAINST DSL-JSON PARSING THE SAME DOCUMENT into its own Java
+    // Maps and Lists — a reference that allocates too, not a bare scan:
+    //
+    //     DSL-JSON to java Maps/Lists        5 582 975 ps   11 143 ps/node
+    //     Mezze parseBytes to MezzeVariant  11 877 094      23 706
+    //
+    // so Mezze's construction was 53% of its own parse and the ceiling is
+    // 2.13x. Reading the code had suggested single digit percent; the estimate
+    // was wrong because `MezzeRecord.fromFields` is not merely an `Object[]` —
+    // there is shape handling behind it. Measuring beat estimating by 2x.
+    //
+    // The typed forms carry the primitive UNBOXED, so `jInt` and `jFloat` also
+    // stop boxing a Long and a Double per node.
+    //
+    // Readers need no change: `getPayloadFieldByName` returns the payload
+    // directly for a fused variant, which is why the serializer already reads
+    // `ok()` and `some()` — both built fused — without drilling into a record.
+
     private static MezzeVariant jBool(boolean val) {
-        MezzeRecord payload = MezzeRecord.fromFields(VAL_FIELD, new Object[]{val});
-        return MezzeVariant.singlePayload(getTagRegistry(), getTagJBool(), payload);
+        return MezzeVariant.singlePayloadFused(getTagRegistry(), getTagJBool(),
+            val, VAL_NAME);
     }
 
     private static MezzeVariant jInt(long val) {
-        MezzeRecord payload = MezzeRecord.fromFields(VAL_FIELD, new Object[]{val});
-        return MezzeVariant.singlePayload(getTagRegistry(), getTagJInt(), payload);
+        return MezzeVariant.singleLongPayloadFused(getTagRegistry(), getTagJInt(),
+            val, VAL_NAME);
     }
 
     private static MezzeVariant jFloat(double val) {
-        MezzeRecord payload = MezzeRecord.fromFields(VAL_FIELD, new Object[]{val});
-        return MezzeVariant.singlePayload(getTagRegistry(), getTagJFloat(), payload);
+        return MezzeVariant.singleDoublePayloadFused(getTagRegistry(), getTagJFloat(),
+            val, VAL_NAME);
     }
 
     private static MezzeVariant jString(String val) {
-        MezzeRecord payload = MezzeRecord.fromFields(VAL_FIELD, new Object[]{val});
-        return MezzeVariant.singlePayload(getTagRegistry(), getTagJString(), payload);
+        return MezzeVariant.singlePayloadFused(getTagRegistry(), getTagJString(),
+            val, VAL_NAME);
     }
 
     private static MezzeVariant jArray(Object[] items) {
-        MezzeRecord payload = MezzeRecord.fromFields(ITEMS_FIELD, new Object[]{items});
-        return MezzeVariant.singlePayload(getTagRegistry(), getTagJArray(), payload);
+        return MezzeVariant.singlePayloadFused(getTagRegistry(), getTagJArray(),
+            items, ITEMS_NAME);
     }
 
     private static MezzeVariant jObject(Object[] fields) {
-        MezzeRecord payload = MezzeRecord.fromFields(FIELDS_FIELD, new Object[]{fields});
-        return MezzeVariant.singlePayload(getTagRegistry(), getTagJObject(), payload);
+        return MezzeVariant.singlePayloadFused(getTagRegistry(), getTagJObject(),
+            fields, FIELDS_NAME);
     }
 
     // =========================================================================

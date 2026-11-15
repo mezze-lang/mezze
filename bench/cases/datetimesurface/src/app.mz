@@ -1,0 +1,212 @@
+## WHAT DATETIME COSTS — the first measurement of the module.
+##
+## `std::datetime` is 66 operations at ZERO benchmark coverage, which is the
+## shape that hid `bytes::to_hex` calling `String.format` once per byte (56.7x).
+## Formatting and parsing are where that kind of defect lives, and the first
+## reading found one: `DateTimeNatives.format` and `.parse` both called
+## `DateTimeFormatter.ofPattern(pattern)` on EVERY call, which parses the
+## pattern string and builds a formatter. Measured in Java at 211 ns a call
+## against 75 with one formatter reused.
+##
+## METHOD, the same as mapsurface and bytesurface: one row per process
+## (`datetimesurface <n> <row>`), min over k measured passes after `warm`
+## warmups, every row checksummed, and a counted arithmetic loop as the floor.
+##
+## EVERY ROW NEEDS TWO SIZES OF n AND MUST CONVERGE.
+
+use std::effects::log::{ println, Console }
+use std::effects::args::{ SystemArgs, argv }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::collections::seq
+use std::datetime
+use std::result
+use std::str
+use std::int
+use std::option
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_one = { thunk } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = thunk {}
+  let t1 = monotonic {}
+  { ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }, sum = r }
+
+let time_k_go = { thunk, k, acc, last } -> if k == 0
+  then { times = acc, sum = last }
+  else do
+    let r = time_one { thunk = thunk }
+    time_k_go { thunk = thunk, k = k - 1, acc = seq::push { xs = acc, x = r.ns }, last = r.sum }
+
+let nth_or_zero = { xs, i } -> match seq::get { xs = xs, i = i } is
+  Some { val } -> val
+  None -> 0
+
+let min_of = { thunk, warm, k } -> do
+  let w = time_k_go { thunk = thunk, k = warm, acc = [], last = 0 }
+  let ws = seq::sort { xs = w.times }
+  let warm_max = nth_or_zero { xs = ws, i = seq::size { xs = ws } - 1 }
+  let run = time_k_go { thunk = thunk, k = k, acc = [], last = 0 }
+  let sorted = seq::sort { xs = run.times }
+  let half = seq::size { xs = sorted } / 2
+  { min = nth_or_zero { xs = sorted, i = 0 },
+    med = nth_or_zero { xs = sorted, i = half },
+    warm_max = warm_max,
+    sum = run.sum }
+
+## THE FLOOR: one loop iteration and one add, no datetime at all.
+let control_loop = { i, acc } -> if i <= 0 then acc else control_loop { i = i - 1, acc = acc + i }
+
+let report = { idx, sel, label, thunk, floor_ps, n, warm, k } -> perform Console in perform SystemTime in
+  if sel != 0 && sel != idx then {} else do
+    let t = min_of { thunk = thunk, warm = warm, k = k }
+    let ps_per_op = (t.min * 1000) / n
+    let ratio = if floor_ps == 0 then 0 else (ps_per_op * 100) / floor_ps
+    let warm_ratio = if t.min == 0 then 0 else t.warm_max / t.min
+    let warn = if t.med > (t.min * 2) then "   UNDER-WARMED (raise n or passes)"
+      else if warm_ratio > 10 then "   WARMUP-DOMINATED"
+      else ""
+    println { msg = "  $(label): $(int::to_str { n = ps_per_op }) ps/op  x$(int::to_str { n = ratio })/100 floor  sum=$(int::to_str { n = t.sum })$(warn)" }
+
+
+## ── one instant and one zone, built once outside every timed loop ────────
+## 2021-01-01T00:00:00Z, which is a round number of epoch millis.
+let fixed_millis = 1609459200000
+
+let the_zone = {} -> match datetime::zone_of { id = "America/New_York" } is
+  Ok { val } -> val
+  Err { error } -> datetime::utc {}
+
+## ── 1. instant_from_millis ─ the cheapest constructor ─────────────────
+let l_from_millis = { i, acc } -> if i <= 0 then acc
+  else l_from_millis { i = i - 1,
+    acc = acc + datetime::instant_to_millis {
+      i = datetime::instant_from_millis { n = fixed_millis } } / 1000000000 }
+
+## ── 2. instant_to_millis ─ the field read ────────────────────────
+let l_to_millis = { i, acc, t } -> if i <= 0 then acc
+  else l_to_millis { i = i - 1, t = t,
+    acc = acc + datetime::instant_to_millis { i = t } / 1000000000 }
+
+## ── 3. add_duration ─ instant arithmetic ────────────────────────
+let l_add = { i, acc, t, d } -> if i <= 0 then acc
+  else l_add { i = i - 1, t = t, d = d,
+    acc = acc + datetime::instant_to_millis {
+      i = datetime::add { i = t, d = d } } / 1000000000 }
+
+## ── 4. diff ─ two instants to a duration ────────────────────────
+let l_diff = { i, acc, t, u } -> if i <= 0 then acc
+  else l_diff { i = i - 1, t = t, u = u,
+    acc = acc + datetime::duration_to_millis {
+      d = datetime::diff { s = t, e = u } } / 1000 }
+
+## ── 5. decompose ─ instant + zone to calendar fields ────────────────
+let l_decompose = { i, acc, t, z } -> if i <= 0 then acc
+  else l_decompose { i = i - 1, t = t, z = z,
+    acc = acc + datetime::decompose { i = t, z = z }.year }
+
+## ── 6. year ─ one field, which decomposes internally or does not ───────
+let l_year = { i, acc, t, z } -> if i <= 0 then acc
+  else l_year { i = i - 1, t = t, z = z,
+    acc = acc + datetime::year { i = t, z = z } }
+
+## ── 7. format ─ THE PATTERN ROW. `ofPattern` used to run per call ──────
+let l_format = { i, acc, t, z } -> if i <= 0 then acc
+  else l_format { i = i - 1, t = t, z = z,
+    acc = acc + str::size {
+      s = datetime::format { i = t, p = "yyyy-MM-dd HH:mm:ss", z = z } } }
+
+## ── 8. parse ─ the same pattern, the other direction ───────────────
+let l_parse = { i, acc, z } -> if i <= 0 then acc
+  else l_parse { i = i - 1, z = z,
+    acc = acc + match datetime::parse {
+        s = "2021-01-01 00:00:00", p = "yyyy-MM-dd HH:mm:ss", z = z } is
+      Ok { val } -> datetime::instant_to_millis { i = val } / 1000000000
+      Err { error } -> 0 }
+
+## ── 9. format_iso8601 ─ ANOTHER PATTERN USER, not a control ───────────────
+## This was written down as the control for row 7, on the reasoning that an ISO
+## formatter is a constant in java.time and `DateTimeNatives` does hold a
+## `DateTimeFormatter.ISO_INSTANT`. It is not the one this reaches: the stdlib
+## defines `format_iso8601` as `format { p = "yyyy-MM-dd'T'HH:mm:ss'Z'", … }`,
+## so it goes through the pattern path like row 7, and the constant formatter
+## belongs to `instant_encode` on the codec path. It measured 2.38x on the
+## pattern cache, which is what a pattern user does — a row's control status has
+## to be read in the stdlib, not inferred from a native's name.
+## THE REAL CONTROL for rows 7 and 8 is row 5 `decompose`, which is its own
+## native and touches no pattern: it read 1.03x.
+let l_format_iso = { i, acc, t } -> if i <= 0 then acc
+  else l_format_iso { i = i - 1, t = t,
+    acc = acc + str::size { s = datetime::format_iso8601 { i = t } } }
+
+## ── 10. is_leap_year ─ pure arithmetic on an Int ─────────────────
+let l_leap = { i, acc } -> if i <= 0 then acc
+  else l_leap { i = i - 1,
+    acc = acc + (if datetime::is_leap_year { year = 2024 } then 1 else 0) }
+
+## ── 11. zone_offset_at ─ the zone rules lookup ──────────────────
+let l_offset = { i, acc, t, z } -> if i <= 0 then acc
+  else l_offset { i = i - 1, t = t, z = z,
+    acc = acc + datetime::duration_to_seconds {
+      d = datetime::zone_offset_at { z = z, at = t } } / 3600 }
+
+## ── 12. hour ─ a TIME field, which needs no calendar at all ──────────────
+## A zone offset is a whole number of seconds, so hour/minute/second are
+## division and remainder on the local second count — no LocalDate, no object.
+let l_hour = { i, acc, t, z } -> if i <= 0 then acc
+  else l_hour { i = i - 1, t = t, z = z,
+    acc = acc + datetime::hour { i = t, z = z } }
+
+## ── 13. nanos ─ the field the ZONE CANNOT CHANGE ─────────────────────────
+## An offset never shifts the nano-of-second, so this reads straight off the
+## Instant and does no zone work whatsoever.
+let l_nanos = { i, acc, t, z } -> if i <= 0 then acc
+  else l_nanos { i = i - 1, t = t, z = z,
+    acc = acc + datetime::nanos { i = t, z = z } }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let n = arg_at { args = args, i = 0, def = 200000 }
+  let sel = arg_at { args = args, i = 1, def = 0 }
+  let floor_n = arg_at { args = args, i = 2, def = 20000000 }
+  let warm = 4
+  let k = 9
+  let t = datetime::instant_from_millis { n = fixed_millis }
+  let u = datetime::instant_from_millis { n = fixed_millis + 86400000 }
+  let z = the_zone {}
+  let d = datetime::duration_seconds { n = 3600 }
+  let floor = min_of { thunk = {} -> control_loop { i = floor_n, acc = 0 }, warm = warm, k = k }
+  let floor_ps = (floor.min * 1000) / floor_n
+  println { msg = "datetimesurface (n=$(int::to_str { n = n }) ops): $(int::to_str { n = warm }) warmup + $(int::to_str { n = k }) measured, MIN per row" }
+  println { msg = "  control (floor)     : $(int::to_str { n = floor_ps }) ps/op" }
+  report { idx = 1, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "instant_from_millis ", thunk = {} -> l_from_millis { i = n, acc = 0 } }
+  report { idx = 2, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "instant_to_millis   ", thunk = {} -> l_to_millis { i = n, acc = 0, t = t } }
+  report { idx = 3, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "add_duration        ", thunk = {} -> l_add { i = n, acc = 0, t = t, d = d } }
+  report { idx = 4, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "diff                ", thunk = {} -> l_diff { i = n, acc = 0, t = t, u = u } }
+  report { idx = 5, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "decompose           ", thunk = {} -> l_decompose { i = n, acc = 0, t = t, z = z } }
+  report { idx = 6, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "year                ", thunk = {} -> l_year { i = n, acc = 0, t = t, z = z } }
+  report { idx = 7, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "format  PATTERN     ", thunk = {} -> l_format { i = n, acc = 0, t = t, z = z } }
+  report { idx = 8, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "parse   PATTERN     ", thunk = {} -> l_parse { i = n, acc = 0, z = z } }
+  report { idx = 9, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "format_iso8601 PATTERN", thunk = {} -> l_format_iso { i = n, acc = 0, t = t } }
+  report { idx = 10, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "is_leap_year        ", thunk = {} -> l_leap { i = n, acc = 0 } }
+  report { idx = 11, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "zone_offset_at      ", thunk = {} -> l_offset { i = n, acc = 0, t = t, z = z } }
+  report { idx = 12, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "hour                ", thunk = {} -> l_hour { i = n, acc = 0, t = t, z = z } }
+  report { idx = 13, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "nanos               ", thunk = {} -> l_nanos { i = n, acc = 0, t = t, z = z } }

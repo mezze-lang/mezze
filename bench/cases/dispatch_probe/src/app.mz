@@ -1,0 +1,141 @@
+## DISPATCH AND DICTIONARY COST — in-process, steady state.
+##
+## Five routes to the SAME arithmetic, so the difference between them is the
+## dispatch mechanism and nothing else. Every route sums 0..n-1 and must print
+## the same checksum; a mismatch means a route is not doing the same work.
+##
+##   direct      a tail-recursive loop, monomorphic Int. The floor: after the
+##               record-collapse fix this is the FusedLongTailLoop path.
+##   via_fn      the same loop, but the add goes through a named helper. Tests
+##               whether a plain function call is free.
+##   via_hof     the add is a CLOSURE passed in as a parameter. This is the
+##               shape every map/filter/fold callback has, and the one the mono
+##               notes say stays polymorphic — the folder's body keeps
+##               `CallIndirectIR(add-dispatch)` so no inline op fires.
+##   via_ability the add goes through an ability method on a user ability with
+##               one impl. Compile time knows the impl exactly; if a dictionary
+##               is still passed and dispatched at runtime, this is where it
+##               shows.
+##   via_seqfold the stdlib's `fold` over an iter, dot-chained — the idiomatic
+##               form, and the one ChainCanonicalizer refuses.
+##
+## WHAT A RESULT MEANS: direct is the target. Any route far above it is paying
+## for dispatch that the typechecker already had the information to remove.
+##
+## NOTE ON CHECKSUMS: `via_3p` sums `k` per iteration and `via_iterfold` walks
+## 0..n-1 exclusive, so those two legitimately differ from the rest. Only
+## routes computing the same sum are compared by checksum.
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::collections::seq
+use std::collections::iter
+use std::int
+
+let size_or = { args, def } -> match seq::get { xs = args, i = 0 } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+## 1. direct — monomorphic tail loop
+let direct = { n, acc } ->
+  if n <= 0 then acc
+  else direct { n = n - 1, acc = acc + n }
+
+## 2. via_fn — the add behind a named function
+let add2 = { a, b } -> a + b
+let via_fn = { n, acc } ->
+  if n <= 0 then acc
+  else via_fn { n = n - 1, acc = add2 { a = acc, b = n } }
+
+## 3. via_hof — the add arrives as a closure parameter
+let via_hof = { n, acc, f } ->
+  if n <= 0 then acc
+  else via_hof { n = n - 1, acc = f { a = acc, b = n }, f = f }
+
+## 3b. via_3p — THE CONTROL for via_hof. Three params, but the arithmetic is
+## direct. via_hof also has three params, and FusedLongTailLoop only accepts one
+## or two, so without this control its cost cannot be attributed to the closure
+## rather than to simply missing the fused tier. The third param is carried and
+## returned so it cannot be dropped as unused.
+## The base case must be a PLAIN param read and each update `self op rhs` —
+## that is the shape the fused tiers accept at any arity. Written first as
+## `if n <= 0 then acc + k - k`, which is neither, so it measured the non-fused
+## path for a reason that had nothing to do with arity. `k` is genuinely used
+## (it is the addend), so it cannot be dropped as dead.
+let via_3p = { n, acc, k } ->
+  if n <= 0 then acc
+  else via_3p { n = n - 1, acc = acc + k, k = k }
+
+## 3c. via_hof_nodict — ATTRIBUTION for via_hof. Same closure-parameter call
+## shape, but the callee does no arithmetic, so it is NOT generic over a numeric
+## ability and gets no dict wrapper. via_hof's callee `add2` is reached through
+## `dict_wrapper_add2` (observed directly), so comparing the two splits the
+## closure cost between the call machinery and the dictionary wrapper.
+## The sum is deliberately meaningless — only the per-iteration cost is read.
+let pick_first = { a, b } -> a
+let via_hof_nodict = { n, acc, f } ->
+  if n <= 0 then acc
+  else via_hof_nodict { n = n - 1, acc = f { a = acc, b = n }, f = f }
+
+## 4. via_ability — one impl, known at compile time
+ability Adder for 'a where {
+  combine: { it: 'a, r: 'a } -> 'a
+}
+impl Adder for Int where {
+  combine = { it, r } -> it + r
+}
+let via_ability = { n, acc } ->
+  if n <= 0 then acc
+  else via_ability { n = n - 1, acc = acc.combine { r = n } }
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+let report = { label, ns, iters, result } ->
+  println { msg = "  $(label)  $(int::to_str { n = ns / 1000000 }) ms   $(int::to_str { n = ns / iters }) ns/iter   sum=$(int::to_str { n = result })" }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let n = size_or { args = argv {}, def = 20000000 }
+
+  ## warm every route
+  direct { n = n, acc = 0 }
+  direct { n = n, acc = 0 }
+  via_fn { n = n, acc = 0 }
+  via_fn { n = n, acc = 0 }
+  via_hof { n = n, acc = 0, f = add2 }
+  via_hof { n = n, acc = 0, f = add2 }
+  via_3p { n = n, acc = 0, k = 1 }
+  via_3p { n = n, acc = 0, k = 1 }
+  via_hof_nodict { n = n, acc = 0, f = pick_first }
+  via_hof_nodict { n = n, acc = 0, f = pick_first }
+  via_ability { n = n, acc = 0 }
+  via_ability { n = n, acc = 0 }
+  iter::range { start = 0, end = n }.fold { init = 0, f = { acc, x } -> acc + x }
+  iter::range { start = 0, end = n }.fold { init = 0, f = { acc, x } -> acc + x }
+
+  println { msg = "dispatch probe  n=$(int::to_str { n = n })  (all routes sum 0..n-1)" }
+  let a = time_it { f = {} -> direct { n = n, acc = 0 } }
+  report { label = "direct     ", ns = a.ns, iters = n, result = a.result }
+  let b = time_it { f = {} -> via_fn { n = n, acc = 0 } }
+  report { label = "via_fn     ", ns = b.ns, iters = n, result = b.result }
+  let c = time_it { f = {} -> via_hof { n = n, acc = 0, f = add2 } }
+  report { label = "via_hof    ", ns = c.ns, iters = n, result = c.result }
+  let c3 = time_it { f = {} -> via_hof_nodict { n = n, acc = 0, f = pick_first } }
+  report { label = "via_hof_nodict", ns = c3.ns, iters = n, result = c3.result }
+  let c2 = time_it { f = {} -> via_3p { n = n, acc = 0, k = 1 } }
+  report { label = "via_3p     ", ns = c2.ns, iters = n, result = c2.result }
+  let d = time_it { f = {} -> via_ability { n = n, acc = 0 } }
+  report { label = "via_ability", ns = d.ns, iters = n, result = d.result }
+  let e = time_it { f = {} -> iter::range { start = 0, end = n }.fold { init = 0, f = { acc, x } -> acc + x } }
+  report { label = "via_iterfold", ns = e.ns, iters = n, result = e.result }
+  ## A folder that cannot be reduced to a closed form, so this measures the
+  ## stdlib HOF + closure path rather than a range-sum native. If the dict
+  ## wrapper cost applied here it would show up as tens of ns/elem.
+  let e2 = time_it { f = {} -> iter::range { start = 0, end = n }.fold { init = 0, f = { acc, x } -> acc + x * 3 % 7 } }
+  report { label = "via_iterfold2", ns = e2.ns, iters = n, result = e2.result }

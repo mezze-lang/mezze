@@ -57,11 +57,92 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
             return of(elements[0]);
         }
 
-        MezzeSet<A> result = empty();
-        for (A elem : elements) {
-            result = result.add(elem);
+        return fromElements(elements, elements.length);
+    }
+
+    /**
+     * BUILDS A SET FROM ELEMENTS ALREADY IN HAND, in one pass.
+     *
+     * <p>WHY. Every path that rebuilds a whole set — `filter`, `map`,
+     * `filter_map`, `insert_all`, `symmetric_difference`, `intersection`,
+     * `difference`, `from_list`, `of` — wrote {@code result = result.add(e)}
+     * per element, and so did {@code TrieSetStorage.fromCollection}, which the
+     * two {@code fromMutableSet} helpers called while their comments claimed a
+     * one-pass build. A persistent add allocates a node at every level of the
+     * path it touches: right for an update whose base survives, wasted for a
+     * rebuild that discards the base on the next element. The map measured the
+     * same change at 3.2x.
+     *
+     * <p>THE STRATEGY LADDER IS PRESERVED, which is why this lives on
+     * `MezzeSet` and not on a storage. A set's storage is chosen by size and
+     * element type — single, then {@link SmallFlatSetStorage} to
+     * {@link SmallFlatSetStorage#MAX_SIZE}, {@link LongSetStorage} to
+     * {@link LongSetStorage#MAX_SIZE} for all-Long elements, then the long
+     * trie or the general one. Below the widest flat tier this adds one at a
+     * time, which IS the ladder's answer and is cheap at that size; above it a
+     * builder takes over and the tier is the one the adds would have reached.
+     *
+     * <p>Repeats are allowed and collapse, exactly as the adds did.
+     * {@code count} says how much of the array to read, so a caller that
+     * filtered may pass an array sized for its input.
+     */
+    @TruffleBoundary
+    @SuppressWarnings("unchecked")
+    public static <A> MezzeSet<A> fromElements(Object[] elems, int count) {
+        if (count <= 0) {
+            return empty();
         }
-        return result;
+        // Above BOTH flat maxima, so the tier below is always the ladder's.
+        if (count <= BULK_FLOOR) {
+            SetStorage out = EmptySetStorage.INSTANCE;
+            for (int i = 0; i < count; i++) {
+                out = out.add(elems[i]);
+            }
+            return new MezzeSet<>(out);
+        }
+        if (allLongElements(elems, count)) {
+            var b = new LongTrieSetStorage.Builder();
+            for (int i = 0; i < count; i++) {
+                b.add((Long) elems[i]);
+            }
+            return new MezzeSet<>(b.build());
+        }
+        var b = new TrieSetStorage.Builder();
+        for (int i = 0; i < count; i++) {
+            b.add(elems[i]);
+        }
+        return new MezzeSet<>(b.build());
+    }
+
+    /**
+     * The size below which adding one at a time IS the ladder's answer. The
+     * flat tiers are the fastest storage at their own sizes and a builder
+     * would only take the set off them, so the floor sits above the wider of
+     * the two — {@link LongSetStorage#MAX_SIZE} for all-Long elements and
+     * {@link SmallFlatSetStorage#MAX_SIZE} otherwise.
+     */
+    private static final int BULK_FLOOR =
+        Math.max(LongSetStorage.MAX_SIZE, SmallFlatSetStorage.MAX_SIZE);
+
+    /** The flat storage's own condition for promoting to the long-keyed trie. */
+    private static boolean allLongElements(Object[] elems, int count) {
+        for (int i = 0; i < count; i++) {
+            if (!(elems[i] instanceof Long)) return false;
+        }
+        return true;
+    }
+
+    /**
+     * ONE WALK, NO ARRAY, for the whole-set operations — the Set's twin of
+     * {@code MezzeMap.walkEntries}. MEASURED there at 3.6x on the walk itself.
+     */
+    public void walkElems(java.util.function.Consumer<Object> fn) {
+        storage.forEach(fn);
+    }
+
+    /** {@link #walkElems} that stops, for `any`, `all`, `none` and `find`. */
+    public boolean walkElemsUntil(java.util.function.Predicate<Object> p) {
+        return storage.forEachUntil(p);
     }
 
     /**
@@ -133,6 +214,26 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
     }
 
     /**
+     * True when a probe may run INSIDE compiled code — everything except
+     * {@link EvidenceSetStorage}, which dispatches through guest closures. The
+     * set counterpart of {@code MezzeMap.hasDirectProbe}.
+     */
+    public boolean hasDirectProbe() {
+        return storage instanceof SingleElemSetStorage
+                || storage instanceof EmptySetStorage;
+    }
+
+    /**
+     * {@link #contains} with the storage type NAMED, so each branch has a
+     * concrete receiver. See {@code MezzeMap.getDirect} for the measurement
+     * that says both halves are needed.
+     */
+    public boolean containsDirect(Object elem) {
+        if (storage instanceof SingleElemSetStorage s) return s.contains(elem);
+        return storage.contains(elem);
+    }
+
+    /**
      * Returns true if the element is present.
      */
     public boolean contains(A elem) {
@@ -141,6 +242,15 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
 
     /**
      * Unboxed contains for long sets.
+     *
+     * <p>DEAD, AND THE TRIE IS DELIBERATELY ABSENT FROM IT. Nothing calls this
+     * method: a long-keyed set reaches its unboxed probe through
+     * {@code LongTrieSetStorage.containsLong} from {@code storage.contains},
+     * never through here, so the missing branch cost nothing. It was found
+     * while testing whether an interpreter fast path could use this method, and
+     * that fast path measured NULL — see {@code InlineMapContainsKey} — so
+     * closing the hole would have meant fixing code with no callers. Named
+     * here as what it is instead.
      */
     public boolean containsLong(long elem) {
         if (storage instanceof LongSetStorage longStorage) {
@@ -171,36 +281,44 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
      * Returns a new set with all elements from other set added.
      * Optimized: uses mutable HashSet for batch operations.
      */
+    @SuppressWarnings("unchecked")
     public MezzeSet<A> addAll(MezzeSet<A> other) {
         if (other.isEmpty()) return this;
         if (isEmpty()) return other;
 
-        // Use mutable HashSet for bulk insert
-        java.util.HashSet<A> mutable = new java.util.HashSet<>(size() + other.size());
-
-        for (A elem : this) {
-            mutable.add(elem);
+        // THE TWO ARRAYS STAY, measured: see `MezzeMap.putAll`. A walk saves
+        // the allocation and gives up `System.arraycopy`, and on `set::union`
+        // that read 0.99x.
+        Object[] mine = toArray();
+        Object[] theirs = other.toArray();
+        Object[] out = new Object[mine.length + theirs.length];
+        System.arraycopy(mine, 0, out, 0, mine.length);
+        System.arraycopy(theirs, 0, out, mine.length, theirs.length);
+        // Shared elements appear twice and collapse, as the adds collapsed them.
+        //
+        // COLLAPSE BY WHOSE EQUALITY, THOUGH. The static `fromElements` buckets
+        // STRUCTURALLY, so two elements a hand-written `Eq` calls equal stayed
+        // apart and `set::union` answered 4 where every other operation agreed
+        // the answer was 3. The element instance lives on the storage — see
+        // `EvidenceSetStorage`, whose own comment says a set with evidence keeps
+        // it — and `storage()` exists to be asked this exact question before a
+        // rebuild. It was not being asked here.
+        //
+        // The defect was invisible from the result, because `contains` takes its
+        // evidence from the CALL SITE: the union result still recognised a
+        // differently-spelled member, so only the SIZE gave it away.
+        ElementHashing hashing = hashingOf(this);
+        if (hashing == null) hashing = hashingOf(other);
+        if (hashing != null) {
+            return fromStorage(EvidenceSetStorage.fromElements(out, hashing));
         }
-        for (A elem : other) {
-            mutable.add(elem);
-        }
-
-        return fromMutableSet(mutable);
+        return (MezzeSet<A>) fromElements(out, out.length);
     }
 
-    /**
-     * Creates a MezzeSet from a mutable HashSet (internal use).
-     * Optimized: builds HashSetStorage directly instead of adding one by one.
-     */
-    @SuppressWarnings("unchecked")
-    private static <A> MezzeSet<A> fromMutableSet(java.util.HashSet<A> mutable) {
-        if (mutable.isEmpty()) return empty();
-        if (mutable.size() == 1) {
-            return of(mutable.iterator().next());
-        }
-
-        // Build HashSetStorage directly from collection (O(n) vs O(n^2))
-        return new MezzeSet<>(HashSetStorage.fromCollection(mutable));
+    /** The element instance this set buckets by, or null when it buckets
+     *  structurally. */
+    private static ElementHashing hashingOf(MezzeSet<?> s) {
+        return s.storage instanceof EvidenceSetStorage es ? es.hashing() : null;
     }
 
     /**
@@ -224,6 +342,22 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
             return new MezzeSet<>(ls.unionLong(otherLs));
         }
 
+        // AND THE TRIE, which is where a thousand-element Int set actually
+        // lives: `LongSetStorage` caps at 32, so the sorted two-pointer merge
+        // above never sees one. Without this, union fell through to `addAll`,
+        // which collects BOTH sides into arrays and calls `fromElements` —
+        // rehashing every element and discarding two perfectly good tries.
+        //
+        // MEASURED on the real structure, 1000 elements a side: that rebuild is
+        // 84% of `addAll`'s work for disjoint inputs and 72% for identical
+        // ones, against 6 790 ps/element merely to walk both sides. The
+        // structural merge shares whole subtrees by reference and hashes
+        // nothing — see `LongTrieSetStorage.unionWith`.
+        if (storage instanceof LongTrieSetStorage lt
+                && other.storage instanceof LongTrieSetStorage otherLt) {
+            return new MezzeSet<>(LongTrieSetStorage.unionWith(lt, otherLt));
+        }
+
         return addAll(other);
     }
 
@@ -240,16 +374,19 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
             return new MezzeSet<>(result);
         }
 
-        MezzeSet<A> result = empty();
         MezzeSet<A> smaller = size() <= other.size() ? this : other;
         MezzeSet<A> larger = size() > other.size() ? this : other;
 
-        for (A elem : smaller) {
-            if (larger.contains(elem)) {
-                result = result.add(elem);
+        int size = smaller.size();
+        Object[] out = new Object[size];
+        int[] n = {0};
+        smaller.storage.forEach(e -> {
+            if (larger.contains((A) e)) {
+                out[n[0]++] = e;
             }
-        }
-        return result;
+        });
+        if (n[0] == size) return smaller;
+        return (MezzeSet<A>) fromElements(out, n[0]);
     }
 
     /**
@@ -266,19 +403,39 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
             return new MezzeSet<>(result);
         }
 
-        MezzeSet<A> result = empty();
-        for (A elem : this) {
-            if (!other.contains(elem)) {
-                result = result.add(elem);
+        int size = size();
+        Object[] out = new Object[size];
+        int[] n = {0};
+        storage.forEach(e -> {
+            if (!other.contains((A) e)) {
+                out[n[0]++] = e;
             }
-        }
-        return result;
+        });
+        if (n[0] == size) return this;
+        return (MezzeSet<A>) fromElements(out, n[0]);
     }
 
     /**
      * Symmetric difference (elements in either but not both).
      */
     public MezzeSet<A> symmetricDifference(MezzeSet<A> other) {
+        if (isEmpty()) return other;
+        if (other.isEmpty()) return this;
+
+        // THE TRIE CANCELS STRUCTURALLY. The composition below walks the sets
+        // THREE times — a union, an intersection, then a difference of the two
+        // — and each of those rebuilds. `symmetricDifferenceWith` does it in
+        // one pass, sharing every subtree only one side has and rehashing
+        // nothing. At 26 464 686 ps for two half-overlapping thousand-element
+        // sets this was the most expensive set row left.
+        if (storage instanceof LongTrieSetStorage lt
+                && other.storage instanceof LongTrieSetStorage otherLt) {
+            LongTrieSetStorage out =
+                LongTrieSetStorage.symmetricDifferenceWith(lt, otherLt);
+            if (out.size() == 0) return empty();
+            return new MezzeSet<>(out);
+        }
+
         return union(other).difference(intersect(other));
     }
 
@@ -322,33 +479,22 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
 
     /**
      * Maps over elements.
-     * Optimized: builds HashSetStorage directly from collection.
+     *
+     * <p>The {@code HashSet} this used to fill was not a bulk build: it was an
+     * extra hash table, and the trie behind it was still filled one persistent
+     * add at a time.
      */
     @TruffleBoundary
+    @SuppressWarnings("unchecked")
     public <B> MezzeSet<B> map(Function<A, B> fn) {
         if (isEmpty()) return empty();
 
-        java.util.HashSet<B> mutable = new java.util.HashSet<>(size());
-        for (A elem : this) {
-            mutable.add(fn.apply(elem));
-        }
-
-        return fromMutableSetGeneric(mutable);
-    }
-
-    /**
-     * Creates a MezzeSet from a mutable HashSet of any type (internal use).
-     * Optimized: builds HashSetStorage directly instead of adding one by one.
-     */
-    @SuppressWarnings("unchecked")
-    private static <B> MezzeSet<B> fromMutableSetGeneric(java.util.HashSet<B> mutable) {
-        if (mutable.isEmpty()) return empty();
-        if (mutable.size() == 1) {
-            return of(mutable.iterator().next());
-        }
-
-        // Build HashSetStorage directly from collection (O(n) vs O(n^2))
-        return new MezzeSet<>(HashSetStorage.fromCollection(mutable));
+        int size = size();
+        Object[] out = new Object[size];
+        int[] n = {0};
+        storage.forEach(e -> out[n[0]++] = fn.apply((A) e));
+        // Two elements may map to one: they collapse, as the adds did.
+        return (MezzeSet<B>) fromElements(out, size);
     }
 
     /**
@@ -367,27 +513,26 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
 
     /**
      * Filters elements by predicate.
-     * Optimized: uses mutable HashSet for batch operations.
+     *
+     * <p>Keeping everything still returns {@code this}: an immutable set that
+     * would be rebuilt element for element is already the answer.
      */
     @TruffleBoundary
+    @SuppressWarnings("unchecked")
     public MezzeSet<A> filter(Predicate<A> p) {
         if (isEmpty()) return this;
 
-        java.util.HashSet<A> mutable = new java.util.HashSet<>();
-        boolean allMatch = true;
-
-        for (A elem : this) {
-            if (p.test(elem)) {
-                mutable.add(elem);
-            } else {
-                allMatch = false;
+        int size = size();
+        Object[] out = new Object[size];
+        int[] n = {0};
+        storage.forEach(e -> {
+            if (p.test((A) e)) {
+                out[n[0]++] = e;
             }
-        }
+        });
+        if (n[0] == size) return this;
 
-        // If all elements matched, return this (no change)
-        if (allMatch) return this;
-
-        return fromMutableSet(mutable);
+        return (MezzeSet<A>) fromElements(out, n[0]);
     }
 
     // ===== FOLD =====
@@ -525,70 +670,6 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
             return longStorage.toLongArray();
         }
         throw new UnsupportedOperationException("toLongArray requires Long elements");
-    }
-
-    // ===== MUTABLE OPERATIONS (for LocalMut effect) =====
-
-    /**
-     * Creates a mutable copy of this set.
-     * Used by to_mut to get a fresh copy that can be mutated.
-     */
-    public MezzeSet<A> copyToMutable() {
-        if (storage instanceof HashSetStorage hashStorage) {
-            return new MezzeSet<>(hashStorage.copyToMutable());
-        }
-        // For other storage types, convert to HashSetStorage first
-        java.util.HashSet<Object> temp = new java.util.HashSet<>();
-        for (A elem : this) {
-            temp.add(elem);
-        }
-        return new MezzeSet<>(HashSetStorage.fromCollection(temp).copyToMutable());
-    }
-
-    /**
-     * Creates a mutable set with given initial capacity.
-     * Use this when you know the approximate final size.
-     */
-    public static <A> MezzeSet<A> mutableWithCapacity(int capacity) {
-        // Pre-create a HashSetStorage with enough room
-        java.util.HashSet<Object> temp = new java.util.HashSet<>(capacity);
-        return new MezzeSet<>(HashSetStorage.fromCollection(temp).copyToMutable());
-    }
-
-    /**
-     * In-place add - mutates the underlying storage.
-     * Only safe within LocalMut context.
-     * Returns true if element was new, false if already present.
-     */
-    public boolean mutAdd(A elem) {
-        if (storage instanceof HashSetStorage hashStorage) {
-            return hashStorage.mutAdd(elem);
-        }
-        throw new UnsupportedOperationException("mutAdd requires HashSetStorage - use copyToMutable() first");
-    }
-
-    /**
-     * In-place remove - mutates the underlying storage.
-     * Only safe within LocalMut context.
-     * Returns true if element was found and removed.
-     */
-    public boolean mutRemove(A elem) {
-        if (storage instanceof HashSetStorage hashStorage) {
-            return hashStorage.mutRemove(elem);
-        }
-        throw new UnsupportedOperationException("mutRemove requires HashSetStorage - use copyToMutable() first");
-    }
-
-    /**
-     * In-place clear - mutates the underlying storage.
-     * Only safe within LocalMut context.
-     */
-    public void mutClear() {
-        if (storage instanceof HashSetStorage hashStorage) {
-            hashStorage.mutClear();
-        } else {
-            throw new UnsupportedOperationException("mutClear requires HashSetStorage - use copyToMutable() first");
-        }
     }
 
     // ===== INTERNAL =====

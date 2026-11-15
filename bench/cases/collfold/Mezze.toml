@@ -1,0 +1,12 @@
+[package]
+name = "collfold"
+version = "0.1.0"
+
+[[app]]
+name = "collfold"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

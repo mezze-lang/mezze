@@ -1,0 +1,393 @@
+## WHICH PIPELINE SHAPES FALL OFF THE FAST PATH.
+##
+## `map+filter+fold` over a range measures 0.075 ns/elem — the vectorised floor.
+## That is one shape. This app runs the shapes a real program actually writes
+## through the same harness so the cliffs rank themselves, instead of being
+## guessed at.
+##
+## Reported in PICOseconds per element, because ns/elem as an integer prints 0
+## for everything at the floor and that reads like a dead measurement.
+##
+## Every kernel iterates the same `n` elements, so the numbers are directly
+## comparable. Each prints a checksum too: a shape that is fast because it
+## silently dropped a stage is not a fast shape.
+use std::collections::iter
+use std::collections::seq
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::int
+
+let size_or = { args, def } -> match seq::get { xs = args, i = 0 } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { result = r, ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } } }
+
+## ── The kernels ─────────────────────────────────────────────────────────
+## 1. The known floor: one map, one filter, fold.
+let k_map_filter = { n } -> iter::range { start = 0, end = n }
+  .map { f = { x } -> x * 3 }
+  .filter { p = { x } -> x < n }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+## 2. One map only.
+let k_map = { n } -> iter::range { start = 0, end = n }
+  .map { f = { x } -> x * 3 }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+## 3. One filter only.
+let k_filter = { n } -> iter::range { start = 0, end = n }
+  .filter { p = { x } -> x % 2 == 0 }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+## 4. TWO maps. The fast path accepts at most one.
+let k_map_map = { n } -> iter::range { start = 0, end = n }
+  .map { f = { x } -> x * 3 }
+  .map { f = { x } -> x + 1 }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+## 5. TWO filters. Likewise.
+let k_filter_filter = { n } -> iter::range { start = 0, end = n }
+  .filter { p = { x } -> x % 2 == 0 }
+  .filter { p = { x } -> x < n }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+## 6. A take BEFORE the filter — the shape the fast path can express as a
+##    source clamp.
+let k_take_filter = { n } -> iter::range { start = 0, end = n }
+  .take { n = n }
+  .filter { p = { x } -> x % 2 == 0 }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+## 7. A take AFTER the filter — needs a counter, not a clamp.
+let k_filter_take = { n } -> iter::range { start = 0, end = n }
+  .filter { p = { x } -> x % 2 == 0 }
+  .take { n = n }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+## 8. take_while.
+let k_take_while = { n } -> iter::range { start = 0, end = n }
+  .take_while { p = { x } -> x < n }
+  .map { f = { x } -> x * 3 }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+## 9. drop.
+let k_drop = { n } -> iter::range { start = 0, end = n }
+  .drop { n = 0 }
+  .map { f = { x } -> x * 3 }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+## 10. A count sink with a predicate (seq — `iter::count` takes none).
+let k_count = { n } -> seq::count {
+  xs = seq::map { xs = seq::range { start = 0, end = n }, f = { x } -> x * 3 },
+  p = { x } -> x < n,
+}
+
+## 11. An `any` sink — short-circuits, so it should be the cheapest of all.
+let k_any = { n } -> if iter::any {
+    it = iter::map { it = iter::range { start = 0, end = n }, f = { x } -> x * 3 },
+    p = { x } -> x > n,
+  } then 1 else 0
+
+## 12. The eager array source rather than a generated range.
+let k_seq = { n } -> seq::fold {
+  xs = seq::filter {
+    xs = seq::map { xs = seq::range { start = 0, end = n }, f = { x } -> x * 3 },
+    p = { x } -> x < n,
+  },
+  init = 0,
+  f = { acc, x } -> acc + x,
+}
+
+## 13. enumerate — produces a RECORD per element, which is the interesting part:
+##     records are meant to vanish at lowering.
+let k_enumerate = { n } -> iter::range { start = 0, end = n }
+  .enumerate {}
+  .map { f = { x } -> x.val * 3 }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+## 14. A fold whose body is a compound expression, not a single op.
+let k_compound = { n } -> iter::range { start = 0, end = n }
+  .map { f = { x } -> x * 3 }
+  .fold { init = 0, f = { acc, x } -> acc + x * 2 - 1 }
+
+## 15. to_seq — materialises, so it pays allocation per element.
+let k_to_seq = { n } -> seq::size {
+  xs = iter::to_seq {
+    it = iter::filter {
+      it = iter::map { it = iter::range { start = 0, end = n }, f = { x } -> x * 3 },
+      p = { x } -> x < n,
+    },
+  },
+}
+
+## ONE KERNEL PER PROCESS, because 15 kernels in one JVM do not measure
+## shapes — they measure a compiler-thread lottery. With two warmups each, the
+## same binary gave `03 filter` 215, 7097 and 7474 ps/elem on three consecutive
+## runs: every kernel lands in a fast or a slow mode depending on whether its
+## compiled code happened to be ready by its timed call. The numbers were
+## bimodal, up to 35x apart, and useless for ranking.
+##
+## So: `fusegaps <kernel> <n>` runs ONE kernel, warms it five times, then times
+## it five times and prints every timing. The caller takes the minimum — the
+## speed once compiled — and the spread across the five is itself the evidence
+## that the measurement settled.
+## 16. The SAME pipeline as 01, reached through a function VALUE. Measured by
+## accident while building this bench: taking a pipeline function as a value
+## appeared to cost 350x, because the reference site carries a type variable and
+## the specialisation never happens. Measured here on purpose.
+let apply_to = { f, n } -> f { n = n }
+let k_via_value = { n } -> apply_to { f = k_map_filter, n = n }
+
+## 17. Control for 16: the same indirection depth with the pipeline INLINE, so
+## the difference is the function value and not the extra call.
+let k_via_lambda = { n } -> apply_to { f = { n } -> iter::range { start = 0, end = n }
+  .map { f = { x } -> x * 3 }
+  .filter { p = { x } -> x < n }
+  .fold { init = 0, f = { acc, x } -> acc + x }, n = n }
+
+## 18. Kernel 16 with every type ANNOTATED. If this is fast while 16 is slow,
+## the indirection is not the problem — inference is, and the generic copy is
+## what runs.
+let k_annot: { n: Int } -> Int = { n } -> iter::range { start = 0, end = n }
+  .map { f = { x } -> x * 3 }
+  .filter { p = { x } -> x < n }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+let apply_annot: { f: { n: Int } -> Int, n: Int } -> Int = { f, n } -> f { n = n }
+let k_via_annot = { n } -> apply_annot { f = k_annot, n = n }
+
+## 19. Kernel 16 with its OWN single-use HOF and NO annotations. Kernels 16 and
+## 17 share one `apply_to` with two different callbacks, while the annotated 18
+## has a HOF of its own used once — so "annotation" and "one callback" were
+## confounded. This holds the callback count at one and leaves the types
+## inferred.
+let apply_solo = { f, n } -> f { n = n }
+let k_via_solo = { n } -> apply_solo { f = k_map_filter, n = n }
+
+let report = { name, n, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/elem  sum=$(int::to_str { n = r.result })" }
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  let n = arg_at { args = args, i = 1, def = 20000000 }
+  if k == 1 then do
+    k_map_filter { n = n }
+    k_map_filter { n = n }
+    k_map_filter { n = n }
+    k_map_filter { n = n }
+    k_map_filter { n = n }
+    report { name = "01 map+filter    ", n = n, r = time_it { f = {} -> k_map_filter { n = n } } }
+    report { name = "01 map+filter    ", n = n, r = time_it { f = {} -> k_map_filter { n = n } } }
+    report { name = "01 map+filter    ", n = n, r = time_it { f = {} -> k_map_filter { n = n } } }
+    report { name = "01 map+filter    ", n = n, r = time_it { f = {} -> k_map_filter { n = n } } }
+    report { name = "01 map+filter    ", n = n, r = time_it { f = {} -> k_map_filter { n = n } } }
+  else if k == 2 then do
+    k_map { n = n }
+    k_map { n = n }
+    k_map { n = n }
+    k_map { n = n }
+    k_map { n = n }
+    report { name = "02 map           ", n = n, r = time_it { f = {} -> k_map { n = n } } }
+    report { name = "02 map           ", n = n, r = time_it { f = {} -> k_map { n = n } } }
+    report { name = "02 map           ", n = n, r = time_it { f = {} -> k_map { n = n } } }
+    report { name = "02 map           ", n = n, r = time_it { f = {} -> k_map { n = n } } }
+    report { name = "02 map           ", n = n, r = time_it { f = {} -> k_map { n = n } } }
+  else if k == 3 then do
+    k_filter { n = n }
+    k_filter { n = n }
+    k_filter { n = n }
+    k_filter { n = n }
+    k_filter { n = n }
+    report { name = "03 filter        ", n = n, r = time_it { f = {} -> k_filter { n = n } } }
+    report { name = "03 filter        ", n = n, r = time_it { f = {} -> k_filter { n = n } } }
+    report { name = "03 filter        ", n = n, r = time_it { f = {} -> k_filter { n = n } } }
+    report { name = "03 filter        ", n = n, r = time_it { f = {} -> k_filter { n = n } } }
+    report { name = "03 filter        ", n = n, r = time_it { f = {} -> k_filter { n = n } } }
+  else if k == 4 then do
+    k_map_map { n = n }
+    k_map_map { n = n }
+    k_map_map { n = n }
+    k_map_map { n = n }
+    k_map_map { n = n }
+    report { name = "04 map+map       ", n = n, r = time_it { f = {} -> k_map_map { n = n } } }
+    report { name = "04 map+map       ", n = n, r = time_it { f = {} -> k_map_map { n = n } } }
+    report { name = "04 map+map       ", n = n, r = time_it { f = {} -> k_map_map { n = n } } }
+    report { name = "04 map+map       ", n = n, r = time_it { f = {} -> k_map_map { n = n } } }
+    report { name = "04 map+map       ", n = n, r = time_it { f = {} -> k_map_map { n = n } } }
+  else if k == 5 then do
+    k_filter_filter { n = n }
+    k_filter_filter { n = n }
+    k_filter_filter { n = n }
+    k_filter_filter { n = n }
+    k_filter_filter { n = n }
+    report { name = "05 filter+filter ", n = n, r = time_it { f = {} -> k_filter_filter { n = n } } }
+    report { name = "05 filter+filter ", n = n, r = time_it { f = {} -> k_filter_filter { n = n } } }
+    report { name = "05 filter+filter ", n = n, r = time_it { f = {} -> k_filter_filter { n = n } } }
+    report { name = "05 filter+filter ", n = n, r = time_it { f = {} -> k_filter_filter { n = n } } }
+    report { name = "05 filter+filter ", n = n, r = time_it { f = {} -> k_filter_filter { n = n } } }
+  else if k == 6 then do
+    k_take_filter { n = n }
+    k_take_filter { n = n }
+    k_take_filter { n = n }
+    k_take_filter { n = n }
+    k_take_filter { n = n }
+    report { name = "06 take+filter   ", n = n, r = time_it { f = {} -> k_take_filter { n = n } } }
+    report { name = "06 take+filter   ", n = n, r = time_it { f = {} -> k_take_filter { n = n } } }
+    report { name = "06 take+filter   ", n = n, r = time_it { f = {} -> k_take_filter { n = n } } }
+    report { name = "06 take+filter   ", n = n, r = time_it { f = {} -> k_take_filter { n = n } } }
+    report { name = "06 take+filter   ", n = n, r = time_it { f = {} -> k_take_filter { n = n } } }
+  else if k == 7 then do
+    k_filter_take { n = n }
+    k_filter_take { n = n }
+    k_filter_take { n = n }
+    k_filter_take { n = n }
+    k_filter_take { n = n }
+    report { name = "07 filter+take   ", n = n, r = time_it { f = {} -> k_filter_take { n = n } } }
+    report { name = "07 filter+take   ", n = n, r = time_it { f = {} -> k_filter_take { n = n } } }
+    report { name = "07 filter+take   ", n = n, r = time_it { f = {} -> k_filter_take { n = n } } }
+    report { name = "07 filter+take   ", n = n, r = time_it { f = {} -> k_filter_take { n = n } } }
+    report { name = "07 filter+take   ", n = n, r = time_it { f = {} -> k_filter_take { n = n } } }
+  else if k == 8 then do
+    k_take_while { n = n }
+    k_take_while { n = n }
+    k_take_while { n = n }
+    k_take_while { n = n }
+    k_take_while { n = n }
+    report { name = "08 take_while+map", n = n, r = time_it { f = {} -> k_take_while { n = n } } }
+    report { name = "08 take_while+map", n = n, r = time_it { f = {} -> k_take_while { n = n } } }
+    report { name = "08 take_while+map", n = n, r = time_it { f = {} -> k_take_while { n = n } } }
+    report { name = "08 take_while+map", n = n, r = time_it { f = {} -> k_take_while { n = n } } }
+    report { name = "08 take_while+map", n = n, r = time_it { f = {} -> k_take_while { n = n } } }
+  else if k == 9 then do
+    k_drop { n = n }
+    k_drop { n = n }
+    k_drop { n = n }
+    k_drop { n = n }
+    k_drop { n = n }
+    report { name = "09 drop+map      ", n = n, r = time_it { f = {} -> k_drop { n = n } } }
+    report { name = "09 drop+map      ", n = n, r = time_it { f = {} -> k_drop { n = n } } }
+    report { name = "09 drop+map      ", n = n, r = time_it { f = {} -> k_drop { n = n } } }
+    report { name = "09 drop+map      ", n = n, r = time_it { f = {} -> k_drop { n = n } } }
+    report { name = "09 drop+map      ", n = n, r = time_it { f = {} -> k_drop { n = n } } }
+  else if k == 10 then do
+    k_count { n = n }
+    k_count { n = n }
+    k_count { n = n }
+    k_count { n = n }
+    k_count { n = n }
+    report { name = "10 count(pred)   ", n = n, r = time_it { f = {} -> k_count { n = n } } }
+    report { name = "10 count(pred)   ", n = n, r = time_it { f = {} -> k_count { n = n } } }
+    report { name = "10 count(pred)   ", n = n, r = time_it { f = {} -> k_count { n = n } } }
+    report { name = "10 count(pred)   ", n = n, r = time_it { f = {} -> k_count { n = n } } }
+    report { name = "10 count(pred)   ", n = n, r = time_it { f = {} -> k_count { n = n } } }
+  else if k == 11 then do
+    k_any { n = n }
+    k_any { n = n }
+    k_any { n = n }
+    k_any { n = n }
+    k_any { n = n }
+    report { name = "11 any(pred)     ", n = n, r = time_it { f = {} -> k_any { n = n } } }
+    report { name = "11 any(pred)     ", n = n, r = time_it { f = {} -> k_any { n = n } } }
+    report { name = "11 any(pred)     ", n = n, r = time_it { f = {} -> k_any { n = n } } }
+    report { name = "11 any(pred)     ", n = n, r = time_it { f = {} -> k_any { n = n } } }
+    report { name = "11 any(pred)     ", n = n, r = time_it { f = {} -> k_any { n = n } } }
+  else if k == 12 then do
+    k_seq { n = n }
+    k_seq { n = n }
+    k_seq { n = n }
+    k_seq { n = n }
+    k_seq { n = n }
+    report { name = "12 seq map+filter", n = n, r = time_it { f = {} -> k_seq { n = n } } }
+    report { name = "12 seq map+filter", n = n, r = time_it { f = {} -> k_seq { n = n } } }
+    report { name = "12 seq map+filter", n = n, r = time_it { f = {} -> k_seq { n = n } } }
+    report { name = "12 seq map+filter", n = n, r = time_it { f = {} -> k_seq { n = n } } }
+    report { name = "12 seq map+filter", n = n, r = time_it { f = {} -> k_seq { n = n } } }
+  else if k == 13 then do
+    k_enumerate { n = n }
+    k_enumerate { n = n }
+    k_enumerate { n = n }
+    k_enumerate { n = n }
+    k_enumerate { n = n }
+    report { name = "13 enumerate+map ", n = n, r = time_it { f = {} -> k_enumerate { n = n } } }
+    report { name = "13 enumerate+map ", n = n, r = time_it { f = {} -> k_enumerate { n = n } } }
+    report { name = "13 enumerate+map ", n = n, r = time_it { f = {} -> k_enumerate { n = n } } }
+    report { name = "13 enumerate+map ", n = n, r = time_it { f = {} -> k_enumerate { n = n } } }
+    report { name = "13 enumerate+map ", n = n, r = time_it { f = {} -> k_enumerate { n = n } } }
+  else if k == 14 then do
+    k_compound { n = n }
+    k_compound { n = n }
+    k_compound { n = n }
+    k_compound { n = n }
+    k_compound { n = n }
+    report { name = "14 compound fold ", n = n, r = time_it { f = {} -> k_compound { n = n } } }
+    report { name = "14 compound fold ", n = n, r = time_it { f = {} -> k_compound { n = n } } }
+    report { name = "14 compound fold ", n = n, r = time_it { f = {} -> k_compound { n = n } } }
+    report { name = "14 compound fold ", n = n, r = time_it { f = {} -> k_compound { n = n } } }
+    report { name = "14 compound fold ", n = n, r = time_it { f = {} -> k_compound { n = n } } }
+  else if k == 15 then do
+    k_to_seq { n = n }
+    k_to_seq { n = n }
+    k_to_seq { n = n }
+    k_to_seq { n = n }
+    k_to_seq { n = n }
+    report { name = "15 to_seq        ", n = n, r = time_it { f = {} -> k_to_seq { n = n } } }
+    report { name = "15 to_seq        ", n = n, r = time_it { f = {} -> k_to_seq { n = n } } }
+    report { name = "15 to_seq        ", n = n, r = time_it { f = {} -> k_to_seq { n = n } } }
+    report { name = "15 to_seq        ", n = n, r = time_it { f = {} -> k_to_seq { n = n } } }
+    report { name = "15 to_seq        ", n = n, r = time_it { f = {} -> k_to_seq { n = n } } }
+  else if k == 16 then do
+    k_via_value { n = n }
+    k_via_value { n = n }
+    k_via_value { n = n }
+    k_via_value { n = n }
+    k_via_value { n = n }
+    report { name = "16 via fn value  ", n = n, r = time_it { f = {} -> k_via_value { n = n } } }
+    report { name = "16 via fn value  ", n = n, r = time_it { f = {} -> k_via_value { n = n } } }
+    report { name = "16 via fn value  ", n = n, r = time_it { f = {} -> k_via_value { n = n } } }
+    report { name = "16 via fn value  ", n = n, r = time_it { f = {} -> k_via_value { n = n } } }
+    report { name = "16 via fn value  ", n = n, r = time_it { f = {} -> k_via_value { n = n } } }
+  else if k == 17 then do
+    k_via_lambda { n = n }
+    k_via_lambda { n = n }
+    k_via_lambda { n = n }
+    k_via_lambda { n = n }
+    k_via_lambda { n = n }
+    report { name = "17 via lambda arg", n = n, r = time_it { f = {} -> k_via_lambda { n = n } } }
+    report { name = "17 via lambda arg", n = n, r = time_it { f = {} -> k_via_lambda { n = n } } }
+    report { name = "17 via lambda arg", n = n, r = time_it { f = {} -> k_via_lambda { n = n } } }
+    report { name = "17 via lambda arg", n = n, r = time_it { f = {} -> k_via_lambda { n = n } } }
+    report { name = "17 via lambda arg", n = n, r = time_it { f = {} -> k_via_lambda { n = n } } }
+  else if k == 18 then do
+    k_via_annot { n = n }
+    k_via_annot { n = n }
+    k_via_annot { n = n }
+    k_via_annot { n = n }
+    k_via_annot { n = n }
+    report { name = "18 via annot val ", n = n, r = time_it { f = {} -> k_via_annot { n = n } } }
+    report { name = "18 via annot val ", n = n, r = time_it { f = {} -> k_via_annot { n = n } } }
+    report { name = "18 via annot val ", n = n, r = time_it { f = {} -> k_via_annot { n = n } } }
+  else if k == 19 then do
+    k_via_solo { n = n }
+    k_via_solo { n = n }
+    k_via_solo { n = n }
+    k_via_solo { n = n }
+    k_via_solo { n = n }
+    report { name = "19 solo HOF infer", n = n, r = time_it { f = {} -> k_via_solo { n = n } } }
+    report { name = "19 solo HOF infer", n = n, r = time_it { f = {} -> k_via_solo { n = n } } }
+    report { name = "19 solo HOF infer", n = n, r = time_it { f = {} -> k_via_solo { n = n } } }
+  else println { msg = "unknown kernel" }

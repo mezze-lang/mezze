@@ -69,6 +69,14 @@ impl NumMod Nat for Float having 'out = Float where {
 ## disagrees with its equality is silently kept twice.
 
 
+## IEEE comparison, unchanged: every comparison involving NaN is False, in both
+## directions, so `NaN <= NaN` is False too. `float::is_nan` is the test.
+##
+## SORTING IS A SEPARATE RULE: `seq::sort` places NaN LAST, by a total order, so
+## that one NaN cannot reorder the values around it. These operators are not
+## that order and are not meant to be — a NaN check on every float comparison
+## would cost more than it is worth. The consequence to know about is that
+## `min`, `max` and `is_sorted` go through here, so they can answer NaN.
 impl Ord for Float where {
   lt = { it, r } -> __native_float_lt { l = it, r = r },
   le = { it, r } -> __native_float_le { l = it, r = r },

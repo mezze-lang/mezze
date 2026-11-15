@@ -158,7 +158,7 @@ public final class LongKeyMapStorage implements MapStorage {
             return fromSorted(newKeys, newValues);
         }
 
-        // Transition to HashMapStorage
+        // Transition to the trie
         return transitionToHash().put(key, value);
     }
 
@@ -208,6 +208,13 @@ public final class LongKeyMapStorage implements MapStorage {
      */
     public long[] keysLong() {
         return keys.clone();
+    }
+
+    @Override
+    public MapStorage withValues(Object[] newValues) {
+        // The keys are already sorted and stay so: `alreadySorted` skips the
+        // sort as well as the hashing.
+        return new LongKeyMapStorage(keys, newValues, true);
     }
 
     @Override
@@ -267,21 +274,14 @@ public final class LongKeyMapStorage implements MapStorage {
         return new SmallFlatMapStorage(boxedKeys, values.clone());
     }
 
-    /** Promote to {@link LongHashMapStorage} (primitive-keyed, no boxing) when
-     *  every key is sentinel-safe; fall back to {@link HashMapStorage} otherwise. */
+    /** Promote to {@link LongTrieMapStorage} (primitive-keyed, no boxing). No
+     *  key can disqualify any more: the table this used to promote to reserved
+     *  two sentinel values and sent such maps to boxed storage instead, and a
+     *  trie stores no sentinels. */
     private MapStorage transitionToHash() {
-        for (long k : keys) {
-            if (!LongHashMapStorage.isStorable(k)) {
-                HashMapStorage hash = new HashMapStorage();
-                for (int i = 0; i < keys.length; i++) {
-                    hash = (HashMapStorage) hash.put(keys[i], values[i]);
-                }
-                return hash;
-            }
-        }
-        LongHashMapStorage out = new LongHashMapStorage();
+        MapStorage out = new LongTrieMapStorage();
         for (int i = 0; i < keys.length; i++) {
-            out = (LongHashMapStorage) out.putLong(keys[i], values[i]);
+            out = ((LongTrieMapStorage) out).putLong(keys[i], values[i]);
         }
         return out;
     }

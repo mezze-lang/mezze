@@ -1,6 +1,8 @@
 use std::abilities::compare::{ Eq, Ord, Hash, structural_hash }
 use std::abilities::sized::{ Sized }
 use std::abilities::default::{ Default }
+use std::abilities::iter::{ Iterable }
+use std::collections::iter
 use std::int
 
 ## Default Bytes is the empty byte sequence.
@@ -130,6 +132,19 @@ impl Bytes where {
   index_of = { it, pattern } -> index_of { b = it, pattern = pattern },
   starts_with = { it, prefix } -> starts_with { b = it, prefix = prefix },
   ends_with = { it, suffix } -> ends_with { b = it, suffix = suffix },
+}
+
+
+## Bytes joins the SEVEN other collections that can enter an `Iter` pipeline.
+## It was the odd one out: without this, `bytes` had to be spelled
+## `iter::from_seq { xs = bytes::to_seq { b = it } }` by hand, while every
+## other collection answers `.to_iter {}`.
+##
+## Routed through `to_seq` exactly as Set, SortedSet, Deque, Map and SortedMap
+## are — `iter::from_seq` is the fused source, so a pipeline from here gets the
+## same treatment as one from a sequence.
+impl Iterable for Bytes having 'elem = Int where {
+  to_iter = { it } -> iter::from_seq { xs = to_seq { b = it } }
 }
 
 impl Sized for Bytes where {

@@ -71,7 +71,7 @@ internal fun Constraint.collectVariables(out: MutableSet<Any>) {
         is Constraint.AssociatedTypeResolution -> {
             out += primaryTypeVar
             out.addAll(associatedTypeVars.values)
-            out.addAll(classArgTypeVars)
+            classArgTypes.forEach { collectVariables(it, out) }
         }
         is Constraint.Subsumes -> { collectVariables(general, out); collectVariables(specific, out) }
         is Constraint.HasField -> { collectVariables(recordType, out); collectVariables(fieldType, out) }

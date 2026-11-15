@@ -1,0 +1,12 @@
+[package]
+name = "hetero"
+version = "0.1.0"
+
+[[app]]
+name = "hetero"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

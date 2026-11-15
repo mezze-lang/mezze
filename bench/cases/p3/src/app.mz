@@ -1,0 +1,15 @@
+## MINIMAL 3-param self-tail loop.
+##
+## The base case is a plain param read and every update is
+## `self op (literal | other param)` — exactly the shape
+## FusedLongTailLoop3P accepts. If this does not fuse, the refusal is in the
+## recogniser rather than in the program, which is the point of having it.
+use std::effects::log::{ println, Console }
+use std::int
+
+let loop3 = { n, acc, k } ->
+  if n <= 0 then acc
+  else loop3 { n = n - 1, acc = acc + k, k = k }
+
+pub let main = {} -> perform Console in
+  println { msg = int::to_str { n = loop3 { n = 1000, acc = 0, k = 2 } } }

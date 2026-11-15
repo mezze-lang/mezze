@@ -1,0 +1,198 @@
+## HOW MANY ALLOCATIONS DOES A RECORD FIELD COST, BY FIELD COUNT?
+##
+## `MezzeRecord` has unboxed `long[]`/`double[]` storage and has had it all
+## along; the bytecode compiler never populates it, so every `Int` field of
+## every record is a boxed `Long`. `MakeSingleFieldRecord` takes ONE operand,
+## so the Bytecode DSL CAN hand it an unboxed `long` — that is the enabling
+## slice. `MakeRecord`'s `@Variadic Object[]` is already boxed by the time the
+## operation runs, so multi-field needs per-signature operations.
+##
+## This sizes both before either is built. ALLOCATION IS THE QUESTION, so read
+## the `Pause Young` count, not the nanoseconds.
+##
+##   1  control      pure arithmetic, no record
+##   2  one field    a single-field record built and read per iteration
+##   3  two fields   a two-field record built and read per iteration
+##   4  one field, variant   `Circle { r = i }` — the fused single-field factory
+##   5  two fields, variant  `Tri { b = i, h = i }` — measured at FIVE allocations
+use std::collections::seq
+use std::effects::log::{ println, Console }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::args::{ SystemArgs, argv }
+use std::int
+
+type Shape = |
+  Circle { r: Int },
+  Tri { b: Int, h: Int },
+|
+
+## Kernel 7's own type, so adding a constructor here cannot move kernels 1-6.
+type Opt = |
+  Hit { v: Int },
+  Miss,
+|
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }, result = r }
+
+let report = { name, n, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let k_control = { n } -> do
+  let go = { i, acc } -> if i <= 0 then acc else go { i = i - 1, acc = acc + i }
+  go { i = n, acc = 0 }
+
+let k_one_field = { n } -> do
+  let go = { i, acc } -> if i <= 0 then acc else do
+    let r = { a = i }
+    go { i = i - 1, acc = acc + r.a }
+  go { i = n, acc = 0 }
+
+let k_two_field = { n } -> do
+  let go = { i, acc } -> if i <= 0 then acc else do
+    let r = { a = i, b = i }
+    go { i = i - 1, acc = acc + r.a }
+  go { i = n, acc = 0 }
+
+let k_one_variant = { n } -> do
+  let go = { i, acc } -> if i <= 0 then acc else do
+    let s = Circle { r = i }
+    let v = match s is
+      Circle { r } -> r
+      Tri { b = _, h = _ } -> 0
+    go { i = i - 1, acc = acc + v }
+  go { i = n, acc = 0 }
+
+let k_two_variant = { n } -> do
+  let go = { i, acc } -> if i <= 0 then acc else do
+    let s = Tri { b = i, h = i }
+    let v = match s is
+      Tri { b, h = _ } -> b
+      Circle { r = _ } -> 0
+    go { i = i - 1, acc = acc + v }
+  go { i = n, acc = 0 }
+
+
+## 6. The one-field variant with the construction INLINE in the match
+##    scrutinee, no `let` in between. If this is fast and kernel 4 is not,
+##    the `let` is what stops the folder seeing a construction it could elide.
+let k_one_inline = { n } -> do
+  let go = { i, acc } -> if i <= 0 then acc else do
+    let v = match Circle { r = i } is
+      Circle { r } -> r
+      Tri { b = _, h = _ } -> 0
+    go { i = i - 1, acc = acc + v }
+  go { i = n, acc = 0 }
+
+
+## 7. A top-level FUNCTION returning a variant, matched at the call site. This
+##    is the Option/Result idiom and the shape `iter::unfold`'s `Step` takes.
+##    Both passes that elide a construction work within ONE body, so this needs
+##    the function INLINED first.
+let mk = { i } -> if i % 2 == 0 then Hit { v = i } else Miss
+
+let k_fn_variant = { n } -> do
+  let go = { i, acc } -> if i <= 0 then acc else do
+    let v = match mk { i = i } is
+      Hit { v } -> v
+      Miss -> 0
+    go { i = i - 1, acc = acc + v }
+  go { i = n, acc = 0 }
+
+## 8. THE CEILING for kernel 7: the same answer with no variant at all, which
+##    is what inlining followed by the fold would leave behind.
+let k_fn_ceiling = { n } -> do
+  let go = { i, acc } -> if i <= 0 then acc else do
+    let v = if i % 2 == 0 then i else 0
+    go { i = i - 1, acc = acc + v }
+  go { i = n, acc = 0 }
+
+
+## 9. The if INLINE in the match scrutinee. No function call, so this needs
+##    only the match distributed over the if branches — not inlining. Sizes
+##    that half of kernel 7 on its own.
+let k_if_inline = { n } -> do
+  let go = { i, acc } -> if i <= 0 then acc else do
+    let v = match (if i % 2 == 0 then Hit { v = i } else Miss) is
+      Hit { v } -> v
+      Miss -> 0
+    go { i = i - 1, acc = acc + v }
+  go { i = n, acc = 0 }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  let n = arg_at { args = args, i = 1, def = 20000000 }
+  if k == 1 then do
+    k_control { n = n }
+    k_control { n = n }
+    k_control { n = n }
+    report { name = "1 control         ", n = n, r = time_it { f = {} -> k_control { n = n } } }
+    report { name = "1 control         ", n = n, r = time_it { f = {} -> k_control { n = n } } }
+    report { name = "1 control         ", n = n, r = time_it { f = {} -> k_control { n = n } } }
+  else if k == 2 then do
+    k_one_field { n = n }
+    k_one_field { n = n }
+    k_one_field { n = n }
+    report { name = "2 one field       ", n = n, r = time_it { f = {} -> k_one_field { n = n } } }
+    report { name = "2 one field       ", n = n, r = time_it { f = {} -> k_one_field { n = n } } }
+    report { name = "2 one field       ", n = n, r = time_it { f = {} -> k_one_field { n = n } } }
+  else if k == 3 then do
+    k_two_field { n = n }
+    k_two_field { n = n }
+    k_two_field { n = n }
+    report { name = "3 two fields      ", n = n, r = time_it { f = {} -> k_two_field { n = n } } }
+    report { name = "3 two fields      ", n = n, r = time_it { f = {} -> k_two_field { n = n } } }
+    report { name = "3 two fields      ", n = n, r = time_it { f = {} -> k_two_field { n = n } } }
+  else if k == 4 then do
+    k_one_variant { n = n }
+    k_one_variant { n = n }
+    k_one_variant { n = n }
+    report { name = "4 one field variant", n = n, r = time_it { f = {} -> k_one_variant { n = n } } }
+    report { name = "4 one field variant", n = n, r = time_it { f = {} -> k_one_variant { n = n } } }
+    report { name = "4 one field variant", n = n, r = time_it { f = {} -> k_one_variant { n = n } } }
+  else if k == 6 then do
+    k_one_inline { n = n }
+    k_one_inline { n = n }
+    k_one_inline { n = n }
+    report { name = "6 one field inline ", n = n, r = time_it { f = {} -> k_one_inline { n = n } } }
+    report { name = "6 one field inline ", n = n, r = time_it { f = {} -> k_one_inline { n = n } } }
+    report { name = "6 one field inline ", n = n, r = time_it { f = {} -> k_one_inline { n = n } } }
+  else if k == 7 then do
+    k_fn_variant { n = n }
+    k_fn_variant { n = n }
+    k_fn_variant { n = n }
+    report { name = "7 fn returns variant", n = n, r = time_it { f = {} -> k_fn_variant { n = n } } }
+    report { name = "7 fn returns variant", n = n, r = time_it { f = {} -> k_fn_variant { n = n } } }
+    report { name = "7 fn returns variant", n = n, r = time_it { f = {} -> k_fn_variant { n = n } } }
+  else if k == 8 then do
+    k_fn_ceiling { n = n }
+    k_fn_ceiling { n = n }
+    k_fn_ceiling { n = n }
+    report { name = "8 fn ceiling        ", n = n, r = time_it { f = {} -> k_fn_ceiling { n = n } } }
+    report { name = "8 fn ceiling        ", n = n, r = time_it { f = {} -> k_fn_ceiling { n = n } } }
+    report { name = "8 fn ceiling        ", n = n, r = time_it { f = {} -> k_fn_ceiling { n = n } } }
+  else if k == 9 then do
+    k_if_inline { n = n }
+    k_if_inline { n = n }
+    k_if_inline { n = n }
+    report { name = "9 if inline scrutinee", n = n, r = time_it { f = {} -> k_if_inline { n = n } } }
+    report { name = "9 if inline scrutinee", n = n, r = time_it { f = {} -> k_if_inline { n = n } } }
+    report { name = "9 if inline scrutinee", n = n, r = time_it { f = {} -> k_if_inline { n = n } } }
+  else do
+    k_two_variant { n = n }
+    k_two_variant { n = n }
+    k_two_variant { n = n }
+    report { name = "5 two field variant", n = n, r = time_it { f = {} -> k_two_variant { n = n } } }
+    report { name = "5 two field variant", n = n, r = time_it { f = {} -> k_two_variant { n = n } } }
+    report { name = "5 two field variant", n = n, r = time_it { f = {} -> k_two_variant { n = n } } }

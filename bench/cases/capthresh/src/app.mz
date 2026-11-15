@@ -1,0 +1,74 @@
+## A CAPTURED filter threshold, at a size you can check by hand.
+##
+## `bench/cases/capchain` proves stage ORDER is right through `mez build`: its
+## thresholds are literals and all five lines agree. `bench/cases/chain` is the
+## same shape with the threshold CAPTURED — `p = { x } -> x < n` closes over the
+## same `n` that bounds the range — and it reported a checksum that only comes
+## out if every element passed the filter. So the suspect is the captured value,
+## not the order of the stages.
+##
+## Every line below is the `chain` kernel shrunk to n = 5, where the answer is
+## short enough to verify by eye:
+##   0..4 -> *3 -> 0,3,6,9,12 -> keep < 5 -> 0,3 -> 3
+## Testing the RAW element against 5 keeps all five and gives 30. Testing
+## against a threshold read from the wrong slot gives something else again, so
+## the three answers are distinguishable.
+use std::collections::iter
+use std::collections::seq
+use std::effects::log::{ println, Console }
+use std::int
+
+## The captured threshold, dot-chained — `chain`'s `dotted`, shrunk.
+let dotted_cap = { n } -> iter::range { start = 0, end = n }
+  .map { f = { x } -> x * 3 }
+  .filter { p = { x } -> x < n }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+
+## The same, free-function — `chain`'s `freefn`, shrunk.
+let freefn_cap = { n } -> iter::fold {
+  it = iter::filter {
+    it = iter::map { it = iter::range { start = 0, end = n }, f = { x } -> x * 3 },
+    p = { x } -> x < n,
+  },
+  init = 0,
+  f = { acc, x } -> acc + x,
+}
+
+## Control: the identical pipeline with the threshold written as a LITERAL, so a
+## disagreement with the two above isolates the fault to the capture.
+let freefn_lit = { n } -> iter::fold {
+  it = iter::filter {
+    it = iter::map { it = iter::range { start = 0, end = n }, f = { x } -> x * 3 },
+    p = { x } -> x < 5,
+  },
+  init = 0,
+  f = { acc, x } -> acc + x,
+}
+
+## Control: eager `seq`, which takes a different route to the same answer.
+let seq_cap = { n } -> seq::fold {
+  xs = seq::filter {
+    xs = seq::map { xs = seq::range { start = 0, end = n }, f = { x } -> x * 3 },
+    p = { x } -> x < n,
+  },
+  init = 0,
+  f = { acc, x } -> acc + x,
+}
+
+## Two captures of DIFFERENT magnitude, so reading the wrong slot is visible
+## rather than coincidental: 0..4 -> *10 -> keep < 25 -> 0,10,20 -> 30.
+let two_caps = { mul, lim } -> iter::fold {
+  it = iter::filter {
+    it = iter::map { it = iter::range { start = 0, end = 5 }, f = { x } -> x * mul },
+    p = { x } -> x < lim,
+  },
+  init = 0,
+  f = { acc, x } -> acc + x,
+}
+
+pub let main = {} -> perform Console in do
+  println { msg = "dotted_cap (expect 3):  $(int::to_str { n = dotted_cap { n = 5 } })" }
+  println { msg = "freefn_cap (expect 3):  $(int::to_str { n = freefn_cap { n = 5 } })" }
+  println { msg = "freefn_lit (expect 3):  $(int::to_str { n = freefn_lit { n = 5 } })" }
+  println { msg = "seq_cap    (expect 3):  $(int::to_str { n = seq_cap { n = 5 } })" }
+  println { msg = "two_caps   (expect 30): $(int::to_str { n = two_caps { mul = 10, lim = 25 } })" }

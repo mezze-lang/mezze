@@ -39,6 +39,14 @@ class ConstraintCollectorTest {
         referencedBindings = setOf(DefinitionRef.ByName(null, "f")),
         methodCallResolutions = mapOf((loc to "m") to ConstraintResult.MethodCallInfo(null, "m", null, "it")),
         callReturnTypes = mapOf(loc to MezzeType.IntType),
+        callFunctionTypes = mapOf(
+            loc to MezzeType.FunctionType(
+                paramType = MezzeType.IntType,
+                returnType = MezzeType.IntType,
+                effects = null,
+                abilityConstraints = emptyList(),
+            )
+        ),
         expectedTypeAt = mapOf(loc to MezzeType.StringType),
         matchCaseBindings = mapOf(loc to mapOf("v" to MezzeType.IntType)),
         matchScrutineeTypes = mapOf(loc to MezzeType.FloatType),

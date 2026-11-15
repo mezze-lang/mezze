@@ -50,6 +50,10 @@ internal fun buildPartialTypedModule(
             .fold(emptyMap<Loc, MezzeType>()) { acc, r ->
                 acc + r.callReturnTypes
             }
+        val callFunctionTypes = constraintResults.values
+            .fold(emptyMap<Loc, MezzeType>()) { acc, r ->
+                acc + r.callFunctionTypes
+            }
         val matchCaseBindings = constraintResults.values
             .fold(emptyMap<Loc, Map<String, MezzeType>>()) { acc, r ->
                 acc + r.matchCaseBindings.mapValues { (_, bindings) ->
@@ -80,6 +84,7 @@ internal fun buildPartialTypedModule(
             mustBeOpenRowVars = emptySet(),
             methodCallResolutions = methodCallResolutions,
             callReturnTypes = callReturnTypes,
+            callFunctionTypes = callFunctionTypes,
             matchCaseBindings = matchCaseBindings,
             matchScrutineeTypes = matchScrutineeTypes,
             doBindingSolvedTypes = doBindingSolvedTypes,

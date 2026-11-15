@@ -1,5 +1,7 @@
 package com.mezze.interpreter.nodes.builtin.io;
 
+import com.mezze.datastructures.seq.LongSeqStorage;
+import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.values.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
@@ -64,19 +66,36 @@ public final class BytesNatives {
     }
 
     @TruffleBoundary
+    /**
+     * Hex-decode. The companion to {@link #toHex} and the same shape of fix:
+     * it used to call {@code hex.substring(i*2, i*2+2)} and
+     * {@code Integer.parseInt} per byte — a two-character String allocated and
+     * parsed for every byte of output.
+     *
+     * <p>ONE BEHAVIOUR CHANGE, and it is a narrowing. {@code parseInt} accepts
+     * a SIGN, so `"-1"` decoded to {@code 0xFF} and `"+f"` to {@code 0x0F};
+     * neither is hex. The nibble table rejects both as {@code None}, which is
+     * what every other malformed input already did.
+     */
     public static MezzeVariant fromHex(String hex) {
-        if (hex.length() % 2 != 0) {
-            return MezzeVariant.none();
+        int len = hex.length();
+        if ((len & 1) != 0) return MezzeVariant.none();
+        byte[] out = new byte[len / 2];
+        for (int i = 0, j = 0; j < out.length; j++) {
+            int hi = nibble(hex.charAt(i++));
+            int lo = nibble(hex.charAt(i++));
+            if ((hi | lo) < 0) return MezzeVariant.none();
+            out[j] = (byte) ((hi << 4) | lo);
         }
-        try {
-            byte[] bytes = new byte[hex.length() / 2];
-            for (int i = 0; i < bytes.length; i++) {
-                bytes[i] = (byte) Integer.parseInt(hex.substring(i * 2, i * 2 + 2), 16);
-            }
-            return MezzeVariant.some(new MezzeBytes(bytes));
-        } catch (NumberFormatException e) {
-            return MezzeVariant.none();
-        }
+        return MezzeVariant.some(new MezzeBytes(out));
+    }
+
+    /** A hex digit's value, or -1. Both cases, as {@code parseInt} accepted. */
+    private static int nibble(char c) {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
     }
 
     @TruffleBoundary
@@ -261,25 +280,162 @@ public final class BytesNatives {
         return new MezzeBytes(result);
     }
 
-    @TruffleBoundary
+    /**
+     * Companion to {@link #fold}: same helper, same reasons.
+     *
+     * The callback field is `x`, NOT `byte` — `std::collections::bytes` declares
+     * `map`'s as `{ x: Int } -> Int` while `fold`'s is `{ acc, byte }`. Writing
+     * `byte` for both is invisible on the scalar path, which is positional, and
+     * `map` turns out not to take that path here at all, so the name is
+     * load-bearing: both of `BytesHofScalarBypassTest`'s map cases fail when it
+     * is wrong, and neither of its fold cases does.
+     */
     public static MezzeBytes map(MezzeBytes bytes, MezzeFunction mapper,
                                                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        byte[] result = new byte[bytes.length()];
-        for (int i = 0; i < bytes.length(); i++) {
-            Object res = callNode.call(mapper.getCallTarget(),
-                prepareArgs(mapper, (long) (bytes.get(i) & 0xFF)));
-            result[i] = ((Long) res).byteValue();
+        var ctx = com.mezze.interpreter.nodes.builtin.collections.ScalarCall
+            .prepare1(mapper, "x");
+        int size = bytes.length();
+        byte[] result = new byte[size];
+        for (int i = 0; i < size; i++) {
+            result[i] = ((Long) ctx.call1(callNode, (long) (bytes.get(i) & 0xFF))).byteValue();
         }
         return new MezzeBytes(result);
     }
 
+    // ============ map with the mapper RECOGNISED instead of called ============
+    //
+    // `bytes::map { b, f = { x } -> x * 2 }` does not need a guest call per
+    // byte: the mapper is one arithmetic operation against a literal, and
+    // `BytesMapArithRewriter` recognises that shape at lowering time and sends
+    // the call here instead. SELF-A/B, two builds from identical source with
+    // the pass hook the only difference, 1024 bytes, min of 9 at two n:
+    //
+    //   map `x * 2`   5 540 077 -> 259 413 ps    21.4x    (252 ps/byte)
+    //   map `x / 2`   5 390 947 -> 1 479 640      3.64x   (1 452 ps/byte)
+    //   bytes::fold / bytes::reverse (controls)   unmoved
+    //
+    // AT 252 ps/BYTE THE MULTIPLYING MAP BEATS `bytes::reverse`'s 298 — the
+    // same shape without a callback, which was taken as the ceiling before this
+    // was built. This loop indexes `src[i]` directly where `reverse` calls
+    // `bytes.length()` twice per iteration and `bytes.get(i)`.
+    //
+    // So the whole of the dividing row's residual is ONE INSTRUCTION: 1 200
+    // ps/byte, DIV 5.73x MUL, because `k` arrives as a runtime long and cannot
+    // be strength-reduced to a shift. A `@ConstantOperand` would fix it and
+    // would need a Bytecode DSL operation instead of a native — and
+    // BytesSumPrimitiveTest records that routing bytes through the generic
+    // fused loop was built, measured, and not worth having.
+    //
+    // A ROUTE THAT LOOKS LIKE THE ANSWER AND IS NOT: going through a seq
+    // (`bytes::to_seq` → `seq::map` → `bytes::from_seq`) so the seq fuser
+    // inlines the transform measures 8 431 ps/byte — 1.63x SLOWER than the
+    // unfused `map` it was meant to beat, because the boxed `[Int]`
+    // intermediate costs more than the callback it removes. bytesurface row 14
+    // keeps that measurement.
+    //
+    // FIVE ENTRY POINTS, NOT ONE WITH AN OP CODE. Each native name resolves to
+    // exactly one method, so the operation is dispatched once by the handler
+    // lookup and there is no tag to re-interpret per call and no magic number
+    // shared across the Kotlin/Java boundary.
+    //
+    // SEMANTICS ARE THE CALLBACK'S, EXACTLY. `map` hands the mapper
+    // `(long) (b & 0xFF)` — the element is the Int in 0..255, not a signed Java
+    // byte — and truncates the result with `byteValue()`. Both are reproduced
+    // here; the `& 0xFF` and the `(byte)` cast are the whole of it.
+    //
+    // The rewriter, not these methods, rejects the literals that would behave
+    // differently: a zero divisor (the guest `/` raises, this would throw a
+    // Java ArithmeticException) and any literal whose arithmetic could overflow
+    // a long for an input of 0..255 (Mezze Int overflow RAISES, this would
+    // silently wrap). Declining to rewrite leaves the ordinary callback path,
+    // which already behaves correctly — there is no fallback inside these.
+
     @TruffleBoundary
+    public static MezzeBytes mapAdd(MezzeBytes bytes, long k) {
+        byte[] src = bytes.getData();
+        int n = src.length;
+        byte[] out = new byte[n];
+        for (int i = 0; i < n; i++) out[i] = (byte) ((src[i] & 0xFF) + k);
+        return new MezzeBytes(out);
+    }
+
+    @TruffleBoundary
+    public static MezzeBytes mapSub(MezzeBytes bytes, long k) {
+        byte[] src = bytes.getData();
+        int n = src.length;
+        byte[] out = new byte[n];
+        for (int i = 0; i < n; i++) out[i] = (byte) ((src[i] & 0xFF) - k);
+        return new MezzeBytes(out);
+    }
+
+    @TruffleBoundary
+    public static MezzeBytes mapMul(MezzeBytes bytes, long k) {
+        byte[] src = bytes.getData();
+        int n = src.length;
+        byte[] out = new byte[n];
+        for (int i = 0; i < n; i++) out[i] = (byte) ((src[i] & 0xFF) * k);
+        return new MezzeBytes(out);
+    }
+
+    /** The rewriter guarantees {@code k != 0}. */
+    @TruffleBoundary
+    public static MezzeBytes mapDiv(MezzeBytes bytes, long k) {
+        byte[] src = bytes.getData();
+        int n = src.length;
+        byte[] out = new byte[n];
+        for (int i = 0; i < n; i++) out[i] = (byte) ((src[i] & 0xFF) / k);
+        return new MezzeBytes(out);
+    }
+
+    /** The rewriter guarantees {@code k != 0}. */
+    @TruffleBoundary
+    public static MezzeBytes mapMod(MezzeBytes bytes, long k) {
+        byte[] src = bytes.getData();
+        int n = src.length;
+        byte[] out = new byte[n];
+        for (int i = 0; i < n; i++) out[i] = (byte) ((src[i] & 0xFF) % k);
+        return new MezzeBytes(out);
+    }
+
+    /**
+     * Fold the bytes, calling the guest folder per element.
+     *
+     * NOT {@code @TruffleBoundary}, and that is the point. A boundary on a HOF's
+     * loop means the loop never compiles and the callback is never inlined into
+     * it — the opposite of what a hot fold wants. The seq, list, iter and
+     * nonemptylist folds have never had one.
+     *
+     * {@link com.mezze.interpreter.nodes.builtin.collections.ScalarCall} is the
+     * shared way to do this: it resolves the scalar-ABI bypass ONCE, reuses one
+     * positional args array for the whole loop, and falls back to a record built
+     * from the declared field names — prepending closure values, which the
+     * hand-rolled code in these natives used to get wrong. The old loop called a
+     * local `prepareArgsTwo` per element, which allocated four objects every
+     * iteration: two `Object[]`, the field-name `String[]`, and a
+     * `MezzeRecord`.
+     *
+     * MEASURED, `bench/cases/fuseall` kernel 4 against kernel 1 at n=2M:
+     * 41 076 ps/elem to 8 089, with the control steady at 385 to 383.
+     *
+     * (An earlier version of this note split that gap into "~4x fusion, 10x
+     * this path" on the strength of running the seq fold with
+     * `MEZZE_CHAIN_CANONICALIZE=0`. That split is WITHDRAWN: the canonicalizer
+     * is a LOWERING pass, so the variable acts when lowering runs — build time
+     * under `mez build` — and setting it at run time changed nothing. Both
+     * columns were the same code and the difference was noise at n=500k, a size
+     * where the control itself swung 910 to 6 600.)
+     *
+     * The field names are `acc` and `byte`, per `std::collections::bytes` — and
+     * see {@link #map}, whose callback is named differently.
+     */
     public static Object fold(MezzeBytes bytes, Object init, MezzeFunction folder,
                                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        var ctx = com.mezze.interpreter.nodes.builtin.collections.ScalarCall
+            .prepare2(folder, "acc", "byte");
+        int size = bytes.length();
         Object acc = init;
-        for (int i = 0; i < bytes.length(); i++) {
-            acc = callNode.call(folder.getCallTarget(),
-                prepareArgsTwo(folder, acc, (long) (bytes.get(i) & 0xFF)));
+        for (int i = 0; i < size; i++) {
+            acc = ctx.call2(callNode, acc, (long) (bytes.get(i) & 0xFF));
         }
         return acc;
     }
@@ -300,13 +456,42 @@ public final class BytesNatives {
         }
     }
 
+    /** Lowercase hex digits, indexed by nibble. */
+    private static final char[] HEX_DIGITS = "0123456789abcdef".toCharArray();
+
+    /**
+     * Hex-encode, two characters a byte.
+     *
+     * <p>It used to call {@code String.format("%02x", …)} PER BYTE, which
+     * parses the format string, allocates a {@code Formatter} and boxes the
+     * int every time. Measured on `bench/cases/bytesurface` over a 1 024-byte
+     * buffer: <b>49 944 ps a byte</b>, against {@link #toBase64} — the method
+     * immediately below, a strictly more complex encoding — at 220. The
+     * contrast was the whole diagnosis: base64 hands the buffer to a bulk JDK
+     * encoder and hex formatted one byte at a time.
+     *
+     * <p>Two array writes a byte now, off {@code getData()} rather than
+     * {@code get(i)} so the loop reads the array directly.
+     *
+     * <p>A {@code byte[]} handed over as ISO-8859-1 was tried instead, on the
+     * reasoning that {@code new String(char[])} must scan and compress UTF-16
+     * down to Latin1. INTERLEAVED, it measured 0.93x — 8% WORSE, seven
+     * readings a side with no overlap (char 927-959k, byte 1002-1072k). The
+     * all-ASCII {@code char[]} constructor evidently takes a better path than
+     * the explicit charset one, so this stays as it is. Measured across two
+     * separate runs first, where it looked worse by a different amount and the
+     * control had drifted 25% — more than the difference being asked about.
+     */
     @TruffleBoundary
     public static String toHex(MezzeBytes bytes) {
-        StringBuilder sb = new StringBuilder(bytes.length() * 2);
-        for (int i = 0; i < bytes.length(); i++) {
-            sb.append(String.format("%02x", bytes.get(i) & 0xFF));
+        byte[] data = bytes.getData();
+        char[] out = new char[data.length * 2];
+        for (int i = 0, j = 0; i < data.length; i++) {
+            int v = data[i] & 0xFF;
+            out[j++] = HEX_DIGITS[v >>> 4];
+            out[j++] = HEX_DIGITS[v & 0x0F];
         }
-        return sb.toString();
+        return new String(out);
     }
 
     @TruffleBoundary
@@ -314,34 +499,30 @@ public final class BytesNatives {
         return Base64.getEncoder().encodeToString(bytes.getData());
     }
 
+    /**
+     * The bytes as a `[Int]`, built straight into a primitive `long[]`.
+     *
+     * <p>It used to BOX every byte: an `Object[]` filled with
+     * `(long) (bytes.get(i) & 0xFF)`, which allocates a `Long` per element and
+     * then makes `SeqStorageFactory.fromArray` guess the storage back — three
+     * `instanceof` a element to decide it is all `Long`, a second array, and an
+     * unboxing pass. 2 496 ps a byte on `bench/cases/bytesurface`, for a
+     * conversion that is a widening copy.
+     *
+     * <p>`MezzeSeq.fromLongs` would CLONE the array, so the storage is built
+     * directly instead. Sound because `out` is allocated here and never
+     * escapes: the clone exists to stop a caller mutating the sequence it
+     * handed over, and there is no such caller.
+     */
     @TruffleBoundary
-    public static Object[] toArray(MezzeBytes bytes) {
-        Object[] result = new Object[bytes.length()];
-        for (int i = 0; i < bytes.length(); i++) {
-            result[i] = (long) (bytes.get(i) & 0xFF);
+    public static MezzeSeq<Long> toSeq(MezzeBytes bytes) {
+        byte[] data = bytes.getData();
+        if (data.length == 0) return MezzeSeq.empty();
+        long[] out = new long[data.length];
+        for (int i = 0; i < data.length; i++) {
+            out[i] = data[i] & 0xFF;
         }
-        return result;
+        return MezzeSeq.fromStorage(new LongSeqStorage(out));
     }
 
-    // ==================== Helper Methods ====================
-
-    private static Object[] prepareArgs(MezzeFunction fn, Object arg) {
-        Object[] closureValues = fn.getClosureValues();
-        Object[] args = new Object[closureValues.length + 1];
-        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
-        args[closureValues.length] = MezzeRecord.fromFields(
-            new String[]{"x"}, new Object[]{arg}
-        );
-        return args;
-    }
-
-    private static Object[] prepareArgsTwo(MezzeFunction fn, Object arg1, Object arg2) {
-        Object[] closureValues = fn.getClosureValues();
-        Object[] args = new Object[closureValues.length + 1];
-        System.arraycopy(closureValues, 0, args, 0, closureValues.length);
-        args[closureValues.length] = MezzeRecord.fromFields(
-            new String[]{"acc", "byte"}, new Object[]{arg1, arg2}
-        );
-        return args;
-    }
 }

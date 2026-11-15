@@ -1,0 +1,12 @@
+[package]
+name = "capchain"
+version = "0.1.0"
+
+[[app]]
+name = "capchain"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

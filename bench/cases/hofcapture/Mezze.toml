@@ -1,0 +1,12 @@
+[package]
+name = "hofcapture"
+version = "0.1.0"
+
+[[app]]
+name = "hofcapture"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

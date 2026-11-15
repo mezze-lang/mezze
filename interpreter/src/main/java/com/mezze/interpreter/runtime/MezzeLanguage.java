@@ -286,6 +286,18 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             String rejected = bdsl.lastRejectionReason();
             String reason = "unsupported"
                     + (rejected == null ? "" : " (node=" + rejected + ")");
+            // MEZZE_DUMP_FN dumps a function's lowered IR from inside
+            // BytecodeCompiler, which never runs for a function that
+            // supports() REJECTED — exactly the case where the body is what
+            // you need. A rejection names the blocking node, and for a
+            // dangling callee that is a hash; finding which call it is takes
+            // the tree. Same env var, same format, so one grep sees both.
+            if (System.getenv("MEZZE_DUMP_FN") != null) {
+                System.err.println("[dump-fn-rejected] " + ir.getName()
+                        + " hash=" + ir.getHash().getHex().substring(0, 8)
+                        + " params=" + ir.getParamNames()
+                        + "\n  body=" + ir.getBody());
+            }
             throw bdslCompileError(ir, reason, null);
         }
         try {

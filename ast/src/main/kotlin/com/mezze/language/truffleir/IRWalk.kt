@@ -66,18 +66,22 @@ fun NodeIR.transformChildren(f: (NodeIR) -> NodeIR): NodeIR = when (this) {
         }
     }, result = f(result))
     is FusedChainIR -> copy(
-        source = when (val s = source) {
-            is SourceIR.RangeSeq -> SourceIR.RangeSeq(f(s.start), f(s.end))
-            is SourceIR.RangeStepSeq -> SourceIR.RangeStepSeq(f(s.start), f(s.end), f(s.step))
-            is SourceIR.RawSeq -> SourceIR.RawSeq(f(s.xs))
-            is SourceIR.RawList -> SourceIR.RawList(f(s.xs))
-            is SourceIR.Opaque -> SourceIR.Opaque(f(s.expr))
-        },
+        source = mapSourceIR(source, f),
         stages = stages.map { st ->
             when (st) {
                 is StageIR.Take -> StageIR.Take(f(st.n))
                 is StageIR.Drop -> StageIR.Drop(f(st.n))
+                // THE SECOND SOURCE IS REWRITTEN TOO. A walker that skipped it
+                // would hand later passes nodes it had not visited, and
+                // `DeadLetEliminator` walks through here — a `let` referenced
+                // only by the second source would look dead.
+                is StageIR.Zip -> StageIR.Zip(mapSourceIR(st.second, f))
+                // The INNER source is rewritten for the same reason the
+                // zip's second one is: it holds NodeIRs no other walk
+                // reaches. The lambda is a hash, like Map's and Filter's.
+                is StageIR.FlatMap -> StageIR.FlatMap(st.f, mapSourceIR(st.inner, f))
                 is StageIR.Map, is StageIR.Filter, is StageIR.TakeWhile, is StageIR.DropWhile -> st
+                StageIR.Enumerate -> st
             }
         },
         sink = when (val k = sink) {
@@ -107,3 +111,32 @@ inline fun NodeIR.forEachChildIR(crossinline visit: (NodeIR) -> Unit) {
 
 /** Rewrite every node, children first. */
 fun NodeIR.transformBottomUp(f: (NodeIR) -> NodeIR): NodeIR = f(transformChildren { it.transformBottomUp(f) })
+
+/**
+ * Rewrite every [NodeIR] a [SourceIR] holds.
+ *
+ * Shared by a chain's own source and by a [StageIR.Zip]'s second source, so the
+ * two cannot drift. Two hand-spelled copies of a `when` over the same sealed
+ * type is how `isFoldOp`'s predecessor let a name be added to one list and not
+ * the other.
+ */
+fun mapSourceIR(s: SourceIR, f: (NodeIR) -> NodeIR): SourceIR = when (s) {
+    is SourceIR.RangeSeq -> SourceIR.RangeSeq(f(s.start), f(s.end))
+    is SourceIR.RangeStepSeq -> SourceIR.RangeStepSeq(f(s.start), f(s.end), f(s.step))
+    is SourceIR.RawSeq -> SourceIR.RawSeq(f(s.xs))
+    is SourceIR.RawList -> SourceIR.RawList(f(s.xs))
+    is SourceIR.RawBytes -> SourceIR.RawBytes(f(s.xs))
+    is SourceIR.Opaque -> SourceIR.Opaque(f(s.expr))
+}
+
+/**
+ * Visit every [NodeIR] a [SourceIR] holds, for passes that READ rather than
+ * rewrite — reachability, for one.
+ *
+ * Defined through [mapSourceIR] so there is still exactly one `when` over
+ * `SourceIR`'s variants: a walker that forgot a variant would silently skip
+ * whatever it holds, which for reachability means a pruned FunctionIR.
+ */
+fun forEachSourceNode(s: SourceIR, f: (NodeIR) -> Unit) {
+    mapSourceIR(s) { n -> f(n); n }
+}

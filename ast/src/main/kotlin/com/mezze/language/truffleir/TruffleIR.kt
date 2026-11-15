@@ -40,6 +40,84 @@ enum class OrdKind {
     INSTANCE,
 }
 
+/**
+ * WHICH COLLECTION A VALUE IS, for the passes that must know how to read it.
+ *
+ * The same kind of decision as [OrdKind], for the same reason and carried the
+ * same way: from where the TYPE was known, never re-derived. [SlotKind] cannot
+ * answer it — a Seq, a Set, a Map and a record are all OBJECT.
+ *
+ * WHAT WENT WRONG WITHOUT IT. `ChainCanonicalizer` had nothing to read, so it
+ * asked the native's NAME instead: `name.startsWith("__native_seq_")` was taken
+ * to mean "this produces a Seq". The module a native lives in is not its return
+ * type — six natives in the seq module hand back a different collection
+ * (`to_list`, `to_set`, `to_deque`, `to_sorted_set`, `to_map`, `to_sorted_map`)
+ * — so a chain whose source peeled down to one of them was read with `SeqSize`
+ * and an indexed `SeqGet`, and
+ *
+ *     seq::size { xs = set::to_seq { s = seq::to_set { xs = xs } } }
+ *
+ * threw `UnsupportedSpecializationException … SeqSize_Node … [MezzeSet]` on a
+ * two-element seq. A label is for dispatching once; it is not a type.
+ *
+ * Absent (null) means the compiler could not decide — an unsolved type variable
+ * — and a caller must treat that exactly like [OTHER]: never fuse on a guess.
+ */
+@Serializable
+enum class CollectionKind {
+    SEQ,
+    ITER,
+    LIST,
+    SET,
+    SORTED_SET,
+    DEQUE,
+    MAP,
+    SORTED_MAP,
+    BYTES,
+
+    /** Not a collection: an Int, a Str, an Option, a record, a function. */
+    OTHER,
+    ;
+
+    /**
+     * The collections whose elements a fused chain walks one at a time.
+     *
+     * Excludes MAP and SORTED_MAP, whose callbacks take an ENTRY rather than an
+     * element, and BYTES, which fuses only into `BuiltinSumBytes`. This is the
+     * question `NativeHofNames.isAnyElementCollection` answered by building six
+     * native names and comparing the spelling of each.
+     */
+    val isElementCollection: Boolean
+        get() = this == SEQ || this == ITER || this == LIST ||
+            this == SET || this == SORTED_SET || this == DEQUE
+}
+
+/**
+ * WHICH CHAIN OPERATION A NATIVE IS — the companion to [CollectionKind].
+ *
+ * Together they say what a `__native_…` label MEANT, so the label itself is
+ * needed only at emit, to bind the Java method.
+ *
+ * `ChainCanonicalizer` used to ask this 32 times per node by spelling:
+ * `isAnyElementCollection(name, OP_MAP)` builds `__native_seq_map`,
+ * `__native_iter_map`, `__native_list_map`, `__native_set_map`,
+ * `__native_sorted_set_map` and `__native_deque_map` and compares all six, so
+ * one visit could construct and compare nearly two hundred strings to learn
+ * what a single resolution already knew.
+ *
+ * Generated from the OP_ constants in `NativeHofNames`, which stay the one
+ * place the spellings live.
+ */
+@Serializable
+enum class NativeOp {
+    FOLD, FOLD_LEFT, MAP, FILTER, FOR_EACH, SUM, SUM_VALUES, COUNT,
+    ANY, ALL, FIND, REDUCE, TAKE, DROP, RANGE, FROM_SEQ,
+    TO_SEQ, TO_LIST, TAKE_WHILE, DROP_WHILE, NONE_MATCH, FIRST, LAST, MIN,
+    MAX, MIN_BY, MAX_BY, PARTITION, SCAN, SUM_FLOAT, PRODUCT, PRODUCT_FLOAT,
+    FIND_INDEX, UNFOLD, FROM_LIST, ONCE, EMPTY, ENUMERATE, CHAIN, ZIP,
+    FLAT_MAP, COUNT_ALL, SIZE,
+}
+
 @Serializable
 data class SourceInfo(
     val fileIndex: Int,
@@ -222,6 +300,26 @@ sealed interface StringPartIR {
     /** When set, `maybeCollapseInlineOp` can convert this node into an
      *  `InlineBinaryOpIR` without querying NativeSignatures. */
     val inlineOp: InlineOp? = null,
+    /**
+     * WHICH COLLECTION THIS CALL RETURNS, decided by the typechecker from the
+     * call's solved type and carried here — see [CollectionKind] for what
+     * reading the native's NAME instead cost. Null when the type was not
+     * solved; a caller must then treat it as [CollectionKind.OTHER] rather than
+     * guess from the spelling.
+     */
+    val producesKind: CollectionKind? = null,
+    /**
+     * WHICH COLLECTION'S MODULE this native belongs to — the collection its
+     * source argument is — resolved once from the label where the label was
+     * resolved. Null for a native that belongs to no collection.
+     */
+    val ownerKind: CollectionKind? = null,
+    /**
+     * WHICH CHAIN OPERATION this native is, or null when it is not one of
+     * them. See [NativeOp]: nothing downstream should ask [name] what this
+     * node does.
+     */
+    val opKind: NativeOp? = null,
 ) : NodeIR {
     val isScalarABI: Boolean get() = argKinds.isNotEmpty()
 }
@@ -447,6 +545,17 @@ sealed interface SourceIR {
      *  emit path converts to Object[] via list.toArray() then iterates
      *  by index — same indexed loop as RawSeq but with a toArray() step. */
     @Serializable data class RawList(val xs: NodeIR) : SourceIR
+    /**
+     * Any expression evaluating to a `Bytes` at runtime.
+     *
+     * Reaches exactly ONE destination: the `BuiltinSumBytes` primitive sum. It
+     * is deliberately NOT routed into the generic fused loop — measured, that
+     * was SLOWER than `BytesNatives.fold`, because a bare fold has nothing to
+     * eliminate and the generic loop pays a boxed accumulator and a
+     * bounds-checked read for the privilege. Bytes earns fusion only where
+     * fusion can delete the guest callback entirely.
+     */
+    @Serializable data class RawBytes(val xs: NodeIR) : SourceIR
     /** Fall-through — canonicalizer refuses to fuse (unknown expression,
      *  descriptor we couldn't peel through). Peel MUST reject on Opaque
      *  and let ability-dispatch handle it. */
@@ -464,6 +573,71 @@ sealed interface StageIR {
     @Serializable data class TakeWhile(val p: MakeLambdaIR) : StageIR
     /** Skip elements while predicate holds, then keep the rest. */
     @Serializable data class DropWhile(val p: MakeLambdaIR) : StageIR
+    /**
+     * Attach each element's position, as `iter::enumerate` does.
+     *
+     * Carries nothing: the index is the loop's own counter, and the `{i, val}`
+     * RECORD the stage nominally produces is never built. Downstream lambdas
+     * read it as `x.val` and `x.i`, which the emitter resolves to the element
+     * and the counter — records are syntax, and this is where one disappears.
+     *
+     * Before this existed a chain containing `.enumerate{}` could not be peeled
+     * at all: the source classified Opaque, nothing fused, and a record was
+     * allocated per element. Measured at 124247 ps/elem against 93 for the
+     * shapes that fuse.
+     */
+    @Serializable data object Enumerate : StageIR
+
+    /**
+     * Advance a SECOND source in lockstep, as `iter::zip` does, stopping at the
+     * shorter.
+     *
+     * Carries the second source and nothing else: the `{fst, snd}` RECORD the
+     * stage nominally produces is never built, the same way [Enumerate]'s
+     * `{i, val}` is not. Downstream lambdas read it as `x.fst` and `x.snd`,
+     * which the emitter resolves to the loop's element local and a second
+     * element local loaded beside it.
+     *
+     * WHY A STAGE AND NOT A SOURCE. Every [SourceIR] carries ONE source and the
+     * loop driver is built around that. `chain` also has two and is handled by
+     * a REWRITE — `fold(chain(a,b))` is `fold(b, fold(a))`, two ordinary
+     * single-source folds in sequence. That does not work here, because zip
+     * advances both sources in LOCKSTEP and there is no sequencing one after
+     * the other.
+     *
+     * The second source is a bare [SourceIR] with no stages of its own:
+     * `zip(a, map(f, b))` would need b's pipeline threaded through the same
+     * loop, which the peel declines so the chain falls back.
+     */
+    @Serializable data class Zip(val second: SourceIR) : StageIR
+
+    /**
+     * Replace each element with the elements of a SECOND source derived from
+     * it, as `iter::flat_map` does.
+     *
+     * THE ONLY STAGE THAT IS NOT ONE-IN-ONE-OUT. Every other stage either keeps
+     * an element, drops it, or replaces it; this one produces MANY, so the
+     * stages after it and the sink run inside an INNER LOOP. That is why it was
+     * never built beside the others, and it is why [inner] is a whole
+     * [SourceIR] rather than an expression: the emitter drives it with the same
+     * counted loop it would drive a top-level source with.
+     *
+     * [inner]'s expressions READ THE LAMBDA'S PARAMETER, which is the outer
+     * element — `{ x } -> iter::range { start = x, end = x + 10 }` classifies as
+     * `RangeSeq(ReadLocal(x), x + 10)`. The emitter binds that parameter's slot
+     * to the loop's element local before evaluating the bounds, the same way
+     * [Map]'s tree tier binds its own.
+     *
+     * MEASURED BEFORE BUILDING: 14 703 ps/elem unfused against 1 258 for the
+     * same computation written as a fold whose folder is a fold — the shape a
+     * fused flat_map emits, so that is the ceiling RUNNING and not an estimate.
+     * 11.7x. Both arms return 5 000 040 000 000, which is what says the ceiling
+     * arm does the subject's work rather than less of it. The flat floor is 57,
+     * and it is UNREACHABLE here: a nested shape costs 22x a flat loop because
+     * a million outer elements each set up an inner one. The table's headline
+     * "213.9x vs floor" overstated the prize by that factor.
+     */
+    @Serializable data class FlatMap(val f: MakeLambdaIR, val inner: SourceIR) : StageIR
 }
 
 /** How elements are combined. */

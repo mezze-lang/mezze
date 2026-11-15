@@ -78,6 +78,20 @@ class Monomorphizer(
      * constraints.
      */
     private val resolveEvidence: ((TypedLetDecl, List<MezzeType>) -> List<AbilityImplRef>)? = null,
+    /**
+     * Completes a PARTIAL type-arg list by resolving the callee's `having 'out`
+     * bindings against its ability impls — [MonoDriver.fillHavingOutTypeArgs],
+     * which the seed path already uses.
+     *
+     * The transitive path needs the same thing and did not have it. A `having
+     * 'out` var is not reachable from the callee's parameter type: it only
+     * becomes concrete once the impl is resolved for the (now concrete) receiver
+     * and class args. `buildArgsFromBindings` therefore returned null for it, and
+     * a null transitive derivation is dropped silently — which is how a
+     * SPECIALIZED recursive function kept recursing into its GENERIC self.
+     * Null in unit tests that do not exercise constraints.
+     */
+    private val fillHavingOut: ((TypedLetDecl, List<MezzeType>) -> List<MezzeType>)? = null,
     /** Worklist depth limit. Default matches the spec's recommendation. */
     private val maxDepth: Int = 16,
 ) {
@@ -549,36 +563,6 @@ class Monomorphizer(
         is com.mezze.language.typedast.TypedRecordEntry.Spread -> entry.copy(expr = go(entry.expr))
     }
 
-    /** Collect closure-param names that are still referenced in [body].
-     *  A param is "still live" if any TypedVar with a Param/Local binding
-     *  and a name in [candidates] exists anywhere in the body tree.
-     *  This lets Piece 5 strip only the params that Piece 3 actually
-     *  made dead (beta-reduced away), leaving native-delegated params
-     *  (e.g. `p` in seq::filter → __native_seq_filter) untouched. */
-    private fun referencedClosureParams(
-        body: TypedExpr,
-        candidates: Set<String>,
-    ): Set<String> {
-        val found = HashSet<String>()
-        fun walk(e: TypedExpr) {
-            if (found.size == candidates.size) return
-            if (e is TypedVar
-                && e.name in candidates
-                && (e.binding is BindingRef.Param || e.binding is BindingRef.Local)
-            ) {
-                found.add(e.name)
-                return
-            }
-            e.forEachChild { walk(it) }
-        }
-        if (body is com.mezze.language.typedast.TypedLambda) {
-            walk(body.body)
-        } else {
-            walk(body)
-        }
-        return found
-    }
-
     /** Post-pass: rewrite `TypedVar(BindingRef.ByHash(h), …)` inside a
      *  specialization body to point at the specialized-callee hash when
      *  the callee's `(h, derivedTypeArgs, closureArgs)` is in
@@ -732,12 +716,52 @@ class Monomorphizer(
             }
         }
 
+        // LAST ATTEMPT: a typeParam that is a `having 'out` is not reachable from
+        // the parameter type at all, so both unifications above leave it unbound
+        // and every one of them returned null.
+        //
+        //     let go = { i, acc, p, q } ->
+        //       if i <= 0 then acc + p + q
+        //       else go { i = i - 1, acc = acc + i, p = p, q = q }
+        //
+        // typeParams are ['acc, 'p, 'q, 'ret, 'mid]: `'mid` is the type of
+        // `acc + p` before `+ q`, and `'ret` the result. Unifying the parameter
+        // type pins the first three to Int and says nothing about the last two —
+        // so the SELF-CALL got no transitive request, kept the generic hash, and
+        // a specialized recursive function recursed into its GENERIC self. Every
+        // iteration after the first then ran the dictionary-passing version:
+        // `bench/cases/allocsurface` kernel 11 at 30 675 ps/iter against kernel
+        // 10's 595, the two differing by one line of source.
+        //
+        // The seed path has resolved these all along, with the same filler. Take
+        // the partial list and complete it, then hold to the same all-concrete
+        // bar as every other route — a `having 'out` that cannot be resolved
+        // still declines.
+        val fill = fillHavingOut ?: return null
+        for (bindings in buildList {
+            if (siteType != null) {
+                val b = HashMap<String, MezzeType>()
+                if (unify(callee.scheme.type, siteType, b)) add(b)
+            }
+            val fnType = callee.scheme.type as? MezzeType.FunctionType
+            if (enclosingCall != null && fnType != null) {
+                val b = HashMap<String, MezzeType>()
+                if (unify(fnType.paramType, enclosingCall.arg.type, b)) add(b)
+            }
+        }) {
+            val partial = buildArgsFromBindings(typeParams, bindings, allowPartial = true) ?: continue
+            if (partial.all { isConcreteEnough(it) }) return partial
+            val filled = fill(callee, partial)
+            if (filled.size == typeParams.size && filled.all { isConcreteEnough(it) }) return filled
+        }
+
         return null
     }
 
     private fun buildArgsFromBindings(
         typeParams: List<TypeParam>,
         bindings: Map<String, MezzeType>,
+        allowPartial: Boolean = false,
     ): List<MezzeType>? {
         val args = ArrayList<MezzeType>(typeParams.size)
         for (tp in typeParams) {
@@ -746,6 +770,11 @@ class Monomorphizer(
                 args.add(b)
             } else if (isEffectVarNameLocal(tp.name)) {
                 args.add(MezzeType.EffectRow.simple(emptySet()))
+            } else if (allowPartial) {
+                // Leave it unresolved, carrying its param name, so
+                // [fillHavingOut] can complete it from the ability's `having`
+                // bindings. Mirrors `MonoDriver.deriveTypeArgs(allowPartial)`.
+                args.add(MezzeType.VarType(com.mezze.language.ast.TypeVar.freshWithName(tp.name)))
             } else {
                 return null
             }
@@ -1047,7 +1076,7 @@ class Monomorphizer(
      *  position — same shape as [tryResolveAbilityOp] in the compiler. */
     private data class OpEntry(val impl: TypedAbilityImpl, val opHash: Hash)
 
-    private fun rewriteConstrainedMethodCalls(
+    internal fun rewriteConstrainedMethodCalls(
         expr: TypedExpr,
         abilityImpls: List<AbilityImplRef>,
     ): TypedExpr {
@@ -1375,6 +1404,108 @@ class Monomorphizer(
 
     companion object {
         /**
+         * Collect closure-param names that are still referenced in [body].
+         *
+         * A param is "still live" if anything in the body tree RESOLVES TO IT —
+         * decided by binding IDENTITY, never by matching a name. This lets Piece 5
+         * strip only the params Piece 3 actually made dead (beta-reduced away),
+         * leaving native-delegated ones (`p` in seq::filter → __native_seq_filter)
+         * untouched.
+         *
+         * THE CAPTURE LIST IS WHAT WAS MISSING, and it is why `MEZZE_MONO_STRIP=1`
+         * crashed the compiler rather than merely stripping too much. A nested
+         * lambda records what it closes over in `captures: List<TypedCapture>` — a
+         * STRUCTURAL field, not an expression child — and after Piece 3 splices,
+         * that list is the ONLY remaining record: nothing in the body mentions the
+         * parameter any more. No walk over expressions can see it, and
+         * `TypedASTCompiler` consumes exactly that list. So the parameter was
+         * counted dead, removed from the outer parameter list, and lowering hit
+         *
+         *     lambda captures 'f', which is neither a local, a parameter nor a
+         *     capture of the enclosing function. Enclosing params=[xs]
+         *
+         * reproduced on `bench/cases/defunc` from a clean cache. The A/B is the
+         * evidence: with the capture-list half removed the crash returns unchanged;
+         * with it restored the build succeeds.
+         *
+         * AND IT IS KEYED ON IDENTITY, NOT ON NAMES. `TypedCapture` carries
+         * `source: BindingRef`, so a capture says WHICH binding it came from.
+         * Reading that instead of comparing a name costs nothing and removes a real
+         * shadowing hazard: an inner lambda with its OWN parameter called `f` would
+         * otherwise mark the outer `f` live and silently disable the strip. Entering
+         * a lambda RE-INDEXES what is visible — a candidate reachable outside is
+         * reachable inside only through a capture, as `Capture(j)` — so the walk
+         * carries that mapping down rather than a set of strings. Names cross the
+         * boundary only because the caller's contract is names: `closureArgs` is
+         * keyed by arg-record field and `stripLambdaParams` filters by param name.
+         *
+         * A NON-LAMBDA BODY RETURNS NOTHING. Such a specialization has no
+         * parameters to strip and `stripLambdaParams` already refuses it, so
+         * "nothing is live" is the honest answer rather than a walk with no frame
+         * of reference.
+         */
+        internal fun referencedClosureParams(
+            body: TypedExpr,
+            candidates: Set<String>,
+        ): Set<String> {
+            val lambda = body as? com.mezze.language.typedast.TypedLambda
+                ?: return emptySet()
+            // A parameter is addressed TWO ways, and both have to be in the map.
+            // `Param(i)` is how the body names it directly; from inside a `do`
+            // block it is a FRAME SLOT instead, because the layout is
+            // `[captures…, params…, locals…]` and a block addresses the enclosing
+            // params as locals. MEASURED on `bench/cases/defunc`: `apply_fold =
+            // { n, f } -> do { let go = …f… }` gives `go`'s capture list as
+            // `[go<-Local(depth=1, index=2), f<-Local(depth=1, index=1)]` — `f` is
+            // params[1] and arrives as `Local(1, 1)`, `go` is the block's own
+            // binding at index 2, after the two params.
+            val wanted = HashMap<BindingRef, String>(candidates.size * 2)
+            lambda.params.forEachIndexed { i, prm ->
+                if (prm.name in candidates) {
+                    wanted[BindingRef.Param(i)] = prm.name
+                    wanted[BindingRef.Local(1, i)] = prm.name
+                }
+            }
+            if (wanted.isEmpty()) return emptySet()
+            val found = HashSet<String>()
+            fun walk(e: TypedExpr, alias: Map<BindingRef, String>) {
+                if (found.size == wanted.size || alias.isEmpty()) return
+                if (e is TypedVar) {
+                    alias[e.binding]?.let { found.add(it) }
+                    return
+                }
+                if (e is com.mezze.language.typedast.TypedLambda) {
+                    // Entering a lambda RE-INDEXES what is visible: a candidate
+                    // reachable out here is reachable in there only through a
+                    // capture, and inside it is `Capture(j)`, not what it was.
+                    val inner = HashMap<BindingRef, String>(e.captures.size)
+                    e.captures.forEachIndexed { j, c ->
+                        // Identity first. The NAME is accepted as well, and only
+                        // for a CAPTURE, because an under-approximation here does
+                        // not merely strip too little — it CRASHES the emitter
+                        // ("lambda captures 'f', which is neither a local, a
+                        // parameter nor a capture"). A capture's name IS the name
+                        // of the binding it closes over, so this cannot be fooled
+                        // by shadowing: an inner lambda's own parameter of the same
+                        // name is a PARAMETER, not a capture, and is matched by
+                        // identity alone below. Over-approximating keeps a dead
+                        // parameter; under-approximating loses the build.
+                        val nm = alias[c.source]
+                            ?: c.name.takeIf { it in candidates }
+                            ?: return@forEachIndexed
+                        found.add(nm)
+                        inner[BindingRef.Capture(j)] = nm
+                    }
+                    walk(e.body, inner)
+                    return
+                }
+                e.forEachChild { walk(it, alias) }
+            }
+            walk(lambda.body, wanted)
+            return found
+        }
+
+        /**
          * Tag byte for specialization hashes. Distinct from any HashTag in
          * `HashTags` so there's no collision between a generic decl and its
          * own specialization.
@@ -1523,15 +1654,42 @@ class Monomorphizer(
          * Returns an empty map if the call's arg is not a record
          * literal, or contains no lambda-literal fields.
          */
-        fun closureArgsAt(call: TypedCall): Map<String, Hash> {
+        fun closureArgsAt(
+            call: TypedCall,
+            declIndex: Map<Hash, com.mezze.language.typedast.TypedLetDecl> = emptyMap(),
+        ): Map<String, Hash> {
             val arg = call.arg
             if (arg !is com.mezze.language.typedast.TypedRecord) return emptyMap()
             val out = LinkedHashMap<String, Hash>()
             for (entry in arg.entries) {
                 if (entry !is com.mezze.language.typedast.TypedRecordEntry.Field) continue
-                val value = entry.value
-                if (value !is com.mezze.language.typedast.TypedLambda) continue
-                out[entry.name] = hashClosure(value)
+                when (val value = entry.value) {
+                    is com.mezze.language.typedast.TypedLambda ->
+                        out[entry.name] = hashClosure(value)
+                    // A NAMED function reference — `fold { f = add2 }` rather
+                    // than `fold { f = {a,b} -> a+b }`. The doc above excludes
+                    // non-lambda values because "those can't be specialized
+                    // without escape analysis", which is true of a general
+                    // variable but NOT of a `ByHash` reference: that names a
+                    // top-level function statically, and its hash IS its
+                    // identity — exactly what the spec is keyed on. No escape
+                    // analysis is involved.
+                    //
+                    // WHY IT MATTERS: without this the HOF is not specialised
+                    // on its callback, so the callback's parameter type stays a
+                    // type VARIABLE, so the referenced function cannot be
+                    // monomorphised either, so lowering falls back to
+                    // `dict_wrapper_<name>`. Measured, that wrapper is 52 of the
+                    // 57 ns a generic closure call costs.
+                    is TypedVar -> {
+                        val b = value.binding
+                        if (b is BindingRef.ByHash && declIndex[b.hash]?.value is
+                                com.mezze.language.typedast.TypedLambda) {
+                            out[entry.name] = b.hash
+                        }
+                    }
+                    else -> Unit
+                }
             }
             return out
         }
@@ -1539,15 +1697,30 @@ class Monomorphizer(
         /** Companion to [closureArgsAt]: for the same fields, return the
          *  actual `TypedLambda` IR — Piece 3 splices these into the
          *  specialized body. */
-        fun closureBodiesAt(call: TypedCall): Map<String, com.mezze.language.typedast.TypedLambda> {
+        fun closureBodiesAt(
+            call: TypedCall,
+            declIndex: Map<Hash, com.mezze.language.typedast.TypedLetDecl> = emptyMap(),
+        ): Map<String, com.mezze.language.typedast.TypedLambda> {
             val arg = call.arg
             if (arg !is com.mezze.language.typedast.TypedRecord) return emptyMap()
             val out = LinkedHashMap<String, com.mezze.language.typedast.TypedLambda>()
             for (entry in arg.entries) {
                 if (entry !is com.mezze.language.typedast.TypedRecordEntry.Field) continue
-                val value = entry.value
-                if (value !is com.mezze.language.typedast.TypedLambda) continue
-                out[entry.name] = value
+                when (val value = entry.value) {
+                    is com.mezze.language.typedast.TypedLambda -> out[entry.name] = value
+                    // Companion to the reference case in closureArgsAt: the body
+                    // to splice is the referenced declaration's own lambda.
+                    is TypedVar -> {
+                        val b = value.binding
+                        if (b is BindingRef.ByHash) {
+                            val referenced = declIndex[b.hash]?.value
+                            if (referenced is com.mezze.language.typedast.TypedLambda) {
+                                out[entry.name] = referenced
+                            }
+                        }
+                    }
+                    else -> Unit
+                }
             }
             return out
         }

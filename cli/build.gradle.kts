@@ -305,6 +305,13 @@ val compileStdlib by tasks.registering(JavaExec::class) {
     // Sibling schema fingerprint StdlibPrecompiler writes next to the cbor; checked
     // at load before decode to reject a schema-skewed snapshot cleanly.
     outputs.file(layout.buildDirectory.file("generated/resources/META-INF/mezze/stdlib-snapshot.fp"))
+    // Sibling table of native signatures (name, purity, inline form, param
+    // order). This process has :interpreter on its class path and so has the
+    // declarations; `mez` does not and reads them back from here. Without it
+    // every native call in USER code lowers without purity, without an inline
+    // form, and on the record ABI. Tracked as an output so a change to the
+    // declarations — which changes this task's classpath — regenerates it.
+    outputs.file(layout.buildDirectory.file("generated/resources/META-INF/mezze/native-signatures.tsv"))
     inputs.dir(rootProject.projectDir.resolve("stdlib/std"))
 
     // Needs access to stdlib source files for parsing
@@ -317,6 +324,48 @@ val compileStdlib by tasks.registering(JavaExec::class) {
     val slimSnapshot = (project.findProperty("slimSnapshot") as String?) == "true"
     inputs.property("slimSnapshot", slimSnapshot)
     systemProperty("mezze.snapshot.slim", slimSnapshot.toString())
+
+    // THE JAR WAS ALWAYS ONE BUILD BEHIND, and silently.
+    //
+    // `processResources` copies `generated/resources` into
+    // `build/resources/main`, and it has to run BEFORE this task — this task's
+    // classpath is `sourceSets.main.runtimeClasspath`, which contains
+    // `processResources`'s output, so Gradle orders it that way (the `test`
+    // task's comment above says the same thing). So the copy `jar` packages is
+    // the copy made before THIS run wrote anything: the PREVIOUS build's.
+    //
+    // That is not cosmetic. `mez` has no :interpreter on its classpath and
+    // reads the native declarations back from
+    // META-INF/mezze/native-signatures.tsv, so a stale TSV lowers every newly
+    // declared native on the record ABI — the slow shape, with nothing failing.
+    //
+    // MEASURED: withholding `MutOps.MARKER` and running ONE `installDist` left
+    // 300 signatures in the jar; restoring it left 207. Exactly one build
+    // behind, in both directions. That is what made a 2.2x mut win look as
+    // though it came from a CLI change that measures 1.00x.
+    //
+    // Overwriting the copy here is the same remedy the `test` task below
+    // already applies to the snapshot, and it needs no reordering: `jar`
+    // depends on this task, so by the time it packages `build/resources/main`
+    // these files are the ones this run produced.
+    val resourcesMain = layout.buildDirectory.dir("resources/main")
+    val generatedResources = layout.buildDirectory.dir("generated/resources")
+    doLast {
+        val from = generatedResources.get().asFile
+        val to = resourcesMain.get().asFile
+        for (rel in listOf(
+            "stdlib.sqlite",
+            "META-INF/mezze/stdlib-snapshot.cbor",
+            "META-INF/mezze/stdlib-snapshot.fp",
+            "META-INF/mezze/native-signatures.tsv",
+        )) {
+            val src = File(from, rel)
+            if (!src.exists()) continue
+            val dst = File(to, rel)
+            dst.parentFile.mkdirs()
+            src.copyTo(dst, overwrite = true)
+        }
+    }
 }
 
 // Include pre-compiled stdlib.sqlite as a JAR resource via the

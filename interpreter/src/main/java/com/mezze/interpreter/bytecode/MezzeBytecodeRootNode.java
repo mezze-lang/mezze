@@ -125,7 +125,53 @@ import com.oracle.truffle.api.profiles.InlinedLoopConditionProfile;
     // quickenings to stabilize, the invalidation cycle persists.
     // Requires upstream Truffle fix (quickening-aware compilation
     // assumption) or BDSL-level manual typed locals.
-    boxingEliminationTypes = {},
+    // MEASURED 2026-11-03 (mez nightly-202611030641, Truffle 25.0.3), and the
+    // numbers correct two things in the note above.
+    //
+    //  1. THE STORM NO LONGER REPRODUCES. Flipping this to
+    //     {long,double,boolean} and running bench/cases/boxing_probe gives
+    //     fib(30) in 3ms across three warmed runs, with no compile->deopt
+    //     storm and no `Addr 0x0`. The blocker the note describes is stale on
+    //     25.0.3. Left OFF regardless, because:
+    //  2. TURNING IT ON CHANGES NOTHING MEASURABLE. A tail loop stays at
+    //     13 ns/iter against 12 ns/iter with it off — inside noise. So the flag
+    //     alone is not the win the note implies; the quickenings it enables do
+    //     not reach the loop's hot locals.
+    //
+    // WHAT THE LOOP COST ACTUALLY IS: a self-tail LOOP keeps its parameters in
+    // BDSL locals across the backward branch, and sum_tr (1 arithmetic op per
+    // iteration) and arith (4 ops) BOTH cost 12-13 ns/iter — identical. A fixed
+    // per-iteration cost that does not move with the amount of arithmetic is
+    // not the arithmetic. Meanwhile fib, which passes values on the operand
+    // stack inside one recursively-inlined compilation unit, is at PARITY with
+    // Java (1.1 vs 1.06 ns/call) because escape analysis removes the boxing
+    // there.
+    //
+    // The open lead is NOT this flag but a hard compile failure visible in the
+    // same trace, present with the flag either way:
+    //     opt failed MezzeRootNode[__entry__] Reason: SourceStackTraceBailout:
+    //     Object of type FrameWithoutBoxing should not be materialized
+    //     (must not pass virtual object into an invoke that cannot be inlined)
+    // A materialized frame cannot have its slots virtualized, which would
+    // explain a fixed per-iteration cost that no boxing flag can touch.
+    //
+    // 2026-11-03 — ENABLED, and everything above is still true of the case it
+    // measured. That case was a tail loop with NO locals, where the values
+    // never leave the operand stack; the flag cannot help there and does not.
+    // A tail loop whose body BINDS anything is a different shape: every store
+    // into an Object-typed BDSL local boxes, so
+    //     else do { let lo = i - 1  let add = i  go { i = lo, acc = acc + add } }
+    // ran 2 665 ps/iter against 242 for the same arithmetic with no lets — 11x
+    // for two bindings. With the flag on it is 705 ps, a 3.8x improvement, and
+    // that shape is any loop carrying a `let`.
+    //
+    // MEASURED NEUTRAL ON PIPELINES, which is why the earlier reading said the
+    // flag was worthless: bench/cases/fusegaps off vs on, map+filter 92/92,
+    // map 82/87, filter 101/87, map+map 641/640-675, filter+filter 570/523,
+    // drop+map 84/75, count 75/77, compound fold 877/782. One sample showed
+    // map+map at 882 and three more put it back at 640-675, so that was an
+    // outlier — the kind this log has been caught by twice before.
+    boxingEliminationTypes = {long.class, double.class, boolean.class},
     enableUncachedInterpreter = true,
     enableYield = true,
     enableSerialization = true,
@@ -393,6 +439,287 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * {@code map::insert} and {@code set::insert} without the generic native
+     * path — the three- and two-operand members of the family that starts at
+     * {@link InlineMapSize}.
+     *
+     * <p>Both had a scalar `NativeOp` registration and no `BytecodeCompiler`
+     * special case, which is the exact position `contains_key` was in before
+     * {@link InlineMapContainsKey} was worth 1.46x. `map::insert` along the
+     * owner chain measures 16 091 ps and is the most-used map write, so the
+     * ~2-4 ns of dispatch this removes is worth taking on it.
+     *
+     * <p>This does NOT touch the insert cliff. `map::insert` from a base map
+     * somebody else still holds costs 5.41 µs at 4 000 keys because
+     * `LongHashMapStorage.putLong` cloned both arrays when it was not the owner.
+     * (That storage is gone — see LongTrieMapStorage and BUG 38 — and the cliff
+     * with it; the note stands as the record of what the row measured.)
+     * That is a datastructures problem — a structure that shares instead of an
+     * owner token that copies on branch — and no amount of dispatch removal
+     * touches it.
+     */
+    @Operation
+    public static final class InlineMapInsert {
+        @Specialization
+        public static Object doMap(com.mezze.datastructures.map.MezzeMap<?, ?> m, Object k, Object v) {
+            return com.mezze.interpreter.nodes.builtin.collections.MapNatives.insert(m, k, v);
+        }
+    }
+
+    /** The two-operand peer of {@link InlineMapInsert}, for {@code set::insert}. */
+    @Operation
+    public static final class InlineSetInsert {
+        @Specialization
+        public static Object doSet(com.mezze.datastructures.set.MezzeSet<?> s, Object x) {
+            return com.mezze.interpreter.nodes.builtin.collections.SetNatives.insert(s, x);
+        }
+    }
+
+    /**
+     * {@code map::get} without the generic native path — the same removal as
+     * {@link InlineMapContainsKey}, on the largest row of the map surface
+     * (12.4 ns against `contains_key`'s 7.8).
+     *
+     * <p>`get` does strictly more than `contains_key` and the extra is not
+     * dispatch: on a MISS it probes twice (`map.get` then `map.containsKey`,
+     * to tell a stored null from an absent key) and on a HIT it allocates a
+     * `MezzeVariant` for the `Some`. The allocation cannot go away — the
+     * signature returns `Option v` — so this takes out the one layer that can.
+     */
+    @Operation
+    public static final class InlineMapGet {
+        @Specialization
+        public static Object doMap(com.mezze.datastructures.map.MezzeMap<?, ?> m, Object k) {
+            return com.mezze.interpreter.nodes.builtin.collections.MapNatives.get(m, k);
+        }
+    }
+
+    /**
+     * {@code map::contains_key} and {@code set::contains} without the generic
+     * native path — the two-operand peer of {@link InlineMapSize}.
+     *
+     * <p>ORDER MATTERS HERE, and getting it wrong once is why this comment
+     * exists. The first attempt on these rows was to drop the
+     * `@TruffleBoundary` from `MapNatives.containsKey`, on the evidence that
+     * `size`/`isEmpty` carry none and are far cheaper. Interleaved, that
+     * measured 7 605 ps against the baseline's 7 444 — no gain. The boundary
+     * was not the cost because the GENERIC DISPATCH in front of it was, and
+     * the same thing had just happened with `size`: the cached-count change
+     * read as a null result until `InlineMapSize` removed the dispatch, after
+     * which it was worth 3.9x. So the dispatch comes out first, and the
+     * boundary is re-tested on top of this rather than before it.
+     *
+     * <p>THE BOUNDARY WAS RE-TESTED ON TOP, as the note above said to, AND IT
+     * IS STILL NULL. Running the long-keyed trie walk directly inside compiled
+     * code — guarded on the storage, so the walk is allocation-free,
+     * virtual-call-free arithmetic reached on a concrete receiver — measured:
+     *
+     * <pre>
+     *   allocsurface, 1-entry map       base    with the fast path
+     *     map has                   12 077 ps       12 334     0.98x
+     *     set has                   13 116          12 408     1.06x
+     *     map get                   16 895          17 148     0.99x
+     *   mapsurface, 1 000-key trie
+     *     map::contains_key         56 356          55 869     1.01x
+     *     set::contains             54 318          54 719     0.99x
+     * </pre>
+     *
+     * two builds from identical source but for the fast path, interleaved, min
+     * of three, checksums equal, young-collection counts equal to within one.
+     * The change was reverted. AND READ IT AS "BELOW THIS INSTRUMENT'S NOISE"
+     * RATHER THAN AS A ZERO: in the same run `str size`, a row nothing touched,
+     * read 532 ps in one arm and 2 994 in the other.
+     *
+     * <p>WHY IT CANNOT HAVE BEEN MUCH ANYWAY. The probe barely depends on the
+     * structure — `map::contains_key` is 51 ns at ONE key and 67 ns at 16 000,
+     * both converged across two n — so the HAMT walk is a few ns of a row whose
+     * other ~50 ns is the loop around it. A boundary wrapped around a few ns
+     * cannot be worth more than a few ns.
+     */
+    @Operation
+    public static final class InlineMapContainsKey {
+        /** The map half of this was measured and NOT demonstrated — see
+         *  `MezzeMap.get` for the table. The set half below was 1.33x. */
+        @Specialization
+        public static boolean doMap(com.mezze.datastructures.map.MezzeMap<?, ?> m, Object k) {
+            return com.mezze.interpreter.nodes.builtin.collections.MapNatives.containsKey(m, k);
+        }
+
+        @Specialization
+        public static boolean doSet(com.mezze.datastructures.set.MezzeSet<?> s, Object x) {
+            if (s.hasDirectProbe()) {
+                return s.containsDirect(x);
+            }
+            return com.mezze.interpreter.nodes.builtin.collections.SetNatives.contains(s, x);
+        }
+    }
+
+    /**
+     * {@code map::size} and {@code set::size} without the generic native path.
+     *
+     * <p>WHY. `str::size` costs 416 ps and `map::size` 4 519 — eleven times as
+     * much for the same shape of work, reading a stored count out of a
+     * container. Both are registered as identical scalar `NativeOp`s (one
+     * OBJECT param, LONG return, pure) and NEITHER crosses a
+     * `@TruffleBoundary`, so the ABI is not the difference. What `str::size`
+     * has and `map::size` lacks is a dedicated PE-transparent operation that
+     * `BytecodeCompiler` emits by name — {@link InlineStringSize}, directly
+     * above. This is its peer.
+     *
+     * <p>WHAT IT IS NOT, established by measurement rather than argument. The
+     * first hypothesis was that `MezzeMap.size()` delegating through the
+     * ten-implementation `MapStorage` interface could not devirtualise.
+     * Caching the size in a final field on `MezzeMap` was built and measured
+     * INTERLEAVED against the unmodified build — two standalone jars,
+     * alternated, because the machine was under load from another worktree:
+     * 3 992 ps against 4 024, with the in-process controls matching at 213 and
+     * 210. 0.8%, so the interface call is not the cost; that change was
+     * reverted. See PERF-LOG.
+     */
+    @Operation
+    public static final class InlineMapSize {
+        @Specialization
+        public static long doMap(com.mezze.datastructures.map.MezzeMap<?, ?> m) {
+            return (long) m.size();
+        }
+
+        @Specialization
+        public static long doSet(com.mezze.datastructures.set.MezzeSet<?> s) {
+            return (long) s.size();
+        }
+
+        // The ORDERED containers and Deque, for the same reason and off the
+        // same measurement. `bench/cases/dsmore` put `sorted_map::size` at
+        // 8 934 ps and `deque::size` at 8 960 against the hash `map::size`'s
+        // 429 — 20.8x for an operation that returns a field — because these
+        // natives are registered in NativeDispatch's record-ABI HANDLERS map
+        // and reached by a STRING-KEYED HashMap lookup per call. No comparator
+        // is involved anywhere here: `size` and `is_empty` are the only
+        // ordered operations with no `with Ord`, which is what makes them the
+        // control that isolated this cost from the comparator's.
+        @Specialization
+        public static long doSortedMap(com.mezze.datastructures.sorted.MezzeSortedMap<?, ?> m) {
+            return (long) m.size();
+        }
+
+        @Specialization
+        public static long doSortedSet(com.mezze.datastructures.sorted.MezzeSortedSet<?> s) {
+            return (long) s.size();
+        }
+
+        @Specialization
+        public static long doDeque(com.mezze.datastructures.deque.MezzeDeque<?> d) {
+            return (long) d.size();
+        }
+
+        // Seq, List and Bytes, which had no dedicated operation at all — and
+        // the name of this class is now the only thing map-specific about it.
+        //
+        // DECLARING THEM WAS HALF THE GAP. `bench/cases/allocsurface` at
+        // n=2e7, one kernel per process, binary built by the DEV launcher:
+        //
+        //   row              undeclared   declared   + this operation
+        //     seq::size         8 522 ps      4 107
+        //     bytes::size       8 893         3 990
+        //     map::size (ref)                            613
+        //
+        // The declaration removes the per-call `MezzeRecord`; this removes the
+        // generic native dispatch in front of it, which is what `map::size`
+        // has had since `InlineMapSize` was added and these did not.
+        //
+        // The `Object[]` case is not optional: a seq is EITHER a `MezzeSeq` OR
+        // a bare `Object[]` that was never wrapped, and accepting only the
+        // canonical class is a change of semantics rather than an
+        // optimisation — it cost 39 interpreter tests once already. See
+        // `InlineSeqGetRaw`.
+        @Specialization
+        public static long doSeq(com.mezze.datastructures.seq.MezzeSeq<?> xs) {
+            return (long) xs.size();
+        }
+
+        @Specialization
+        public static long doObjectArray(Object[] xs) {
+            return (long) xs.length;
+        }
+
+        @Specialization
+        public static long doList(com.mezze.datastructures.list.MezzeList<?> xs) {
+            return (long) xs.size();
+        }
+
+        @Specialization
+        public static long doBytes(
+                com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes b) {
+            return (long) b.length();
+        }
+    }
+
+    /**
+     * The indexed probes the guest-side ordered binary search drives.
+     *
+     * <p>These are not an optimisation on top of that search, they are part of
+     * it. The search makes ~log2(n) probes per lookup — ten on a 1 000-key map
+     * — and a probe left on the record-ABI HANDLERS path costs ~9 ns, which
+     * would come to more than the 300 ns of guest callbacks the whole exercise
+     * is removing.
+     */
+    @Operation
+    public static final class InlineSortedKeyAt {
+        @Specialization
+        public static Object doLong(com.mezze.datastructures.sorted.MezzeSortedMap<?, ?> m, long i) {
+            return m.keyAt((int) i);
+        }
+
+        @Specialization
+        public static Object doBoxed(com.mezze.datastructures.sorted.MezzeSortedMap<?, ?> m, Object i) {
+            return m.keyAt((int) (long) (Long) i);
+        }
+    }
+
+    /** The Set peer of {@link InlineSortedKeyAt}, for the same reason. */
+    @Operation
+    public static final class InlineSortedElementAt {
+        @Specialization
+        public static Object doLong(com.mezze.datastructures.sorted.MezzeSortedSet<?> s, long i) {
+            return s.elementAt((int) i);
+        }
+
+        @Specialization
+        public static Object doBoxed(com.mezze.datastructures.sorted.MezzeSortedSet<?> s, Object i) {
+            return s.elementAt((int) (long) (Long) i);
+        }
+    }
+
+    /** The value peer of {@link InlineSortedKeyAt}. */
+    @Operation
+    public static final class InlineSortedValueAt {
+        @Specialization
+        public static Object doLong(com.mezze.datastructures.sorted.MezzeSortedMap<?, ?> m, long i) {
+            return m.valueAt((int) i);
+        }
+
+        @Specialization
+        public static Object doBoxed(com.mezze.datastructures.sorted.MezzeSortedMap<?, ?> m, Object i) {
+            return m.valueAt((int) (long) (Long) i);
+        }
+    }
+
+    /**
+     * {@code deque::first} off the string-keyed HANDLERS path.
+     *
+     * <p>Measured at 12 276 ps in `bench/cases/dsmore` — more than `size`
+     * because it also allocates a {@code MezzeVariant} for the {@code Some},
+     * which cannot go away while the signature returns {@code Option a}.
+     */
+    @Operation
+    public static final class InlineDequeFirst {
+        @Specialization
+        public static Object doDeque(com.mezze.datastructures.deque.MezzeDeque<?> d) {
+            return com.mezze.interpreter.nodes.builtin.collections.DequeNatives.first(d);
+        }
+    }
+
+    /**
      * Inline unary string operations: TRIM(0), TO_UPPER(1), TO_LOWER(2),
      * REVERSE(3), TRIM_START(4), TRIM_END(5).
      * Bypasses MakeRecord + NativeDispatch for single-arg string natives.
@@ -414,8 +741,14 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         public static String doOp(int op, String s) {
             return switch (op) {
                 case TRIM       -> s.trim();
-                case TO_UPPER   -> s.toUpperCase();
-                case TO_LOWER   -> s.toLowerCase();
+                // Locale.ROOT, not the default locale. `str::to_upper` is a
+                // LANGUAGE PRIMITIVE and must return the same string on every
+                // host; the no-arg overload does not. Demonstrated on a
+                // Turkish locale: "i".toUpperCase() is U+0130 "İ" there and
+                // U+0049 "I" everywhere else, so the same program produced
+                // different output depending on the machine it ran on.
+                case TO_UPPER   -> s.toUpperCase(java.util.Locale.ROOT);
+                case TO_LOWER   -> s.toLowerCase(java.util.Locale.ROOT);
                 case REVERSE    -> new StringBuilder(s).reverse().toString();
                 case TRIM_START -> s.stripLeading();
                 case TRIM_END   -> s.stripTrailing();
@@ -908,6 +1241,11 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
     private static final long[] EMPTY_LONGS = new long[0];
     private static final double[] EMPTY_DOUBLES = new double[0];
+    private static final Object[] EMPTY_OBJECTS = new Object[0];
+
+    static final int STORAGE_OBJECT = 0;
+    static final int STORAGE_LONG = 1;
+    static final int STORAGE_DOUBLE = 2;
 
     /**
      * Specialized single-field record creation for the very common
@@ -921,7 +1259,48 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @Operation
     @ConstantOperand(type = String[].class)
     public static final class MakeSingleFieldRecord {
+        /**
+         * UNBOXED. The operand is declared `long`, so the Bytecode DSL hands
+         * the value over as a primitive and no `Long` is ever created — the
+         * record stores it in the shape's `long[]`.
+         *
+         * <p>This is why {@link com.mezze.interpreter.values.ShapeCache}
+         * has `getOrCreateSingleLong`, and until now nothing called it: the
+         * only specialization was the `Object` one below, so every `Int` field
+         * of every record in the language was a boxed `Long`. `{ r = i }` cost
+         * three allocations (the box, the `Object[1]`, the record) where two
+         * suffice, and a two-field variant payload cost five.
+         *
+         * <p>A FIXED-ARITY operation can do this and {@link MakeRecord} cannot:
+         * its `@Variadic Object[]` is already populated with boxed values by
+         * the time the operation body runs.
+         */
         @Specialization
+        @ForceQuickening
+        public static MezzeRecord doLong(String[] fieldNames, long value,
+                @Cached(value = "resolveLongShape(fieldNames)", allowUncached = true)
+                    com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
+            return new MezzeRecord(cachedShape, new long[]{value}, EMPTY_DOUBLES, EMPTY_OBJECTS);
+        }
+
+        /** The `Float` peer of {@link #doLong}. */
+        @Specialization
+        @ForceQuickening
+        public static MezzeRecord doDouble(String[] fieldNames, double value,
+                @Cached(value = "resolveDoubleShape(fieldNames)", allowUncached = true)
+                    com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
+            return new MezzeRecord(cachedShape, EMPTY_LONGS, new double[]{value}, EMPTY_OBJECTS);
+        }
+
+        /**
+         * Everything else, and the replacement for a site that has seen more
+         * than one of these — a field holding a `Long` at one execution and a
+         * `Str` at the next must not thrash between two shapes, so the site
+         * settles on the object layout. Readers cope either way:
+         * `MezzeRecord.getField` and `ReadFieldOrMethod.doRecordCached` both
+         * switch on the shape's storage kind.
+         */
+        @Specialization(replaces = {"doLong", "doDouble"})
         public static MezzeRecord doObject(String[] fieldNames, Object value,
                 @Cached(value = "resolveShape(fieldNames)", allowUncached = true)
                     com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
@@ -931,6 +1310,199 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @TruffleBoundary
         static com.mezze.interpreter.values.MezzeRecord.Shape resolveShape(String[] fieldNames) {
             return com.mezze.interpreter.values.ShapeCache.getOrCreateAllObjects(fieldNames);
+        }
+
+        @TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape resolveLongShape(String[] fieldNames) {
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateSingleLong(fieldNames);
+        }
+
+        @TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape resolveDoubleShape(String[] fieldNames) {
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateSingleDouble(fieldNames);
+        }
+    }
+
+    /**
+     * Two-field record creation with TYPED OPERANDS.
+     *
+     * <p>Why this exists next to the variadic {@link MakeRecord}: a
+     * {@code @Variadic Object[]} is populated with BOXED values before the
+     * operation body runs, so no amount of work inside {@code MakeRecord} can
+     * avoid the boxes. A fixed-arity operation takes each operand as its own
+     * child and the Bytecode DSL hands primitives over unboxed — the same
+     * mechanism {@link AddLong} uses, with {@code @ForceQuickening} so the
+     * interpreter rewrites to the long-only bytecode after warmup.
+     *
+     * <p>What it removes, measured on {@code Tri { b: Int, h: Int }} — a
+     * two-field variant constructor, the worst case on the board:
+     *
+     * <pre>
+     *   before: MezzeVariant + MezzeRecord + Object[2] + Long + Long  = 5
+     *   after:  MezzeVariant + MezzeRecord + long[2]                  = 3
+     * </pre>
+     *
+     * <p>Arity two covers the shapes that actually recur: {@code { l, r }} for
+     * binary operands, {@code { acc, x }} for folds, and most multi-field
+     * variant payloads. MIXED types (one Int, one Str) fall to the object
+     * layout rather than multiplying specializations — three storage kinds
+     * across two fields is nine combinations, and the mixed ones are both
+     * rarer and cheaper to leave boxed.
+     */
+    @Operation
+    @ConstantOperand(type = String[].class)
+    public static final class MakeRecord2 {
+        @Specialization
+        @ForceQuickening
+        public static MezzeRecord doLongLong(String[] fieldNames, long a, long b,
+                @Cached(value = "resolveAllLongShape(fieldNames)", allowUncached = true)
+                    com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
+            return new MezzeRecord(cachedShape, new long[]{a, b}, EMPTY_DOUBLES, EMPTY_OBJECTS);
+        }
+
+        @Specialization
+        @ForceQuickening
+        public static MezzeRecord doDoubleDouble(String[] fieldNames, double a, double b,
+                @Cached(value = "resolveAllDoubleShape(fieldNames)", allowUncached = true)
+                    com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
+            return new MezzeRecord(cachedShape, EMPTY_LONGS, new double[]{a, b}, EMPTY_OBJECTS);
+        }
+
+        /**
+         * Mixed or non-primitive, and the replacement once a site has seen
+         * more than one layout — a site must not thrash between shapes.
+         * Readers are unaffected either way: {@code MezzeRecord.getField} and
+         * {@code ReadFieldOrMethod.doRecordCached} both switch on the shape's
+         * storage kind.
+         */
+        @Specialization(replaces = {"doLongLong", "doDoubleDouble"})
+        public static MezzeRecord doGeneric(String[] fieldNames, Object a, Object b,
+                @Cached(value = "resolveShape(fieldNames)", allowUncached = true)
+                    com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
+            return new MezzeRecord(cachedShape, EMPTY_LONGS, EMPTY_DOUBLES, new Object[]{a, b});
+        }
+
+        @TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape resolveShape(String[] fieldNames) {
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateAllObjects(fieldNames);
+        }
+
+        @TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape resolveAllLongShape(String[] fieldNames) {
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateAllLong(fieldNames);
+        }
+
+        @TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape resolveAllDoubleShape(String[] fieldNames) {
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateAllDouble(fieldNames);
+        }
+    }
+
+    /**
+     * 3-field record creation with TYPED OPERANDS — {@link MakeRecord2} at
+     * arity 3. Same reason it cannot be folded into the variadic
+     * {@link MakeRecord}: a {@code @Variadic Object[]} is already full of boxed
+     * values by the time the operation body runs, and only a FIXED-ARITY
+     * operation receives primitives unboxed.
+     *
+     * <p>Arity 3 and 4 are worth their own operations because they are the
+     * shapes real code uses for numeric aggregates — a point, a span, an RGB
+     * colour, a rect — and every one of them boxed every field before this.
+     */
+    @Operation
+    @ConstantOperand(type = String[].class)
+    public static final class MakeRecord3 {
+        @Specialization
+        @ForceQuickening
+        public static MezzeRecord doAllLong(String[] fieldNames, long a, long b, long c,
+                @Cached(value = "resolveAllLongShape(fieldNames)", allowUncached = true)
+                    com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
+            return new MezzeRecord(cachedShape, new long[]{a, b, c}, EMPTY_DOUBLES, EMPTY_OBJECTS);
+        }
+
+        @Specialization
+        @ForceQuickening
+        public static MezzeRecord doAllDouble(String[] fieldNames, double a, double b, double c,
+                @Cached(value = "resolveAllDoubleShape(fieldNames)", allowUncached = true)
+                    com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
+            return new MezzeRecord(cachedShape, EMPTY_LONGS, new double[]{a, b, c}, EMPTY_OBJECTS);
+        }
+
+        /** Mixed or non-primitive, and the replacement once a site has seen two layouts. */
+        @Specialization(replaces = {"doAllLong", "doAllDouble"})
+        public static MezzeRecord doGeneric(String[] fieldNames, Object a, Object b, Object c,
+                @Cached(value = "resolveShape(fieldNames)", allowUncached = true)
+                    com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
+            return new MezzeRecord(cachedShape, EMPTY_LONGS, EMPTY_DOUBLES, new Object[]{a, b, c});
+        }
+
+        @TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape resolveShape(String[] fieldNames) {
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateAllObjects(fieldNames);
+        }
+
+        @TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape resolveAllLongShape(String[] fieldNames) {
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateAllLong(fieldNames);
+        }
+
+        @TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape resolveAllDoubleShape(String[] fieldNames) {
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateAllDouble(fieldNames);
+        }
+    }
+
+    /**
+     * 4-field record creation with TYPED OPERANDS — {@link MakeRecord2} at
+     * arity 4. Same reason it cannot be folded into the variadic
+     * {@link MakeRecord}: a {@code @Variadic Object[]} is already full of boxed
+     * values by the time the operation body runs, and only a FIXED-ARITY
+     * operation receives primitives unboxed.
+     *
+     * <p>Arity 3 and 4 are worth their own operations because they are the
+     * shapes real code uses for numeric aggregates — a point, a span, an RGB
+     * colour, a rect — and every one of them boxed every field before this.
+     */
+    @Operation
+    @ConstantOperand(type = String[].class)
+    public static final class MakeRecord4 {
+        @Specialization
+        @ForceQuickening
+        public static MezzeRecord doAllLong(String[] fieldNames, long a, long b, long c, long d,
+                @Cached(value = "resolveAllLongShape(fieldNames)", allowUncached = true)
+                    com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
+            return new MezzeRecord(cachedShape, new long[]{a, b, c, d}, EMPTY_DOUBLES, EMPTY_OBJECTS);
+        }
+
+        @Specialization
+        @ForceQuickening
+        public static MezzeRecord doAllDouble(String[] fieldNames, double a, double b, double c, double d,
+                @Cached(value = "resolveAllDoubleShape(fieldNames)", allowUncached = true)
+                    com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
+            return new MezzeRecord(cachedShape, EMPTY_LONGS, new double[]{a, b, c, d}, EMPTY_OBJECTS);
+        }
+
+        /** Mixed or non-primitive, and the replacement once a site has seen two layouts. */
+        @Specialization(replaces = {"doAllLong", "doAllDouble"})
+        public static MezzeRecord doGeneric(String[] fieldNames, Object a, Object b, Object c, Object d,
+                @Cached(value = "resolveShape(fieldNames)", allowUncached = true)
+                    com.mezze.interpreter.values.MezzeRecord.Shape cachedShape) {
+            return new MezzeRecord(cachedShape, EMPTY_LONGS, EMPTY_DOUBLES, new Object[]{a, b, c, d});
+        }
+
+        @TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape resolveShape(String[] fieldNames) {
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateAllObjects(fieldNames);
+        }
+
+        @TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape resolveAllLongShape(String[] fieldNames) {
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateAllLong(fieldNames);
+        }
+
+        @TruffleBoundary
+        static com.mezze.interpreter.values.MezzeRecord.Shape resolveAllDoubleShape(String[] fieldNames) {
+            return com.mezze.interpreter.values.ShapeCache.getOrCreateAllDouble(fieldNames);
         }
     }
 
@@ -1149,11 +1721,23 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 MezzeRecord record,
                 @Cached("record.getShape()") Shape cachedShape,
                 @Cached("cachedShape.findFieldIndex(fieldName)") int fieldIndex,
-                @Cached("resolveLocationIndex(cachedShape, fieldIndex)") int locationIndex) {
+                @Cached("resolveLocationIndex(cachedShape, fieldIndex)") int locationIndex,
+                @Cached("resolveStorageKind(cachedShape, fieldIndex)") int storageKind) {
             if (fieldIndex < 0) {
                 return fallbackNotFound(record, fieldName);
             }
-            return record.getObjectField(locationIndex);
+            // STORAGE IS PART OF THE SHAPE, so it is cached beside the location
+            // and the switch folds away with it. Reading `objectFields`
+            // unconditionally — which this did — meant no record could use the
+            // unboxed LONG layout the Shape machinery has always supported:
+            // every read of such a field hit `objectFields`, length 0, and threw
+            // ArrayIndexOutOfBoundsException. That is why
+            // `ShapeCache.getOrCreateSingleLong` was dead code.
+            return switch (storageKind) {
+                case STORAGE_LONG -> record.getLongField(locationIndex);
+                case STORAGE_DOUBLE -> record.getDoubleField(locationIndex);
+                default -> record.getObjectField(locationIndex);
+            };
         }
 
         // Megamorphic fallback (>6 distinct shapes at one site).
@@ -1232,6 +1816,16 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             if (fieldIndex < 0) return -1;
             FieldLocation loc = shape.getFieldLocation(fieldIndex);
             return loc.index;
+        }
+
+        /** Which of the three arrays a field lives in, as a PE constant. */
+        protected static int resolveStorageKind(Shape shape, int fieldIndex) {
+            if (fieldIndex < 0) return STORAGE_OBJECT;
+            return switch (shape.getFieldLocation(fieldIndex).storageType) {
+                case LONG -> STORAGE_LONG;
+                case DOUBLE -> STORAGE_DOUBLE;
+                case OBJECT -> STORAGE_OBJECT;
+            };
         }
 
         @TruffleBoundary
@@ -1467,6 +2061,79 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         // operates on constants — e.g. `k * arg` where k is folded.
         // This eliminates the 30×+ overhead measured in closure-heavy
         // hot loops vs manually-inlined equivalents.
+
+        /**
+         * {@code resume { val = X }} IS {@code X}. Return the argument; make
+         * no call at all.
+         *
+         * <p>WHY THIS IS A SPECIAL CASE AND NOT A MISSING BYPASS. The
+         * fall-through resume function is a singleton built in
+         * {@link YieldDispatch}, and its entire body is
+         * {@code rec.getField("val")} over a {@code MezzeRecord} argument. Its
+         * root is a plain {@code MezzeRootNode}, which {@code canBypassTarget}
+         * refuses — correctly, since the bypass is for trampoline-wrapped BDSL
+         * roots. So this call site took the path described in this class's own
+         * doc: <i>"falls back to wrapping the arg in a single-field record so
+         * the callee's existing normalizeArgs path works correctly"</i>. A
+         * scalar call site therefore allocated a record to hand to a callee
+         * whose only job was to take the field back out, and then made an
+         * un-inlined indirect call to do it.
+         *
+         * <p>MEASURED, {@code bench/cases/effectsurface}, minima of nine
+         * readings at n=2e7:
+         *
+         * <pre>
+         *   kernel 3  handler is a bare value `1`              840 ps/iter
+         *   kernel 8  handler is a DIRECT call returning arg   894      (+54, free)
+         *   kernel 4  handler is `resume { val = 1 }`        4 091    (+3 251)
+         * </pre>
+         *
+         * Kernel 8 is what rules out "calling a function is expensive": a
+         * direct call of the same shape costs 54 ps because Graal inlines it.
+         * The 3 251 ps is this callee specifically — the record it forces plus
+         * the indirect call it cannot inline.
+         *
+         * <p>CORRECTNESS. The guard is IDENTITY against that singleton, whose
+         * behaviour is fixed at construction, so no handler-chain assumption is
+         * needed — unlike {@code EffectBinding.doCachedResumeAbort}, which has
+         * to guard {@code handlerStable} because it is choosing WHICH function
+         * {@code resume} names. By the time a function instance is in hand the
+         * choice is already made: if the chain were unstable,
+         * {@code EffectBinding} would have handed over the dispatch fiber's
+         * resume instead and this guard would simply not match. The field-name
+         * guard holds the other half — {@code arg} is the {@code val} field's
+         * value only because the call site says {@code argFieldNames=[val]},
+         * and both guards are over {@code @ConstantOperand}/cached values, so
+         * they fold away.
+         */
+        @Specialization(guards = {
+            "fn == cachedFn",
+            "isFallThroughResume",
+            "isValField"
+        }, limit = "1", excludeForUncached = true)
+        public static Object doFallThroughResume(
+                String fieldName,
+                MezzeFunction fn,
+                Object arg,
+                @Cached("fn") MezzeFunction cachedFn,
+                @Cached("isFallThroughResumeFn(fn)") boolean isFallThroughResume,
+                @Cached("isValFieldName(fieldName)") boolean isValField) {
+            return arg;
+        }
+
+        /**
+         * Identity test against the fall-through resume singleton, evaluated
+         * ONCE at specialization time so the result is a compilation constant.
+         * Doing it in the guard itself would read a volatile field per call.
+         */
+        static boolean isFallThroughResumeFn(MezzeFunction fn) {
+            return fn == YieldDispatch.fallThroughResumeFnPublic();
+        }
+
+        /** The scalar call site's field name must be the one resume reads. */
+        static boolean isValFieldName(String fieldName) {
+            return "val".equals(fieldName);
+        }
 
         @Specialization(guards = {
             "fn == cachedFn",
@@ -1735,12 +2402,41 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                         && tramp.getInnerTarget() != null) {
                     return true;
                 }
+                // A LazyStubRootNode is what a top-level function's root IS
+                // until the function is compiled, which is on its first call —
+                // the same moment this decision is taken and CACHED. Refusing
+                // here costs the call site the allocation-free path for good:
+                // MEASURED at 111x on `bench/cases/defunc`, with a local
+                // closure (never a stub, because it is built eagerly) 4.6x
+                // FASTER than a top-level function for the same work. So look
+                // through to the target the stub will forward to and judge
+                // THAT. `peekForwardTargetNoClosures` returns null when the
+                // function carries closures, because the stub prepends them per
+                // call and a bypassing caller would not.
+                if (root instanceof LazyStubRootNode stub) {
+                    CallTarget forwarded = stub.peekForwardTargetNoClosures();
+                    if (forwarded != null && forwarded != target) {
+                        return canBypassTarget(forwarded);
+                    }
+                }
             }
             return false;
         }
 
         @CompilerDirectives.TruffleBoundary
         static CallTarget resolveInner(CallTarget target) {
+            // Follows the same path `canBypassTarget` approved, stub included —
+            // if the gate looked through a LazyStubRootNode then so must this,
+            // or the fast specialization would call the STUB with flat
+            // positional arguments while the stub expects to be entered as an
+            // AST callee.
+            if (target instanceof com.oracle.truffle.api.RootCallTarget rct0
+                    && rct0.getRootNode() instanceof LazyStubRootNode stub) {
+                CallTarget forwarded = stub.peekForwardTargetNoClosures();
+                if (forwarded != null && forwarded != target) {
+                    return resolveInner(forwarded);
+                }
+            }
             if (target instanceof com.oracle.truffle.api.RootCallTarget rct
                     && rct.getRootNode() instanceof TrampolineRootNode tramp
                     && tramp.getInnerTarget() != null) {
@@ -2001,12 +2697,36 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                         && tramp.getInnerTarget() != null) {
                     return true;
                 }
+                // Same stub look-through as CIS1, and for the same reason: the
+                // decision is a `@Cached` initialiser taken on the first call,
+                // which is exactly when a top-level function's root is still a
+                // LazyStubRootNode. Two arguments is the arity a fold callback
+                // has, so leaving this out would make the fix arity-specific
+                // while the bug is not.
+                if (root instanceof LazyStubRootNode stub) {
+                    CallTarget forwarded = stub.peekForwardTargetNoClosures();
+                    if (forwarded != null && forwarded != target) {
+                        return canBypassTarget(forwarded);
+                    }
+                }
             }
             return false;
         }
 
         @CompilerDirectives.TruffleBoundary
         static CallTarget resolveInner(CallTarget target) {
+            // Follows the same path `canBypassTarget` approved, stub included —
+            // if the gate looked through a LazyStubRootNode then so must this,
+            // or the fast specialization would call the STUB with flat
+            // positional arguments while the stub expects to be entered as an
+            // AST callee.
+            if (target instanceof com.oracle.truffle.api.RootCallTarget rct0
+                    && rct0.getRootNode() instanceof LazyStubRootNode stub) {
+                CallTarget forwarded = stub.peekForwardTargetNoClosures();
+                if (forwarded != null && forwarded != target) {
+                    return resolveInner(forwarded);
+                }
+            }
             if (target instanceof com.oracle.truffle.api.RootCallTarget rct
                     && rct.getRootNode() instanceof TrampolineRootNode tramp
                     && tramp.getInnerTarget() != null) {
@@ -2324,6 +3044,131 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         }
     }
 
+    /**
+     * Typed fast path for (Object) -> long natives. NO `@TruffleBoundary`, so
+     * the handler inlines into the compiled loop and nothing is packed into an
+     * array on the way in. See {@link TypedNativeHandlers.OL} for the
+     * measurement, for why this has to be a narrow interface rather than a
+     * flag on the shared one, and for how far it generalises.
+     *
+     * No `@ForceQuickening`: the operand is already `Object`, so a quickened
+     * variant carries the same derived instruction name as the base and BDSL
+     * refuses it ("Multiple instructions declared with name ...").
+     */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.OL.class)
+    public static final class CallNativeOL {
+        @Specialization
+        public static long doInvoke(TypedNativeHandlers.OL handler, Object a) {
+            return handler.invoke(a);
+        }
+    }
+
+    /**
+     * Typed fast path, (Object) -> boolean. Emptiness tests and bool-cell reads. No boundary, so the handler inlines
+     * into the compiled loop. See {@link CallNativeOL} for the
+     * measurement, and no {@code @ForceQuickening} for the reason
+     * given there.
+     */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.OB.class)
+    public static final class CallNativeOB {
+        @Specialization
+        public static boolean doInvoke(TypedNativeHandlers.OB handler, Object a) {
+            return handler.invoke(a);
+        }
+    }
+
+    /**
+     * Typed fast path, (Object) -> double. Float-cell reads. No boundary, so the handler inlines
+     * into the compiled loop. See {@link CallNativeOL} for the
+     * measurement, and no {@code @ForceQuickening} for the reason
+     * given there.
+     */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.OD.class)
+    public static final class CallNativeOD {
+        @Specialization
+        public static double doInvoke(TypedNativeHandlers.OD handler, Object a) {
+            return handler.invoke(a);
+        }
+    }
+
+    /**
+     * Typed fast path, (Object) -> Object. One-argument ops returning a value or Unit. No boundary, so the handler inlines
+     * into the compiled loop. See {@link CallNativeOL} for the
+     * measurement, and no {@code @ForceQuickening} for the reason
+     * given there.
+     */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.OO.class)
+    public static final class CallNativeOO {
+        @Specialization
+        public static Object doInvoke(TypedNativeHandlers.OO handler, Object a) {
+            return handler.invoke(a);
+        }
+    }
+
+    /**
+     * Typed fast path, (Object, long) -> Object. Indexed reads and int-cell updates. No boundary, so the handler inlines
+     * into the compiled loop. See {@link CallNativeOL} for the
+     * measurement, and no {@code @ForceQuickening} for the reason
+     * given there.
+     */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.OLO.class)
+    public static final class CallNativeOLO {
+        @Specialization
+        public static Object doInvoke(TypedNativeHandlers.OLO handler, Object a, long b) {
+            return handler.invoke(a, b);
+        }
+    }
+
+    /**
+     * Typed fast path, (Object, double) -> Object. Float-cell updates. No boundary, so the handler inlines
+     * into the compiled loop. See {@link CallNativeOL} for the
+     * measurement, and no {@code @ForceQuickening} for the reason
+     * given there.
+     */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.ODO.class)
+    public static final class CallNativeODO {
+        @Specialization
+        public static Object doInvoke(TypedNativeHandlers.ODO handler, Object a, double b) {
+            return handler.invoke(a, b);
+        }
+    }
+
+    /**
+     * Typed fast path, (Object, boolean) -> Object. Bool-cell writes. No boundary, so the handler inlines
+     * into the compiled loop. See {@link CallNativeOL} for the
+     * measurement, and no {@code @ForceQuickening} for the reason
+     * given there.
+     */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.OBO.class)
+    public static final class CallNativeOBO {
+        @Specialization
+        public static Object doInvoke(TypedNativeHandlers.OBO handler, Object a, boolean b) {
+            return handler.invoke(a, b);
+        }
+    }
+
+    /**
+     * Typed fast path, (Object, Object) -> boolean. Membership tests. No boundary, so the handler inlines
+     * into the compiled loop. See {@link CallNativeOL} for the
+     * measurement, and no {@code @ForceQuickening} for the reason
+     * given there.
+     */
+    @Operation
+    @ConstantOperand(type = TypedNativeHandlers.OOB.class)
+    public static final class CallNativeOOB {
+        @Specialization
+        public static boolean doInvoke(TypedNativeHandlers.OOB handler, Object a, Object b) {
+            return handler.invoke(a, b);
+        }
+    }
+
     /** Typed fast path for (long) -> long natives: int abs/neg/sign. */
     @Operation
     @ConstantOperand(type = TypedNativeHandlers.LL.class)
@@ -2494,6 +3339,30 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Interpolation with EXACTLY ONE interpolated expression, which is the
+     * commonest shape by a wide margin: `"a$(x)"`, `"$(x)b"`, `"[$(x)]"`.
+     *
+     * <p>WHY A SEPARATE OPERATION. {@link InterpolateString} receives its
+     * values through a {@code @Variadic Object[]}, and the DSL allocates that
+     * array on every execution. With one value there is nothing to collect, so
+     * a fixed operand skips it: `bench/cases/allocsurface` had interpolation at
+     * 11 945 ps/iter with 25 young collections against `str::concat`'s 9 893
+     * and 17, and the variadic array is what the remaining eight are.
+     *
+     * <p>The two-element `parts` case still goes to `String.concat` for one
+     * total allocation; longer part lists size the builder exactly. See
+     * {@link #buildInterpolatedString}, which this shares.
+     */
+    @Operation
+    @ConstantOperand(type = String[].class)
+    public static final class InterpolateString1 {
+        @Specialization
+        public static String doOne(String[] parts, Object value) {
+            return buildInterpolatedString1(parts, value);
+        }
+    }
+
+    /**
      * Seq size equals compile-time N. Used by Seq patterns without a
      * rest — {@code [a, b, c]} matches only length-3 sequences.
      */
@@ -2526,6 +3395,42 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @Specialization
         public static Object doSeq(int index, MezzeSeq<?> seq) {
             return seq.get(index);
+        }
+    }
+
+    /**
+     * Sum a `Bytes` into a primitive long — no guest callback, no boxing, no
+     * per-element record.
+     *
+     * The peer of {@code BuiltinSumLongSeq} for a byte array, and the whole
+     * reason a bytes chain is worth routing through the fuser at all. Fusing a
+     * bytes fold into the GENERIC loop was measured SLOWER than
+     * `BytesNatives.fold` — a boxed accumulator and a bounds-checked `SeqGet`
+     * against a tight loop on the scalar-ABI bypass. This path is different in
+     * kind: it does not call the folder, it recognises it.
+     *
+     * `& 0xFF` because `std::collections::bytes` types the element as the `Int`
+     * in 0-255 while a Java byte is signed.
+     *
+     * No overflow check, matching {@code SeqSumLongScalarNode}: the largest
+     * reachable total is 255 per element, so a `long` cannot overflow before
+     * the array does (it would need ~3.6e16 bytes).
+     */
+    @Operation
+    public static final class BuiltinSumBytes {
+        @Specialization
+        public static long doBytes(
+                com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes bytes,
+                @Bind Node node,
+                @Cached InlinedLoopConditionProfile loopProfile) {
+            byte[] data = bytes.getData();
+            int n = data.length;
+            long acc = 0;
+            loopProfile.profileCounted(node, n);
+            for (int i = 0; loopProfile.inject(node, i < n); i++) {
+                acc += (data[i] & 0xFF);
+            }
+            return acc;
         }
     }
 
@@ -2563,6 +3468,81 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         FLP_SINK_ANY = 2, FLP_SINK_ALL = 3, FLP_SINK_FIND = 4,
         FLP_SINK_TO_SEQ = 5, FLP_SINK_TO_LIST = 6, FLP_SINK_REDUCE = 7,
         FLP_SINK_NONE = 8;
+
+    /** A pipeline with no map stages beyond the first. Shared so that the
+     *  overwhelmingly common case adds nothing to the constant pool. */
+    public static final long[] FLP_NO_EXTRA_MAPS = new long[0];
+
+    /**
+     * Extra map stages carried in {@code extraOps}, 5 bits each.
+     *
+     * <p>CAPPED BY MEASUREMENT, not by the 6 that the bits allow. On
+     * {@code bench/cases/iterstage} at n=2e7 against the generic loop this
+     * replaces: two stages 564 -> 423 ps/elem (1.33x), three 629 -> 550
+     * (1.14x), FOUR 749 -> 1324 (0.57x -- WORSE). The unrolled body stops
+     * paying somewhere past three stages, so a pipeline needing more than two
+     * extras is refused and keeps the generic loop it had.
+     */
+    public static final int FLP_MAX_EXTRA_MAPS = 2;
+
+    /** Pack one extra map stage into {@code extraOps}: op+1 in 4 bits, self in the 5th. */
+    public static int flpPackExtraMap(int extraOps, int index, int op, boolean selfOp) {
+        return extraOps | ((((op + 1) & 0xF) | (selfOp ? 0x10 : 0)) << (index * 5));
+    }
+
+    /**
+     * Apply map stages TWO AND LATER, in pipeline order.
+     *
+     * <p>WHY A SECOND PLACE FOR MAPS AT ALL. The packed config carries ONE map
+     * slot, and `tryBuildFusedLongPipeline` used to refuse the whole fast path
+     * on meeting a second map — `if (mapOp >= 0) return null`. The pipeline then
+     * fell to the generic bytecode loop, which `bench/cases/iterstage` measures
+     * at 539 ps/elem against FLP's 70 for the identical work: a pure stage-count
+     * ladder reads 55 / 70 / 539 / 629 / 719 ps for 0 to 4 stages, so the second
+     * stage alone cost 469 ps where each later one costs ~90. A control doing
+     * the three-stage kernel's arithmetic in ONE stage, with the same checksum,
+     * read 72 against 629.
+     *
+     * <p>WHERE THE OPS LIVE, AND WHY IT IS NOT THE ARRAY. The first version of
+     * this put op ordinal, self flag and literal in a {@code long[]}
+     * {@code @ConstantOperand}, three longs per stage, and MEASURED SLOWER THAN
+     * THE GENERIC LOOP IT REPLACED: 2 stages 536 -> 891 ps/elem, 3 stages
+     * 652 -> 1511, 4 stages 790 -> 2424, each extra stage costing ~760 ps where
+     * the generic loop charges ~120. Controls flat, checksums identical.
+     *
+     * <p>A {@code @ConstantOperand} array is a constant REFERENCE, not constant
+     * CONTENTS. {@code extraMaps.length} folds — the
+     * {@code partialEvaluationConstant} assertion on it passes and
+     * {@link com.oracle.truffle.api.nodes.ExplodeLoop} did unroll — but an
+     * element READ does not, so {@code flpOp}'s switch stayed a runtime switch
+     * and every element paid one dispatch per stage. That is the whole
+     * difference between this and the single-map slot, whose op comes out of the
+     * PE-constant config and folds to one arithmetic instruction.
+     *
+     * <p>So the OPS ride in an int — 5 bits a stage, op+1 in four and the self
+     * flag in the fifth, {@link #FLP_MAX_EXTRA_MAPS} of them — and only the
+     * LITERALS stay in the array. A literal need not fold: it is a value, like
+     * the primary {@code mapOperand}, and after unrolling the index is constant
+     * and the load is loop-invariant, so it hoists out of the loop.
+     *
+     * <p>An extra stage whose operand is a RUNTIME expression is refused rather
+     * than handled: a dynamic operand needs a bytecode child, and the emitter
+     * has a fixed child list. The first map keeps its slot and its child, so the
+     * single-map case — runtime operand and vectorised path included — is
+     * untouched.
+     */
+    @com.oracle.truffle.api.nodes.ExplodeLoop
+    public static long flpApplyExtraMaps(int extraOps, long[] extraLits, long v) {
+        CompilerAsserts.partialEvaluationConstant(extraOps);
+        for (int s = 0; s < FLP_MAX_EXTRA_MAPS; s++) {
+            int field = (extraOps >>> (s * 5)) & 0x1F;
+            if (field == 0) break;                  // no further stage
+            int op = (field & 0xF) - 1;
+            boolean self = (field & 0x10) != 0;
+            v = FusedLongPipeline.flpOp(op, v, self ? v : extraLits[s]);
+        }
+        return v;
+    }
 
     /**
      * Pack op ordinals and flags into a single int for FusedLongPipeline.
@@ -2603,11 +3583,13 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      */
     @Operation
     @ConstantOperand(type = int.class)   // config: packed ops (PE constant)
+    @ConstantOperand(type = int.class)   // extraOps: map stages 2..k (PE constant)
+    @ConstantOperand(type = long[].class) // their literal operands
     public static final class FusedLongPipeline {
 
         @Specialization(guards = "isLongStorage(seq)")
         public static Object doLong(
-                int config,
+                int config, int extraOps, long[] extraLits,
                 MezzeSeq<?> seq,
                 long mapOperand, long filterPreRhs,
                 long filterCmpRhs, long sinkPredPreRhs,
@@ -2617,7 +3599,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Cached InlinedLoopConditionProfile loopProfile) {
             com.mezze.datastructures.seq.LongSeqStorage ls =
                     (com.mezze.datastructures.seq.LongSeqStorage) seq.getStorage();
-            return run(config, ls.getArray(), ls.size(), null,
+            return run(config, extraOps, extraLits, ls.getArray(), ls.size(), null,
                     mapOperand, filterPreRhs, filterCmpRhs, sinkPredPreRhs,
                     sinkPredCmpRhs, foldInit, takeLimit, node, loopProfile);
         }
@@ -2632,7 +3614,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
          */
         @Specialization
         public static Object doList(
-                int config,
+                int config, int extraOps, long[] extraLits,
                 com.mezze.datastructures.list.MezzeList<?> list,
                 long mapOperand, long filterPreRhs,
                 long filterCmpRhs, long sinkPredPreRhs,
@@ -2646,7 +3628,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             // A list's length is a walk; only a materializing sink needs it up front.
             int n = materializes ? list.size() : Integer.MAX_VALUE;
             if (hasTake) n = (int) Math.min(n, takeLimit);
-            return run(config, null, n, list,
+            return run(config, extraOps, extraLits, null, n, list,
                     mapOperand, filterPreRhs, filterCmpRhs, sinkPredPreRhs,
                     sinkPredCmpRhs, foldInit, takeLimit, node, loopProfile);
         }
@@ -2659,7 +3641,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
          * stages and sinks below are written once for both.
          */
         private static Object run(
-                int config, long[] data, int n,
+                int config, int extraOps, long[] extraLits, long[] data, int n,
                 com.mezze.datastructures.list.MezzeList<?> cells,
                 long mapOperand, long filterPreRhs,
                 long filterCmpRhs, long sinkPredPreRhs,
@@ -2688,13 +3670,32 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             if (fromArray
                     && FlpSimd.AVAILABLE
                     && n >= FlpSimd.SIMD_THRESHOLD
-                    && (sinkKind == FLP_SINK_SUM || sinkKind == FLP_SINK_COUNT
-                        || sinkKind == FLP_SINK_REDUCE)
-                    && sinkPredCmpOp < 0) {
+                    && ((sinkKind == FLP_SINK_SUM || sinkKind == FLP_SINK_COUNT
+                         || sinkKind == FLP_SINK_REDUCE)
+                        // A SHORT-CIRCUIT sink vectorises too: compare a
+                        // vector of lanes and test the mask. `any` is
+                        // anyTrue, `all` is "no surviving lane fails", `find`
+                        // takes firstTrue — and lanes ascend, so the lowest
+                        // set lane is the first match in SOURCE order.
+                        //
+                        // These were excluded, so a chain under `any` ran the
+                        // scalar loop while the same walk under a `fold`
+                        // vectorised: 477 ps/elem against 81 for a filter+fold
+                        // doing MORE work. The win is in the walk, not the
+                        // exit — a predicate matching at element 0 returns
+                        // immediately either way.
+                        || sinkKind == FLP_SINK_ANY || sinkKind == FLP_SINK_ALL
+                        || sinkKind == FLP_SINK_FIND || sinkKind == FLP_SINK_NONE)
+                    // Still required for the ACCUMULATING sinks, which have no
+                    // sink predicate of their own and never had one here.
+                    && (sinkPredCmpOp < 0
+                        || sinkKind == FLP_SINK_ANY || sinkKind == FLP_SINK_ALL
+                        || sinkKind == FLP_SINK_FIND || sinkKind == FLP_SINK_NONE)) {
                 return FlpSimd.flpArraySimd(data, n, sinkKind,
-                        mapOp, mapOperand, selfMap,
+                        mapOp, mapOperand, selfMap, extraOps, extraLits,
                         filterPreOp, filterPreRhs, filterCmpOp, filterCmpRhs,
-                        foldOp, foldInit, filterFirst);
+                        foldOp, foldInit, filterFirst,
+                        sinkPredPreOp, sinkPredPreRhs, sinkPredCmpOp, sinkPredCmpRhs);
             }
 
             long acc = foldInit;
@@ -2742,6 +3743,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
                 // ── Map stage ──
                 if (mapOp >= 0) v = flpOp(mapOp, v, selfMap ? v : mapOperand);
+                if (extraOps != 0) v = flpApplyExtraMaps(extraOps, extraLits, v);
 
                 // ── Filter-second path ──
                 if (!filterFirst && filterCmpOp >= 0) {
@@ -2824,7 +3826,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @Specialization(guards = "!isLongStorage(seq)")
         @TruffleBoundary
         public static Object doFallback(
-                int config,
+                int config, int extraOps, long[] extraLits,
                 MezzeSeq<?> seq,
                 long mapOperand, long filterPreRhs,
                 long filterCmpRhs, long sinkPredPreRhs,
@@ -2857,6 +3859,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                     if (!flpCmp(filterCmpOp, fv, filterCmpRhs)) continue;
                 }
                 if (mapOp >= 0) v = flpOp(mapOp, v, selfMap ? v : mapOperand);
+                if (extraOps != 0) v = flpApplyExtraMaps(extraOps, extraLits, v);
                 if (!filterFirst && filterCmpOp >= 0) {
                     long fv = filterPreOp >= 0
                             ? flpOp(filterPreOp, v, filterPreRhs) : v;
@@ -3002,11 +4005,13 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      */
     @Operation
     @ConstantOperand(type = int.class)   // config: packed ops (PE constant)
+    @ConstantOperand(type = int.class)   // extraOps: map stages 2..k (PE constant)
+    @ConstantOperand(type = long[].class) // their literal operands
     public static final class FusedLongRangePipeline {
 
         @Specialization
         public static Object doRange(
-                int config,
+                int config, int extraOps, long[] extraLits,
                 long start, long end,
                 long mapOperand, long filterPreRhs,
                 long filterCmpRhs, long sinkPredPreRhs,
@@ -3040,13 +4045,32 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             // Gated off on SVM and when jdk.incubator.vector is absent.
             if (FlpSimd.AVAILABLE
                     && n >= FlpSimd.SIMD_THRESHOLD
-                    && (sinkKind == FLP_SINK_SUM || sinkKind == FLP_SINK_COUNT
-                        || sinkKind == FLP_SINK_REDUCE)
-                    && sinkPredCmpOp < 0) {
+                    && ((sinkKind == FLP_SINK_SUM || sinkKind == FLP_SINK_COUNT
+                         || sinkKind == FLP_SINK_REDUCE)
+                        // A SHORT-CIRCUIT sink vectorises too: compare a
+                        // vector of lanes and test the mask. `any` is
+                        // anyTrue, `all` is "no surviving lane fails", `find`
+                        // takes firstTrue — and lanes ascend, so the lowest
+                        // set lane is the first match in SOURCE order.
+                        //
+                        // These were excluded, so a chain under `any` ran the
+                        // scalar loop while the same walk under a `fold`
+                        // vectorised: 477 ps/elem against 81 for a filter+fold
+                        // doing MORE work. The win is in the walk, not the
+                        // exit — a predicate matching at element 0 returns
+                        // immediately either way.
+                        || sinkKind == FLP_SINK_ANY || sinkKind == FLP_SINK_ALL
+                        || sinkKind == FLP_SINK_FIND || sinkKind == FLP_SINK_NONE)
+                    // Still required for the ACCUMULATING sinks, which have no
+                    // sink predicate of their own and never had one here.
+                    && (sinkPredCmpOp < 0
+                        || sinkKind == FLP_SINK_ANY || sinkKind == FLP_SINK_ALL
+                        || sinkKind == FLP_SINK_FIND || sinkKind == FLP_SINK_NONE)) {
                 return FlpSimd.flpRangeSimd(start, n, sinkKind,
-                        mapOp, mapOperand, selfMap,
+                        mapOp, mapOperand, selfMap, extraOps, extraLits,
                         filterPreOp, filterPreRhs, filterCmpOp, filterCmpRhs,
-                        foldOp, foldInit, filterFirst);
+                        foldOp, foldInit, filterFirst,
+                        sinkPredPreOp, sinkPredPreRhs, sinkPredCmpOp, sinkPredCmpRhs);
             }
 
             long acc = foldInit;
@@ -3079,6 +4103,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
                 // ── Map stage ──
                 if (mapOp >= 0) v = FusedLongPipeline.flpOp(mapOp, v, selfMap ? v : mapOperand);
+                if (extraOps != 0) v = flpApplyExtraMaps(extraOps, extraLits, v);
 
                 // ── Filter-second path ──
                 if (!filterFirst && filterCmpOp >= 0) {
@@ -3151,8 +4176,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @TruffleBoundary
         private static Object flpResultToSeq(long[] data, int count) {
             if (count == 0) return MezzeSeq.empty();
-            long[] trimmed = count == data.length ? data : java.util.Arrays.copyOf(data, count);
-            return MezzeSeq.fromLongs(trimmed);
+            // No trim. The buffer was sized to the SOURCE and filled to `count`,
+            // and nothing else references it, so the storage takes it as a
+            // prefix -- see LongSeqStorage.ofPrefix for why that is sound and
+            // what the copy used to cost.
+            return MezzeSeq.fromStorage(
+                    com.mezze.datastructures.seq.LongSeqStorage.ofPrefix(data, count));
         }
 
         /** Materialize a long[] into a MezzeList. */
@@ -3248,6 +4277,127 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             LoopNode.reportLoopCount(node, count);
 
             return resultIdx == 0 ? p0 : p1;
+        }
+    }
+
+    // Config packing for FusedLongTailLoop3P:
+    //   bits 0-3:   condCmpOp   (cmp op for the loop condition)
+    //   bits 4-5:   condOnIdx   (which param the condition compares: 0/1/2)
+    //   bits 6-9:   p0UpdateOp  (arith op, +1 bias: 0 = identity)
+    //   bits 10-13: p1UpdateOp
+    //   bits 14-17: p2UpdateOp
+    //   bits 18-19: resultIdx   (which param the base case returns)
+    //   bits 20-21: p0RhsSrc    (0 = literal child, else param index + 1)
+    //   bits 22-23: p1RhsSrc
+    //   bits 24-25: p2RhsSrc
+    //
+    // WHY RhsSrc IS TWO BITS AND NOT A FLAG. The 2-param packing above uses a
+    // single `pNRhsIsOtherP` bit, which works only because with two params
+    // "the other one" is unambiguous. With three it has to NAME the source, or
+    // `acc = acc + k` and `acc = acc + n` pack identically and the loop
+    // silently computes the wrong one.
+
+    static int fltlPack3(int condCmpOp, int condOnIdx,
+                         int p0Op, int p1Op, int p2Op,
+                         int resultIdx,
+                         int p0RhsSrc, int p1RhsSrc, int p2RhsSrc) {
+        return (condCmpOp & 0xF)
+             | ((condOnIdx & 0x3) << 4)
+             | (((p0Op + 1) & 0xF) << 6)
+             | (((p1Op + 1) & 0xF) << 10)
+             | (((p2Op + 1) & 0xF) << 14)
+             | ((resultIdx & 0x3) << 18)
+             | ((p0RhsSrc & 0x3) << 20)
+             | ((p1RhsSrc & 0x3) << 22)
+             | ((p2RhsSrc & 0x3) << 24);
+    }
+
+    /** Right-hand operand for one param update: a literal, or another param. */
+    private static long fltl3Rhs(int src, long lit, long p0, long p1, long p2) {
+        switch (src) {
+            case 1: return p0;
+            case 2: return p1;
+            case 3: return p2;
+            default: return lit;
+        }
+    }
+
+    /**
+     * Fused THREE-parameter long tail-loop. Same shape as
+     * {@link FusedLongTailLoop}, one parameter wider:
+     * <pre>
+     *   let f = { p0, p1, p2 } ->
+     *     if pK cmpOp condRhs
+     *       then resultParam
+     *       else f { p0 = p0 op0 rhs0, p1 = p1 op1 rhs1, p2 = p2 op2 rhs2 }
+     * </pre>
+     *
+     * WHY A THIRD HAND-WRITTEN ARITY RATHER THAN ONE VARIADIC OPERATION.
+     * `@Variadic Object[]` allocates a fresh array per execution — the record
+     * operation in this file says so in its own comment — and an Object[] would
+     * re-box the longs this operation exists to keep unboxed. So the arity is
+     * specialised, which is the same reason CallDirect1/2/3 are separate.
+     *
+     * WHY IT IS WORTH IT, MEASURED: a 3-param tail loop with ordinary direct
+     * arithmetic and no closure anywhere cost 34 ns/iter against 0.45 for the
+     * identical 2-param loop, purely because the tiers stopped at two and it
+     * fell through to the BDSL loop. `bench/cases/dispatch_probe` carries that
+     * comparison as `via_3p` against `direct`.
+     *
+     * <p>Children (in order): p0Init, p1Init, p2Init, condRhs, p0UpdateRhs,
+     * p1UpdateRhs, p2UpdateRhs.
+     */
+    @Operation
+    @ConstantOperand(type = int.class)  // config: packed ops (PE constant)
+    public static final class FusedLongTailLoop3P {
+
+        @Specialization
+        public static long doLoop(
+                int config,
+                long p0Init, long p1Init, long p2Init,
+                long condRhs, long p0Rhs, long p1Rhs, long p2Rhs,
+                @Bind Node node,
+                @Cached InlinedLoopConditionProfile loopProfile) {
+            CompilerAsserts.partialEvaluationConstant(config);
+            int condCmpOp = config & 0xF;
+            int condOnIdx = (config >> 4) & 0x3;
+            int p0Op      = ((config >> 6) & 0xF) - 1;
+            int p1Op      = ((config >> 10) & 0xF) - 1;
+            int p2Op      = ((config >> 14) & 0xF) - 1;
+            int resultIdx = (config >> 18) & 0x3;
+            int p0Src     = (config >> 20) & 0x3;
+            int p1Src     = (config >> 22) & 0x3;
+            int p2Src     = (config >> 24) & 0x3;
+
+            long p0 = p0Init, p1 = p1Init, p2 = p2Init;
+            int count = 0;
+
+            // Loop while the condition is NOT met: the condition triggers the
+            // base case, exactly as in the 2-param operation.
+            while (loopProfile.inject(node,
+                    !FusedLongPipeline.flpCmp(condCmpOp,
+                            condOnIdx == 0 ? p0 : condOnIdx == 1 ? p1 : p2,
+                            condRhs))) {
+                // All three new values are computed from the OLD ones before
+                // any is stored, so `p1 = p1 + p0` sees the old p0 — the same
+                // rule the 2-param operation follows.
+                long newP0 = p0Op >= 0
+                        ? FusedLongPipeline.flpOp(p0Op, p0, fltl3Rhs(p0Src, p0Rhs, p0, p1, p2))
+                        : p0;
+                long newP1 = p1Op >= 0
+                        ? FusedLongPipeline.flpOp(p1Op, p1, fltl3Rhs(p1Src, p1Rhs, p0, p1, p2))
+                        : p1;
+                long newP2 = p2Op >= 0
+                        ? FusedLongPipeline.flpOp(p2Op, p2, fltl3Rhs(p2Src, p2Rhs, p0, p1, p2))
+                        : p2;
+                p0 = newP0;
+                p1 = newP1;
+                p2 = newP2;
+                count++;
+            }
+            LoopNode.reportLoopCount(node, count);
+
+            return resultIdx == 0 ? p0 : resultIdx == 1 ? p1 : p2;
         }
     }
 
@@ -4196,7 +5346,48 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return invokeHandlerOp(effectHash, opName, arg, cachedCV, callNode);
         }
 
-        @Specialization(assumptions = "effectStable",
+        // NO `assumptions` HERE, and that is the point. This specialization
+        // already RE-RESOLVES AND COMPARES on every call —
+        // `resolveHandler(effectHash) == cachedHandler` — which is strictly
+        // stronger than any assumption that the handler has not changed. The
+        // assumption it used to carry (`effectStable`) was therefore redundant
+        // for correctness and did nothing but make this tier UNAVAILABLE at
+        // exactly the moment it is needed.
+        //
+        // WHAT THAT COST, measured. `StabilityAssumption.CHURN_LIMIT` is 8 and
+        // the back-off is permanent, so after eight install/uninstall pairs of
+        // an effect's handler the per-effect assumption is NEVER_VALID for the
+        // life of the process. With `effectStable` on this specialization too,
+        // both cached tiers vanished together and every later perform of that
+        // effect fell to `doGeneric`: `bench/cases/effectsurface` kernel 9
+        // measured 25 118 ps/iter against kernel 3's 826 in a pristine
+        // process — 31x, permanently. Kernel 10 pins it on this axis: churning
+        // a DIFFERENT effect leaves the per-effect assumption intact and costs
+        // 987 against 857, so the 31x is this tier's absence and not the global
+        // assumption that `EffectBinding` uses.
+        //
+        // Now the tiers degrade instead of collapsing:
+        //   - `doCachedSingleThreaded` — assumption only, NO check. Every
+        //     single-threaded program with a stable handler, and it must stay
+        //     free: the check it skips is the ThreadLocal probe the cache
+        //     exists to remove.
+        //   - this one — cache plus a per-call probe and reference compare.
+        //     Reached when a second thread installs handlers OR when the
+        //     effect's handler has churned past the limit.
+        //   - `doGeneric` — only when the handler genuinely is not the cached
+        //     one.
+        // THE ONE ASSUMPTION THIS TIER MAY CARRY, and why it is not the one
+        // that was removed. `effectStable` dies on churn, which is what made
+        // both cached tiers vanish together and cost 31x. `churnedTier` is
+        // invalidated ONLY by StabilityAssumption.reset(), which happens when
+        // a run of memo hits has proved the chain settled again. So churn
+        // leaves this tier in place — the 2.6x that removing `effectStable`
+        // bought is untouched — while recovery can DROP it, which is the only
+        // way to make the DSL re-specialize and re-ask for a fresh
+        // `effectStable`. Without an assumption here a reset had nothing to
+        // dislodge: this tier kept matching and the free tier was unreachable
+        // for the life of the process.
+        @Specialization(assumptions = "churnedTier",
                         guards = {"cachedHandler != null", "cachedTarget != null",
                                   "resolveHandler(effectHash) == cachedHandler"},
                         excludeForUncached = true)
@@ -4205,7 +5396,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 @Cached("resolveFieldIndex(cachedHandler, opName)") int cachedFieldIndex,
                 @Cached("resolveCallTarget(cachedHandler, cachedFieldIndex)") CallTarget cachedTarget,
                 @Cached("resolveClosureValues(cachedHandler, cachedFieldIndex)") Object[] cachedCV,
-                @Cached("getEffectStableAssumption(effectHash)") com.oracle.truffle.api.Assumption effectStable,
+                @Cached("getChurnedTierAssumption(effectHash)") com.oracle.truffle.api.Assumption churnedTier,
                 @Cached("createInlined(cachedTarget)") DirectCallNode callNode) {
             return invokeHandlerOp(effectHash, opName, arg, cachedCV, callNode);
         }
@@ -4273,6 +5464,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         static com.oracle.truffle.api.Assumption getEffectStableAssumption(Hash effectHash) {
             return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
                 .getEffectStableAssumption(effectHash);
+        }
+
+        @TruffleBoundary
+        static com.oracle.truffle.api.Assumption getChurnedTierAssumption(Hash effectHash) {
+            return com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
+                .getChurnedTierAssumption(effectHash);
         }
 
         @TruffleBoundary
@@ -4467,6 +5664,45 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
          *  a hash-keyed map + throws a String-formatted RuntimeException on miss;
          *  both reach blocklisted methods under SVM. Handler lookup happens
          *  once per handle-block install, not per op-call. #402. */
+        /**
+         * Resolved once per site, for the reasons given at length on
+         * {@link LookupParameterizedHandlerByHash#doCachedFromContext} — and
+         * here there is no second branch to exclude: the context is this
+         * operation's only source of an answer, and it does not take `params`
+         * at all. A parameterless performer installed in a loop was paying a
+         * `ConcurrentHashMap` probe against a 64-character hex key per install
+         * for a record that cannot change.
+         *
+         * <p>The context guard is load-bearing under
+         * {@code ContextPolicy.SHARED}; the hash needs none, being a
+         * {@code @ConstantOperand}.
+         */
+        @Specialization(guards = {"cachedHandler != null",
+                                  "contextOf(node) == cachedContext"},
+                        excludeForUncached = true)
+        @SuppressWarnings("unused")
+        public static Object doCached(Hash contentHash,
+                @Bind Node node,
+                @Cached("contextOf(node)")
+                    com.mezze.interpreter.runtime.MezzeContext cachedContext,
+                @Cached("resolveOrNull(contentHash, node)") Object cachedHandler) {
+            return cachedHandler;
+        }
+
+        /** Reads the CURRENT context, so it is not idempotent — see the
+         *  note on {@link LookupParameterizedHandlerByHash#contextOf}. */
+        @com.oracle.truffle.api.dsl.NonIdempotent
+        static com.mezze.interpreter.runtime.MezzeContext contextOf(Node node) {
+            return com.mezze.interpreter.runtime.MezzeContext.get(node);
+        }
+
+        /** The record, or null so the guard declines and the loud path runs. */
+        @TruffleBoundary
+        static Object resolveOrNull(Hash contentHash, Node node) {
+            Object handler = contextOf(node).lookupHandler(contentHash);
+            return handler instanceof MezzeRecord ? handler : null;
+        }
+
         @Specialization
         @TruffleBoundary
         public static Object doLookup(Hash contentHash, @Bind Node node) {
@@ -4491,6 +5727,82 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     @Operation
     @ConstantOperand(type = Hash.class)
     public static final class LookupParameterizedHandlerByHash {
+        /**
+         * THE HANDLER A CONTENT HASH NAMES CANNOT CHANGE, so resolving it once
+         * per site is enough — and resolving it per INSTALL was 14 ns of the
+         * 45 ns `install/iter`: two `ConcurrentHashMap` probes whose keys are
+         * 64-character hex strings, so a hit runs `String.equals` over all 64.
+         *
+         * <p>WHY THIS IS SOUND, AND WHY ONLY FOR ONE OF THE TWO BRANCHES.
+         * `handlersByHash` has exactly two writers: module load stores a
+         * `PerformerInfo` under the hash, and `lookupHandler` upgrades that
+         * entry in place to the inflated record on first use. Nothing removes
+         * an entry and nothing replaces a record, and a content hash is the
+         * identity of the performer's structure — so once a hash resolves to a
+         * `MezzeRecord`, that record IS the answer for the life of the context.
+         * That branch also ignores `params` entirely, which is why this
+         * specialization may.
+         *
+         * <p>The stdlib-factory branch below is NOT cacheable and this never
+         * caches it: it CALLS a guest factory with `params`, so reusing its
+         * result would call it once instead of once per install.
+         * {@link #resolveFromContextOnly} returns null whenever that branch
+         * could answer, and the guard then declines to cache.
+         *
+         * <p>THE CONTEXT GUARD IS NOT OPTIONAL. Mezze is
+         * {@code ContextPolicy.SHARED}, so this AST is shared between contexts
+         * in one engine, and a record resolved in one context must never be
+         * handed to another — the cross-context leak this codebase has been
+         * bitten by before. Comparing the context is two reference compares
+         * against a map probe plus a 64-character `equals`.
+         *
+         * <p>THERE IS NO GUARD ON THE HASH and there must not be one: it is a
+         * {@code @ConstantOperand}, so a site carries exactly one hash and a
+         * per-site cache can never be asked about a second. A guard against a
+         * variation that cannot occur reads as though it can.
+         */
+        @Specialization(guards = {"cachedRecord != null",
+                                  "contextOf(node) == cachedContext"},
+                        excludeForUncached = true)
+        @SuppressWarnings("unused")
+        public static Object doCachedFromContext(Hash contentHash, Object params,
+                @Bind Node node,
+                @Cached("contextOf(node)")
+                    com.mezze.interpreter.runtime.MezzeContext cachedContext,
+                @Cached("resolveFromContextOnly(contentHash, node)") Object cachedRecord) {
+            return cachedRecord;
+        }
+
+        /**
+         * NOT IDEMPOTENT, and the DSL has to be told so — this is the one place
+         * where the context guard's whole purpose shows up as a contract.
+         * Truffle asserts that a guard returns the same value for consecutive
+         * executions, and a guard that reads the CURRENT context does not: the
+         * full suite failed with "a guard was assumed idempotent" out of
+         * EffectPicIntegrationTest, which runs two contexts over one shared
+         * AST. That is exactly the case the guard exists for, so the answer is
+         * to declare the honest contract rather than to weaken the guard.
+         */
+        @com.oracle.truffle.api.dsl.NonIdempotent
+        static com.mezze.interpreter.runtime.MezzeContext contextOf(Node node) {
+            return com.mezze.interpreter.runtime.MezzeContext.get(node);
+        }
+
+        /**
+         * The record for this hash IF the context is what answers for it, and
+         * null otherwise — including whenever the stdlib factory could answer,
+         * because that branch must run per install. See
+         * {@link #doCachedFromContext}.
+         */
+        @TruffleBoundary
+        static Object resolveFromContextOnly(Hash contentHash, Node node) {
+            if (MezzeLanguage.get(node).getCachedStdlibCallTarget(contentHash) != null) {
+                return null;
+            }
+            Object record = contextOf(node).lookupHandler(contentHash);
+            return record instanceof MezzeRecord ? record : null;
+        }
+
         @TruffleBoundary
         @Specialization
         public static Object doLookup(Hash contentHash, Object params, @Bind Node node) {
@@ -4826,6 +6138,368 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
 
 
+
+    /**
+     * A map lookup returning the VALUE or null, for the fused
+     * `match map::get { m, k } is Some { val } -> … , None -> …` pattern.
+     *
+     * <p>WHY. `__native_map_get` builds a `MezzeVariant` for the `Some`, and
+     * that allocation is the larger half of the operation. Measured on
+     * `bench/cases/allocsurface` at n=2e7, one kernel per process, with young
+     * collections as the evidence:
+     *
+     * <pre>
+     *   kernel            ps/iter   young
+     *   map size            1 172       3     a native call, no lookup
+     *   map has             6 111       3     the same lookup, returns Bool
+     *   map get            16 303      18     the same lookup, returns Option
+     * </pre>
+     *
+     * `has` sits on the tier control (6 180 ps, 3 collections), so the lookup
+     * itself allocates nothing and costs ~5 ns. The ~10 ns and the fifteen
+     * extra collections between `has` and `get` are the `Option` — <b>twice the
+     * cost of the lookup it wraps</b>. The same gap shows on `seq get`,
+     * `list get` and `bytes get`, which all allocate while their `has`/`size`
+     * siblings do not.
+     *
+     * <p>NULL MEANS ABSENT, unambiguously: Mezze has no null value, so a map
+     * can never hold one. `MezzeMap.get` already returns null for a missing
+     * key, which is why this needs no new lookup — only a way to reach the one
+     * that exists without wrapping its answer.
+     *
+     * <p>The emitter stores the result in a local and tests it with
+     * {@link IsNotNull}, so the lookup runs ONCE. Doing it twice would be worse
+     * than the allocation; the MUT version of this pattern could split into a
+     * bounds check and a read because both were free, and a hash lookup is not.
+     *
+     * <p>THE BOUNDARY STAYS, and {@link InlineMapContainsKey} carries the
+     * measurement that decided it.
+     */
+    @Operation
+    public static final class InlineMapGetRaw {
+        /** THE BOUNDARY STAYS: the paired probe measured 1.08x then 1.01x here,
+         *  inside the control spread. See `MezzeMap.get` for the table. */
+        @Specialization
+        @TruffleBoundary
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        public static Object doOp(com.mezze.datastructures.map.MezzeMap map, Object key) {
+            return map.get(key);
+        }
+    }
+
+    /**
+     * An indexed read returning the ELEMENT or null, for the same fused
+     * `match get { … } is Some/None` pattern as {@link InlineMapGetRaw}.
+     *
+     * <p>NULL MEANS OUT OF RANGE, and that is sound for all three of these:
+     * Mezze has no null value, so no container can hold one. `bytes::get`
+     * boxes its byte into a `Long` before returning it, so even there a
+     * present element is non-null.
+     *
+     * <p>The bounds check lives HERE rather than in the emitted code, which is
+     * what lets one operation stand in for the native's whole
+     * check-then-wrap body. The mut version of this pattern split into a
+     * separate bounds test and read; that is only worth it when the read can
+     * come back UNBOXED, which is a further step these do not take.
+     *
+     * <p>THE CONTAINER IS TAKEN AS `Object` AND DISPATCHED HERE, deliberately.
+     * A seq is EITHER a {@link com.mezze.datastructures.seq.MezzeSeq} OR a bare
+     * `Object[]` that was never wrapped, and a list has a third form again — so
+     * the native does not RECEIVE a container, it receives something it
+     * COERCES, in `NativeDispatch.getSeq`/`getList`. A fused read accepting
+     * only the canonical class is therefore narrower than the native it stands
+     * in for, which is not an optimisation but a change of semantics: it cost
+     * 39 interpreter tests, every one an `Object[]` seq arriving at a node with
+     * no specialization for it. Anything unrecognised here goes to the SAME
+     * coercion the native uses, so there is one answer to "what counts as a
+     * seq" and this cannot drift from it.
+     *
+     * <p>A DSL type guard would buy nothing anyway: the body is behind a
+     * boundary, so the guard is an `instanceof` either way, and doing it here
+     * makes the unsupported-specialization failure mode IMPOSSIBLE rather than
+     * merely unlikely.
+     *
+     * <p>AND THE BOUNDARY STAYS, which was not the obvious answer. A
+     * recognised container's read is a bounds test and ONE array load — the
+     * `long[]`, `Object[]` and `byte[]` are right there — so running it inside
+     * compiled code and leaving only the unrecognised representation behind a
+     * boundary looks free. MEASURED, two builds from identical source but for
+     * that split, interleaved, min of three, checksums equal:
+     *
+     * <pre>
+     *   allocsurface          base    boundary removed
+     *     seq get         16 992 ps       17 152     0.99x
+     *     list get        16 435          16 830     0.98x
+     *     bytes get       17 480          17 681     0.99x
+     * </pre>
+     *
+     * and it was reverted. The reason it could not have been much: these rows
+     * are ~17 ns around a read of a few hundred PICOseconds, and that ~17 ns is
+     * the loop, not the read — the same instrument puts a bare counted loop at
+     * 0.22 ns/iter and the same loop with one more operation in its body at
+     * 41 ns. Until that is fixed, nothing measurable here is about the read.
+     *
+     * <p>`list::get` stays O(n) but walks the cons cells ONCE; the native walks
+     * TWICE, because `ListNatives.get` bounds-checks with `size()` — itself a
+     * walk — before calling `get(i)`, which walks again. An `Object[]` seq or
+     * list is read IN PLACE, where the native allocates a wrapper around it
+     * first just to read one element.
+     */
+    @Operation
+    public static final class InlineSeqGetRaw {
+        /**
+         * THE BOUNDARY IS GONE, BUT ONLY BECAUSE `MezzeSeq.get` STOPPED BEING
+         * A MEGAMORPHIC CALL AT THE SAME TIME. Removing it alone measured
+         * 0.78x — a REGRESSION — and that reading stood for a while:
+         *
+         * <pre>
+         *   this boundary   MezzeSeq.get   seq::get
+         *     kept          delegating     3 561 ps   baseline
+         *     kept          concrete       3 550      null
+         *     REMOVED       delegating     4 781      0.78x WORSE
+         *     REMOVED       concrete       2 949      1.21x
+         * </pre>
+         *
+         * With the boundary gone and the call still an interface call over four
+         * storages, partial evaluation inlines a megamorphic call and the
+         * caller's graph grows for a read that did not get cheaper. With both
+         * gone there is one concrete array read to inline — the shape
+         * {@link InlineBytesGetRaw} always had, which is why the boundary alone
+         * was 1.44x there. Neither half is a fix on its own; see
+         * `MezzeSeq.get` for the measurement and the noise it had to clear.
+         *
+         * <p>LIST STILL KEEPS ITS BOUNDARY, and deliberately: removing it alone
+         * measured 0.71x and the PAIRED experiment has not been run for it. A
+         * list read is a loop over sealed-interface calls rather than one
+         * indexed load, so the shape that made seq work may not exist there.
+         * Do not remove it on the strength of this entry.
+         */
+        @Specialization
+        @SuppressWarnings("rawtypes")
+        public static Object doOp(Object container, long index) {
+            int i = (int) index;
+            if (i < 0) return null;
+            if (container instanceof Object[] arr) {
+                return i >= arr.length ? null : arr[i];
+            }
+            if (container instanceof com.mezze.datastructures.seq.MezzeSeq s) {
+                return i >= s.size() ? null : s.get(i);
+            }
+            return coerceThenGet(container, i);
+        }
+
+        @TruffleBoundary
+        @SuppressWarnings("rawtypes")
+        private static Object coerceThenGet(Object container, int i) {
+            com.mezze.datastructures.seq.MezzeSeq seq =
+                com.mezze.interpreter.nodes.builtin.NativeDispatch.coerceSeq(container, "xs");
+            return i >= seq.size() ? null : seq.get(i);
+        }
+    }
+
+    /** See {@link InlineSeqGetRaw}. */
+    @Operation
+    public static final class InlineListGetRaw {
+        /** PROBE: the paired cell, boundary off AND the walk's calls made
+         *  concrete — the combination that rescued {@link InlineSeqGetRaw}. */
+        @Specialization
+        @SuppressWarnings("rawtypes")
+        public static Object doOp(Object container, long index) {
+            int i = (int) index;
+            if (i < 0) return null;
+            if (container instanceof Object[] arr) {
+                return i >= arr.length ? null : arr[i];
+            }
+            if (container instanceof com.mezze.datastructures.list.MezzeList l) {
+                return walk(l, i);
+            }
+            return coerceThenWalk(container, i);
+        }
+
+        /**
+         * A cons cell's head and tail are FIELD READS once the receiver is
+         * concrete, where a sealed-interface call is not — and naming the three
+         * cons shapes is what makes removing the boundary pay instead of cost.
+         *
+         * <p>THE LAST BRANCH OF EACH CHAIN IS THE INTERFACE CALL, not `null`.
+         * `MezzeList` is sealed and the three shapes plus `MezzeNil` are all of
+         * it, so the fallback is unreachable today; writing it as `null` would
+         * mean that adding a fourth cons shape makes `list::get` answer `None`
+         * for an element that is present. A fast path may be slower than the
+         * general one, never different from it.
+         */
+        @SuppressWarnings("rawtypes")
+        private static Object walk(com.mezze.datastructures.list.MezzeList cur, int i) {
+            for (int k = 0; k < i; k++) {
+                if (cur instanceof com.mezze.datastructures.list.MezzeLongCons c) {
+                    cur = c.tail();
+                } else if (cur instanceof com.mezze.datastructures.list.MezzeCons c) {
+                    cur = c.tail();
+                } else if (cur instanceof com.mezze.datastructures.list.MezzeDoubleCons c) {
+                    cur = c.tail();
+                } else if (cur.isEmpty()) {
+                    return null;
+                } else {
+                    cur = cur.tail();
+                }
+            }
+            if (cur instanceof com.mezze.datastructures.list.MezzeLongCons c) {
+                return c.head();
+            }
+            if (cur instanceof com.mezze.datastructures.list.MezzeCons c) {
+                return c.head();
+            }
+            if (cur instanceof com.mezze.datastructures.list.MezzeDoubleCons c) {
+                return c.head();
+            }
+            return cur.isEmpty() ? null : cur.head();
+        }
+
+        @TruffleBoundary
+        @SuppressWarnings("rawtypes")
+        private static Object coerceThenWalk(Object container, int i) {
+            return walk(com.mezze.interpreter.nodes.builtin.NativeDispatch.coerceList(container, "xs"), i);
+        }
+    }
+
+    /** See {@link InlineSeqGetRaw}. */
+    @Operation
+    public static final class InlineBytesGetRaw {
+        /**
+         * NO BOUNDARY, and alone among the three — 1.52x, where seq and list
+         * both got WORSE. A recognised `MezzeBytes` read is `data[i]` on a
+         * final `byte[]`, with nothing polymorphic and nothing to box;
+         * {@link InlineSeqGetRaw} carries the table and why the other two
+         * differ. Only the unrecognised representation, which has to allocate
+         * a wrapper to be read at all, is still behind a boundary.
+         */
+        @Specialization
+        public static Object doOp(Object container, long index) {
+            int i = (int) index;
+            if (i < 0) return null;
+            if (container instanceof com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes b) {
+                return i >= b.length() ? null : (long) (b.get(i) & 0xFF);
+            }
+            return coerceThenGet(container, i);
+        }
+
+        /** See {@code InlineSeqGetRaw.coerceThenGet}. */
+        @TruffleBoundary
+        private static Object coerceThenGet(Object container, int i) {
+            com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes bytes =
+                com.mezze.interpreter.nodes.builtin.NativeDispatch.coerceBytes(container, "b");
+            return i >= bytes.length() ? null : (long) (bytes.get(i) & 0xFF);
+        }
+    }
+
+
+    /**
+     * `is_empty`, for every container that answers it — the Bool peer of
+     * {@link InlineMapSize}.
+     *
+     * <p>All eight of these were DECLARED and none had an operation, which is
+     * the half-finished position `size` was in: the declaration removes the
+     * per-call `MezzeRecord`, and without an operation the call still goes
+     * through the generic scalar native, whose `@TruffleBoundary` makes it
+     * PE-opaque. Each body here is the same delegate the native runs.
+     *
+     * <p>The `Object[]` case is not optional, for the reason given on
+     * {@link InlineMapSize}: a seq is EITHER a `MezzeSeq` OR a bare array.
+     */
+    @Operation
+    public static final class InlineContainerIsEmpty {
+        @Specialization
+        public static boolean doMap(com.mezze.datastructures.map.MezzeMap<?, ?> m) {
+            return m.isEmpty();
+        }
+
+        @Specialization
+        public static boolean doSet(com.mezze.datastructures.set.MezzeSet<?> s) {
+            return s.isEmpty();
+        }
+
+        @Specialization
+        public static boolean doSortedMap(com.mezze.datastructures.sorted.MezzeSortedMap<?, ?> m) {
+            return m.isEmpty();
+        }
+
+        @Specialization
+        public static boolean doSortedSet(com.mezze.datastructures.sorted.MezzeSortedSet<?> s) {
+            return s.isEmpty();
+        }
+
+        @Specialization
+        public static boolean doDeque(com.mezze.datastructures.deque.MezzeDeque<?> d) {
+            return d.isEmpty();
+        }
+
+        @Specialization
+        public static boolean doSeq(com.mezze.datastructures.seq.MezzeSeq<?> xs) {
+            return xs.isEmpty();
+        }
+
+        @Specialization
+        public static boolean doObjectArray(Object[] xs) {
+            return xs.length == 0;
+        }
+
+        @Specialization
+        public static boolean doList(com.mezze.datastructures.list.MezzeList<?> xs) {
+            return xs.isEmpty();
+        }
+
+        @Specialization
+        public static boolean doBytes(
+                com.mezze.interpreter.nodes.builtin.io.BytesNatives.MezzeBytes b) {
+            return b.isEmpty();
+        }
+    }
+
+    /**
+     * A deque's indexed read and its front read, returning the ELEMENT or null
+     * for the same fused `match … is Some/None` pattern as
+     * {@link InlineMapGetRaw} — and the reason they are here is that the
+     * elision covered map, seq, list and bytes and never deque, which left
+     * these two the slowest element reads in the language:
+     *
+     * <pre>
+     *   row                       before
+     *     deque::get by index    8 525 ps   41x the floor
+     *     deque::first           5 430      25x
+     *     list::get (reference)    730       3.3x
+     * </pre>
+     *
+     * A `MezzeDeque` is FINAL and its `get` is `buffer[(head + index) & mask]`
+     * — one array load behind some arithmetic, which is the shape that made
+     * the boundary removal worth 1.44x on bytes and 4.19x on list, rather than
+     * the shape that made it 0.78x on seq.
+     *
+     * <p>NULL MEANS ABSENT, as everywhere in this family: Mezze has no null
+     * value, so no container can hold one.
+     *
+     * <p>`revokeOwnership` inside `MezzeDeque.get` early-returns once the flag
+     * is set, so it is a boolean read here and not a per-call write.
+     */
+    @Operation
+    public static final class InlineDequeGetRaw {
+        @Specialization
+        @SuppressWarnings("rawtypes")
+        public static Object doOp(com.mezze.datastructures.deque.MezzeDeque d, long index) {
+            int i = (int) index;
+            if (i < 0 || i >= d.size()) return null;
+            return d.get(i);
+        }
+    }
+
+    /** See {@link InlineDequeGetRaw}; the front element, or null when empty. */
+    @Operation
+    public static final class InlineDequeFirstRaw {
+        @Specialization
+        @SuppressWarnings("rawtypes")
+        public static Object doOp(com.mezze.datastructures.deque.MezzeDeque d) {
+            return d.size() == 0 ? null : d.get(0);
+        }
+    }
 
     /** Null check — used by the fused MutGetRaw + match pattern. */
     @Operation
@@ -5778,9 +7452,84 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * chunks. Non-string expression values go through
      * {@link String#valueOf(Object)}.
      */
+    /**
+     * {@link #buildInterpolatedString} for exactly one value, with no array to
+     * read it out of. Same three routes and the same reasons; see there.
+     */
+    @TruffleBoundary
+    private static String buildInterpolatedString1(String[] parts, Object value) {
+        if (value instanceof String v) {
+            if (parts.length == 2) {
+                // One literal and one value: `String.concat` allocates once.
+                // Not `+`, whose `StringConcatHelper` is on native-image's
+                // runtime-compilation blocklist.
+                return parts[0] == null ? v.concat(parts[1]) : parts[0].concat(v);
+            }
+            int len = v.length();
+            for (String p : parts) if (p != null) len += p.length();
+            StringBuilder sb = new StringBuilder(len);
+            for (String p : parts) sb.append(p != null ? p : v);
+            return sb.toString();
+        }
+        int estimate = 16;
+        for (String p : parts) if (p != null) estimate += p.length();
+        StringBuilder sb = new StringBuilder(estimate);
+        for (String p : parts) {
+            if (p == null) sb.append(String.valueOf(value));
+            else sb.append(p);
+        }
+        return sb.toString();
+    }
+
     @TruffleBoundary
     private static String buildInterpolatedString(String[] parts, Object[] exprValues) {
-        // Pre-size: sum literal chunk lengths + 16 chars per expression slot
+        // EVERY VALUE ALREADY A STRING is the common case — `"a$(b)"` on text,
+        // and `"$(n.to_str {})"` on anything else, because interpolation needs
+        // `Str` and the conversion has happened by the time the value arrives.
+        // It is worth two things: an EXACT size, and for the commonest shape no
+        // builder at all.
+        //
+        // `bench/cases/allocsurface` at n=2e7: interpolating one string into
+        // one literal measured 15 287 ps/iter with 38 young collections against
+        // 9 784 and 17 for `str::concat` of the same two pieces — 1.56x, on a
+        // desugaring whose target is that concat. Four allocations against two:
+        // the variadic array, the builder, its char array, and the result. The
+        // 16-chars-per-slot estimate was most of the difference; a two-character
+        // result was asking for seventeen.
+        int exprLen = 0;
+        boolean allStrings = true;
+        for (Object v : exprValues) {
+            if (v instanceof String s) exprLen += s.length();
+            else { allStrings = false; break; }
+        }
+
+        if (allStrings) {
+            int litLen = 0;
+            int litCount = 0;
+            String onlyLit = null;
+            for (String p : parts) {
+                if (p != null) { litLen += p.length(); litCount++; onlyLit = p; }
+            }
+            // ONE literal and ONE value: `String.concat` allocates once and is
+            // an ordinary method, NOT the `+` operator's `StringConcatHelper`,
+            // which is on native-image's runtime-compilation blocklist (see
+            // project_native_blocklist_string_concat). Behind a boundary here
+            // either way, but the explicit call keeps it that way by
+            // construction.
+            if (parts.length == 2 && litCount == 1 && exprValues.length == 1) {
+                String v = (String) exprValues[0];
+                return parts[0] == null ? v.concat(onlyLit) : onlyLit.concat(v);
+            }
+            StringBuilder sb = new StringBuilder(litLen + exprLen);
+            int exprIdx = 0;
+            for (String p : parts) {
+                sb.append(p != null ? p : (String) exprValues[exprIdx++]);
+            }
+            return sb.toString();
+        }
+
+        // Mixed values: size the literals exactly and leave the old slack for
+        // the parts whose rendered length is not known until `String.valueOf`.
         int estimate = 0;
         for (String p : parts) {
             estimate += (p != null) ? p.length() : 16;

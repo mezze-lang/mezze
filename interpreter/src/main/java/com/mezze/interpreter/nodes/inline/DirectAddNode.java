@@ -93,10 +93,44 @@ public abstract class DirectAddNode extends MezzeNode {
     }
 
     /**
-     * String concatenation. `@TruffleBoundary` — `String + String` in JDK 24+
-     * lowers to `StringConcatHelper.simpleConcat`, a blocklisted method under
-     * native-image SVM runtime compilation. Boundary keeps the PE reachability
-     * clean; string concat is inherently allocating so the boundary is free. #402.
+     * String concatenation. `@TruffleBoundary` because `String + String` in
+     * JDK 24+ lowers to `StringConcatHelper.simpleConcat`, a blocklisted method
+     * under native-image SVM runtime compilation (#402).
+     *
+     * <p>THE BOUNDARY IS NOT FREE, and this comment used to say it was —
+     * "string concat is inherently allocating so the boundary is free". It
+     * costs 2x. Measured on `bench/cases/surface` with this annotation as the
+     * only difference between two builds:
+     *
+     * <pre>
+     *   row                     boundary   no boundary    ratio
+     *   concat    15 chars          8 662         4 323    2.00x
+     *   concat   131 chars         12 159         6 536    1.86x
+     *   str::size (control)           895           890    1.01x
+     *
+     *   fixed per concat            8 210         4 037
+     *   per character                30.1          19.1
+     * </pre>
+     *
+     * ~4.2 ns of FIXED cost per concatenation against 30 ps a character of
+     * copying — for a short string that is most of the operation, and it is the
+     * same per-op floor a boundary imposes everywhere else.
+     *
+     * <p>IT STAYS ANYWAY, and not for the reason above. Avoiding `+` does not
+     * help: `String.concat` has delegated to the same helper since JDK 21, and
+     * copying through a `char[]` with `getChars` fails the image build too —
+     * for a different reason worth knowing, since it is the one that closes the
+     * whole route. `getChars` bounds-checks, and the FAILURE path builds its
+     * message through `Preconditions.outOfBoundsMessage`, which reaches
+     * `List.of`, `Collection.toArray` and `ConcurrentHashMap.get` — all
+     * blocklisted. Without a boundary that error path becomes
+     * runtime-compilable. Every bounds-checked String accessor has the same
+     * shape, so the PE-safe formulations all end up allocating more than the
+     * 4.2 ns they save.
+     *
+     * <p>Verified in BOTH directions rather than assumed: with the boundary
+     * `mez build --native` succeeds in ~1m28s, without it the analysis phase
+     * fails in ~57s. Do not remove this without re-running that check.
      */
     @Specialization
     @TruffleBoundary

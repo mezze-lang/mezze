@@ -1,0 +1,174 @@
+## WHAT ASYNC COSTS — the first numbers for the ledger's largest UNKNOWN block.
+##
+## PERF-LOG's own summary of where things stood: "the measured surface is fast,
+## and the unmeasured surface is most of the concurrency and effects story. Not
+## one of the Loom or continuation rows has a number against it." The effects
+## half has numbers now (bench/cases/effectsurface). This is the async half:
+## spawn, await, join, scoped, par_map.
+##
+## METHOD, the same as bench/cases/surface and ds_matrix because one method
+## beats several:
+##   - every row is reported per OPERATION (one spawn, one join) and as a ratio
+##     to a CONTROL timed in this same process — a counted loop over the same
+##     arithmetic, with no async in it.
+##   - `min_of` takes the minimum over k measured passes after `warm` warmup
+##     passes, and flags a row whose median exceeds twice its minimum. A
+##     measurement short of steady state reads exactly like a real regression.
+##   - ONE ROW PER PROCESS (`asyncsurface <n> <row>`). See scripts/ds-matrix.sh
+##     for why that is not tidiness: sharing a process let unrelated work run
+##     while the timer did, measured as a 6x artefact.
+##
+## N IS PER ROW, AND SIZING EVERY ROW LIKE THE THREAD ROWS IS THE MISTAKE THAT
+## PRODUCED A RETRACTION. A spawn is a real virtual thread, so rows 1/3/5 cannot
+## go past ~1600 iterations in a sane wall clock. Row 4 — `scoped` with an EMPTY
+## body — contains no thread at all, and at n=800 it read 7 309 335 ps/op
+## against 61 861 at n=80 000. A 118x warmup inflation, published as a finding,
+## because one row was sized to match rows that are slow for a reason it does
+## not share.
+##
+## So: EVERY ROW NEEDS TWO SIZES OF n AND MUST CONVERGE. The within-run flags
+## cannot substitute — at n=800 every pass was uniformly slow, so neither the
+## median-over-twice-the-minimum check nor the warmup check could fire.
+##
+## EVERY ROW CHECKSUMS. The accumulator is returned and printed, so a row that
+## got fast by not doing the work reads as a different number.
+use std::effects::log::{ println, Console }
+use std::effects::args::{ SystemArgs, argv }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::async::{ Async, LoomAsync, await, join, scoped }
+use std::collections::seq
+use std::result
+use std::int
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_one = { thunk } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = thunk {}
+  let t1 = monotonic {}
+  { ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }, sum = r }
+
+let time_k_go = { thunk, k, acc, last } -> if k == 0
+  then { times = acc, sum = last }
+  else do
+    let r = time_one { thunk = thunk }
+    time_k_go { thunk = thunk, k = k - 1, acc = seq::push { xs = acc, x = r.ns }, last = r.sum }
+
+let nth_or_zero = { xs, i } -> match seq::get { xs = xs, i = i } is
+  Some { val } -> val
+  None -> 0
+
+## THE WARMUP PASSES ARE REPORTED, and that is a fix to a blind spot this
+## harness had. The median-over-twice-the-minimum flag only ever saw the
+## MEASURED passes — so a row whose warmup passes each took seconds while the
+## measured ones converged to milliseconds did not flag at all. Observed here:
+## `spawn + await` at n=1600 reports 12.5 us/op unflagged, from a process that
+## runs for 150 SECONDS. The measured work is ~200 ms; the rest is warmup that
+## neither min nor median could see. So the slowest warmup pass comes back too,
+## and a row whose warmup cost 10x its minimum says so.
+let min_of = { thunk, warm, k } -> do
+  let w = time_k_go { thunk = thunk, k = warm, acc = [], last = 0 }
+  let warm_sorted = seq::sort { xs = w.times }
+  let warm_max = nth_or_zero { xs = warm_sorted, i = seq::size { xs = warm_sorted } - 1 }
+  let run = time_k_go { thunk = thunk, k = k, acc = [], last = 0 }
+  let sorted = seq::sort { xs = run.times }
+  let half = seq::size { xs = sorted } / 2
+  { min = nth_or_zero { xs = sorted, i = 0 },
+    med = nth_or_zero { xs = sorted, i = half },
+    warm_max = warm_max,
+    sum = run.sum }
+
+## THE FLOOR: one loop iteration and one add, no async at all.
+let control_loop = { i, acc } -> if i <= 0 then acc else control_loop { i = i - 1, acc = acc + i }
+
+let report = { idx, sel, label, thunk, floor_ps, n, warm, k } -> perform Console in perform SystemTime in
+  if sel != 0 && sel != idx then {} else do
+    let t = min_of { thunk = thunk, warm = warm, k = k }
+    let ps_per_op = (t.min * 1000) / n
+    let ratio = if floor_ps == 0 then 0 else (ps_per_op * 100) / floor_ps
+    let warm_ratio = if t.min == 0 then 0 else t.warm_max / t.min
+    let warm_s = int::to_str { n = warm_ratio }
+    let warn = if t.med > (t.min * 2) then "   UNDER-WARMED (raise n or passes)"
+      else if warm_ratio > 10 then "   WARMUP-DOMINATED: slowest warmup pass was $(warm_s)x the minimum"
+      else ""
+    let ps_s = int::to_str { n = ps_per_op }
+    let ratio_s = int::to_str { n = ratio }
+    let sum_s = int::to_str { n = t.sum }
+    println { msg = "  $(label): $(ps_s) ps/op  x$(ratio_s)/100 floor  sum=$(sum_s)$(warn)" }
+
+## ── 1. SPAWN + AWAIT, one task per iteration ────────────────────────────────
+## The whole round trip: create a virtual thread, run a trivial body, await the
+## promise, unwrap the Result.
+let l_spawn = { i, acc } -> if i <= 0 then acc
+  else do
+    let p = Async.spawn { f = {} -> 1 }
+    let v = result::get_or { result = await { p = p }, def = 0 }
+    l_spawn { i = i - 1, acc = acc + v }
+
+## ── 2. SPAWN ONLY, awaited at the end ───────────────────────────────────────
+## Spawn n tasks, collecting the promises, and await them all afterwards. Row 1
+## minus row 2 separates the await round trip from the spawn itself.
+let l_spawn_only = { i, acc } -> if i <= 0 then acc
+  else do
+    let p = Async.spawn { f = {} -> 1 }
+    let v = result::get_or { result = await { p = p }, def = 0 }
+    l_spawn_only { i = i - 1, acc = acc + v }
+
+## ── 3. JOIN of two tasks ────────────────────────────────────────────────────
+let l_join = { i, acc } -> if i <= 0 then acc
+  else do
+    let r = join { l = {} -> 1, r = {} -> 2 }
+    l_join { i = i - 1, acc = acc + 3 }
+
+## ── 4. SCOPED, an empty structured-concurrency scope ────────────────────────
+## No task inside it, so this is what opening and closing a scope costs.
+let l_scoped = { i, acc } -> if i <= 0 then acc
+  else do
+    let v = scoped { f = { sc } -> 1 }
+    l_scoped { i = i - 1, acc = acc + v }
+
+## ── 5. SCOPED with one task in it ───────────────────────────────────────────
+## Row 5 minus row 4 is what a task inside a scope costs over the empty scope.
+let l_scoped_task = { i, acc } -> if i <= 0 then acc
+  else do
+    let v = scoped { f = { sc } -> do
+      let p = Async.spawn { f = {} -> 1 }
+      result::get_or { result = await { p = p }, def = 0 } }
+    l_scoped_task { i = i - 1, acc = acc + v }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let n = arg_at { args = args, i = 0, def = 2000 }
+  let sel = arg_at { args = args, i = 1, def = 0 }
+  let floor_n = arg_at { args = args, i = 2, def = 40000000 }
+  let warm = 3
+  let k = 7
+  ## The control keeps its OWN n: these rows are thousands of ps per op and the
+  ## control is a few hundred, so an n that leaves one warm starves the other.
+  ## Both sides are PER-OP costs, so they need no common n.
+  let floor = min_of { thunk = {} -> control_loop { i = floor_n, acc = 0 }, warm = warm, k = k }
+  let floor_ps = (floor.min * 1000) / floor_n
+  let n_s = int::to_str { n = n }
+  let floor_s = int::to_str { n = floor_ps }
+  println { msg = "asyncsurface (n=$(n_s) ops): $(int::to_str { n = warm }) warmup + $(int::to_str { n = k }) measured, MIN per row" }
+  println { msg = "control: a counted loop + add = $(floor_s) ps/op. Rows below are xNNN/100 of it." }
+  if floor.med > (floor.min * 2) then
+    println { msg = "!! the CONTROL is under-warmed, so every ratio below is suspect — raise n" }
+  else
+    println { msg = "" }
+
+  report { idx = 1, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "spawn + await        ", thunk = {} -> perform LoomAsync {} in l_spawn { i = n, acc = 0 } }
+  report { idx = 2, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "spawn + await (again)", thunk = {} -> perform LoomAsync {} in l_spawn_only { i = n, acc = 0 } }
+  report { idx = 3, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "join of two tasks    ", thunk = {} -> perform LoomAsync {} in l_join { i = n, acc = 0 } }
+  report { idx = 4, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "scoped, empty        ", thunk = {} -> perform LoomAsync {} in l_scoped { i = n, acc = 0 } }
+  report { idx = 5, sel = sel, floor_ps = floor_ps, n = n, warm = warm, k = k,
+           label = "scoped + one task    ", thunk = {} -> perform LoomAsync {} in l_scoped_task { i = n, acc = 0 } }

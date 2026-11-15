@@ -42,6 +42,17 @@ data class SolvedModule(
     val methodCallResolutions: Map<Pair<Loc, String>, ConstraintResult.MethodCallInfo>,
     /** Solved return type per call-site Loc; emit uses it for receiver dispatch. */
     val callReturnTypes: Map<Loc, MezzeType>,
+    /**
+     * Per-call-site INSTANTIATED callee arrow.
+     *
+     * A reference to a polymorphic function is emitted carrying the
+     * DECLARATION'S SCHEME, so every call site of one function shows the same
+     * scheme vars and the final substitution says nothing about them — while
+     * the solver did instantiate and resolve them per site. Without this the
+     * answer never reaches lowering, which then picks a dictionary from the
+     * only thing it can see: the receiver.
+     */
+    val callFunctionTypes: Map<Loc, MezzeType>,
     /** Solved per-match-case binding types; emit populates PatternBinding.type. */
     val matchCaseBindings: Map<Loc, Map<String, MezzeType>>,
     /** Solved (unerased) scrutinee type per Loc; emit stamps scrutineeSourceType. */

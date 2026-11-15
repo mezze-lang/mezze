@@ -242,24 +242,56 @@ class ConstraintGenerator(
                             as? TypingContext.LookupResult.Found
                         val placeholder =
                             (found?.binding as? TypingContext.Binding.Monomorphic)?.type
-                        // PURE bodies only. Unifying the self-reference unifies the
-                        // whole arrow, effect row included, and a row is not a set to
-                        // be equated through a recursive reference: `<*>` says "the
-                        // body performs effects and handles them itself", so equating
-                        // it with the row the self-call site produced reports
-                        // "declared `<*>` … but this body performs none"
-                        // (RecursiveArbitraryDerivationTest). The leak this equation
-                        // closes is an ability constraint, which an effectful
-                        // recursive function can still carry; that is the narrower
-                        // follow-up, and it needs the row question answered first.
-                        val valueRow = (result.type as? MezzeType.FunctionType)?.effects
-                        val pureBody = valueRow == null ||
-                            (!valueRow.performed && valueRow.allEffectNames.isEmpty())
-                        if (placeholder is MezzeType.VarType && annotationTypes[item] == null && pureBody) {
+                        // EQUATE THE TYPES, NEVER THE ROW.
+                        //
+                        // This used to run for PURE bodies only, because unifying
+                        // the self-reference unifies the whole arrow, row included,
+                        // and a row is not a set to be equated through a recursive
+                        // reference: `<*>` says "the body performs effects and
+                        // handles them itself", so equating it with the row the
+                        // self-call site produced reports "declared `<*>` … but this
+                        // body performs none" (RecursiveArbitraryDerivationTest).
+                        // The note here called the rest "the narrower follow-up,
+                        // and it needs the row question answered first".
+                        //
+                        // The answer is to drop the row from the equation and keep
+                        // the types: an effectful recursive function gets the same
+                        // equality with `effects = null` on the right, so param,
+                        // return and every ability-constraint variable unify while
+                        // the rows are left to the effect machinery that owns them.
+                        //
+                        // WHAT IT FIXES, and it is the last live mono defect. Two
+                        // loops identical but for where the subtrahend comes from:
+                        //
+                        //   plain = { i, acc } -> … plain { i = i - 1,       acc = acc + i }
+                        //   viaop = { i, acc } -> … viaop { i = i - one {},  acc = acc + i }
+                        //
+                        //   plain : { i: Int, acc: 'a } with NumAdd Int 'a having 'out = 'a -> 'a
+                        //   viaop : { i: Int, acc: 'a } with NumAdd Int 'a having 'out = out -> 'a
+                        //
+                        // `'out = 'a` against a FREE `out`. With no self-reference
+                        // equality nothing ties the accumulator's associated output
+                        // back to the accumulator, so no call site can resolve it,
+                        // the decl stays generic, and mono refuses it: `go_a` and
+                        // four siblings in `bench/cases/effectsurface` compiled as
+                        // `[i, acc, __dict_add]` — five of the eight
+                        // dictionary-carrying functions left in the bench suite.
+                        //
+                        // (It was NOT literal defaulting. `mez check` reports a bare
+                        // `0` as `Int`, and `plain` resolves to Int at its call site.
+                        // The binding was being dropped, not the literal's type.)
+                        val valueType = result.type
+                        if (placeholder is MezzeType.VarType && annotationTypes[item] == null) {
+                            val rowFree = when (valueType) {
+                                is MezzeType.FunctionType ->
+                                    if (valueType.effects == null) valueType
+                                    else valueType.copy(effects = null)
+                                else -> valueType
+                            }
                             listOf(
                                 Constraint.Equality(
                                     left = placeholder,
-                                    right = result.type,
+                                    right = rowFree,
                                     context = "`${item.variableName}` refers to itself, so that reference " +
                                         "has this binding's own type",
                                     loc = item.loc,
@@ -269,7 +301,7 @@ class ConstraintGenerator(
                     } else emptyList()
 
                     val allBindingConstraints = result.constraints + result.abilityConstraints + result.associatedTypeConstraints + patternResult.constraints + selfReference
-                    val solveResult = solver.solve(allBindingConstraints)
+                    val solveResult = solver.solve(allBindingConstraints, surfaceType = result.type)
                     when (solveResult) {
                         is ConstraintSolver.SolveResult.Failure -> {
                             perBindingSolveErrors.addAll(solveResult.errors)
@@ -743,6 +775,39 @@ class ConstraintGenerator(
                         // pinned by the equalities, never ran for exactly the programs
                         // that needed it.
                         val solveResult = solver.solve(result.constraints + abilityObligations)
+                        if (solveResult is ConstraintSolver.SolveResult.Success) {
+                            // ...and its ANSWERS are kept, not just its complaints.
+                            // The paragraph above says why this solve has to exist:
+                            // the global solve strips HasConstructor/HasField, so a
+                            // var those constraints pin is never pinned there. That
+                            // cuts both ways. This solve is the only one that binds
+                            // `'b` in `set::filter_map`'s `with Eq 'b, Hash 'b` for
+                            // a bare trailing expression whose callback RETURNS a
+                            // constructor (`{ val } -> Some { val = P.(val) }`) —
+                            // `'b` lives inside `Option 'b`, so only the stripped
+                            // HasConstructor reaches it. Reading the failures and
+                            // dropping the substitution meant a program the ability
+                            // check had ALREADY resolved (a `P` without `Eq` is
+                            // rejected here, so `'b` really is solved) still reached
+                            // emit with `'b` open: the per-site arrow was discarded
+                            // as unresolved, mono seeded no spec, and the call fell
+                            // back to a STRUCTURAL hash container — two elements
+                            // P's own Eq calls equal. The identical call `let`-bound
+                            // was correct. That is the fourth instance of this one
+                            // top-level-vs-bound asymmetry in this block, and the
+                            // first where the asymmetry is silently WRONG CODE
+                            // rather than a missing diagnostic.
+                            //
+                            // Safe to compose: TypeVar ids are globally unique and
+                            // `perBindingSubstitution` is the LOWER-precedence side
+                            // of the merge in TypeChecker (`solveResult
+                            // .compose(perBindingSubstitution)` keeps the receiver's
+                            // mappings), so the global solve stays authoritative
+                            // wherever the two meet — this only ADDS bindings for
+                            // variables it left open. Same argument as
+                            // `implOpSubstitution` beside it.
+                            perBindingSubstitution = solveResult.substitution.compose(perBindingSubstitution)
+                        }
                         if (solveResult is ConstraintSolver.SolveResult.Failure) {
                             // Keep only genuine ability failures — both the directly
                             // solved obligation and the deferred validateAbilityConstraints

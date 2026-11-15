@@ -266,7 +266,59 @@ class ConstraintSolver(
         val fixHints: List<FixHint> = emptyList(),
     )
 
-    fun solve(rawConstraints: List<Constraint>): SolveResult {
+    /**
+     * Every type variable in a PARAMETER or RESULT position of some function type in
+     * [constraints] — the variables a call site gets to choose, as opposed to the
+     * ones that only ever name an intermediate value.
+     *
+     * A function type's own `abilityConstraints` are deliberately NOT walked: a
+     * variable that occurs only there is exactly the ambiguous kind, and walking
+     * them would put every one of them back out of reach. See
+     * [AbilityChecker.callerDeterminableVars] for what the distinction buys.
+     */
+    /** The variables in the binding's own parameter and result positions; see the
+     *  `surfaceType` parameter of [solve]. */
+    private fun surfaceVars(surfaceType: MezzeType?): Set<TypeVar> {
+        if (surfaceType == null) return emptySet()
+        val acc = LinkedHashSet<Any>()
+        if (surfaceType is MezzeType.FunctionType) {
+            com.mezze.language.typechecker.constraints.collectVariables(surfaceType.paramType, acc)
+            com.mezze.language.typechecker.constraints.collectVariables(surfaceType.returnType, acc)
+        } else {
+            com.mezze.language.typechecker.constraints.collectVariables(surfaceType, acc)
+        }
+        return acc.filterIsInstanceTo(LinkedHashSet<TypeVar>())
+    }
+
+    private fun functionPositionVars(constraints: List<Constraint>): Set<TypeVar> {
+        val out = LinkedHashSet<TypeVar>()
+        val seen = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<MezzeType, Boolean>())
+        fun walk(t: MezzeType) {
+            if (t.isGround || !seen.add(t)) return
+            if (t is MezzeType.FunctionType) {
+                val acc = LinkedHashSet<Any>()
+                com.mezze.language.typechecker.constraints.collectVariables(t.paramType, acc)
+                com.mezze.language.typechecker.constraints.collectVariables(t.returnType, acc)
+                acc.filterIsInstanceTo(out)
+            }
+            t.anyChild { walk(it); false }
+        }
+        for (c in constraints) c.mapTypes { t -> walk(t); t }
+        return out
+    }
+
+    /**
+     * @param surfaceType the type of the binding these constraints come from, when
+     *   the caller knows it. It is NOT redundant with [functionPositionVars]: a
+     *   top-level `let add_ten = { x } -> x + 10` puts no function type in its own
+     *   constraints at all — the lambda's type is the generator's RESULT, and only
+     *   the body's constraints are solved — so without this `'x` looks like an
+     *   intermediate and gets defaulted, which froze `add_ten` to `{ x: Int } -> Int`
+     *   and made `HavingOutGeneralizationSoundnessTest`'s `f { x = 5.0 }` a type
+     *   error. The two sources cover different halves: this one the binding's own
+     *   parameters, the walk every lambda and callee underneath them.
+     */
+    fun solve(rawConstraints: List<Constraint>, surfaceType: MezzeType? = null): SolveResult {
         // Pre-solve simplification: drop reflexive equalities and exact
         // duplicates so the worklist below has fewer constraints to iterate.
         // Provably meaning-preserving — same solution set (see ConstraintSimplifier).
@@ -277,7 +329,10 @@ class ConstraintSolver(
         // reused across per-binding solves).
         poisonedVars.clear()
         deferredInherentLeftovers.clear()
-        abilityChecker.beginSolve()
+        abilityChecker.beginSolve(
+            functionPositionVars(constraints) + surfaceVars(surfaceType),
+            bindingKnown = surfaceType != null,
+        )
         var substitution = Substitution.empty
         val errors = mutableListOf<ConstraintError>()
         val warnings = mutableListOf<String>()
@@ -318,6 +373,10 @@ class ConstraintSolver(
         substitution = variantSolver.closePatternBasedVariants(substitution)
 
         substitution = solveMainWorklist(remainingHasConstructors + otherConstraints, substitution, warnings, errors)
+        // Every equality is solved, so a binding's surface type now says what it
+        // really is — the precondition for improving an operand off a known output
+        // (see AbilityChecker.improvementPhase).
+        abilityChecker.beginImprovementPhase()
         substitution = finalizeDeferredAbilities(substitution, errors)
         // #160: now the substitution is complete (incl. deferred ability
         // inference that pins e.g. `help`'s `'a` to Int). Re-check the inherent

@@ -432,6 +432,19 @@ stays, used only by `index.astro`. Needs the playground wasm rebuilt to ship, bu
 the behavior bug is in the editor wrapper, now removed.
 
 **STATUS 2026-10-28: NO open bugs in this file.** BUG 28 is fixed, as is the
+**STATUS 2026-11-07: TWO open bugs — BUG 35 and BUG 39.** BUG 38 is FIXED:
+every persistent Map and Set is now a hash-array-mapped trie with structural
+sharing, for every key type, so a derivation can no longer be observed in the
+structure it came from. BUG 39 is the same defect surviving in `MezzeBitSet`,
+which no Mezze program can reach — it is wired to nothing but its own tests.
+BUG 35 is a recursive LOCAL lambda that calls a function handling its own
+effect. `MezzeDeque` was probed for the same defect and is SOUND; everything
+else below is closed.
+
+**STATUS 2026-10-30: no open bugs at that date.** BUG 34 is fixed in both halves — the
+printed row is WRITABLE (`<..., *>` parses, P0137 names the wrong order) and
+PRECISE (a vacuous row variable no longer survives inference). Everything else in
+this file is closed. BUG 28 is fixed, as is the
 module-qualified type annotation below and numbered bugs 26, 29, 30, 31, 32 and
 33; 27 closed as a class. Everything claimed open outside this file was re-run
 and was stale — see the sweep below. Each fix has a regression test named
@@ -5335,3 +5348,1547 @@ and every `it` field's type is exactly the `for` type. Permitted and unaffected:
 `NumZero`/`NumOne`'s shape and is called as `NumZero.zero {}` with the produced
 type determining the impl), and `tag: { n: Int } -> Int` (the `for` type absent
 from the parameters).
+## BUG 35 — OPEN 2026-11-04: a recursive LOCAL lambda cannot call a function that handles its own effect
+
+### Symptom
+
+```mezze
+effect E where { op: {} -> Int <E> }
+impl E for H {} where { op = {} -> 1 }
+
+let handled = {} -> perform H {} in E.op {}
+
+let local_loop = { n } -> do
+  let go = { i, acc } ->
+    if i <= 0 then acc
+    else go { i = i - handled {}, acc = acc + i }   # rejected
+  go { i = n, acc = 0 }
+```
+
+```
+error[T0201]: Type mismatch for argument '{i, acc}' in call to 'go':
+  expected { i: Int, acc: 'a } with NumAdd Int 'a having 'out = 'c -> 'b <*>
+  but got  { i: 'd, acc: 'c } -> 'e
+```
+
+Nothing here performs an UNHANDLED effect. `handled` closes over its own
+`perform`, so `go` should be an ordinary pure recursive function.
+
+### The same loop at TOP LEVEL is accepted
+
+```mezze
+let go_top = { i, acc } ->
+  if i <= 0 then acc
+  else go_top { i = i - handled {}, acc = acc + i }
+```
+
+```
+handled : {} -> Int <*>
+go_top  : { i: Int, acc: 'a } with NumAdd Int 'a having 'out = out -> 'a <*>
+```
+
+So this is specific to the recursive LOCAL lambda, not to calling a handled
+function. `handled`'s type carries the `<*>` "handled here" marker; the
+top-level function's own signature can carry it and its self-call matches, while
+the local lambda's self-REFERENCE is typed without the row its body acquires —
+which is what the two sides of the mismatch are.
+
+### Why it matters beyond the error
+
+`<*>` means "handled here" — it is a marker, not an obligation, so a function
+carrying it is pure to its callers. A local recursive loop calling any such
+function is an everyday shape: anything that wraps its own handler
+(`comptime`, `noop`, early-return, exception) and is then used inside a
+`let`-bound loop.
+
+The workaround is to lift the loop to top level, which is what
+`bench/cases/effectsurface` does and says so.
+
+### Where to look
+
+`<*>`-carrying callee + recursive-let self-reference. The self-reference is
+registered before the body is checked (the recursive-let path), so the row the
+body turns out to need is not reflected back into it. Related:
+`project_effect_row_binds_to_the_arrow`, `project_star_performed_marker`,
+`project_perform_on_uncalled_function`.
+
+### Found by
+
+Writing `bench/cases/effectsurface` to fill the effects rows of the PERF-LOG
+ledger — kernels that install a handler per iteration. Not by a test.
+
+## BUG 36 — WITHDRAWN 2026-11-06, SAME DAY. Not a bug: that IS the most general type
+
+Filed as "an inherent method on a value whose type the caller pins cannot be
+resolved, and the structural fallback is unsatisfiable". Withdrawn after the
+user pointed out the thing I had not checked.
+
+### What I filed
+
+    let show = { x } -> x.to_str {}
+
+infers `{ x: { to_str: {} -> 'a } } -> 'a`, and so cannot be called with an
+`Int`. I called the structural refinement a wrong branch that inference should
+not have taken.
+
+### Why it is not a bug
+
+`to_str` IS NOT AN ABILITY. It is an inherent impl method —
+`stdlib/std/int.mz:179`, `impl Int where { to_str = { it } -> … }` — one per
+type, and an inherent impl is not something a signature can abstract over.
+There is no `ability ToStr`, so for an unknown `x` there is nothing the type
+system can say about it EXCEPT "has a `to_str` member", and the only form that
+says that is a structural record.
+
+So `{ x: { to_str: {} -> 'a } }` is not a guess and not a fallback. With no
+context it is the most general type expressible, which is exactly what
+inference is supposed to produce. That it cannot then be satisfied by `Int` is
+not inference failing — it is inherent impls not being abstractable, which is
+what abilities are for.
+
+The other two spellings in the original report follow from the same fact and
+are also correct: `(n / d * 100).to_str {}` cannot be typed (V0408 — no
+`NumMul` impl produces a record), and the deferred path's T0206 is the honest
+answer when nothing determines the receiver.
+
+### The abstraction exists and works
+
+`ability Inspect for 'a where { to_dbg: { it: 'a } -> Str }`
+(`stdlib/std/abilities/inspect.mz`), auto-derived for all types. `to_dbg` is an
+ability op, so it abstracts:
+
+    let show = { x } -> x.to_dbg {}
+
+    pub let main = {} -> perform Console in do
+      println { msg = show { x = 5 } }       # 5
+      println { msg = show { x = "hi" } }    # "hi"
+      println { msg = show { x = 2.5 } }     # 2.5
+
+One definition, three types, no annotation. Verified running, 2026-11-06.
+
+### The one thing that IS wrong, and it is a comment
+
+`stdlib/std/abilities/inspect.mz:2` says: *"Used for string interpolation:
+`"value is $(x)"` calls `x.to_dbg {}`"*. It does not. Interpolation requires
+`Str`:
+
+    let n = 42
+    println { msg = "int=$(n)" }
+
+    error[T0201]: String interpolation requires String type, but expression has
+    type Int
+
+Whether the comment is stale or describes intent that was never implemented is
+a design question for the author, not something to decide from here. It is also
+what misled me: `bench/cases/surface` uses `int::to_str { n = x }` in its
+interpolations, and I attributed that to this non-bug when it is simply how
+interpolation works.
+
+### The lesson, which is the reason this entry stays instead of being deleted
+
+I filed a typechecker bug without checking whether the member I was abstracting
+over was an ability. The error message even told me — `Available impls: impl
+NumMul Int for Int …` lists abilities, and `to_str` was not among anything —
+and I read the structural type as a defect because it was inconvenient for the
+program I happened to be writing. "Inference produced a type I did not want" is
+not evidence of a bug; the first question is whether the type is the most
+general one the system can express.
+
+## BUG 37 — FIXED 2026-11-06: case conversion read the HOST's locale, so `str::to_upper` and every HTTP header lookup were machine-dependent
+
+### Symptom
+
+Twelve call sites used `String.toUpperCase()` / `toLowerCase()` — the overloads
+that read `Locale.getDefault()`. Demonstrated on this machine with the default
+locale set to Turkish:
+
+```
+  str::to_upper { s = "i" }     elsewhere: I  (U+0049)     tr: İ  (U+0130)
+
+  header name folding
+    IF-MATCH             -> if-match              tr -> ıf-match              (U+0131)
+    X-API-KEY            -> x-api-key             tr -> x-apı-key
+    CONTENT-DISPOSITION  -> content-disposition   tr -> content-dısposıtıon
+    ACCEPT               -> accept                tr -> accept      (unaffected, no I)
+```
+
+Two distinct failures came out of one mistake.
+
+**The language primitives were not deterministic.** `str::to_upper`,
+`str::to_lower` and the `Char` pair returned a different string depending on
+the machine the program ran on. A language primitive cannot do that.
+
+**HTTP header lookup silently missed.** `HttpServerNatives` and `IONatives`
+lower-case an incoming header NAME to key the map the guest looks it up in. On
+a Turkish host a request's `If-Match` landed in that map under `ıf-match`, so
+`headers.get { k = "if-match" }` found nothing — no error, no warning, just a
+header that was present on the wire and absent to the program. Header names are
+ASCII and RFC 9110 folds them with ASCII rules, which is exactly what
+`Locale.ROOT` does and exactly what the default locale does not.
+
+### Why it was invisible
+
+Every development and CI machine involved runs an English locale, where the
+default and `Locale.ROOT` agree for ASCII. Nothing in the test suite set the
+default locale, so no test could tell the two overloads apart. The bug is
+reachable only by running the compiler on a host whose locale has different
+casing rules — which is to say, by a user rather than by us.
+
+### The fix
+
+`Locale.ROOT` at all twelve sites: the two primitives in
+`MezzeBytecodeRootNode`'s `InlineStringUnary`, their peers in
+`PrimitiveNatives` and `CharNatives`, the three header-folding sites in
+`HttpServerNatives` and `IONatives`, the wire-identifier switch in
+`HttpServerNatives`, an exception-message classifier in `IONatives`, and
+`NativeDispatch`'s SCREAMING_SNAKE_CASE conversion. Every one of them folds
+ASCII — an identifier, a protocol token, or a user string that must behave the
+same everywhere.
+
+Non-ASCII casing is unaffected and still works: `école` -> `ÉCOLE`, `αβγ` ->
+`ΑΒΓ`. This is about dropping the HOST's locale, not about restricting the
+primitives to ASCII.
+
+### The test
+
+`CaseConversionLocaleTest`: four tests that set the default locale to Turkish,
+assert ASCII results, and restore it in a `finally`. It discriminates —
+reverting one site to the default overload fails
+`strToUpperIgnoresTheHostLocale` and nothing else.
+
+Two details that matter in it. It carries a PREMISE GUARD: it asserts the JDK
+really does apply Turkish casing before testing anything, so that if a future
+JDK stopped doing so the test would fail loudly rather than pass for the wrong
+reason. And it is annotated `@ResourceLock(Resources.LOCALE)`, because the
+default locale is process-global — without that it could flip the locale out
+from under a test running in parallel.
+
+The three header-folding sites are not unit-testable without a live request, so
+they are covered by the protocol tests plus the mechanism this test
+demonstrates.
+
+### Found by
+
+Chasing `str::to_upper`, which the PERF-LOG surface bench had measured at 262x
+the control and whose cause I expected to be the char-at-a-time conversion. It
+is, but reading the call site to confirm that turned up the missing `Locale`
+argument instead. The perf question is still open and is the smaller of the
+two findings.
+
+
+## BUG 38 — FIXED 2026-11-07: a derivation corrupted the Map or Set it came FROM
+
+A map still in scope changes under you when another map is derived from it by
+replacing an existing key. Minimal repro, plain Mezze, no threads, no effects:
+
+```mezze
+use std::collections::map
+use std::option
+let fill = { i, m } -> if i <= 0 then m
+  else fill { i = i - 1, m = map::insert { m = m, k = i, v = i * 10 } }
+let base = fill { i = 64, m = map::empty {} }
+let derived = map::insert { m = base, k = 30, v = 777 }
+option::get_or { opt = map::get { m = base, k = 30 }, def = 0 }
+```
+
+**Prints 777. Must print 300.** `base` was never written to by the program.
+
+### Why 64 entries, and why this has been invisible
+
+At one entry a Map is a `SingleEntry` storage, which allocates on every put and
+so cannot mutate anything in place; the same program at that size answers
+correctly. 64 entries crosses into `LongHashMapStorage`, whose copy-on-write
+ownership token lets a storage that still OWNS its arrays write into them and
+hand the token to the derived storage.
+
+**Every small-size test of this behaviour therefore passes vacuously.** Two
+already in the tree did: `MapInsertInlineTest`'s "a base map is unchanged by a
+map derived from it" uses a two-entry base, and the first version of
+`PersistentReplaceSoundnessTest`'s hash-map case used a one-entry base. Both
+assert the right thing at a size that cannot reach the code that gets it wrong.
+
+### BLAST RADIUS — wider than a replace, and wider than Map
+
+The first version of this entry reasoned that inserting a NEW key was safe even
+with an in-place write, "because the base's own `size` bounds what it can see
+and the write lands outside it". **That is false for a hash table.** It is true
+of a sorted ARRAY, whose search never looks past `length`. `getLong` probes the
+shared `keys` array by hash until it meets `EMPTY_KEY`, and an in-place insert
+writes into the first empty slot of exactly that probe sequence — so the base's
+probe walks straight onto it. Measured, not reasoned:
+
+```
+  derivation from a 64-entry base          base observes it?
+  replace an existing key                  YES   (777 for 300)
+  insert a NEW key                         YES   (base contains_key 999 -> true)
+  remove a key                             no
+  size after a derived insert              no    (still 64)
+```
+
+So the base ends up **self-inconsistent**: `map::size` says 64 while
+`contains_key` says the 65th key is present. That is worse than a single wrong
+value — the structure's own invariants no longer hold.
+
+Removal is safe for a reason worth recording: `removeLong` calls
+`revokeOwnership()` and then clones unconditionally. **The two mutators disagree
+about the contract**, and the one that is correct is the one that does not take
+the fast path.
+
+Eight storages use the in-place pattern and all are affected:
+
+```
+  maps  LongHashMapStorage  StringHashMapStorage  DoubleHashMapStorage  HashMapStorage
+  sets  LongHashSetStorage  StringHashSetStorage  DoubleHashSetStorage  HashSetStorage
+```
+
+`EmptyMapStorage`, `SingleEntryMapStorage`, `SmallFlatMapStorage` and their Set
+counterparts hold no owner token and allocate per put, so they are correct —
+which is the whole reason this has stayed invisible.
+
+The Set case is the same program shape:
+
+```mezze
+use std::collections::set
+let fill = { i, s } -> if i <= 0 then s
+  else fill { i = i - 1, s = set::insert { s = s, x = i } }
+let base = fill { i = 64, s = set::empty {} }
+let derived = set::insert { s = base, x = 999 }
+set::contains { s = base, x = 999 }      ## True. Must be False.
+```
+
+### The design hole, in the design's own words
+
+`HashMapStorage`:
+
+> Copy-on-write ownership token. A map owns its table if ownerToken is non-null
+> and ownerToken[0] == this. On put/remove, ownership transfers to the new map
+> by setting ownerToken[0] = newMap. The old map's ownership check fails
+> (ownerToken[0] != this), so it will clone.
+
+Every clause is about the old map MUTATING afterwards — it "will clone" on its
+next write. The case the comment never considers is the old map being READ after
+the transfer. `getLong` does call `revokeOwnership()`, but the corruption has
+already happened by then: it occurs at the derivation, not at the read.
+
+So the token establishes "only one map may mutate these arrays", which is not
+the property a persistent map needs. It needs "no map may observe a mutation it
+did not make".
+
+### Regression tests, already written
+
+`interpreter/src/test/kotlin/.../stdlib/PersistentReplaceSoundnessTest.kt`, 12
+tests. Three fail and are `@Disabled` with a pointer here so the suite stays
+green: the Map replace, the Map new-key insert, and the Set new-key insert, each
+at 64 entries. The other nine pass and pin what IS correct — the derived
+structure's own contents, removal, the base's size, and the SortedMap
+equivalents, whose copying path is right today.
+
+All twelve pass under the diff-chain attempt described below, so they are known
+to be satisfiable and are not merely asserting a wish.
+
+### What it would take, and why no quick fix was shipped
+
+Making the replace branch clone instead of mutating is three lines, and it was
+written and VERIFIED to close this bug — the regression test above passes with
+it. It was not shipped because its cost was then measured rather than guessed:
+
+```
+  map::insert chain, keys already present   250 keys    1 000     4 000
+    HEAD, in-place (unsound)                  13 128   13 702    16 326   O(1)
+    clone on replace (correct)               391 765  1 420 019  5 795 685  O(n)
+    cost of correctness                        29.8x    103.6x     355x
+```
+
+So correctness on this path costs 30x at 250 keys, 104x at 1 000 and 355x at
+4 000, and grows without bound. Shipping a silent wrong value is worse than
+shipping a slow correct one — but there is a third option better than both, and
+it is already on the perf backlog, which is why this is filed OPEN with a repro
+and a disabled regression test rather than patched.
+
+And the naive fix is worse than those numbers suggest, because the measurement
+above is of a REPLACE chain. Cloning on every put also makes BUILDING a map
+O(n^2): `m = insert(m, k, v)` in a loop is the pattern the owner token exists
+for, and it is what every program that constructs a map does.
+
+#### Why in-place mutation cannot simply be made safe
+
+It needs to know the base is dead, and that is a liveness property the runtime
+cannot see. Ownership as implemented is not that property: it is established at
+construction and dropped only on a READ, so a base that is derived from and
+then read later was never observed to be alive at the moment it mattered.
+Invalidating the base on transfer and failing loudly on a later read would be
+sound, but a `Map` is a pure value and may not stop working because something
+was derived from it.
+
+So the fix is a structure that shares instead of copying.
+
+#### The diff chain was BUILT, was CORRECT, and is dead — measured
+
+The obvious cheap fix is a persistent array without rerooting: each superseded
+storage records the ONE slot the derivation overwrote plus a link to the storage
+that took the arrays, and any operation on a stale storage reconstructs its own
+view once by walking that chain. A derivation changes exactly one slot, and a
+storage can be superseded in place only once (afterwards it no longer holds the
+token, so the next derivation clones), so one diff per storage is the whole
+obligation.
+
+It was implemented for `LongHashMapStorage` and `LongHashSetStorage`, and **it
+works**: all twelve tests above pass with nothing disabled, including the Map
+replace, the Map new-key insert and the Set insert. Reads barely notice it —
+`map::get` +2%, `map::size` flat, `contains_key` +5.6%.
+
+Then the insert chain:
+
+```
+  map::insert chain, 1 000 keys, 2M ops      HEAD       diff chain
+    time                                   13 702 ps    66 722 ps   4.9x WORSE
+    young collections                            18           24
+    heap after a young collection             19 MB     2 571 MB
+    young pause                             0.7-0.8 ms   500-590 ms
+```
+
+**The base retains the entire chain.** `Superseded.by` points FORWARD at the
+successor, so a program that keeps any old version keeps every version derived
+after it: 2.57 GB surviving each collection where HEAD survives 19 MB. The 4.9x
+is that, not the volatile write.
+
+And the leak is not a detail of this encoding. Any scheme that lets the derived
+version mutate shared arrays must leave the old version able to reconstruct,
+which needs either forward links (retains successors, as above) or an undo log
+(unbounded, and retained by the CURRENT version, which is the one that appends
+to it). Notifying every live old version instead is O(chain) per write. **The
+whole family is dead**, which is worth knowing because it is the family every
+cheap fix belongs to.
+
+That leaves one candidate: **a HAMT**, path-copying on update — no version
+references another, nothing to undo, thread-safe by immutability, O(log32 n)
+everywhere. Build becomes slower than the current in-place O(1), and the
+shared-base case becomes dramatically faster.
+
+Either closes the other known defect on this surface at the same time:
+`map::insert` from a base somebody else holds costs 5.41 µs at 4 000 keys and is
+unbounded in map size (PERF-LOG, "a 338x cliff when the base map is shared").
+Both are the same missing property.
+
+### FIXED for `long` keys — `LongTrieMapStorage` / `LongTrieSetStorage`
+
+`LongHashMapStorage` and `LongHashSetStorage` are DELETED. In their place,
+hash-array-mapped tries with structural sharing: every field final, nothing
+overwritten, an update copying only one root-to-leaf path. All twelve tests in
+`PersistentReplaceSoundnessTest` pass with nothing disabled.
+
+What it cost and bought, at 1 000 keys:
+
+```
+  map::get (hit)            10 640 -> 13 460    1.27x slower
+  map::contains_key          5 172 ->  7 545    1.46x slower
+  map::size                    473 ->    489    flat
+  map::insert chain         13 702 -> 44 704    3.26x slower
+  set::contains              4 783 ->  4 765    flat
+  set::add chain             6 292 ->  6 286    flat
+
+  map::insert, SHARED base   250 keys    1 000      4 000
+    table                     278 611  1 305 284  5 407 531
+    trie                       32 251     44 816     63 164
+                                 8.6x        29x      85.6x FASTER
+```
+
+The shared-base slope went from linear to 1.4x per 4x the keys. And the number
+that says the structure is right: the trie's shared-base insert (44 816) equals
+its own chain insert (44 704), where the table had a **95x spread** between
+them. It was fast when the program threw the base away and wrong when it kept
+it; a persistent map costs the same either way.
+
+Two things fell out for free. **No collision nodes** — the 64-bit mix is a
+bijection, so distinct keys cannot share a full hash and must part within 64
+bits; depth is bounded at 13 and the impossible branch throws. **No sentinels**
+— the table reserved `Long.MIN_VALUE` and `MIN_VALUE+1` as empty/deleted
+markers and promoted any map using one as a key to boxed storage; that
+promotion is gone, with a test pinning it.
+
+### FIXED for every other key type too — `TrieMapStorage` / `TrieSetStorage`
+
+General-key persistent tries, WITH collision nodes: the Long version hashes
+through a bijection and provably cannot collide, while `hashCode()` is 32 bits
+and not injective, so two unequal keys can agree on all of it and must share a
+node. String, Double and generic keys all reach these now.
+
+**ROUTING THE PROMOTION WAS NOT ENOUGH, and a test is what said so.** The
+transforms (`map`, `filter`, `flatMap`, `mapValues`) do not promote — they
+collect into a `java.util.HashMap`/`HashSet` and call
+`HashMapStorage.fromMap` / `HashSetStorage.fromCollection` to build the result
+in one pass. Those constructors were untouched by the routing change, so a
+MAPPED Map or Set still carried this bug while every promotion path was fixed.
+`BulkBuildSoundnessTest` caught it; both bulk builders now have persistent
+counterparts. When a structure has more than one way in, fixing the one you were
+thinking about leaves the others exactly as broken.
+
+Double keys now BOX, where the specialised table held raw bits. Semantics are
+unaffected and tested, not asserted: `Double.equals` and `doubleToLongBits`
+agree on the only two cases that could differ — every NaN folds to one key, and
+`-0.0` stays distinct from `0.0` — and `DoubleStorageSmokeTest` pins both.
+
+The old storages remain in the tree, reachable ONLY through the explicit
+`copyToMutable()`/`mutAdd`/`mutRemove` API: opt-in mutability, the same pattern
+`MezzeSeq`, `MezzeBytes` and the sorted structures have, with no callers in the
+interpreter. That is not this bug, which was a PERSISTENT value changing
+underneath a program that never asked for mutation. The two `long` storages,
+which had no such excuse, were deleted.
+
+MEASURED since: `mapsurface` rows 10-13 cover `Str` keys, interleaved against
+the commit where the String table still existed. The trie costs the same for
+`Str` keys as for `long` ones — get 1.13-1.24x, contains_key 1.20x, replace
+chain 3.26x — so being general cost nothing extra. See PERF-LOG.
+
+### Discovered by
+
+Trying to give `MezzeSortedMap`'s replace path the same in-place fast path —
+which measured 5.63x at 4 000 keys and turned a linear slope logarithmic, and
+then failed its own soundness test with `expected: <10> but was: <20>`. That
+change was reverted. The test written to check it is what found the Map bug,
+and the first version of that test PASSED because it used a one-entry base: a
+soundness test at a size that cannot reach the code under test proves nothing.
+
+
+## BUG 39 — OPEN 2026-11-07: `MezzeBitSet.add` mutates in place, so a derivation is observable in the base
+
+The same defect as BUG 38, in the one structure that still had it. Not reachable
+from Mezze — see the severity note below — which is the only reason it is filed
+rather than fixed.
+
+```java
+MezzeBitSet base = MezzeBitSet.empty();
+for (int i = 0; i < 50; i++) base = base.add(i);
+MezzeBitSet derived = base.add(55);
+base.contains(55);   // true. Must be false.
+base.size();         // 50 — so the base is SELF-INCONSISTENT
+```
+
+`add` does `words[wordIndex] |= mask` while it still holds the ownership token
+and hands the token to the result. `cardinality` is per-instance, so the base's
+count does not move while its contents do.
+
+### Why the Deque is SOUND and this is not — the useful part
+
+`MezzeDeque` keeps its in-place writes and was probed at the same time: all five
+of its cases pass. The difference is not care, it is addressability.
+
+- A deque's reads are bounded by an explicit `[head, tail)` window.
+  `pushBack` writes at `tail` and `pushFront` at `head - 1`, both OUTSIDE the
+  base's window, which the base has no way to address. Its pops write nothing
+  at all — they narrow the window, share the buffer and revoke ownership.
+- A bitset has no window. `contains(i)` reads `words[i >>> 6]` for any `i`, so
+  there is nowhere unobservable to write.
+
+That is the same distinction that made the hash map's in-place insert unsafe
+while a sorted array's append was safe: whether the structure's reads are
+bounded away from the slot being written.
+
+### The one-line fix is correct and was reverted
+
+Removing the in-place branch — letting `add` always allocate — makes the two
+tests above pass, and then `:datastructures:test` dies with **Java heap space**
+before finishing the benchmarks. A bitset's words array is one long per 64 bits,
+so cloning per `add` looked cheap, and at the scale a benchmark exercises it is
+not: `DatastructuresBenchmark` builds a bitset by repeated `add` inside its
+timing loop, and every one of those adds now allocates.
+
+So this is the BUG 38 story again in miniature: the cheap fix is correct and
+costs more than it looks, and the real fix is a structure that shares — words
+in a small persistent trie, exactly as the Map and Set now do.
+
+### SEVERITY: not reachable from Mezze
+
+`MezzeBitSet` is referenced only by its own test and two benchmarks. No native
+exposes it, no stdlib module mentions it, and no interpreter code constructs
+it. So no Mezze program can observe this today, which is why it is filed OPEN
+rather than fixed at the cost of the memory profile.
+
+**It is also a deletion candidate** — an unwired data structure carrying a
+soundness defect — but it is ~600 lines of deliberate work that may be staged
+for a future `Set Int` representation, so that is a call for the maintainer
+rather than a cleanup.
+
+### Regression tests
+
+`datastructures/src/test/java/.../bitset/OwnerTokenSoundnessTest.java`. Eight
+tests: five for the Deque, which all pass and pin the property that makes it
+sound, and three for the BitSet. Two of those are `@Disabled` against this
+entry; the third — a base keeping a bit REMOVED from a derived set — passes,
+because `remove` clones.
+
+## BUG 40 — FIXED 2026-11-08: `MezzeSortedMap` and `MezzeSortedSet` were changed by inserting into them
+
+The shape of BUG 38 and BUG 39 once more — a derivation observable in the value
+it came FROM — in the two structures `OwnerTokenSoundnessTest` had not probed,
+because that file went after the Deque and the BitSet and stopped there.
+
+Nothing is shared in this reproduction. One map, one insert whose result is
+thrown away, and the map is wrong afterwards:
+
+```java
+MezzeSortedMap<Integer, String> base = MezzeSortedMap.empty();
+for (int i = 0; i <= 20; i += 2) base = base.put(i, "v" + i);  // 0,2,4,…,20
+
+base.put(5, "v5");       // the RESULT IS DISCARDED
+base.keys();             // [0, 2, 4, 5, 6, 8, 10, 12, 14, 16, 18]
+                         // 5 is in a map it was never added to, and 20 is gone
+```
+
+`base.size()` still says 11, so the key that fell off the end of the window is
+simply unreachable. `MezzeSortedSet.add` is the same, one array instead of two.
+
+### Cause: a fast path that wrote inside its own read window
+
+`putObject` carried two in-place paths, both guarded by
+`isOwner() && length < keys.length`, and the guard is not what distinguishes
+them:
+
+```java
+// (a) append — writes at index `length`
+keys[length] = key;
+
+// (b) middle insert — writes inside [insertPos, length)
+System.arraycopy(keys, insertPos, keys, insertPos + 1, length - insertPos);
+keys[insertPos] = key;
+```
+
+(a) is sound, and not by luck: every structure holding that array reads
+`[0, length)` and so cannot ADDRESS index `length`. Only the map derived by the
+append carries `length + 1`, and only it can see the slot. That is the same
+argument that makes `MezzeDeque` sound under BUG 38 — a window, and writes
+outside it.
+
+(b) has no such defence. `[insertPos, length)` is exactly what the base reads,
+so the base sees the shift. `isOwner()` was being read as "nobody else can
+observe these contents", but `this` is somebody: the owner is a live value the
+program can still hold, which in Mezze it always can, because
+`let m2 = insert(m1, k, v)` leaves `m1` bound.
+
+### SEVERITY: not reachable from Mezze
+
+Every ordered operation enters through `SortedMapNatives`, which installs a
+comparator before touching the map:
+
+```java
+map = map.withComparator(ElementComparator.of(cmpFn));
+return map.putObject(key, value);
+```
+
+`ElementComparator.of` returns a NEW instance per call, so `withComparator`
+never takes its `cmp == this.comparator` short circuit, and the map it returns
+has no owner token. `isOwner()` is therefore false on every map `putObject`
+ever sees from guest code, and neither in-place path can fire. Only a
+host-level `put` chain — tests, and `fromMap` — reaches them.
+
+So this was a defect in the Java API that no Mezze program could observe,
+found while making the replace path share its keys array rather than copy it.
+
+### Fix: the path is deleted, not guarded
+
+(b) is gone. A middle insert allocates and copies, which is what a persistent
+middle insert has to do. (a) stays, with the addressability argument written
+above it so that re-adding a sibling that writes inside the window has to
+argue with a comment first.
+
+Two further things fell out of it:
+
+- The guard on (a) now checks `length < values.length` as well as
+  `length < keys.length`. It writes both arrays and only checked the capacity
+  of one, which the replace path's keys-sharing makes reachable: that path
+  leaves a map whose values array is exactly `length` while the keys array it
+  shares is longer.
+- The MUT layer on both classes is deleted — `copyToMutable`, `mutUpdate`,
+  `mutUpdateObject`, `mutClearValues` on the map, `copyToMutable`,
+  `getElementsInternal`, `mutSet`, `mutSwap` on the set. Nothing outside the
+  two classes called any of them, and they are in-place writers inside the read
+  window, which is the one thing array sharing cannot tolerate. Same finding as
+  the 73 dead `MUT_*` ops, in a different place.
+
+### Regression tests
+
+`datastructures/src/test/java/.../sorted/SharedArraySoundnessTest.java`, ten
+tests. The two that name this entry are `aMapIsNotChangedByInsertingIntoIt` and
+`aSetIsNotChangedByAddingToIt`; both failed before the deletion at index 3 of
+the key array, `expected: <6> but was: <5>`.
+
+The premise is the hard part and the file says so: the in-place paths need a
+structure that OWNS its arrays AND has spare capacity, and ANY read revokes
+ownership. A test that touches the base before the write it is trying to catch
+proves nothing while reading exactly like one that does — which is how the first
+BUG 38 test passed vacuously at one entry. Nothing in the file calls `get` on a
+base; `size`, `keys` and `getKeysInternal` are used because they do not revoke.
+
+## BUG 41 — FIXED 2026-11-08, same day it was introduced: the ordered slices lost the program's `Ord`
+
+A regression of my own, committed in `2a9c54f6a` and found three commits later.
+Recorded because it shipped, and because the SHAPE of it is the useful part: it
+was a dependency on a side effect, and nothing in 7 649 tests touched it.
+
+```mezze
+newtype Down = { v: Int }        # Ord is the REVERSE of the payload
+impl Ord for Down where { lt = { it, r } -> dv { d = it } > dv { d = r }, … }
+
+let m = sorted_map::insert { m = sorted_map::empty {}, k = Down.({ v = 1 }), v = 10 }
+sorted_map::floor_key { m = m, k = Down.({ v = 4 }) }
+# ClassCastException: MezzeRecord cannot be cast to java.lang.Comparable
+```
+
+Six operations threw: `floor_key`, `ceiling_key`, `range`, `head_map`,
+`tail_map`, `sub_map`, plus `range`, `head_set` and `tail_set` on the Set. For a
+key type that IS host-comparable they did not throw — they silently answered by
+the host's ordering instead of the program's, which is the worse half.
+
+### Cause: the comparator was installed by a side effect
+
+Those natives take NO comparator argument. They search with the one STORED on
+the map, and nothing ever set it deliberately — the old `insert` called
+`__native_sorted_map_insert`, which did
+`map.withComparator(ElementComparator.of(cmpFn))` before inserting, and the map
+it returned carried the result. Every insert reinstalled it; the slices simply
+found it there.
+
+`2a9c54f6a` moved the search for `insert` into guest code, so `insert` stopped
+going through that native. The arrays stayed correctly ordered — the guest
+search is what orders them — but the comparator field was never written again,
+and the only one a map could have was the natural-order lambda `empty {}` is
+built with.
+
+### Why no test caught it
+
+Both halves of the suite were satisfied: the ORDER tests used `Int` keys, where
+the host's ordering and the program's agree, and the custom-`Ord` tests used
+`get`/`insert`/`contains_key`, which had already stopped needing the stored
+comparator. No test combined a user `Ord` with a slice, so the one case that
+distinguishes them did not exist.
+
+Verified rather than argued: the same test file passes against the runtime at
+`523138128` and fails six ways against `2a9c54f6a`, which is what makes it a
+regression rather than a pre-existing hole.
+
+### Fix: nothing stores a comparator any more
+
+Putting the install back was the wrong repair — it was a hidden side effect, and
+removing it was the point. A slice is INDEX ARITHMETIC over a search the guest
+already does: `find_index` returns the index when the key is present and
+`-(insertPos + 1)` when it is not, so the number of keys strictly BELOW a probe
+and the number up to and INCLUDING it are each one expression over that, and all
+nine operations are a pair of those numbers handed to one slicing native.
+
+`take` and `drop` were part of the same defect and had to be rewritten too. They
+rebuilt their result one `putObject` at a time, which paid a comparator search
+per entry — so a sorted map keyed by a record threw from `take` however it was
+reached, and the Set's version was worse still, rebuilding through
+`MezzeSortedSet.empty()` with no comparator at all and so losing the ordering it
+had been sliced from. Both are now the same single slice: two array copies of an
+already-ordered run, and not one comparison.
+
+### Regression tests
+
+`interpreter/src/test/kotlin/.../stdlib/SortedOrderOpsOrdTest.kt`, 7 tests. A
+`newtype` with a DESCENDING `Ord` probes both halves at once: it is not
+host-comparable, so a wrong-comparator search throws rather than answering, and
+its order disagrees with the natural one everywhere, so an answer computed the
+wrong way cannot coincide with the right one. The first test establishes the
+layout through `min_key`/`max_key`, which read index 0 and `size - 1` and use no
+comparator, so a failure in the other six cannot be blamed on the insert path.
+
+## BUG 42 — FIXED 2026-11-08: a compound fold body ran BEFORE the filter, so the filter tested the transformed element
+
+```mezze
+iter::range { start = 0, end = 10 }
+  .filter { p = { x } -> x > 5 }
+  .fold { init = 0, f = { acc, x } -> acc + x * x }
+```
+
+Returned **280**. The answer is **230** — `6² + 7² + 8² + 9²` — and writing the
+square as an explicit `.map` returns 230, so the same pipeline gave two answers
+depending on which spelling was used.
+
+A silent wrong number out of a fused numeric pipeline, on the most ordinary
+compound fold anyone writes.
+
+### Cause
+
+`FusedLongPipeline` has ONE map slot, and `classifyFolderBody` decomposes
+`acc + x * x` into a fold op plus an ELEMENT TRANSFORM, which
+`tryBuildFusedLongPipeline` injects into that slot when no explicit map stage
+holds it. But the transform belongs to the SINK — in `acc + x * x` the square is
+part of the fold, not a pipeline stage — so the filter must see the RAW element.
+
+Stage order in the loop is decided by one flag:
+
+```java
+if (filterFirst && filterCmpOp >= 0) { ... }   // filter, then map
+if (mapOp >= 0) v = flpOp(mapOp, v, ...);
+if (!filterFirst && filterCmpOp >= 0) { ... }  // map, then filter
+```
+
+and `filterFirst` is only ever set inside the `MapInline` branch, by
+`if (seenFilter) filterFirst = true`. With the transform injected there is no
+explicit map stage, that branch never runs, `filterFirst` stays false — and the
+filter lands AFTER the injected transform. It tested `x * x > 5`, true from
+x = 3 rather than x = 6.
+
+### Fix
+
+One line, at the injection site: `if (filterCmpOp >= 0) filterFirst = true;`.
+`filterFirst` means exactly "the filter goes before the map", which is the order
+a sink-side transform needs, and it is false here precisely because the branch
+that would have set it never ran.
+
+### Why the existing tests missed it
+
+`CompoundFoldFusionTest` already had "a compound fold over a filtered chain
+keeps both stages", which is this shape — but its body is `acc + x * 2 - 1`,
+THREE nodes, so it is emitted as an inline arithmetic TREE by the generic fused
+loop and never reaches the slot. Only a TWO-node body takes the slot, and the
+slot is where the order lives. The test asserted `"FusedLoop" in emitted`, which
+is the generic loop, so it was passing while naming the right shape.
+
+### Regression tests
+
+`CompoundFoldFusionTest`, three added. A two-node body over a filtered chain
+(230, against 280 for the wrong order — far apart, not adjacent); the
+explicit-map spelling of the same pipeline, which takes a different route and so
+states the answer independently of the path that computes it; and the same order
+**sized past `SIMD_THRESHOLD`**.
+
+That third one is required by what BUG-era work on this file already
+established: `FlpSimd` is a THIRD site deciding stage order and only engages at
+`VL * 4`, so an order bug living in the vector loops is CORRECT small and wrong
+large — which is exactly how the earlier `filterFirst` defect behaved when both
+vector pipelines took the flag and never read it. Its oracle is computed in
+Kotlin, not by a second Mezze pipeline, because an equality between two Mezze
+routes passes when both are wrong the same way. Removing the one-line fix fails
+the small case AND the past-threshold case.
+
+## BUG 43 — OPEN 2026-11-08: a built jar run without `jdk.incubator.vector` dies on a fused numeric pipeline
+
+```
+$ java -Xmx4g -XX:+UseSerialGC --add-modules=jdk.internal.vm.ci -jar app.jar
+Error: java.lang.NoClassDefFoundError: jdk/incubator/vector/Vector
+```
+
+on a program as small as
+
+```mezze
+iter::range { start = 0, end = n }
+  .map { f = { x } -> x + 1 }
+  .fold { init = 0, f = { acc, x } -> acc + x }
+```
+
+`FlpSimd.AVAILABLE` exists to make the vector pipelines optional, and
+`SIMD_THRESHOLD` is `AVAILABLE ? Vectors.VL * 4 : Integer.MAX_VALUE` precisely so
+that a runtime without the module takes the scalar loop. The guard does not hold:
+something on the path still resolves `jdk.incubator.vector.Vector` eagerly, and
+the program dies instead of running slower.
+
+### Why it matters rather than being a curiosity
+
+The launcher `mez build` writes always passes
+`--add-modules=jdk.incubator.vector`, so the supported path is fine. But that
+launcher is a shell script and the jar beside it is an ordinary jar — `java -jar`
+on it is the obvious thing to do, and it is what any host that embeds the jar
+will do. `project_boxing_elimination_blocked` already records `java -jar` being a
+DIFFERENT configuration from the launcher for this exact reason; this says the
+difference is not slower, it is fatal.
+
+### Not a regression
+
+Verified against two builds, one of them `9f6f56cf9` as committed: both fail
+identically. Found while trying to use the module's absence as a way to attribute
+a measurement to the vector path — which is also the workaround for anyone
+needing it: there is none short of passing the module.
+
+### Where to look
+
+`FlpSimd`'s static initialisers and the `Vectors` holder class. A holder is the
+standard idiom for making a capability lazy, so the eager resolution is likely
+either a field type, a method signature on a non-lazy class, or a
+`@TruffleBoundary` method whose descriptor mentions a vector type — note the
+existing comment in `MezzeBytecodeRootNode` that BDSL `Uncached` node paths do
+not respect `@TruffleBoundary`, which is how a similar reference reached the SVM
+blocklist before.
+
+## BUG 43 — a captured partial application never completes
+
+A partial application called from inside ANOTHER FUNCTION returns a function
+instead of completing. The arithmetic around it then fails with
+`Cannot add Long and MezzeFunction`.
+
+```
+let add = { a, b } -> a + b
+let add1 = add { a = 1 }
+let call = { x } -> add1 { b = x }
+call { x = 1 }                       # expected 2, raises instead
+```
+
+### What is and is not involved
+
+Recursion is NOT involved — the shape above is a plain lambda, and a recursive
+loop fails the same way. The same call AT TOP LEVEL works:
+`(add1 { b = 1 }) + (add1 { b = 1 })` is 4. So the difference is being called
+through a capture.
+
+### Not a regression, and not the shape cache
+
+Found while writing `TrampolinePartialShapeCacheTest` for the per-call shape
+cache in `TrampolineRootNode`, and it fails identically with that cache
+reverted — checked, because the cache touches exactly this code path.
+
+### Where to look
+
+`TrampolineRootNode.checkPartialApplication` decides completeness from the
+INCOMING record. A `MezzeFunction.withPartialArgs` value carries the arguments
+already supplied, so a call that completes one has to merge those in BEFORE the
+completeness check; the capture path appears to check first and merge after, so
+the second call looks partial again. Pinned as a disabled test with the minimal
+shape in `TrampolinePartialShapeCacheTest`.
+
+
+## BUG 44 — `sorted_set::union` silently loses elements when the element's `Ord` is hand-written
+
+**FIXED 2026-11-13**, same day, in `MezzeSortedSet` plus a compiler route.
+Found while surveying `sorted_set`, which had 46 operations and ZERO measured
+numbers.
+
+`union`, `intersect` and `difference` carry NO constraint — not `Ord 'a` —
+while `insert`, `remove`, `contains` and `from_seq` all do. The set's ORDER
+comes from a guest-side search using the author's `Ord`;
+`SortedSetNatives.addAt` says so outright: it "takes no comparator because it
+makes no comparison". But the three set operations merge NATIVELY through
+`MezzeSortedSet.compareElements`, which opens:
+
+    if (a instanceof Long la && b instanceof Long lb) return Long.compare(la, lb);
+
+A `newtype R = Int` is a boxed Long at runtime. So a set BUILT descending by the
+author's `Ord` is MERGED as if ascending by that fast path — and the operation
+could not use the author's order even if it wanted to, having no constraint to
+carry it.
+
+REPRODUCED, not reasoned about. `newtype R = Int` with a descending `Ord`:
+
+    a = from_seq [1,5,3]   ->  5, 3, 1     correct
+    b = from_seq [2,6,4]   ->  6, 4, 2     correct
+    union a b              ->  5, 3, 1, 6, 4, 2
+
+That is neither order — it is CONCATENATION. The merge assumes both inputs are
+ascending, exhausts the first, and appends the second.
+
+**THE CONSEQUENCE IS SILENT DATA LOSS**, because the result violates the
+invariant `contains` binary-searches on:
+
+    size(union) = 6
+    contains 1:yes  2:NO  3:yes  4:NO  5:yes  6:NO
+
+Every element from the SECOND set is present and unreachable.
+
+BLAST RADIUS: confined to types with a hand-written `Ord`. A plain `Int` set
+unions correctly and every `contains` answers yes, because there the fast path
+IS the author's order.
+
+This is the BUG 10 family — a newtype is a primitive at runtime, so a
+type-based fast path silently contradicts the order its author wrote.
+
+THE FIX NEEDED NO API CHANGE, which the first reading of it got wrong. The set
+ALREADY carries the author's order: `from_seq` threads a comparator built from
+the element's `Ord`, and `MezzeSortedSet`'s own field comment says so. The
+comparator was never missing — `compareElements` simply answered before asking
+it. So the fix is two halves inside the implementation:
+
+  1. The type-based fast paths are gated on the order actually BEING natural.
+  2. The compiler hands `from_seq` no comparator at all when the element is
+     `OrdKind.DIRECT`, so Int and Str sets are natural-ordered from the start.
+
+HALF ONE ALONE WAS CORRECT AND UNSHIPPABLE: a Mezze set always supplies a
+comparator — even for plain Int, where it IS natural order written as a guest
+closure — so the gate turned the fast path off everywhere and cost **8.2x on
+union, 9.9x on intersect**, measured. Half two restores it: union 1 363 400 ps
+against 1 295 222 before the fix, intersect 830 270 against 1 039 625. No
+measurable cost for correctness.
+
+`naturalOrder` is remembered as the comparator AS SUPPLIED, not the effective
+one, which is never null after construction — passing the effective comparator
+to a derived set made every set derived from a natural-ordered one look custom
+and lose the fast path for good.
+
+Guarded by `SortedSetCustomOrdTest`: removing the gate fails four of its seven,
+all three merges and the findability case. `MezzeSortedMap` was checked for the
+same `instanceof` fast paths and has none.
+
+Probe: scratchpad `ssprobe`; the shape is six lines of `from_seq` + `union` +
+`contains`.
+
+
+## BUG 45 — six more `sorted_set` natives rebuilt through a comparator-less set
+
+**FIXED 2026-11-13** alongside BUG 44.
+
+`SortedSetNatives.slice`'s own doc already named this failure mode: the set's
+`take` and `drop` "rebuilt through `MezzeSortedSet.empty()` with NO comparator,
+so the result lost the ordering it was sliced from". Those two were fixed and
+the identical line survived in six siblings — `range`, `head_set`, `tail_set`,
+`symmetric_difference`, `filter`, `partition`. All preserve the element type,
+so each now inherits the source's order.
+
+THREE OF THE SIX ARE DEAD NATIVES: `range`, `head_set` and `tail_set` are
+registered in `NativeDispatch` and called from nowhere — the stdlib reaches
+those shapes through the guest `find_index` + `slice` path instead, which is
+why they were correct in practice. Fixed anyway, for the reason the
+stage-classification catch-all exists: the next caller would hit it.
+
+The inherited comparator is the one AS SUPPLIED, not `comparator()`, which is
+never null after construction — rebuilding with the effective one marks the
+result custom-ordered and forfeits the fast paths, the 8.2x BUG 44 measured.
+
+Guarded by `SortedSetDerivedOrderTest`: reverting the six fails four of its
+five.
+
+TWO MORE OF THE SAME SHAPE, found by following the family rather than the
+ratios, and fixed here:
+
+  - `sorted_set::from_set` DECLARED `with Ord 'a` and never passed it on — the
+    body called its native bare, which built the set with no comparator. Its
+    sibling `from_list` has had the right shape all along, so this was the one
+    never brought along. A declared constraint that is never used is worse than
+    a missing one: it tells every reader the order is handled.
+  - `set::to_sorted_set` said "(elements must be comparable)" in its DOC COMMENT
+    and carried no constraint at all. The requirement was written for humans and
+    not for the typechecker.
+
+Both measured broken first — `1, 3, 5` with `contains` finding only the middle
+element — and both correct after, in argument position as well as let-bound.
+Guarded by two cases in `SortedSetOrderOperandTest`.
+
+ONE SELF-INFLICTED BREAK ON THE WAY, worth recording because the fix for it is
+now a test. Adding `from_list` to `ordNativeFastForm` made the compiler DROP its
+`cmp` operand, but its dispatch read that field with `getFunction` rather than
+`getFunctionOrNull` — so every Int set threw `Missing field 'cmp'` and four
+suites went red. Every other entry in the table already read its operand
+optionally; `from_list` was the one that did not, and it was only caught because
+`from_list` happens to be well covered.
+
+So `every native with a droppable order operand works on plain Ints` now
+exercises all seven entries with a plain Int — the case where the operand IS
+dropped — and a new entry whose field is not optional fails there immediately
+rather than wherever that native is next used.
+
+AND TWO IN `sorted_map`, which were KNOWN. `map_keys` and `invert` both declared
+their constraint (`with Ord 'k2`, `with Ord 'v`) and neither passed it on: the
+natives set `order = null` outright, with a comment reading "these fall back to
+natural ordering and are therefore still primitive-only (tracked with the
+sorted-container gap)". A deliberate deferral rather than an oversight, and cheap
+to close only because the operand-dropping route now exists to keep plain-Int
+keys fast. Measured broken first: `map_keys` into a descending newtype gave keys
+`1, 3, 5` and a `get` that found one of three.
+
+`sorted_map` ESCAPED THE REST OF THE FAMILY and the reason is worth keeping: it
+has NO merge operations — no union, intersect or difference — so nothing
+natively re-reads its array against a comparator. `sorted_set` broke because it
+has four. A `sorted_map` built by `empty {}` + `insert` is therefore CORRECT,
+which was predicted to be broken and measured not to be; that case is now a
+test, recorded so the prediction is not made again.
+
+TWO FOUND BY GREPPING FOR THE TELL, after the nine:
+
+  - `SortedSetNatives.filterMap` TOOK a comparator and IGNORED it. Its stdlib
+    signature carried `Ord 'b` and threaded one correctly; the native body still
+    built the result through a bare `empty()`. Introduced in the `map` pass and
+    caught one commit later by grepping, not by a test — nothing exercised
+    `filter_map` with a custom `Ord`. A signature that accepts the order and
+    discards it is worse than one that never asked: it reads as handled.
+  - `SortedMapNatives.partition` rebuilt BOTH halves order-less. The key type is
+    unchanged, so it inherits the source's. Note it inherits `comparator()`, the
+    EFFECTIVE one, where `sorted_set` had to inherit the one AS SUPPLIED — the
+    map has no instanceof fast paths, so there is no natural-order flag to
+    preserve. Same-looking fix, opposite choice, for a container-specific reason.
+
+FOUR CONVERSIONS INTO a sorted container, FIXED: `seq::to_sorted_set`,
+`seq::to_sorted_map`, `deque::to_sorted_set`, `deque::to_sorted_map`. All four
+built through a bare `empty()` and none declared an `Ord` — `set::to_sorted_set`'s
+defect in four more places. Measured broken: `1, 3, 5` for a descending newtype,
+`contains` finding one element of three.
+
+AND A SECOND, DIFFERENT BUG IN ONE OF THEM, which is the only CRASH in this
+family. `SeqNatives.toSortedSet` called
+
+    result = result.add((Comparable) seq.get(i));
+
+`add(A)` is UNBOUNDED and delegates straight to `addObject`, so the cast bought
+nothing — and it reintroduced at the call site the very checkcast
+`MezzeSortedSet`'s class comment records removing: "ClassCastException for any
+Mezze record or variant, so a sorted set of user values could not even be
+iterated". A fix to the container's type parameter, undone by one of its
+callers. Confirmed by running it:
+
+    ClassCastException: MezzeRecord cannot be cast to java.lang.Comparable
+
+IT SURVIVED BECAUSE OF WHAT THE OTHER TESTS USED: a `newtype` over Int is a
+boxed Long, which IS `Comparable`, so only record and variant elements ever
+crashed — and nothing converted those. The probe that found the ordering bug
+used a newtype over Int and sailed straight past this one.
+
+Guarded by `SortedConversionOrderTest`; reverting either defect fails three of
+its five.
+
+SO THE FAMILY HAS THREE DISTINCT FORMS, all one root cause — a container
+deciding something about element types that only the element's own instances can
+answer: a type-based shortcut (BUG 44's fast path), an unthreaded or merely
+declared constraint (most of BUG 45), and a reintroduced checkcast (this).
+
+THE RUNNING COUNT OF THIS ONE MISTAKE, in a single session: `seq::sort`,
+`list::sort`, `sorted_set`'s fast path (BUG 44), its six comparator-less
+rebuilds, `from_set`, `set::to_sorted_set`, and `sorted_map`'s `map_keys` and `invert`.
+NINE places where a type-based shortcut or an unthreaded constraint silently
+disagreed with a hand-written `Ord`. Worth more as a pattern than as nine fixes:
+the tell is a native that decides an ORDER without being handed one.
+
+## BUG 46 — FIXED: a set's or sorted set's `map` was absorbed as a flat map stage
+
+**FIXED 2026-11-13.** `ChainCanonicalizer.tryPeelIterMap` peeled
+`sorted_set::map` as an ordinary map stage. A map stage emits elements in
+SOURCE order; a sorted container's `map` RE-SORTS, because the result's
+elements are `'b` and it is handed `'b`'s comparator to build a new container
+under. So the source's ordering was silently substituted for the target's.
+
+`ownsItsOrdering` in that same file already says exactly this —
+
+> "the container keeps an ordering INSIDE the data structure ... Any rewrite
+> that reaches such a container's elements through `to_seq` loses that
+> comparator, so ordering-dependent sinks must not fuse over one"
+
+— and was consulted by the MIN and MAX sinks only. The same reasoning forbids
+the map stage, and the fix is that one call. Refusing declines the chain to the
+native call, which is what the expression means. THIRD TIME TODAY a guard
+existed and one site did not consult it: `MezzeSet.storage()` for BUG 47 and
+`seqElementType` for the `nonemptylist::sort` upgrade were the others.
+
+**AND THE SAME DEFECT IN A HASH SET**, found by asking what else that reasoning
+covers rather than by a second report. A `Set`'s `map` RE-BUCKETS: two sources
+that map to one value become one element. Absorbed as a flat map stage it stops
+collapsing at all —
+
+    set::size { s = set::map { s = from_seq [2, 3], f = { val } -> 7 } }
+        fused -> 2,  for a set that holds ONE element
+
+so the predicate is about element IDENTITY, not ordering: a sorted set re-sorts
+by `'b`'s comparator, a set re-buckets by `'b`'s equality, and a stage does
+neither. `mapRebuildsUnderOwnIdentity` covers both; `ownsItsOrdering` keeps its
+narrower meaning for the MIN and MAX sinks, which care about order alone.
+
+ONE WASTED RUN, worth recording: `MEZZE_CHAIN_CANONICALIZE` is read at COMPILE
+time, so setting it only at run time against an already-built jar proves
+nothing. The earlier test worked because the suite compiles its source at test
+time.
+
+**EVERY EARLIER DIAGNOSIS OF THIS BUG WAS WRONG, including the heading it was
+filed under.** It was filed as a dictionary-arrival bug, "does not arrive in
+argument position". It is not a dictionary bug at all:
+
+  - The COMPARATOR THAT ARRIVES IS CORRECT. Asking the native to call the
+    comparator it had been handed — `cmpFn(1, 3) = 1` for a descending target —
+    showed the right instance arriving while the RESULT was still wrong. That
+    single measurement, which should have been the first one, invalidated the
+    whole dictionary line of investigation.
+  - The in-function call NEVER REACHED `SortedSetNatives.map`. Only one of
+    three map calls logged there: the top-level one, the only one that worked.
+  - `MEZZE_CHAIN_CANONICALIZE=0` fixed it, which named fusion as the cause in
+    one run.
+
+Four dictionary mechanisms were eliminated before that, each by instrumenting
+it and watching it not fire: the D-1 collapse, `abilityOpDictSlot`'s `VAR_SEP`
+prefix scan, `injectDictFields`' concrete-type fallback, and
+`specEvidenceOpHash`'s ordering. All four were irrelevant. The lesson is the
+order of questions: ASK WHETHER THE VALUE ARRIVING IS WRONG BEFORE ASKING WHY
+IT WAS CHOSEN WRONGLY.
+
+**ALSO CORRECTED:** the filed claim that a let-BOUND map keeps the order and
+only argument position loses it. The saving condition was being a TOP-LEVEL
+EXPRESSION — inside a function every shape failed, so a built program lost the
+order everywhere, because everything there sits under `main`. The suite only
+ever saw the working shape because its sources are top-level expressions.
+
+`Bug46TargetOrderTest` now asserts the CORRECT order in both directions
+(descending source to ascending target and the reverse), which is what pins the
+fix: before it, the result followed the source either way.
+
+### The original entry, kept for its narrowing work
+
+
+**RE-CHARACTERISED 2026-11-13**, same day it was filed. The original heading
+said "does not arrive in argument position" and the original entry said a
+let-BOUND map keeps the target order. BOTH ARE WRONG, and the entry is kept
+below with this correction on top because the wrong version had a test pinning
+it.
+
+MEASURED across four shapes:
+
+    top-level, bound          [5, 3, 1]   correct
+    top-level, argument pos   [1, 3, 5]
+    inside a function, bound  [1, 3, 5]
+    inside a function, arg    [1, 3, 5]
+
+The saving condition is being a TOP-LEVEL EXPRESSION, not being bound.
+Annotating the binding (`let m: SortedSet R = ...`) or the lambda's return does
+not help. **A BUILT PROGRAM LOSES THE ORDER IN EVERY SHAPE**, because
+everything there sits inside `main` — which is why this looked narrower than it
+is: the test suite's sources are top-level expressions and a real program's
+never are.
+
+**IT IS NOT "NATURAL ORDER".** Reading `1, 3, 5` as natural was a coincidence
+of the source being Int. With a DESCENDING source and an ASCENDING target the
+result is descending; with the directions swapped it is ascending. It follows
+the SOURCE both times, so `with Ord 'b` is being discharged with the `Ord 'a`
+dictionary.
+
+**TWO MECHANISMS RULED OUT BY EXPERIMENT:**
+
+  - NOT the D-1 collapse (a top-level `let` under a constraint collapsing the
+    variable onto the one type with a hand-written impl). Adding a SECOND type
+    with its own hand-written `Ord` leaves the top-level case correct, so it
+    genuinely resolves the target there.
+  - NOT the `VAR_SEP` prefix scan in `abilityOpDictSlot`, which would hand back
+    another variable's slot. Instrumented, it never fires for `lt`/`le`/`gt`/`ge`
+    here: the comparator closure lives in the STDLIB and was compiled with it,
+    so what varies is the dictionary the CALLER passes at the call site. That is
+    where to look next.
+
+**FOUR MECHANISMS ELIMINATED, each by instrumenting the suspect and watching it
+not fire.** Recorded because each looked right from the source:
+
+  1. **The D-1 collapse** — a top-level `let` collapsing the variable onto the
+     one type with a hand-written impl. Adding a SECOND type with its own
+     hand-written `Ord` leaves the top-level case correct, so it genuinely
+     resolves the target there.
+  2. **`abilityOpDictSlot`'s `VAR_SEP` prefix scan**, which returns the first
+     slot matching `lt$…` regardless of type variable. Instrumented: never
+     fires for `lt`/`le`/`gt`/`ge` here.
+  3. **`injectDictFields`' concrete-type fallback.** Its own comment says
+     element types are collected BEFORE container types and
+     `resolveOpHashFromConcreteTypes` returns the first match — which for
+     `map { s = <SortedSet R>, … }` would be `R`, the source. Instrumented: of
+     1759 resolutions for `lt`, EVERY one is stdlib compilation with generic
+     types, `constraintTypes=[]` and `varBindings={}`. The user's call site does
+     not pass through here at all.
+  4. **`specEvidenceOpHash`'s ordering**, which returns the first recorded impl
+     matching the op name and would pick between `Ord R` and `Ord Q` by
+     position. Never called for `lt`.
+
+**THE STRUCTURAL FINDING, and the best lead.** The per-var dictionary path —
+the branch that exists precisely to tell `Ord 'a` from `Ord 'b` — is DEAD for
+this shape: `keyVar` is null for every `lt` resolution observed. A per-var key
+is minted only for a RECEIVER-LESS ability op called BY NAME
+(`BindingRef.AbilityOp`, via `MagicParams.dictKey(op, typeVar, ability)`), and
+the comparator is written `a < b`, an OPERATOR. So an operator-derived
+constraint never carries its type variable, and two `Ord` constraints in one
+scope have nothing to tell them apart.
+
+Whoever takes this next should NOT start by reading more resolution sites —
+four plausible ones are eliminated above. Start by tracing where the `lt` the
+comparator actually calls is bound for ONE failing call, since none of the
+usual suppliers serve it.
+
+`Bug46TargetOrderTest` pins all of this, asserting the broken behaviour on
+purpose in both directions. The older `SortedSetOrderOperandTest` case that
+reads "a let-bound map keeps the target order" is TRUE ONLY AT TOP LEVEL and
+now says so.
+
+### The original entry, kept for its narrowing work
+
+
+
+**OPEN.** Found 2026-11-13 while fixing BUG 44's construction half.
+
+`sorted_set::map` now carries `with Ord 'b` and threads a comparator, because
+its result's elements are `'b` and the source's order says nothing about them.
+That fix HOLDS when the result is bound:
+
+    let mapped = sorted_set::map { s = <Int set>, f = { val } -> R.(val) }
+    ints { s = mapped }                     ->  5, 3, 1    correct
+
+and FAILS when the identical expression sits in argument position:
+
+    ints { s = sorted_set::map { s = <Int set>, f = { val } -> R.(val) } }
+                                            ->  1, 3, 5    naturally ordered
+
+The comparator IS threaded — the signature carries `Ord 'b` and the stdlib
+passes it. What does not arrive is the `Ord 'b` DICTIONARY, so the comparator
+built is the wrong one. This is the dictionary-plumbing family, not the
+ordering fix.
+
+NARROWED, by the sibling fixes landing in the same pass: `sorted_set::from_set`
+and `set::to_sorted_set` had the same missing-order defect and BOTH work in
+argument position once their comparator is threaded. The difference is where the
+type comes from — their `'a` is the INPUT's element type, already known, while
+`map`'s `'b` is inferred from the LAMBDA'S RETURN. So this is not "argument
+position" in general; it is the target type of a mapping function not being
+resolved by the time the dictionary is chosen.
+
+RULED OUT, each by experiment rather than reasoning:
+
+  - NOT the compiler's operand-dropping rewrite. Removing `map` from
+    `ordNativeFastForm` changes nothing. (It is removed anyway: `expr.type`
+    is not reliable for `map` in that position, so upgrading there would be
+    guessing — see the note in that table.)
+  - NOT test isolation. It fails run alone, so it is not the static
+    TypeChecker.
+
+CONSEQUENCE: a mapped set in argument position is naturally ordered while
+`contains` searches it by the target's `Ord`, so its own elements can be
+invisible — BUG 44's shape, reached through `map`.
+
+`SortedSetOrderOperandTest` asserts the BROKEN result on purpose, named
+`... still loses the target order — BUG 46`, so whoever fixes the dictionary
+arrival is told by a failing test that this improved and the two map cases
+should be folded together.
+
+## BUG 47 — `set::union` and `map::merge` collapsed by representation, not by the author's `Eq`
+
+**FIXED** 2026-11-13, found by sweep rather than by a report.
+
+A hash set or map stores no equivalence of its own — it is a trie keyed on the
+compiler's hashing — EXCEPT when built through the evidence route, which gives
+it an `EvidenceSetStorage` / `EvidenceMapStorage`. That storage's own comment
+says a collection with evidence KEEPS it.
+
+Both merges reached that storage and threw it away. `MezzeSet.addAll` and
+`MezzeMap.putAll` copy both sides into arrays and rebuild through the
+STRUCTURAL `fromElements` / `fromEntries`, so two elements a hand-written `Eq`
+calls equal stayed apart:
+
+    {class 1, class 2} union {class 1, class 3}   ->  4 elements, want 3
+
+`MezzeSet.storage()` exists to be asked this exact question before a rebuild —
+its javadoc says so in as many words — and neither merge asked.
+
+**WHY IT SURVIVED.** `contains` and `get` take their evidence from the CALL
+SITE, not from the collection. So the merged result still answered correctly
+for a differently-spelled member, every probe OF THE RESULT looked right, and
+only the SIZE of what the merge collapsed gave it away. Any test written
+against `contains` would have passed.
+
+**WHY ONLY THESE TWO.** Ten set operations declare `with Eq 'a` and thread
+nothing to their natives, and NINE of them are correct: `intersection`,
+`difference`, `is_subset`, `is_superset`, `is_disjoint`, `equals`,
+`insert_all`, `remove_all` and `symmetric_difference` each return a subset of
+ONE side, and never have to collapse two elements that came from different
+sides. Union and merge are the operations that do. A reading of the signatures
+cannot separate those cases; the probe could.
+
+**THE METHOD**, which is the reusable part: give a newtype an `Eq` and `Hash`
+deliberately COARSER than its representation — here equal by tens, so 10, 11
+and 19 are one element — and ask every operation a question whose answer
+differs under the two equalities. Parity was tried first and is too coarse:
+two classes cannot produce a PARTIAL result, and a partial result is what
+reaches the rebuild path in `intersect` and `difference`.
+
+A first reading blamed the result for losing its evidence. The probe disproved
+that — the union result still recognised a differently-spelled member — and
+localised it to the merge itself.
+
+**THE SWEEP IS CLOSED.** The method was then run over every container that
+takes an instance, and this was the only defect in any of them:
+
+| container | probed with | result |
+|---|---|---|
+| `set` | Eq coarser than representation (by tens) | **union wrong**, nine others correct |
+| `map` | the same | **merge wrong** |
+| `sorted_set` | a DESCENDING `Ord` | clean — add, remove, union, difference, take, drop, head_set, tail_set, filter, and each result re-probed by adding to it |
+| `sorted_map` | the same | clean — insert, remove, and both compositions |
+| `deque` | the same | clean — sort, min, max, contains, index_of, to_sorted_set |
+| `seq`, `list`, `nonemptylist` | fixed earlier the same day, with tests |
+
+The sorted containers are clean because the comparator rides on the CONTAINER
+and every slice inherits it; the hash containers needed the instance per
+operation, and only the two that collapse ACROSS sides could get it wrong.
+
+For the four other rebuild sites in `MezzeSet` — intersect, difference, map,
+filter — the right question is not `contains` (which answers from the call
+site's evidence whatever the storage holds) but whether INSERTING a
+differently-spelled member into the result grows it. Asked that way they are
+correct, and for a reason: each returns a subset of ONE side, whose elements
+were already collapsed when that side was built.
+
+Related: BUG 44 (a type-based fast path overriding the element's own `Ord`) and
+BUG 45 (a constraint declared and never threaded). Same family, third form:
+a REBUILD that drops the instance the collection was carrying.
+
+## BUG 48 — the top-level re-solve read its failures and threw its answers away
+
+**FIXED** 2026-11-14. Pinned by `MergeKeepsElementInstanceTest`'s
+`set filter_map at top level collapses by the target's Eq`, which asserted the
+BROKEN answer (2) while this was open and asserts 1 now. Verified by disabling
+the one changed line: that test, and only that test, goes red with
+`expected: <1> but was: <2>`.
+
+`set::filter_map` declares `with Eq 'b, Hash 'b`. It worked INSIDE A FUNCTION
+and, for a BARE TOP-LEVEL EXPRESSION, built the result set under STRUCTURAL
+identity — so two elements P's own `Eq` calls equal survived as two.
+
+**THE CAUSE.** `ConstraintGenerator`'s `ParsedTopLevelExpr` branch re-solves the
+expression's FULL constraint set. Its own comment says why it must: the global
+solve strips `HasConstructor`/`HasField` before its ability check, so a variable
+those constraints pin is never pinned there. It then read only
+`SolveResult.Failure` — keeping the ability, unknown-constructor and
+field-not-found diagnostics — and dropped the `Success` substitution on the
+floor. That solve is the only one that binds `'b` for a callback whose body
+RETURNS a constructor (`{ val } -> Some { val = P.(val) }`), because `'b` lives
+inside `Option 'b` and only the stripped `HasConstructor` reaches it. So `'b`
+reached emit still open, `resolvedCallSiteArrows` discarded the per-site arrow
+as unresolved (`holdsTypeVar`), mono seeded no spec, `specAbilityImpls` was
+empty, and `evidenceNativeCall` correctly declined — leaving the plain
+structural native.
+
+The fix is one line beside the structural solve that already does exactly this,
+composing into `perBindingSubstitution`. Safe because TypeVar ids are globally
+unique and that substitution is the LOWER-precedence side of the merge in
+`TypeChecker` (`solveResult.compose(perBindingSubstitution)` keeps the
+receiver's mappings), so the global solve stays authoritative wherever the two
+meet and this only ADDS bindings for variables it left open — the same argument
+`implOpSubstitution` is composed under, three lines further down.
+
+This is the FOURTH instance of one top-level-vs-bound asymmetry in that single
+block (abilities, unknown constructor, missing field, and now this), and the
+first where the asymmetry produced silently WRONG CODE rather than a missing
+diagnostic.
+
+**WHAT THE FIRST DIAGNOSIS GOT WRONG, so the eliminations are not re-walked.**
+It read the nesting as the cause — "the monomorphizer records nothing when the
+constrained variable appears only NESTED inside another constructor" — and
+located the fix in `MonoDriver.resolveAbilityConstraintsOf`'s positional
+`nameToConcrete`. The nesting is real and the guard quoted there IS correct, but
+the solver already binds `'b` through the nested payload. The decisive probe: a
+newtype with NO `Eq` impl, in exactly this top-level shape, is REJECTED with
+V0402 `Q does not implement 'Eq'`. A vacuously-discharged constraint cannot
+reject anything, so `'b` was solved all along — the binding simply never left
+that discarded substitution. One cheap experiment ("does the check still bite?")
+settled what four rounds of reading the monomorphizer could not.
+
+Also eliminated and still true: no dictionary-site supplier fires for this call
+(`injectDictFields`' per-var branch — `keyVar` is null for callback-derived
+constraints — its concrete-types fallback, and `abilityOpDictSlot`), and
+re-spelling it as `from_seq { xs = collect_seq { set, f } }` does not help.
+
+**SCOPE.** A bare top-level expression is a test-harness/`eval` shape — a real
+program sits under `main` and always took the working path — so no shipped
+program was affected. The defect was in the typechecker, not in the containers,
+and the fix makes both paths agree.
+
+## BUG 49 — FIXED: an impl operation could bind a parameter name the ability never declares
+
+**FIXED** 2026-11-14, found by making the mistake. Pinned by
+`ImplOpParamNamesTest` (8 tests; disabling the one new check turns exactly the 5
+rejection tests red and leaves the 3 acceptance tests green).
+
+`Eq.eq` is declared `{ it: 'a, r: 'a } -> Bool`. This was ACCEPTED:
+
+    impl Eq for P where {
+      eq  = { it, other } -> cls { v = it } == cls { v = other },
+      neq = { it, other } -> …,
+    }
+
+`mez check` printed "Check passed". `mez build` produced a binary. It ran. And
+`set::size` over two P values that P's own `eq` calls equal printed **2**.
+Arguments are records matched BY NAME, so the op was handed `{it, r}`, the
+unsatisfied `other` left it a PARTIAL APPLICATION instead of a Bool, and the
+container compared the resulting `MezzeFunction`s. The one shape that reported
+anything at all was `ClassCastException: MezzeFunction cannot be cast to
+Boolean`. Meanwhile an explicit `Eq.eq { it = …, other = … }` call WAS rejected
+("record fields don't match: missing 'r'; unexpected 'other'") — so the impl was
+being held to a signature nothing could call.
+
+**THE CAUSE, a fallback.** `AbilityValidator.validateOperationSignatures` reads
+
+    val actualParamType = implOp.paramType ?: expectedParamType
+
+An un-annotated impl op has no `paramType`, so it ADOPTS the declaration's — and
+then unifying the two is vacuous. The names the lambda actually binds were never
+compared with anything. The signature check could not fail for the one input
+that was wrong.
+
+**THE FIX.** Compare the lambda's bound names against the ability op's declared
+record, before that adoption. Only UNKNOWN names are refused: binding FEWER than
+declared is legitimate (ignoring a parameter), `{ it, ... }` keeps its spread,
+and `it` is EXEMPT because the declaration is not what supplies it —
+`Keywords.IT` is the implicit receiver and `x.method {…}` desugars into
+`method({it = x, …})`. That last exemption is not a guess: without it
+`UndeterminedClassArgTest`'s five tests over `ability Into2 'b for 'a where {
+conv2: {} -> 'b }` with `impl … { conv2 = { it } -> … }` go red, which is how it
+was found. New code V0422, with the offending name under the caret.
+
+**THE SWEEP, closed negative.** `?: expected`-shaped adoption occurs at exactly
+two places, both in this one function, and the RETURN side is sound: `implOp
+.returnType ?: expectedReturnType` adopts the declared return and the BODY is
+then checked against it, which is ordinary bidirectional checking. Probed rather
+than argued — `eq = { it, r } -> un { v = it } / 10` (an Int where Bool belongs)
+is rejected with T0201 under the caret. The parameter side had no equivalent
+check because the names a lambda binds are its only evidence, and nothing read
+them.
+
+**HOW IT WAS FOUND, worth keeping.** Not by auditing the validator — by writing
+the bug while building a probe for something else, reading `size=2` where the
+written `Eq` said 1, and chasing MY OWN wrong answer instead of assuming the
+probe was fine. The stdlib's 158 files and 1858 functions compile unchanged
+under the new check, so nothing in-tree depended on the hole.
+
+## BUG 50 — three more containers decided equality they were never handed; `group_by` still does
+
+**THREE FIXED, THREE OPEN-AND-MEASURED**, 2026-11-14. Same family as BUG 44/45/47
+and found the way the perf log says to find things: by reading the module, not by
+reading a ratio. The signature sweep is one grep — every evidence-dependent
+operation in every collection module, keeping the ones with no `with` clause —
+and it took four minutes.
+
+| operation | declared | got | should be | state |
+|---|---|---|---|---|
+| `deque::unique` | NOTHING | 2 | 1 | FIXED |
+| `map::invert` | NOTHING | 2 | 1 | FIXED |
+| `sorted_map::to_map` | NOTHING | 2 | 1 | FIXED |
+| `seq::group_by` | NOTHING | 2 | 1 | **OPEN** |
+| `list::group_by` | NOTHING | 2 | 1 | **OPEN** |
+| `set::group_by` | NOTHING | — | — | **OPEN** (same source shape) |
+
+Measured with a newtype `P` whose `Eq`/`Hash` bucket by `un/10`, so `P.(10)` and
+`P.(11)` are ONE element/key. Every row above must answer 1.
+
+**EACH ONE IS THE SIBLING TELL.** `deque::unique` was the only
+evidence-dependent operation in its own module declaring nothing, while
+`list::unique` and `seq::unique` both already carried `Eq`/`Hash` — the identical
+fix, already written twice. `sorted_map::to_map` sits ONE LINE BELOW
+`sorted_map::from_map`, which always carried its `Ord`. `map::invert`'s own
+comment documents "duplicate values keep one arbitrary key" — behaviour it never
+reached for such a type, because the duplicates were never recognised.
+
+**THE MECHANISM, read at the source in every case.** A Java collection keyed by
+the raw value:
+
+  - `DequeNatives.unique` — `java.util.LinkedHashSet<Object>`
+  - `MapNatives.invert` — `MezzeMap.fromEntries(values, keys, size)`
+  - `SortedMapNatives.toMap` — a bare `MezzeMap.empty()` and `putObject`
+  - `SeqNatives.groupBy` — `LinkedHashMap<Object, ArrayList>.computeIfAbsent(key, …)`
+
+All four bucket by Java `hashCode`/`equals`, so two values a hand-written `Eq`
+calls equal never land in the same bucket to be compared, and both survive.
+
+**WHY `invert` NEEDS THE VALUE'S EVIDENCE, not the key's.** Inverting keys the
+result BY the old values, so the pair that matters is `Eq 'v, Hash 'v`. That is
+the one in this family whose constraint is not on the obvious type parameter, and
+the reason to state it here rather than leave it to be re-derived.
+
+**WHY `sorted_map::to_map` IS NOT COVERED BY `Ord`.** It LEAVES a
+comparator-ordered container for a HASHED one, so the key's own equality becomes
+the question and the comparator stops being it. The probe makes the two visible
+at once: the sorted map correctly still holds 2 under a deliberately finer raw
+`Ord`, and the hash map it converts to must hold 1.
+
+**`group_by` IS LEFT OPEN ON PURPOSE.** It is the same mechanical fix a fourth,
+fifth and sixth time, but it needs a keyed accumulation under the author's
+hash/eq that preserves INSERTION ORDER (what `LinkedHashMap` was providing), in
+three classes with three different result shapes (`[{key, values: [..]}]`,
+`List {key, values: List}`, `List {key, values: Set}`). Stacking three more
+unverified changes while the machine could not run a gate was the wrong trade;
+the measurement is recorded so the next session starts from the answer rather
+than the search. The constraint to add is `Eq 'k, Hash 'k` on the KEY FUNCTION's
+return.
+
