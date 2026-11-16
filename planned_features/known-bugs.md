@@ -7401,3 +7401,59 @@ the helper loses primitive dispatch — the only reason the helper exists, and
 guarded by `mezze-python`'s own "str method dispatch" / "int method dispatch"
 checks; or try raw first and fall back to the helper, which needs a crossing to
 detect failure and so costs a round trip per call.
+
+## BUG 47 — OPEN: an inherent method on a user record breaks TWO ways
+
+Found 2026-11-16 while designing `cont`'s helper methods, which would be
+inherent impls — so this blocks that design, not just itself.
+
+### 47a — a host exception reaches the user
+
+Checks clean, then crashes. A HOST exception reaching a user is a compiler bug
+(see [[project_runtime_failure_host_vs_guest]], the I0004 class).
+
+    use std::effects::log::{ Console, println }
+    type Box = { v: Int }
+    impl Box where {
+      double = {} -> it.v * 2,
+    }
+    pub let main = {} -> perform Console in do
+      let b = { v = 21 }
+      println { msg = "double $(b.double {}.to_str {})" }
+
+    Check passed: ids (1248.3ms)
+    Error: com.oracle.truffle.api.frame.FrameSlotTypeException: Frame slot kind
+           Object expected, but got Illegal at frame slot index 2
+
+Fresh `.build` (deleted and rebuilt), zero build errors, so it is not stale-binary
+skew. The chained call `b.double {}.to_str {}` inside an interpolation is what
+reaches it.
+
+### 47b — the return type does not flow to a `let`
+
+Split the same program and it fails typechecking instead:
+
+    let d = b.double {}
+    println { msg = "double $(d.to_str {})" }
+
+    error[T0206]: Cannot resolve inherent method 'to_str': the receiver's type
+    could not be determined. Annotate the receiver or call the method ...
+
+`double = {} -> it.v * 2` returns `Int`, so `d` is `Int`. Nothing determines it.
+A diagnostic whose advice is "annotate" means inference is wrong here, per
+[[feedback_no_required_type_annotations]] — "annotation fixing it = inference
+BUGGY".
+
+**Note the pair.** Chained, it compiles and crashes; split, it refuses to
+compile. Same program either way, and neither outcome is right. Related:
+[[project_method_chaining_needs_inherent_impl]] (`recv.f{}` needs
+`impl T where { f }`, which is exactly what this is),
+[[project_method_nominal_structural_route]].
+
+**Verified facts gathered alongside** (these all behave correctly):
+
+| | |
+|---|---|
+| `type PromiseId = Int` | V0713 — "renames something that already has a name: `Int` is a built-in primitive" |
+| `type A = { n: Int }` and `type B = { n: Int }` | V0701 — identical closed record aliases are refused |
+| one-field records with DISTINCT field names | accepted — this is how a distinct id type is spelled |
