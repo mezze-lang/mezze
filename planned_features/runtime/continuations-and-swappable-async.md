@@ -262,6 +262,26 @@ clock installed inside a handler gets a fresh scope on every invocation. The
 mutable clock state must therefore live in the SCHEDULER's scope and be passed
 in as a performer param — a ref, not a value, for a clock that advances.
 
+**Hiding versus exposing is a PER-IMPL choice, and all three postures are valid:**
+
+| posture | performer | the test gets |
+|---|---|---|
+| **hide** — bundle and discharge | `FakeAsync` | determinism with no knobs; cannot be wired wrong |
+| **expose** — declare `<Clock>` in the op's row | `VirtualAsync` | the test drives time itself: `Clock.advance_to { ms = 5000 }` |
+| **neither** | `LoomAsync` | real time, from natives; no `Time` effect involved |
+
+The first two coexist as separate performers over the SAME `Async` effect, and a
+program switches between them at one `perform` site. Which is the concrete
+argument for keeping the effect declaration clean: **if `Time` were declared in
+`effect Async`, the hidden variant would be impossible** — every program would
+have to install a clock, including the ones on `LoomAsync` where it means
+nothing.
+
+The general rule: a performer needing another effect either bundles and
+DISCHARGES it (caller sees nothing) or DECLARES it in the row (callers are
+answerable). Performing without doing either is a performer widening past its
+declaration, which is the known leak case.
+
 **And the deadlock rule still refines**: idle means nothing runnable AND no timer
 to advance, not simply an empty ready set —
 
