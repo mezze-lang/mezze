@@ -427,9 +427,33 @@ avoid. Path D avoids the WORKER-THREAD half, not the taint.
 
 **1. Propagate at the call site (mandatory).** A call that might suspend lowers
 to: call; if the result is a `ContinuationResult`, yield it onward. Resuming
-walks the chain — which is exactly what `YieldDriver.drive` already does, a loop
-over a CHAIN of `ContinuationResult`s. The driver was built for this; the emit
-was not. Expressible in the builder today, no framework change.
+walks inward-out: resume the inner with the op's answer, then resume the outer
+with the inner's result.
+
+Concretely, the missing piece is an operation around every suspendable call:
+
+    b.beginAddLong();
+      b.beginPropagateSuspend();              // <-- does not exist
+        b.beginCallDirect1(innerTarget, false);
+          b.emitLoadArgument(0);
+        b.endCallDirect1();
+      b.endPropagateSuspend();
+      b.emitLoadConstant(100L);
+    b.endAddLong();
+
+meaning: if the operand is a `ContinuationResult`, yield it onward so this frame
+suspends too; otherwise pass the value through. `CallDirect1` cannot do this
+itself — its body is `return callNode.call(arg)`, so it cannot distinguish "my
+callee suspended" from "my callee returned a value", and the outer's `+ 100` is
+lost with nothing remembering it must run later.
+
+**CORRECTION to an earlier claim here:** I wrote that `YieldDriver.drive` was
+already built for the chain. Not quite — its loop is
+`while (cur instanceof ContinuationResult cr) { ...; cur = cr.continueWith(answer); }`,
+which handles ONE root yielding REPEATEDLY (a sequence). A nested suspend is a
+STACK: a continuation whose yielded value is itself a continuation. The driver
+needs an explicit stack, not a flat loop. Smaller than writing it from scratch,
+but not free as implied.
 
 *The cost is a branch per call site — and the EFFECT ROW says which sites need
 it.* A call whose row is pure cannot suspend and needs no check. That is static,
