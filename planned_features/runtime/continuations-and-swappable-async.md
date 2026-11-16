@@ -202,12 +202,52 @@ fiber), with scopes holding only the set of task ids suspended inside them.
 This is the sharpest architectural gap in the design and the thing most likely
 to force a rewrite mid-implementation. Settle it first.
 
-### 2. C4 IS 154 NATIVES, NOT "map and fold"
+### 2. C4 IS ~290 NATIVE METHODS — but concentrated in NINE files
 
-Counted: **1217 distinct natives are referenced by the stdlib, and 154 of them
-take a guest callback.** Not all need to be resumable — many can fail loudly —
-but each needs a DECISION, and that is the work. The earlier framing ("rewrite
-the callback-taking HOFs") implied a handful.
+Counted authoritatively from the Java side: **327 methods take a
+`MezzeFunction` parameter across 32 files**; minus the 37 in
+`MezzeBytecodeRootNode` (the interpreter, not natives) that is **~290 native
+methods receiving a guest callback.** An earlier stdlib-grep proxy said 154 and
+was wrong low; "map and fold" was wrong by two orders.
+
+The distribution is what makes it tractable:
+
+      57  SeqNatives        26  DequeNatives       16  IterNatives
+      43  ListNatives       25  SortedSetNatives   11  NonEmptyListNatives
+      31  MapNatives        24  SortedMapNatives
+      26  SetNatives
+
+~260 of them sit in NINE collection files with THE SAME SHAPE — a loop calling a
+callback per element. So C4 is not 290 bespoke rewrites: it is one shared
+resumable-iteration helper applied across nine files, plus a decision (resumable
+or fail-loudly) for the long tail.
+
+### 2b. ONE EFFECT PER PERFORMER NAME — so a fake scheduler cannot bundle its clock
+
+Measured: `impl Ticker for FakeWorld` together with `impl Jobs for FakeWorld` is
+**V0701 "Duplicate effect handler declaration: performer 'FakeWorld' is already
+defined"**, with or without the scope hooks duplicated. A performer name
+implements exactly one effect.
+
+So a deterministic test setup is TWO performers:
+
+    perform FakeTime {} in perform FakeAsync {} in program {}
+
+and they must COOPERATE: advancing the virtual clock when nothing is runnable is
+a scheduling decision taken in `FakeAsync.drive`, while the clock lives in
+`FakeTime`'s scope. Handler bodies are ordinary code and may perform effects, so
+a virtual clock exposes an op the scheduler performs:
+
+    drive = { runnable } -> match runnable.first_or_none {} is
+      Some { t } -> t
+      None {} -> do
+        Clock.advance_to { ms = scope.earliest_deadline {} }
+        runnable.first {}
+
+**This refines the deadlock rule**: idle means nothing runnable AND no timer to
+advance, not simply an empty ready set. It is the standard
+deterministic-simulation trick, and it works only because deadlines go through
+the `Time` effect rather than a runtime clock (see the design's ParkOn section).
 
 ### 3. There are EXISTING parkers to migrate, and they are not all `await`
 
