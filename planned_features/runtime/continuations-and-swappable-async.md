@@ -225,6 +225,41 @@ That is what makes `cont` the right primitive rather than `capture {}`: three
 runtime-bound names (`scope`, `resume`, `abort`) become two (`scope`, `cont`),
 and the survivor is a value.
 
+**4. Math inside a ROW-CARRYING function pays NOTHING.** The third listed
+unknown. Two identical tail-recursive sums, one with no row and one declared
+`-> Int <Noop>` and called inside a `perform` that installs a handler; neither
+performs anything in the loop. One process, arms interleaved, n=2e7, three rounds:
+
+    pure ps/iter: 298 264 232   sum=200000010000000
+    row  ps/iter: 251 290 236   sum=200000010000000
+
+Min 232 against 236 ps/iter, 1.7% apart with the ranges overlapping completely.
+Identical checksums. A row is a type-level artifact; the arithmetic is the same
+code. (`enableYield = true` on `MezzeBytecodeRootNode` costs nothing here.)
+
+**5. BONUS, and it is the number that makes C affordable: THE TAX FOR MAKING
+CAPTURE POSSIBLE IS ~8 ns PER `perform` BLOCK.** Today's dispatch is a direct
+call with no continuation on the path at all, so `cont` requires the perform
+block to run inside a `Continuation` — paid whether or not anybody captures.
+Measured as a body run directly vs the same body inside `Continuation.run()`
+that never yields:
+
+| block work | direct | inside a Continuation | tax |
+|---|---|---|---|
+| 0 | 0 ns | 8 ns | **8** |
+| 10 | 3 ns | 10 ns | **7** |
+| 100 | 16 ns | 24 ns | **8** |
+| 1000 | 159 ns | 183 ns | 24 |
+
+**Per BLOCK, not per op** — a block containing a thousand ops pays it once, so it
+is less than ONE effect op (~16 ns). Nesting does not compound: 1 to 8 nested
+blocks all land in 43-87 ns.
+
+So the "only wrap when the handler might capture" optimisation (statically
+knowable — does any op body of the installed performer mention `cont`) is an
+OPTION rather than a requirement. That was the thing most likely to make C cost
+something for programs that never use it, and it does not.
+
 ### The original Step 0, as written before the measurements
 
 1. Does `jdk.internal.vm.Continuation` work under **native-image**? Biggest
