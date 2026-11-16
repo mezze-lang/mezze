@@ -260,6 +260,54 @@ knowable — does any op body of the installed performer mention `cont`) is an
 OPTION rather than a requirement. That was the thing most likely to make C cost
 something for programs that never use it, and it does not.
 
+**6. A FLAT USERLAND SCHEDULER WORKS — tested, not argued.** The author's
+must-have ("I really want userland async for sure"; generators optional, "we have
+iter"). Probed in the shape a Mezze `impl Async for Reactor` would compile to: a
+shared run queue living outside any task, each task its own `Continuation` so
+suspending one does not unwind the driver, `await` parking the task's
+continuation in that queue, and a flat driver loop (pop, run, requeue if
+`!isDone()`).
+
+    trace   : A1 B1 C1 A2 B2 C2 A3 B3 Cdone Adone Bdone
+    switches: 11
+    max stack depth inside a task: 5
+    INTERLEAVED: yes (round-robin, not run-to-completion)
+
+Real round-robin, every task completed, and **max depth 5 is a maximum over all
+11 switches** — the driver never nested. A trampoline, not recursion.
+
+## THE RULE, SETTLED — and confinement is OUT
+
+The scheduler above only works because the handle LEFT its own block: the queue
+is the driver's and outlives every task whose continuation it holds. That is not
+an artifact of the probe, it is structural — a scheduler's queue must outlive its
+tasks. So "a `cont` may not leave its `perform` block" forbids precisely the
+thing the language most wants, and it is REJECTED. (It had been the working
+assumption for several rounds, on my argument, not the author's.)
+
+What replaces it, both guards dynamic:
+
+> A `cont` is resumable iff its computation is **suspended** — not completed, and
+> not already resumed (one-shot) — **and** the scope it depends on is still alive.
+
+The first half is coherence: a completed computation's frames already returned,
+so there is nobody to return to twice. `isDone` is the flag. The second half is
+the resource guard, enforced at `finalize_scope` rather than by the handle's
+location, with precedent: `AsyncNatives.SuspendedOps` already reports suspended
+ops "when a context closes holding one".
+
+**What this costs, accepted deliberately:**
+
+| | cost |
+|---|---|
+| resource safety | prevention -> DETECTION. A suspended task can outlive its scope; the best we get is a loud failure at a defined kill point. The weakest of this document's three options for the `HttpClient` pool. |
+| leaks | bounded -> GC-bounded. An escaped continuation never resumed holds its frames and everything they reference; block exit no longer bounds it. |
+| `finalize_scope` | needs a decision it did not need before: finalize with suspended continuations outstanding, or refuse, or kill them. |
+| **Phase B** | becomes a HARD PREREQUISITE, not an optimisation. Handlers live on a per-thread stack; a continuation resumed later, possibly on another thread, after that chain has popped, must CARRY ITS HANDLER CONTEXT. That is B. |
+| static story | gone for resource safety. The `runST` region trick needed confinement. One-shot keeps its linear-types path; scope safety is dynamic forever. |
+
+Bought: userland async (the requirement), and generators/streams free with it.
+
 ### The original Step 0, as written before the measurements
 
 1. Does `jdk.internal.vm.Continuation` work under **native-image**? Biggest
