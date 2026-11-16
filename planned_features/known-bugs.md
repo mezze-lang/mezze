@@ -7402,7 +7402,7 @@ guarded by `mezze-python`'s own "str method dispatch" / "int method dispatch"
 checks; or try raw first and fall back to the helper, which needs a crossing to
 detect failure and so costs a round trip per call.
 
-## BUG 47 — OPEN: an inherent impl method that uses `it` WITHOUT declaring it
+## BUG 47 — FIXED 2026-11-16: an inherent impl body was never checked for undefined names
 
 Found 2026-11-16 while designing `cont`'s helper methods, which would be
 inherent impls. **Diagnosed to the line; fix NOT landed** — see "the attempt
@@ -7456,7 +7456,33 @@ zero build errors — not stale-binary skew.
 Not about chaining and not about interpolation: all three undeclared forms
 (let-bound, chained inside a string, chained outside) crash identically.
 
-### THE FIX: reject, do not accommodate
+### THE FIX AS LANDED
+
+Two parts, both in `ConstraintGenerator.processInherentImpl`:
+
+1. **`it` is reserved and checked immediately.** An inherent body naming `it`
+   without declaring it as a parameter is V0702, with a message that says what
+   `it` is and how to write it:
+
+       Type error in inherent impl operation 'get' implementation: Undefined
+       variable 'it'. `it` is the receiver of an inherent method and must be
+       declared as a parameter: write `get = { it } -> …` instead of
+       `get = {} -> …`.
+
+2. **Every OTHER undefined name is collected and judged AFTER the declaration
+   loop**, with the whole module in context. `get = { it } -> nonexistent_thing`
+   used to check clean — the gap swallowed every undefined name, not only `it`.
+
+   The deferral is the load-bearing part. Checking during generation reports
+   false positives, because a module's own bindings are not all bound yet and a
+   sibling or self reference reads as undefined: an earlier attempt broke
+   `std::effects::async` with "Undefined variable 'throw_if_cancelled'" inside
+   the impl of that very name, and took 53 tests with it. A regression test pins
+   the sibling case.
+
+Gates: typechecker 5389/0, interpreter 8164/0.
+
+### Why reject rather than accommodate
 
 **The ABILITY path already does exactly this**, measured:
 

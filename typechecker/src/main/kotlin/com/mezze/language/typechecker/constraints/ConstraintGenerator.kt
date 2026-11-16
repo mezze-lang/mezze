@@ -113,6 +113,13 @@ class ConstraintGenerator(
 
         val recordLiteralBindings = mutableSetOf<String>()
 
+        // BUG 47b: undefined names seen in INHERENT impl bodies. Checked AFTER the
+        // declaration loop, because at generation time a module's own bindings
+        // are not all in context yet — a sibling or self reference looks
+        // undefined there (`std::effects::async` names `throw_if_cancelled`
+        // inside the impl of that very name).
+        val inherentUndefined = mutableListOf<Triple<String, String, com.mezze.language.parsedast.Loc?>>()
+
         val perBindingSolveErrors = mutableListOf<ConstraintSolver.ConstraintError>()
         val collectedTypeCheckErrors = mutableListOf<TypeCheckError>()
 
@@ -690,7 +697,7 @@ class ConstraintGenerator(
                 is ParsedImplAbilityDecl -> try {
                     implValidator.validateAbilityImplementation(item, currentContext)
                     if (item.isInherent) {
-                        currentContext = processInherentImpl(item, currentContext, results)
+                        currentContext = processInherentImpl(item, currentContext, results, inherentUndefined)
                     }
                 } catch (e: TypeCheckError) {
                     collectedTypeCheckErrors.add(if (e.loc == null) TypeCheckError(e.message ?: "Type error", item.loc, e.errorType, e.metadata, code = e.code, hints = e.hints, fixHints = e.fixHints) else e)
@@ -844,6 +851,24 @@ class ConstraintGenerator(
                 is ParsedPubUseDecl -> {
                 }
             }
+        }
+
+        // BUG 47b: judge the inherent-impl bodies' undefined names NOW, with the
+        // whole module in context. An ability impl body gets this from
+        // `ImplValidator.validateImplOperationBody`, but both of ITS call sites
+        // are ability paths, so an inherent body's undefined names were recorded
+        // during generation and then dropped — `get = { it } -> typo` checked
+        // clean. Deferred to here because at generation time a module's own
+        // bindings are not all bound yet and a legitimate sibling or self
+        // reference reads as undefined.
+        for ((opName, varName, varLoc) in inherentUndefined) {
+            if (currentContext.lookup(varName) is TypingContext.LookupResult.Found) continue
+            throw TypeCheckError(
+                "Type error in inherent impl operation '$opName' implementation: " +
+                    "Undefined variable '$varName'",
+                varLoc,
+                code = ErrorCode.V0702_UNDEFINED_VARIABLE,
+            )
         }
 
         return ProgramConstraintResult(
@@ -1425,6 +1450,7 @@ class ConstraintGenerator(
         item: ParsedImplAbilityDecl,
         context: TypingContext,
         results: MutableMap<String, ConstraintResult>,
+        inherentUndefined: MutableList<Triple<String, String, com.mezze.language.parsedast.Loc?>>,
     ): TypingContext {
         var currentContext = context
         for (op in item.operations) {
@@ -1486,6 +1512,51 @@ class ConstraintGenerator(
             )
 
             val bodyResult = expressionGenerator.generate(lambda.body, constraintContext)
+
+            // BUG 47: an INHERENT impl body was the only kind nobody checked for
+            // undefined variables. `validateImplOperationBody` runs this check,
+            // but both of its call sites are ability-impl paths
+            // (`abilityDeclaration.operations.find`), so an inherent body's
+            // undefined names were RECORDED and then ignored: the generator
+            // carried on with a fresh type variable.
+            //
+            // That is the whole bug. `impl Box where { get = {} -> it.v }`
+            // names `it` without declaring it as a parameter, so `it.v` typed as
+            // a fresh var, the method's return type never resolved (T0206 landed
+            // on a LATER call, blaming the wrong expression), and when it did
+            // reach the runtime `CallEmit` passed the receiver as a field named
+            // `it` into a lambda with NO `it` parameter — no frame slot, so
+            // `FrameSlotTypeException: ... got Illegal`.
+            //
+            // `it` is the receiver and is reserved: an inherent method that uses
+            // it must declare it, exactly as an ability impl must.
+            //
+            // NARROW TO `it` ON PURPOSE. A general undefined-variable check here
+            // reports false positives: at this point in the pass a module's own
+            // bindings are not all in context, so a legitimate sibling or
+            // self reference looks undefined — `std::effects::async` fails with
+            // "Undefined variable 'throw_if_cancelled'" inside the impl of that
+            // very name. (That is why `validateImplOperationBody` runs in a
+            // different phase.) `it` has no such ambiguity: it is the receiver,
+            // it is never a module-level binding, and inside an inherent impl it
+            // can mean nothing else.
+            // Everything that is not `it` is RECORDED and judged after the loop,
+            // once every module binding is in context.
+            for (u in bodyResult.undefinedVariables) {
+                if (u.name == Keywords.IT) continue
+                if (u.name.startsWith(com.mezze.language.ast.MagicParams.NATIVE_PREFIX)) continue
+                inherentUndefined.add(Triple(op.name, u.name, u.loc))
+            }
+            bodyResult.undefinedVariables.firstOrNull { it.name == Keywords.IT }?.let { undefinedIt ->
+                throw TypeCheckError(
+                    "Type error in inherent impl operation '${op.name}' implementation: " +
+                        "Undefined variable 'it'. `it` is the receiver of an inherent method " +
+                        "and must be declared as a parameter: write " +
+                        "`${op.name} = { ${Keywords.IT} } -> …` instead of `${op.name} = {} -> …`.",
+                    undefinedIt.loc,
+                    code = ErrorCode.V0702_UNDEFINED_VARIABLE,
+                )
+            }
 
             val constraints = bodyResult.constraints.toMutableList()
 
