@@ -1,312 +1,325 @@
-# Single-shot continuations and swappable async
+# Continuations and swappable async
 
-Designed 2026-11-12/13 while auditing the effect system. **The verdict is
-smaller than the design: do Phase A and B, leave C until something concrete
-demands it.** Phases A and B are each worth doing on their own merits; C is a
-capability nobody has asked for yet.
+**Status 2026-11-16: the design is settled and the mechanisms are measured.
+Nothing here waits on a number.** What remains is implementation, listed under
+*Phases*. The measurement record that produced this design is kept verbatim
+below, including the framings that were tried and rejected.
 
-**Read the measurement, never the prose — this file included.** Every number
-below says how it was produced. Two claims are marked UNMEASURED on purpose.
+The author's requirement, which drove every choice: *"i really want userland
+async for sure"*, generators optional, no new keywords, no required annotations,
+and **no runtime errors — silent behaviour is fine**.
 
-Gates for every change here: `compileStdlib` first, then `:typechecker:test`,
-then `:interpreter:test`, SEPARATELY. `~/.mezze` is shared, so a concurrent
-session will produce 120s `ModuleResolver.prefetch` timeouts that are not yours
-— run the suspect alone before believing a failure.
+---
 
-## Why this is not urgent: Loom already does the common case
+## The design
 
-    perform PooledHttpClient in perform LoomAsync in do
-      let p1 = spawn { f = {} -> get { url = "a" } }
-      let p2 = spawn { f = {} -> get { url = "b" } }
-      combine { a = await { p = p1 }, b = await { p = p2 } }
+One suspension mechanism (Truffle Bytecode DSL `yield`), with schedulers written
+in userland as ordinary performers.
 
-Each task is a virtual thread; the blocking call inside unmounts it. Real
-concurrent IO with ordinary blocking code — no reactor, no io_uring, no
-continuations. `spawn`'s `<...>` on the callback carries the task's effects to
-the spawn site, so a handler installed outside covers them.
+### The surface — no new syntax
 
-A reactor (single-threaded event loop, tasks must never block) only beats that
-at ~1M+ connections, for batched syscall submission, for extreme tail latency,
-or for **deterministic scheduling in tests** — the last being the only one
-appealing here, and not pressing.
+A performer op body can already reference three runtime-bound names: `scope`,
+`resume` and `abort`. This design replaces the latter two with a single value,
+so the count goes from **three to two**.
 
-## Phase A — promote the scheduling points to ops
+    cont                        ## the one bound name, beside `scope`
+    cont.resume  { val = v }    ## continue the block with v
+    cont.abort   { val = v }    ## end the block with v
+    cont.suspend {}             ## park; control returns to the perform boundary
 
-**Stdlib only. No runtime work. This is the whole unlock for realistic
-swappable async, and it is cheap.**
+`cont` is bound exactly where `scope` is — a performer op body. Referencing it
+anywhere else is V0702, which is already the behaviour for `scope` (verified:
+`scope` in an ordinary function is *"Undefined variable or function: scope"*).
 
-`Async` has exactly ONE op today:
+**It is NOT a parameter.** A Mezze parameter record describes the call, and
+`Sched.wait { j = job }` supplies no continuation; putting `cont` in the params
+would make the pattern lie about the call shape. This was tried and rejected —
+see *Rejected framings*.
 
-    effect Async where { spawn: { f: {} -> 'a <...> } -> Promise 'a <Async> }
+**`Cont 'a` is nominal with inherent methods, not a record of closures.** If it
+were a record you could write `let f = cont.resume` and get a bare function —
+precisely the `let k = resume` trap V0503 exists to kill.
 
-Every other scheduling point is a plain `pub let` straight to a native, so **a
-performer cannot intercept it**:
+All three methods return a **site-chosen free type variable**, written `'a`, the
+same shape `abort` has today. There is no named bottom type in Mezze. Verified:
 
-| point | where | today |
-|---|---|---|
-| `spawn` | `async.mz:342` | op ✅ |
-| `await` | `async.mz:56` | `__native_promise_await_result` ❌ |
-| `yield_now` | `async.mz:126` | `__native_async_yield_now` ❌ |
-| `park` / `park_until` | `async.mz:129,144` | natives ❌ |
-| `cancel` | `async.mz:89` | native ❌ |
-| scope lifecycle | — | `initialize_scope`/`finalize_scope` ✅ |
+    impl Ex for Choosy where {
+      throw = { error } -> if error.len {} > 3 then abort { val = 0 } else 7,
+    }
 
-Make those ops; keep the `pub let`s as one-line shims
-(`pub let await = { p } -> Async.await { p = p }` — the shape
-`pub let throw = { error } -> Exception.throw { error }` already uses).
-`LoomAsync` implements them with today's natives, so it stays tail-resumptive,
-same cost, **behaviourally identical** — which is the thing to test. The derived
-combinators (`race`, `all`, `settle`, `par_map`, `try_all`, `try_any`,
-`with_timeout`, `map_ok`, `try_await`, `go`, `run`) need no change at all.
+`abort { val = 0 }` unifies with a plain `7` because `'a` instantiates to `Int`
+at that site. The standing rule is that a bare value must not PIN `'a`. In a
+handler `'a` becomes the block's type; in a `drive` body resuming a stored
+continuation it instantiates to `{}`, because the call stands in statement
+position. One signature, both uses.
 
-Enables: userland `Async` performers with custom policy over Loom — fairness,
-priority, concurrency limits, instrumentation, a mock async for tests. **No
-capture needed**, because tasks still run on virtual threads and Loom unmounts
-on block.
+### Implicit resume stays
 
-**The interface, not the continuation mechanism, is what blocks alternative
-async today.** That is the main finding of the whole exercise.
+A performer op body that falls off the end with a value RESUMES — the value is
+handed back at the perform site. Measured, and it is also the fast path: every
+`resume` mention in the stdlib is a COMMENT explaining that the bare value is
+used instead because it is **~2.4x cheaper**. There are zero bare `resume {`
+calls in stdlib code.
 
-`yield_now` is the clearest illustration of why these must be ops. Its native is
-`Thread.yield()` — under Loom a *hint* to the JDK scheduler; under a reactor it
-would have to mean "requeue me and run someone else". Same source, two
-semantics, and only the handler can know which. `park` is worse: it is a
-spin-park with exponential backoff, and its own comment says *"an explicit waker
-would be cheaper for predicates that change rarely"* — a reactor would register
-against a readiness event and never poll.
+So the 99% handler is untouched by all of this:
 
-## Phase B — evidence passing: delete the ThreadLocal for `resume`/`abort`
+    impl FileRead for LocalFs where {
+      read_text = { path } -> __native_fs_read_text { path = path },
+    }
 
-Independent win; do it regardless of C.
+No `cont`, no suspension, today's direct-call path, today's cost.
 
-`HandlerChainRegistry.pushEffectHandles(resume, abort)` is called by the
-dispatcher IMMEDIATELY before invoking the op handler, and the body fetches them
-back via `EffectBindingNode.lookupOnFiber`, which is `@TruffleBoundary` over a
-ThreadLocal. Producer and consumer are adjacent; the thread-local exists only to
-permit lookup from anywhere — which V0503 made impossible.
+### `drive` — the third impl-only field
 
-Pass the handles through the handler call (or into its frame) instead.
+When a task suspends, control returns to the **perform boundary**, not to user
+code: `perform RunQueue {} in body {}` must not evaluate to "suspended", or
+every `perform` in the language would have to return a variant. So the performer
+supplies a hook the runtime calls while the body is parked.
 
-MEASURED payoff, built JAR, arms interleaved in one invocation, median of 9 runs:
+`initialize_scope` and `finalize_scope` are the precedent — `async.mz` describes
+them as *"runtime plumbing — not declared in the ability but expected by the
+effect driver to bracket the structured concurrency scope. Kept as impl-only
+fields."* `drive` joins that family: expected by the driver, invisible in the
+ability.
 
-| | ns/iter |
-|---|---|
-| bare loop, no effect | ~0–1 |
-| effect op, bare-value handler | ~16 |
-| effect op, explicit `resume { val = … }` | ~41 |
+The runtime loop: run the body; if it suspends, call `drive`; if `drive` reports
+progress, continue; if `drive` reports idle **while the body is still
+suspended**, nothing can ever wake it.
 
-So ~41 → ~16 for explicit `resume`. Allocation is NOT the cause: 3–4 young
-pauses at n=1e7 against a floor of 1, where the calibration in
-`perf-baseline.md` puts one allocation per iteration at ~33.
+### A complete scheduler
 
-Also fixes, from the code's own comments:
-- the documented silent cross-thread hazard — *"a cached handler is one
-  thread's, readable by all… two tasks silently read each other's handler: a
-  wrong VALUE, never an exception"*
-- `singleThreaded`'s permanent degradation — *"the assumption never comes
-  back"*, so multithreaded programs run the re-resolving dispatch for the life
-  of the process
-- **Path C's blocker.** The CPS attempt died on *"the worker-thread approach
-  can't share ThreadLocals with the driver"*. B is its prerequisite, so B keeps
-  a Loom-free capture mechanism possible without committing to one.
+    impl Sched for RunQueue { capacity: Int } where {
+      initialize_scope = {} -> {
+        ready    = new_queue {},     ## runnable now
+        waiting  = new_table {},     ## cont, keyed by job id
+        outcomes = new_table {},
+      },
 
-Benchmark method, because the existing harness cannot answer this: time INSIDE
-one warmed process (`Time.monotonic` around the loop) and take the slope across
-two sizes. `EffectHandlerPerfTest` is end-to-end and startup-dominated — a 100k
-arithmetic loop and a 500-op effect program both land at ~4.6–5.0 ms — and three
-of its five cases no longer compile (two missing `*` on `outer`, one empty `do`
-block). An attempt to measure per-op cost from the JUnit harness produced
-NEGATIVE per-op costs and was discarded. `mez dev` is the interpreter: it
-reports ~160–215 ns for the same op that a built JAR does in ~16.
+      ## Wake every still-parked task so its OWN cleanup runs.
+      finalize_scope = {} -> scope.waiting.drain_each { f = { w } ->
+        w.cont.raise { err = SchedCancelled {} } },
 
-## Phase C — capture. Design settled; build only on demand.
+      drive = {} -> do
+        scope.poll_io {}
+        match scope.ready.take_front {} is
+          QueueEmpty {} -> DriveIdle {}
+          QueueCont { cont, val } -> do
+            cont.resume { val = val }
+            DriveProgressed {}
+          QueueTask { task } -> do
+            task {}
+            DriveProgressed {},
 
-One form per operation. Bare `resume` AND bare `abort` both go away:
+      submit = { f } -> scope.ready.push { task = f },
 
-| want | how |
-|---|---|
-| tail resume | **return a value** — no keyword (already the language rule) |
-| get the continuation | `let k = capture {}` |
-| resume it | `k.resume { val = x }` |
-| discard it, block yields `x` | `k.abort { val = x }` |
+      wait = { j } -> match scope.outcomes.get { key = j.id } is
+        JobDone { val } -> val                            ## implicit resume
+        JobPending {} -> do
+          scope.waiting.put { key = j.id, cont = cont }   ## keep it
+          cont.suspend {},                                 ## park
+    }
 
-Why not "`resume` as a first-class value": mentioning `resume` meaning capture
-while applying it meant resume **breaks referential transparency** —
-`push_back { k = resume }` and `let k = resume; push_back { k = k }` must be the
-same expression. `capture {}` is an ordinary call; `k` an ordinary value.
+`cont` and `scope` appear only in op bodies, `drive` and `finalize_scope`.
+Nothing is a bare function — a top-level `let` cannot see `scope`, so completion
+handling lives in `drive`.
 
-Matches **OCaml 5** (`continue k v` / `discontinue k exn`, first-class one-shot,
-runtime error on second use). **Effekt** deliberately chose second-class
-continuations and consequently cannot express userland schedulers — that is the
-price of the keyword-only direction.
+### Scheduling policy IS `drive`
 
-- Cost model: **does the handle escape the op body?** No → a local escape check
-  compiles it to today's direct path, free. Yes → you are deferring, you pay.
-  Same intuition as a non-escaping closure.
-- One-shot needs a RUNTIME guard either way; static needs linear types. Putting
-  the obligation on `Cont 'a` is what makes it forward-compatible with adding
-  linearity later.
-- Make `capture` an **op**, so a capturing handler shows up in the ROW rather
-  than only in the syntax.
-- `k.abort` is the cancellation story: deterministic unwind instead of a
-  best-effort interrupt. `finalize_scope` already runs on the abort path
-  (measured: `INIT / FINALIZE / -> 99`), so cancel → resume-with-abort → scope
-  hooks run → resources released.
+The continuation carries no priority, identity or ordering. Where you file it is
+the entire policy, which is what makes async swappable:
 
-### Settle these before writing any C code
+    drive = {} -> match scope.ready.take_front {} is …    ## FIFO, fair
+    drive = {} -> match scope.ready.take_back {} is …     ## LIFO, cache-friendly
+    drive = {} -> match scope.ready.take_min { by = { t } -> t.deadline } is …
+    drive = {} -> match scope.ready.take_at { i = scope.rng.next_below { … } } is …  ## deterministic replay
 
-1. **Bare value after a `capture {}`.** OCaml's model makes the handler's return
-   value the BLOCK's value once captured — so a bare value would mean the op's
-   value normally and the block's value after a capture. A mode switch. Decide
-   it explicitly rather than discovering it.
-2. **Captured continuation vs scoped resources.** `HttpClient` holds its pool in
-   `scope`. A continuation captured inside and resumed after `finalize_scope`
-   would touch a closed pool. Options: scope outlives any capture / refuse
-   capture in a scoped handler / fail loudly on a late resume.
-3. **A dropped continuation is a new leak shape** — never resumed, never
-   cancelled. Precedent for detecting it exists: `AsyncNatives.SuspendedOps`
-   already reports unhandled suspended ops *"when a context closes holding
-   one"*.
+Same program, same ops, different `drive`.
 
-### Step 0 — MEASURED 2026-11-15. All three answered; two in our favour.
+### Loom, both ways
 
-Probes: `scratchpad/loomprobe/{Probe,Cycle,Aot}.java`, GraalVM CE 25.0.2,
-`--add-exports java.base/jdk.internal.vm=ALL-UNNAMED`.
+**`LoomAsync` — blocking. Needs nothing new.** The body blocks a virtual thread
+rather than suspending, so control never returns to the perform boundary and
+`drive` is never called:
 
-**1. Does `jdk.internal.vm.Continuation` work under native-image? YES.** The
-listed BIGGEST RISK, and it is not a risk. A native image built from a probe that
-parks and resumes a continuation prints
+    impl Async for LoomAsync where {
+      initialize_scope = {} -> __native_async_init_scope {},
+      finalize_scope   = {} -> __native_async_finalize_scope { tracker = scope },
+      spawn     = { f } -> __native_async_spawn_tracked { f = f, max_concurrent = 0, tracker = scope },
+      await     = { p } -> __native_async_await { p = p },
+      yield_now = {} -> __native_async_yield_now {},
+      cancel    = { p, reason } -> __native_async_cancel { p = p, reason = reason },
+    }
 
-    after park  : stage=1 done=false out=-1
-    after resume: stage=2 done=true  out=42
-    AOT: WORKS
+No `cont`, no `drive`, and identical to today's code except that `await`,
+`yield_now` and `cancel` are now ops (Phase A). **It keeps the one capability a
+BDSL continuation does not have: it parks across native frames**, because it
+freezes the whole Java stack.
 
-so park, resume, the value flowing back and `isDone` all behave as on the JVM.
-The export is still needed (nothing in the build has
-`--add-exports java.base/jdk.internal.vm` today — only `jdk.internal.vm.ci` in a
-bench script), so D7's wish to drop exports is the live tension, not capability.
+**`VirtualPool` — virtual threads as an executor, continuations as the
+mechanism.** Suspension is the core's job; Loom is only a pool, reached through
+public API, so no `jdk.internal.vm` and no `--add-exports`:
 
-**2. Capture cost by stack depth — MEASURED, and it is MOSTLY A FIXED COST.** A
-full switch (freeze + thaw), min of 9, 3000 continuations per rep:
+    impl Async for VirtualPool { workers: Int } where {
+      initialize_scope = {} -> {
+        pool = __native_vthread_pool { size = workers },
+        ready = new_queue {}, waiting = new_table {},
+      },
+      finalize_scope = {} -> do
+        scope.waiting.drain_each { f = { w } -> w.cont.raise { err = AsyncCancelled {} } }
+        scope.pool.shutdown {},
 
-| depth | JVM | native-image |
-|---|---|---|
-| 1 | ~137 ns | 97 ns |
-| 10 | 95 ns | 122 ns |
-| 50 | 116 ns | 211 ns |
-| 200 | 213 ns | 545 ns |
+      drive = {} -> match scope.ready.take_front {} is
+        QueueEmpty {} -> DriveIdle {}
+        QueueCont { cont, val } -> do
+          scope.pool.submit { task = {} -> cont.resume { val = val } }
+          DriveProgressed {},
 
-JVM: ~100 ns floor, ~0.6 ns/frame. AOT: ~90 ns floor, **~2.3 ns/frame** — cleanly
-linear, about 4x the JVM's slope, which is what one would expect when the JIT
-cannot optimise the freeze/thaw loop. Shallow switches are if anything FASTER
-under AOT.
+      await = { p } -> match p.state {} is
+        PromiseSettled { val } -> val
+        PromisePending {} -> do
+          scope.waiting.put { key = p.id, cont = cont }
+          cont.suspend {},
+    }
 
-For scale, an effect op today is ~16 ns (bare-value handler) and ~41 ns (explicit
-`resume`), so **a task switch costs roughly 6x an effect op** and stays in the
-same order to depth ~50. That is fine for IO-bound work; deep stacks suspending
-frequently are where it bites, and only on AOT.
+This one requires **Phase B**: it resumes on a different thread than parked, and
+the handler chain is per-thread today. The cross-thread resume itself is measured
+working.
 
-**3. BINDING A CONTINUATION IS PASSIVE — and this is the finding that shapes the
-syntax.** `Continuation.getCurrentContinuation(scope)` returns a handle, the body
-runs straight past taking it, and finishes WITHOUT unmounting:
-
-    handle obtained without yield : true
-    body continued past the take  : true
-    body finished (no unmount)    : true
-
-And a frame that yields resumes where it left off and can still produce a value
-(`stage=1 … stage=2, result=42`). So a handler may hold `cont`, carry on, and
-either fall off (resume) or park it — **there is no mode switch**, and OCaml's
-"the handler's value becomes the block's value once captured" does NOT have to be
-imported along with the mechanism. OCaml reads that way because `capture` is a
-CALL that unwinds; a BOUND name does not unwind.
-
-That is what makes `cont` the right primitive rather than `capture {}`: three
-runtime-bound names (`scope`, `resume`, `abort`) become two (`scope`, `cont`),
-and the survivor is a value.
-
-**4. Math inside a ROW-CARRYING function pays NOTHING.** The third listed
-unknown. Two identical tail-recursive sums, one with no row and one declared
-`-> Int <Noop>` and called inside a `perform` that installs a handler; neither
-performs anything in the loop. One process, arms interleaved, n=2e7, three rounds:
-
-    pure ps/iter: 298 264 232   sum=200000010000000
-    row  ps/iter: 251 290 236   sum=200000010000000
-
-Min 232 against 236 ps/iter, 1.7% apart with the ranges overlapping completely.
-Identical checksums. A row is a type-level artifact; the arithmetic is the same
-code. (`enableYield = true` on `MezzeBytecodeRootNode` costs nothing here.)
-
-**5. BONUS, and it is the number that makes C affordable: THE TAX FOR MAKING
-CAPTURE POSSIBLE IS ~8 ns PER `perform` BLOCK.** Today's dispatch is a direct
-call with no continuation on the path at all, so `cont` requires the perform
-block to run inside a `Continuation` — paid whether or not anybody captures.
-Measured as a body run directly vs the same body inside `Continuation.run()`
-that never yields:
-
-| block work | direct | inside a Continuation | tax |
+| | `LoomAsync` | `VirtualPool` | single-threaded loop |
 |---|---|---|---|
-| 0 | 0 ns | 8 ns | **8** |
-| 10 | 3 ns | 10 ns | **7** |
-| 100 | 16 ns | 24 ns | **8** |
-| 1000 | 159 ns | 183 ns | 24 |
+| mechanism | blocks a virtual thread | BDSL continuation | BDSL continuation |
+| mentions `cont` / has `drive` | no / no | yes / yes | yes / yes |
+| parks across native frames | **yes** | no | no |
+| per switch | thread park, ~µs | 21 ns | 21 ns |
+| parallelism | yes | yes | no |
+| deterministic | no | no | **yes** |
+| needs Phase B | no | **yes** | no |
 
-**Per BLOCK, not per op** — a block containing a thousand ops pays it once, so it
-is less than ONE effect op (~16 ns). Nesting does not compound: 1 to 8 nested
-blocks all land in 43-87 ns.
+---
 
-So the "only wrap when the handler might capture" optimisation (statically
-knowable — does any op body of the installed performer mention `cont`) is an
-OPTION rather than a requirement. That was the thing most likely to make C cost
-something for programs that never use it, and it does not.
+## Which call sites carry a suspension check
 
-**6. A FLAT USERLAND SCHEDULER WORKS — tested, not argued.** The author's
-must-have ("I really want userland async for sure"; generators optional, "we have
-iter"). Probed in the shape a Mezze `impl Async for Reactor` would compile to: a
-shared run queue living outside any task, each task its own `Continuation` so
-suspending one does not unwind the driver, `await` parking the task's
-continuation in that queue, and a flat driver loop (pop, run, requeue if
-`!isDone()`).
+**Any call whose effect row is non-empty. A pure call carries none.**
 
-    trace   : A1 B1 C1 A2 B2 C2 A3 B3 Cdone Adone Bdone
-    switches: 11
-    max stack depth inside a task: 5
-    INTERLEAVED: yes (round-robin, not run-to-completion)
+No declaration, no new keyword, no inference over impls, no cross-module
+coherence question about whether some impl started parking. The justification is
+the measurement: the check costs **38 ps**, inside the noise, so precision buys
+nothing. A `FileRead` performer that never parks still has call sites carrying a
+check that always falls through, and that is cheaper than inventing syntax to
+avoid it.
 
-Real round-robin, every task completed, and **max depth 5 is a maximum over all
-11 switches** — the driver never nested. A trampoline, not recursion.
+The effect row already exists and is inferred, so **nothing in this design asks
+the user to annotate anything** — not the handler, not the continuation, not the
+call site.
 
-## THE RULE, SETTLED — and confinement is OUT
+## What the typechecker covers
 
-The scheduler above only works because the handle LEFT its own block: the queue
-is the driver's and outlives every task whose continuation it holds. That is not
-an artifact of the probe, it is structural — a scheduler's queue must outlive its
-tasks. So "a `cont` may not leave its `perform` block" forbids precisely the
-thing the language most wants, and it is REJECTED. (It had been the working
-assumption for several rounds, on my argument, not the author's.)
+These belong in a standalone validator pass emitting ordinary `V####`
+diagnostics, not in unification. The precedent is exact: **V0503 is enforced by
+`HandlerTailPositionValidator`**, a separate pass, and is indistinguishable from
+a type error to the user.
 
-What replaces it, both guards dynamic:
-
-> A `cont` is resumable iff its computation is **suspended** — not completed, and
-> not already resumed (one-shot) — **and** the scope it depends on is still alive.
-
-The first half is coherence: a completed computation's frames already returned,
-so there is nobody to return to twice. `isDone` is the flag. The second half is
-the resource guard, enforced at `finalize_scope` rather than by the handle's
-location, with precedent: `AsyncNatives.SuspendedOps` already reports suspended
-ops "when a context closes holding one".
-
-**What this costs, accepted deliberately:**
-
-| | cost |
+| caught | derived from |
 |---|---|
-| resource safety | prevention -> DETECTION. A suspended task can outlive its scope; the best we get is a loud failure at a defined kill point. The weakest of this document's three options for the `HttpClient` pool. |
-| leaks | bounded -> GC-bounded. An escaped continuation never resumed holds its frames and everything they reference; block exit no longer bounds it. |
-| `finalize_scope` | needs a decision it did not need before: finalize with suspended continuations outstanding, or refuse, or kill them. |
-| **Phase B** | becomes a HARD PREREQUISITE, not an optimisation. Handlers live on a per-thread stack; a continuation resumed later, possibly on another thread, after that chain has popped, must CARRY ITS HANDLER CONTEXT. That is B. |
-| static story | gone for resource safety. The `runST` region trick needed confinement. One-shot keeps its linear-types path; scope safety is dynamic forever. |
+| `cont` referenced outside a performer op body | scoping, as `scope` already is (V0702) |
+| `cont.resume { val = v }` payload type | the op's return type, via `Cont 'a` |
+| `cont.suspend` where the chain crosses a non-resumable native | the callback's INFERRED row plus compiler metadata on the native |
+| unreachable code after `cont.suspend {}` | its site-chosen `'a` never returning |
+| a performer that mentions `cont` but declares no `drive` | its tasks could never be woken — syntactic |
+| `cont` stored into two different structures in one handler body | syntactic; the obvious half of the double-store bug |
+| effect obligations at the call site | the inferred row, unchanged |
 
-Bought: userland async (the requirement), and generators/streams free with it.
+## What stays silent
+
+The author's rule for this design: no runtime errors, silent behaviour is fine.
+So `resume` is **total** — a used-bit on the handle, the 179 ps measured, now the
+mechanism of "no-op" rather than the trigger for a raise.
+
+| | behaviour |
+|---|---|
+| resume twice | second is a no-op — the task already moved on |
+| `cont` in two places, both fire | first wins |
+| resume after the scope finalized | no-op; finalize already woke it with `raise` |
+| a promise that never settles | parked until its scope ends, then `raise`d |
+| resumed with a well-typed but wrong value | undetectable; ordinary logic bug |
+| cleanup order when finalize wakes several at once | the scope's iteration order |
+
+**`cont.suspend {}` registers the continuation with its enclosing scope** before
+yielding. The scheduler's own table is its index for FINDING a continuation; it
+is not what keeps it reachable. So nothing can become unreachable, and
+`finalize_scope` can always wake every parked task — which closes the leak OCaml
+still has open, where a dropped continuation's cleanup never runs.
+
+Nothing above is an unbounded leak. A task parked forever under a `perform` that
+never ends is a server waiting for work, not a leak.
+
+**The one reported error:** `drive` returning idle while the body is still
+suspended. Nothing can wake it; that is a deadlock, and it is the single case the
+runtime must report rather than pass over.
+
+## No linear types, no L2
+
+One-shot is handled by the total no-op. A linear `Cont` would require the user to
+annotate linearity, which collides with the standing rule that no annotation is
+ever required (an annotation fixing something means inference is wrong). L2 — the
+type-level proof language — is a separate project and has nothing to do with this.
+
+## Migration cost
+
+**User code that does not define performers: zero change.** `perform X in …`,
+effect calls, and handlers that never park are all untouched.
+
+**Performers using bare `abort`: 7 code sites in the stdlib**, all mechanical:
+
+| file | sites |
+|---|---|
+| `std/effects/exception.mz` | 4 |
+| `std/effects/condition.mz` | 2 |
+| `std/effects/early_return.mz` | 1 |
+
+each `abort { val = v }` becoming `cont.abort { val = v }`. **Zero bare
+`resume {` calls exist in stdlib code** — every mention is a comment explaining
+the bare value is used instead because it is ~2.4x cheaper.
+
+Phase A is non-breaking at call sites if the stdlib keeps `await`/`park`/`cancel`
+as thin wrappers delegating to the new ops.
+
+## Phases
+
+| | state | what |
+|---|---|---|
+| **A** | to do | promote `await`, `yield_now`, `park`, `park_until`, `cancel` to ops of `Async`. Stdlib only, no runtime work, independent. `async.mz:342` declares `spawn` as the SOLE op, which is why all four shipped performers can differ only in `spawn`. |
+| **B** | to do | handler evidence travels with the call rather than a per-thread chain. PREREQUISITE, not an optimisation: continuations are thread-portable while the handler chain is not. Also ~41 → ~16 ns per op. |
+| **C1** | to do | carry the inferred effect row to the call IR. The only unbuilt mechanism; call IR nodes carry no effect information today. |
+| **C2** | **proven** | propagate the suspension at those call sites. |
+| **C3** | **proven** | stack-walking driver. |
+| **C4** | **proven** | callback-taking natives hold loop state on the heap. |
+| **D** | to do | `drive` as a third impl-only field, and `cont.suspend` registering with its scope. |
+
+---
+
+## Rejected framings — things tried and dropped
+
+Kept because each cost real time and each would otherwise be re-proposed.
+
+| framing | why it died |
+|---|---|
+| `cont` confined to its own `perform` block | a scheduler's queue MUST outlive the task whose continuation it holds, so confinement forbids the one thing the language most wants. Measured via the flat-scheduler probe. |
+| "region-scoped is just delimited" | orthogonal axes. OCaml 5 is delimited AND escapable; Effekt is delimited and second-class and consequently cannot express userland schedulers. |
+| Loom vs BDSL as competing mechanisms | a category error — the author: *"it is not that bdsl continuation and loom are competitors."* BDSL is HOW a perform suspends; Loom is WHO runs what. The real axis is blocking vs suspending. |
+| `k` as a parameter in the op's record | a parameter record describes the CALL, and the call supplies no continuation. |
+| a `suspends` keyword on the op declaration | refused: no new keywords. Unnecessary anyway — the check is 38 ps, so every non-empty-row call can carry it. |
+| `Step 'a = Done | Suspended` returned by resume | only needed when resume returns the block's value; with totality it returns `'a` instantiated to `{}`. |
+| five separate forms (`cont.resume`/`abort`/`suspend` plus bare `resume`/`abort`) | two mechanisms for one job. The author: *"either abort park and resume exists as keyword functions or cont is the keyword record... only one of these can happen."* |
+| a linear `Cont` type | needs annotations; the total no-op gives the same guarantee for free. |
+| "Phase C is just re-emit the yield" | wrong. Composition needs every possibly-suspending call site to propagate — the CPS taint Path D was believed to dodge. |
+| `invalidate_all` at `finalize_scope` | prevents an unsafe resume but leaves every parked task's cleanup UNRUN. Must wake them with `raise` instead. |
+
+---
+
+# Evidence — the measurement record
+
+Everything above rests on these. Read them before re-litigating any choice.
 
 ## THE TRUNK, RE-CUT 2026-11-16 AFTER MEASUREMENT
 
