@@ -222,21 +222,48 @@ callback per element. So C4 is not 290 bespoke rewrites: it is one shared
 resumable-iteration helper applied across nine files, plus a decision (resumable
 or fail-loudly) for the long tail.
 
-### 2b. ONE EFFECT PER PERFORMER NAME — so a fake scheduler cannot bundle its clock
+### 2b. ONE EFFECT PER PERFORMER NAME — but a scheduler CAN still bundle a clock
 
 Measured: `impl Ticker for FakeWorld` together with `impl Jobs for FakeWorld` is
 **V0701 "Duplicate effect handler declaration: performer 'FakeWorld' is already
 defined"**, with or without the scope hooks duplicated. A performer name
 implements exactly one effect.
 
-So a deterministic test setup is TWO performers:
+I first concluded from this that a test setup must be TWO performs and that a
+fake scheduler could not bundle a clock. **Wrong — the author corrected it, and
+it is measured.** A handler body is ordinary code, so it can INSTALL a performer:
 
-    perform FakeTime {} in perform FakeAsync {} in program {}
+    impl Clock for FakeClock { base: Int } where {
+      initialize_scope = {} -> {},
+      finalize_scope = {} -> {},
+      now_ms = {} -> base,
+    }
 
-and they must COOPERATE: advancing the virtual clock when nothing is runnable is
-a scheduling decision taken in `FakeAsync.drive`, while the clock lives in
-`FakeTime`'s scope. Handler bodies are ordinary code and may perform effects, so
-a virtual clock exposes an op the scheduler performs:
+    impl Jobs for FakeAsync where {
+      initialize_scope = {} -> { clock = 4200 },
+      finalize_scope = {} -> {},
+      run_job = { n } -> perform FakeClock { base = scope.clock } in do
+        let t = Clock.now_ms {}
+        n + t,
+    }
+
+    pub let main = {} -> perform Console in perform FakeAsync {} in do
+      let r = Jobs.run_job { n = 8 }           ## never installs a Clock
+      println { msg = "job + clock = $(r.to_str {})" }
+    → job + clock = 4208
+
+So the user writes ONE perform, `perform FakeAsync {} in program {}`. And because
+**`drive` is what RUNS the tasks**, wrapping task execution in the bundled clock
+covers every `Time` the tasks perform — including the root body, provided the
+root body is itself a task.
+
+**The caveat the probe exposes:** `initialize_scope` runs PER `perform`, so a
+clock installed inside a handler gets a fresh scope on every invocation. The
+mutable clock state must therefore live in the SCHEDULER's scope and be passed
+in as a performer param — a ref, not a value, for a clock that advances.
+
+**And the deadlock rule still refines**: idle means nothing runnable AND no timer
+to advance, not simply an empty ready set —
 
     drive = { runnable } -> match runnable.first_or_none {} is
       Some { t } -> t
@@ -244,10 +271,8 @@ a virtual clock exposes an op the scheduler performs:
         Clock.advance_to { ms = scope.earliest_deadline {} }
         runnable.first {}
 
-**This refines the deadlock rule**: idle means nothing runnable AND no timer to
-advance, not simply an empty ready set. It is the standard
-deterministic-simulation trick, and it works only because deadlines go through
-the `Time` effect rather than a runtime clock (see the design's ParkOn section).
+the standard deterministic-simulation trick, which works only because deadlines
+go through the `Time` effect rather than a runtime clock (see ParkOn above).
 
 ### 3. There are EXISTING parkers to migrate, and they are not all `await`
 
