@@ -38,7 +38,11 @@ effect Time where {
   ## two readings. Use for benchmarks, timeouts, rate limits.
   monotonic: {} -> Duration <Time>,
   ## Block for the given Duration.
-  sleep: { d: Duration } -> {} <Time>
+  sleep: { d: Duration } -> {} <Time>,
+  ## Move the clock forward by `d`. `sleep` is "this caller waits";
+  ## `advance` is "time moves on". A real clock advances by waiting, a
+  ## virtual one jumps, a frozen one stays put.
+  advance: { d: Duration } -> {} <Time>
 }
 
 ## Real system clocks + real blocking sleep.
@@ -46,6 +50,7 @@ impl Time for SystemTime where {
   now = {} -> __native_instant_now {},
   monotonic = {} -> __native_duration_monotonic {},
   sleep = { d } -> __native_time_sleep { d = d },
+  advance = { d } -> __native_time_sleep { d = d },
 }
 
 ## Test-time impl backed by a mutable TestClock handle. Clock reads
@@ -62,6 +67,7 @@ impl Time for MockTime { clock: TestClock } where {
   now = {} -> test_clock_now { c = clock },
   monotonic = {} -> test_clock_monotonic { c = clock },
   sleep = { d } -> test_clock_advance { c = clock, d = d },
+  advance = { d } -> test_clock_advance { c = clock, d = d },
 }
 
 ## Frozen-time impl. `now` returns `fixed`, `monotonic` returns zero,
@@ -71,6 +77,7 @@ impl Time for FrozenTime { fixed: Instant } where {
   now = {} -> fixed,
   monotonic = {} -> duration_zero {},
   sleep = { d } -> {},
+  advance = { d } -> {},
 }
 
 ## Sugar — thin wrappers over Time.now + std::datetime helpers.
@@ -78,6 +85,9 @@ impl Time for FrozenTime { fixed: Instant } where {
 ## <Time> effect row.
 ## Wall-clock instant right now — same as Time.now.
 pub let now: {} -> Instant <Time> = {} -> Time.now {}
+
+## Move the clock forward by `d` — same as `Time.advance`.
+pub let advance: { d: Duration } -> {} <Time> = { d } -> Time.advance { d = d }
 
 ## Monotonic reading right now — same as Time.monotonic.
 pub let monotonic: {} -> Duration <Time> = {} -> Time.monotonic {}
