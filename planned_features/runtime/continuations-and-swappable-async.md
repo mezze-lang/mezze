@@ -62,74 +62,54 @@ scheduler this design exists to enable. Deadlines are predicates that perform
 `Time`, and effectful predicates already ship — today's `park` takes
 `{ predicate: {} -> Bool <...> }`.
 
-### DECIDED: the Async ABSTRACTION declares `Time`; performers may narrow
+### DECIDED (3rd revision, and the final one): the clock is a PERFORMER PARAM, not an effect obligation
 
-Author's ruling: *"abstraction should expose time"* and *"LoomAsync can consume
-it or not, either is fine — loom sleep definitely does."*
+This went through three positions in one conversation. Recording all three,
+because the reasoning is the useful part and the first two are the ones a reader
+would otherwise re-derive.
 
-**CORRECTED: only the DEADLINE ops need it, not every waiting op.** A first
-draft here put `<Time>` on `await` and `yield_now` too. The author pushed back —
-*"why await needs it? I get park_until"* — and is right: `await` waits on an
-EVENT (the promise settling), not a deadline. No `ms` parameter, no clock read,
-under Loom or a reactor. `yield_now` reschedules immediately. Conflating
-"waiting" with "time" was the error.
+1. *"Keep `Time` out of the declaration so a performer can bundle and hide it."*
+2. *"No — the abstraction should expose `Time`, so the scheduler/clock pairing is
+   type-enforced."* (Author's ruling, which I then narrowed to the deadline ops
+   only, since `await` waits on an EVENT and needs no clock.)
+3. **Final: `effect Async` declares no `Time` at all, and a test scheduler takes
+   the clock as a PERFORMER PARAM.**
 
-    effect Async where {
-      spawn:      { f: {} -> 'a <...> } -> Promise 'a <Async>,
-      await:      { p: Promise 'a } -> Result 'a AsyncError <Async>,        ## event, not clock
-      yield_now:  {} -> {} <Async>,                                          ## immediate
-      park:       { predicate: {} -> Bool <...> } -> {} <Async, Time, ...>,  ## arguably: back-off
-      park_until: { predicate: …, ms: Int } -> Bool <Async, Time, ...>,      ## HAS a deadline
-      cancel:     { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async>,
-    }
+**What kills position 2:** the obligation comes from the EFFECT DECLARATION,
+which every performer shares. You cannot exempt `LoomAsync`'s callers while
+obliging a test scheduler's — so declaring `<Time>` taxes every production
+program to serve a testing need.
 
-`park` is the judgement call: it polls a predicate, and a polling impl plausibly
-wants to sleep between polls, so the declaration should permit it.
+**And the stdlib already shows the answer** — `impl Time for MockTime
+{ clock: TestClock }` takes its clock as a param. A scheduler does the same:
 
-**This mostly dissolves the Phase A breakage flagged below.** `await` is the op
-every program calls; `park_until` is rare. With `await` clean, almost no written
-annotation changes.
+    ## production — no Time in any row, real time via natives
+    perform Console, LoomAsync in program {}
 
-This needs no new rule. An impl may NARROW its effects and never widen
-([[project_what_an_impl_may_change]]), so a pure scheduler that touches no clock
-is legal, and `LoomAsync` — whose sleep consumes real time — is equally legal.
-The effect declares the widest row an impl might need; impls narrow; callers
-answer for the declaration.
+    ## testing — the scheduler is HANDED the clock
+    let clock = test_clock_at { i = epoch {} }
+    perform Console, FakeAsync { clock = clock } in program {}
 
-**What the change actually buys, stated precisely.** `LoomAsync` + `MockTime`
-ALREADY works today, because `sleep` is already a `<Time>` function handled by
-whichever `Time` performer is installed. The row change does not enable that
-combination — it creates the OBLIGATION, which is what turns "a blocking
-`SystemTime` stalls my single-threaded loop" from an accident into a choice
-somebody had to make. The failure it prevents:
+`FakeAsync` honours `park_until` deadlines against ITS clock because it holds
+one. No `<Time>` in `effect Async`, no obligation on anyone, full control in the
+test.
 
-    perform SystemTime in perform MyPureReactor {} in do
-      Async.spawn { f = {} -> do
-        Time.sleep { d = duration_seconds { n = 5 } }   ## SystemTime BLOCKS the
-        work {} } }                                     ## carrier thread, so every
-                                                        ## ready task waits 5s too
+So the author's question — *"what would be the use of exposing it? for testing
+purposes"* — answers itself: exposing buys nothing a performer param does not buy
+more cheaply.
 
-A cont-based scheduler wants a `Time` performer that PARKS or ADVANCES instead,
-and declaring `<Time>` on the waiting ops is what makes that pairing visible.
+**Three consequences:**
 
-**THE COST, now small.** Rows are exact, so an annotated function gains `Time`
-only if it calls `park` or `park_until`. With `await` and `yield_now` clean, that
-is a handful of sites rather than every async caller, and Phase A stays close to
-the cheap stdlib-only phase it was costed as.
-
-**AND A REAL FINDING IN THE SHIPPED CODE.** `park_until`'s own documentation says
-*"The deadline is measured by the thread that WAITS, which is what makes a
-timeout built on this predictable."* So the deadline is measured IN THE NATIVE
-and bypasses the `Time` effect: **a timeout under `MockTime` is not virtual
-today** — it waits real milliseconds while the rest of the program's clock is
-fake. Declaring `<Time>` on `park_until` AND having the impl perform it rather
-than read a native clock is what fixes that, and is the strongest concrete reason
-for the declaration.
-
-**LOOM CONSUMES, IT DOES NOT EXPOSE.** `LoomAsync` reads time in `park_until`'s
-deadline, so it consumes. It cannot EXPOSE `Time`, because V0701 gives a
-performer name exactly one effect — it is an `Async` performer, not a `Time` one.
-A program on Loom installs `SystemTime` or `MockTime` itself.
+- **`effect Async`'s rows do not change.** Phase A is again the cheap,
+  non-breaking, stdlib-only phase. Both re-costings above cancel out.
+- **`park_until`'s native-measured deadline is NOT a bug.** It is correct for
+  `LoomAsync` — real timeouts in production. It only looked wrong under the
+  expectation that `MockTime` should reach inside Loom's internals, which it
+  should not: swap the scheduler instead.
+- **One documentation hazard survives:** `LoomAsync` + `MockTime` gives VIRTUAL
+  SLEEPS BUT REAL TIMEOUTS, because `sleep` goes through the `Time` effect while
+  `park_until`'s deadline does not. A confusing mix, worth stating in the docs
+  rather than fixing.
 
 ### MEASURED END TO END: what swapping a performer actually buys
 
