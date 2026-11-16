@@ -62,54 +62,56 @@ scheduler this design exists to enable. Deadlines are predicates that perform
 `Time`, and effectful predicates already ship — today's `park` takes
 `{ predicate: {} -> Bool <...> }`.
 
-### DECIDED (3rd revision, and the final one): the clock is a PERFORMER PARAM, not an effect obligation
+### DECIDED — a PERFORMER performs `Time`; the obligation surfaces at the ENTRY
 
-This went through three positions in one conversation. Recording all three,
-because the reasoning is the useful part and the first two are the ones a reader
-would otherwise re-derive.
+Four positions in one conversation, three of them mine and wrong. Recorded in
+full because the reasoning is the useful part.
 
-1. *"Keep `Time` out of the declaration so a performer can bundle and hide it."*
-2. *"No — the abstraction should expose `Time`, so the scheduler/clock pairing is
-   type-enforced."* (Author's ruling, which I then narrowed to the deadline ops
-   only, since `await` waits on an EVENT and needs no clock.)
-3. **Final: `effect Async` declares no `Time` at all, and a test scheduler takes
-   the clock as a PERFORMER PARAM.**
+1. *Keep `Time` out of the declaration so a performer can bundle and hide it.*
+2. *The abstraction should declare `<Time>` on its waiting ops* — then narrowed
+   to the deadline ops only, since `await` waits on an EVENT.
+3. *The clock is a performer PARAM* — because "you cannot exempt `LoomAsync`'s
+   callers while obliging a test scheduler's".
+4. **FINAL, and the author's position throughout: the PERFORMER simply performs
+   `Time`. `effect Async` declares nothing.**
 
-**What kills position 2:** the obligation comes from the EFFECT DECLARATION,
-which every performer shares. You cannot exempt `LoomAsync`'s callers while
-obliging a test scheduler's — so declaring `<Time>` taxes every production
-program to serve a testing need.
+**Position 3 died on a capability I had not checked.** A performer CAN perform an
+effect its op declaration never mentions, and an outer performer handles it:
 
-**And the stdlib already shows the answer** — `impl Time for MockTime
-{ clock: TestClock }` takes its clock as a param. A scheduler does the same:
+    effect Jobs where { go: { n: Int } -> Int <Jobs>, }          ## no Ticker
 
-    ## production — no Time in any row, real time via natives
+    impl Jobs for TimeHungry where {
+      go = { n } -> n + Ticker.tick_ms {},                        ## performs Ticker anyway
+    }
+
+    pub let main = {} -> perform Console, FixedTicker { at = 500 }, TimeHungry {} in
+      Jobs.go { n = 7 }
+    → got 507
+
+So the obligation IS per-performer. Measured properties:
+
+| | |
+|---|---|
+| `effect Async`'s rows | **unchanged** |
+| intermediate annotations | **unchanged** — `let middle: { n: Int } -> Int <Jobs>` still checks |
+| `LoomAsync` callers | **no obligation**, it performs no `Time` |
+| `FakeAsync` callers | must install a `Time` performer |
+| forgetting it | **COMPILE ERROR**: *"Entry 'main' performs Ticker, but nothing discharges it. The entry has no enclosing handler, so it leaks at runtime"* |
+
+    ## production
     perform Console, LoomAsync in program {}
 
-    ## testing — the scheduler is HANDED the clock
-    let clock = test_clock_at { i = epoch {} }
-    perform Console, FakeAsync { clock = clock } in program {}
+    ## deterministic test — FakeAsync performs Time, MockTime answers it
+    perform Console, MockTime { clock = clock }, FakeAsync {} in program {}
 
-`FakeAsync` honours `park_until` deadlines against ITS clock because it holds
-one. No `<Time>` in `effect Async`, no obligation on anyone, full control in the
-test.
+No param plumbing, no row changes, no annotation churn, and the missing-clock
+case is caught at compile time. Phase A stays the cheap non-breaking phase.
 
-So the author's question — *"what would be the use of exposing it? for testing
-purposes"* — answers itself: exposing buys nothing a performer param does not buy
-more cheaply.
-
-**Three consequences:**
-
-- **`effect Async`'s rows do not change.** Phase A is again the cheap,
-  non-breaking, stdlib-only phase. Both re-costings above cancel out.
-- **`park_until`'s native-measured deadline is NOT a bug.** It is correct for
-  `LoomAsync` — real timeouts in production. It only looked wrong under the
-  expectation that `MockTime` should reach inside Loom's internals, which it
-  should not: swap the scheduler instead.
-- **One documentation hazard survives:** `LoomAsync` + `MockTime` gives VIRTUAL
-  SLEEPS BUT REAL TIMEOUTS, because `sleep` goes through the `Time` effect while
-  `park_until`'s deadline does not. A confusing mix, worth stating in the docs
-  rather than fixing.
+**The honest caveat:** the obligation is INVISIBLE IN INTERMEDIATE SIGNATURES. A
+library function typed `<Async>` does not reveal that it will need a clock under
+some performers — you find out when assembling the entry. That is the known
+widen-and-leak shape; here it costs ergonomics, not soundness, because the entry
+check catches it.
 
 ### MEASURED END TO END: what swapping a performer actually buys
 
