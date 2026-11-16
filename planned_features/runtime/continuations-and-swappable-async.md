@@ -308,6 +308,89 @@ ops "when a context closes holding one".
 
 Bought: userland async (the requirement), and generators/streams free with it.
 
+## THE TRUNK, RE-CUT 2026-11-16 AFTER MEASUREMENT
+
+Every mechanism below was tested before being planned. Nine tests across five
+suites in `interpreter/src/test/java/com/mezze/interpreter/bytecode/`.
+
+### Phase A — make the ops interceptable. Stdlib only.
+
+Promote `await`, `yield_now`, `park`, `park_until`, `cancel` to ops of `Async`.
+**The source makes the case:** `async.mz:342` declares `spawn` as the SOLE op,
+and `await` (56), `cancel` (89), `yield_now` (126), `park` (129),
+`park_until` (144) are plain `pub let`s straight to natives. That is why the four
+existing performers — `LoomAsync`, `LoomAsyncWith`, `OSThreadAsync`,
+`OSThreadAsyncWith` — differ ONLY in `spawn`: it is the only thing they are
+allowed to differ in.
+
+No runtime work, no continuation, reversible, independent of B and C.
+
+### Phase B — handler evidence travels with the call.
+
+Pass `resume`/`abort` through the handler call instead of a `@TruffleBoundary`
+ThreadLocal. ~41 -> ~16 ns, and it kills the silent cross-thread wrong-handler
+read (a wrong VALUE, never an exception).
+
+**Promoted from optimisation to prerequisite by measurement:** a BDSL
+continuation IS thread-portable (`BdslContinuationCrossThreadTest`: suspended on
+one executor, resumed on another, correct result), so a layered executor can
+parallelise — but the handler chain is per-thread, so the evidence must travel
+with the continuation rather than be read off whichever thread resumes it.
+
+### Phase C — composable suspension. FOUR parts; three are PROVEN, the gating one is not built.
+
+**C1 — carry "can this call suspend" on the call IR. NOT PRESENT TODAY, and it
+gates the rest.** `CallDirectIR` carries `targetHash`, `args`, `isTailCall`,
+`typeTag`, `isScalarABI`, `comptimeShape` — and **no effect information at all**.
+Neither does `CallLocalIR`, `CallIndirectIR` or the rest. So the repeated claim
+in this document that "the effect row picks the sites, pure calls stay free" is
+NOT supported by the IR as it stands: at lowering time a call site does not know
+whether its callee can suspend. The row exists in the solved type and is dropped
+before the IR.
+
+Two precedents in the same file say how to fix it:
+
+- `HandleIR.staticallyFullyDischarges` — a boolean on an effect node, "set by the
+  typechecker/compiler". Exactly this shape.
+- `CallDirectIR.comptimeShape` carries its reason: on the NODE, not a side table,
+  because "the reduction pass runs in the RUNTIME, which for `mez dev` / `exec`
+  is a different process and receives nothing but serialized IR. A side table
+  keyed by source span works in-process and **silently does nothing** across that
+  boundary — which is every path a user actually builds with."
+
+So C1 is one flag per call node, set from the solved effect row, carried on the
+node. Until it exists, C2's check would have to be emitted at EVERY call site,
+which is the version whose cost nobody has measured.
+
+**C2 — propagate the suspension at those call sites. PROVEN.**
+`BdslSuspendPropagationTest`: with the caller yielding the callee's
+`ContinuationResult` onward, `outer(x) = inner(x) + 100` over
+`inner(x) = (yield "op") + 1` resumes to **142 — both tails run.** Built from
+EXISTING builder vocabulary (`yield` accepts any value), so no framework change
+and no new operation was needed to prove the semantics. The real emit adds the
+conditional, which is what C1 feeds.
+
+**C3 — a stack-walking driver. PROVEN, and the flat one is demonstrably
+insufficient.** Nested suspension is a STACK: a continuation whose yielded value
+is itself a continuation. The driver descends on a nested continuation and feeds
+completed values back outward; 25 lines. The same test pins why `YieldDriver`'s
+flat loop cannot do it — it hands the INNER CONTINUATION to the dispatcher as
+though it were an op record.
+
+**C4 — callback-taking natives hold loop state on the HEAP. PROVEN.**
+`ResumableNativeHofTest`: a `map` keeping `(xs, out, i)` in a record parks on
+every one of three elements and still produces `[11, 21, 31]` in order, re-entering
+the loop at `i + 1` each time. **And the fast path costs nothing structural** —
+when the callback never suspends, no state object is ever allocated; the only
+overhead is one type test per element.
+
+### What is still unmeasured, and it is now the only thing
+
+The per-call cost of the suspension check. It cannot be measured faithfully until
+C1 exists, because the honest number is "one type test on each call site the
+effect row marks", not "on every call in the language". Everything else in C has
+been demonstrated to work.
+
 ## THE MECHANISM IS TRUFFLE'S, NOT LOOM'S — and it is already wired up
 
 Asked whether GraalVM/Truffle has its own performant continuation abstraction.
