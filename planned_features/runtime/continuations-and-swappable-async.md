@@ -448,7 +448,52 @@ vectorisation. See [[project_flp_only_pays_when_it_vectorises]].
 measurement is explicit: a BDSL caller fails exactly as a Java caller does. (3)
 is only useful combined with (1).
 
-### What this does to the Loom comparison
+### THE ARCHITECTURE: BDSL cont is the CORE, Loom is an IMPL ON TOP
+
+The author, cutting through a comparison table this document should never have
+drawn: *"my thing was having something core BDSL cont and on top loom can be the
+impl for async using it."*
+
+**That is the right layering and the table was a category error** — it compared a
+primitive against something that would be BUILT ON that primitive. Correctly:
+
+| layer | what it is |
+|---|---|
+| core | BDSL continuation — suspend a Mezze computation, get a handle |
+| on top | schedulers: a virtual-thread executor, an OS-thread pool, a single-threaded loop, a deterministic test scheduler |
+
+And this layering makes Loom CHEAPER than treating it as a rival mechanism. If
+BDSL does the suspending, Loom is only a thread pool:
+`Executors.newVirtualThreadPerTaskExecutor()` — **public API**. No
+`jdk.internal.vm.Continuation`, no `--add-exports`, which **deletes the D7
+tension this document listed as a risk**. The six Loom measurements recorded
+above are then a sanity check on switch costs, not a decision input.
+
+**MEASURED, and it is the precondition for the whole layering:** a BDSL
+continuation is THREAD-PORTABLE. `BdslContinuationCrossThreadTest` suspends on
+one single-thread executor and resumes on another:
+
+    [xthread] suspended on A, yielded=op:park
+    [xthread] resumed on B, result=42
+
+So a layered executor CAN provide real parallelism by resuming continuations on
+different carrier threads. (Phase B is still required before relying on it: the
+handler chain is per-thread, so evidence must travel with the continuation rather
+than be read off the resuming thread.)
+
+### Where the architecture stands
+
+| | |
+|---|---|
+| BDSL cont exists, multi-shot, native-image clean | **yes**, `BdslContinuationPrototypeTest` |
+| thread-portable, so executors can parallelise | **yes**, `BdslContinuationCrossThreadTest` |
+| composes across call frames | **NO** — the one blocker, `BdslYieldComposesAcrossRootsTest` |
+| callback-taking natives resumable | **no** — need heap loop state |
+| cost of the fix | **UNMEASURED** — a branch per effectful call site |
+
+Everything except composition is settled. Composition is the whole job.
+
+### What this does to the Loom comparison — SUPERSEDED by the layering above
 
 Loom composes for FREE: it freezes the whole Java stack, so `Cycle` suspends
 through 200 frames, natives included, with no taint anywhere. That is why Loom
