@@ -384,12 +384,44 @@ the loop at `i + 1` each time. **And the fast path costs nothing structural** �
 when the callback never suspends, no state object is ever allocated; the only
 overhead is one type test per element.
 
-### What is still unmeasured, and it is now the only thing
+### MEASURED: the suspension check costs 38 PICOSECONDS per call site
 
-The per-call cost of the suspension check. It cannot be measured faithfully until
-C1 exists, because the honest number is "one type test on each call site the
-effect row marks", not "on every call in the language". Everything else in C has
-been demonstrated to work.
+I had said this could not be measured until C1 exists. **Wrong — C1 decides HOW
+MANY sites carry a check, not what ONE costs**, and `CheckSuspendedPassThrough`
+already exists with exactly the right cost shape (one `instanceof` on the call's
+result, value passed through). Two roots identical but for the check, arms
+INTERLEAVED in one process (`SuspendCheckCostTest`):
+
+    plain   ps/call: 7368 7146 6984  (min 6984)
+    checked ps/call: 7022 7070 7061  (min 7022)
+    delta per call site: 38 ps (0.04 ns)
+
+The ranges OVERLAP. The check is free, and because it is free the site count
+stops mattering — so C1's value is correctness and clarity, not performance.
+A loose 20 ns guard is asserted so that if the check ever starts defeating
+inlining or boxing elimination, the plan gets re-costed instead of silently
+rotting.
+
+### MULTI-SHOT: free for guest code INCLUDING composition, not free through a native
+
+`MultiShotMatrixTest`, three shapes, because "multi-shot" is not one property:
+
+| shape | result |
+|---|---|
+| one root resumed repeatedly | **free** — 1->2, 2->3, 42->43, then 1->2 again. No state carried between shots |
+| a COMPOSED (nested) continuation resumed repeatedly | **free** — 41 gives 142, 141 gives 242, 41 gives 142 again. Multi-shot SURVIVES composition |
+| resumed through a resumable native | **SHARED STATE.** The guest tail is multi-shot (10->11, 20->21) but both shots write the SAME output slot in the SAME array, so the second overwrites the first |
+
+So: fully multi-shot for guest code, and multi-shot through a native HOF is sound
+only if its heap loop state is COPIED per shot. That is a bounded, known fix on
+the C4 shape — and one more reason the one-shot default is right, with multi-shot
+as an opt-in.
+
+### Everything measurable is now measured
+
+Nothing in this plan is waiting on a number. What remains is implementation: C1
+(the effect row reaching the call IR), then wiring C2/C3/C4 — all three of which
+have working reference implementations in the test suite.
 
 ## THE MECHANISM IS TRUFFLE'S, NOT LOOM'S — and it is already wired up
 
