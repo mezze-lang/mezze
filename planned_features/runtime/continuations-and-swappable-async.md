@@ -264,18 +264,50 @@ in as a performer param — a ref, not a value, for a clock that advances.
 
 **Hiding versus exposing is a PER-IMPL choice, and all three postures are valid:**
 
-| posture | performer | the test gets |
-|---|---|---|
-| **hide** — bundle and discharge | `FakeAsync` | determinism with no knobs; cannot be wired wrong |
-| **expose** — declare `<Clock>` in the op's row | `VirtualAsync` | the test drives time itself: `Clock.advance_to { ms = 5000 }` |
-| **neither** | `LoomAsync` | real time, from natives; no `Time` effect involved |
+**And the stdlib ALREADY HAS ALL OF THIS** — an earlier draft here invented a
+`Clock` effect with an `advance_to` OP, which was wrong twice: the effect is
+`Time`, and the control surface is a plain function over a VALUE, not an op.
 
-The first two coexist as separate performers over the SAME `Async` effect, and a
-program switches between them at one `perform` site. Which is the concrete
-argument for keeping the effect declaration clean: **if `Time` were declared in
-`effect Async`, the hidden variant would be impossible** — every program would
-have to install a clock, including the ones on `LoomAsync` where it means
-nothing.
+    effect Time where {
+      now: {} -> Instant <Time>,
+      monotonic: {} -> Duration <Time>,
+      sleep: { d: Duration } -> {} <Time>
+    }
+
+    impl Time for SystemTime where { … }
+    impl Time for MockTime { clock: TestClock } where { … }
+    impl Time for FrozenTime { fixed: Instant } where { … }
+
+    pub newtype TestClock = __NativeTestClock
+    pub let test_clock_at:      { i: Instant } -> TestClock
+    pub let test_clock_now:     { c: TestClock } -> Instant
+    pub let test_clock_advance: { c: TestClock, d: Duration } -> {}
+
+`datetime.mz` even documents the intent: *"Use with MockTime in
+std::effects::time to run tests where sleep advances the clock."* So the control
+surface is an ordinary mutable value, which also dissolves the V0701 worry — it
+never needed to be a second effect.
+
+| posture | how | the test gets |
+|---|---|---|
+| **hide** | `FakeAsync` makes a `TestClock` in its own scope and installs `MockTime { clock = scope.clock }` around task execution | determinism with no knobs; cannot be wired wrong |
+| **expose** | the TEST makes the `TestClock`, passes it to `MockTime`, and calls `test_clock_advance` on it directly | full control: jump time mid-scenario |
+| **neither** | `LoomAsync` / `SystemTime` | real time from natives |
+
+Both coexist over the SAME `Async` effect and a program switches at one `perform`
+site. Which is the concrete argument for keeping the effect declaration clean:
+**if `Time` were declared in `effect Async`, the hidden variant would be
+impossible** — every program would have to install a clock, including the ones on
+`LoomAsync` where it means nothing.
+
+**And `drive` advancing the clock on idle is just a function call**, not an
+effect op:
+
+    drive = { runnable } -> match runnable.first_or_none {} is
+      Some { t } -> t
+      None {} -> do
+        test_clock_advance { c = scope.clock, d = scope.until_earliest_deadline {} }
+        runnable.first {}
 
 The general rule: a performer needing another effect either bundles and
 DISCHARGES it (caller sees nothing) or DECLARES it in the row (callers are
@@ -283,16 +315,9 @@ answerable). Performing without doing either is a performer widening past its
 declaration, which is the known leak case.
 
 **And the deadlock rule still refines**: idle means nothing runnable AND no timer
-to advance, not simply an empty ready set —
-
-    drive = { runnable } -> match runnable.first_or_none {} is
-      Some { t } -> t
-      None {} -> do
-        Clock.advance_to { ms = scope.earliest_deadline {} }
-        runnable.first {}
-
-the standard deterministic-simulation trick, which works only because deadlines
-go through the `Time` effect rather than a runtime clock (see ParkOn above).
+to advance, not simply an empty ready set — the standard
+deterministic-simulation trick, which works only because deadlines go through
+the `Time` effect rather than a runtime clock (see ParkOn above).
 
 ### 3. There are EXISTING parkers to migrate, and they are not all `await`
 
