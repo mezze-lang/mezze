@@ -13,342 +13,173 @@ and **no runtime errors — silent behaviour is fine**.
 
 ## The design
 
-One suspension mechanism (Truffle Bytecode DSL `yield`), with schedulers written
-in userland as ordinary performers.
+**The runtime owns suspension and task state. A performer owns scheduling policy.**
+Userland never holds a continuation.
 
-### The surface — no new syntax
+### The whole surface
 
-A performer op body can already reference three runtime-bound names: `scope`,
-`resume` and `abort`. This design replaces the latter two with a single value,
-so the count goes from **three to two**.
+    cont.park  { on: ParkOn, set: WaitSet } -> ParkOutcome
+    cont.abort { val = v }                  -> 'b            ## DIVERGENT
 
-    cont                        ## the one bound name, beside `scope`
-    cont.resume  { val = v }    ## -> {}   resume a STORED continuation
-    cont.abort   { val = v }    ## -> 'b   DIVERGENT: end the block with v
-    cont.suspend {}             ## -> 'b   DIVERGENT: park, control to the boundary
+`cont` is a runtime-bound name in a PERFORMER OP BODY, exactly as `scope` is —
+referencing it anywhere else is V0702, which is already `scope`'s behaviour
+(verified). **It is not a parameter and not a receiver**: a Mezze parameter
+record describes the CALL, and `Async.await { p = promise }` supplies no
+continuation.
 
-`cont` is bound exactly where `scope` is — a performer op body. Referencing it
-anywhere else is V0702, which is already the behaviour for `scope` (verified:
-`scope` in an ordinary function is *"Undefined variable or function: scope"*).
+Note the kind of impl this is. The three are not the same, and conflating them
+cost this document a round:
 
-**It is NOT a parameter.** A Mezze parameter record describes the call, and
-`Sched.wait { j = job }` supplies no continuation; putting `cont` in the params
-would make the pattern lie about the call shape. This was tried and rejected —
-see *Rejected framings*.
+| impl kind | `it` | how it reaches its own data |
+|---|---|---|
+| **effect** (performer) — `impl Async for LoomAsync` | **none exists** | bare performer params and `scope` — and now `cont` |
+| **ability** — `impl Eq for Int` | the receiver; type from the ability's op | `it` |
+| **inherent** — `impl Box where` | the receiver; nothing declares it | `it`, which must be declared (BUG 47) |
 
-**`Cont 'a` is nominal with inherent methods, not a record of closures.** If it
-were a record you could write `let f = cont.resume` and get a bare function —
-precisely the `let k = resume` trap V0503 exists to kill.
+`cont` belongs to the first row, which has no `it` at all.
 
-### Return types — only TWO of the three may be polymorphic
+    type ParkOn = |
+      OnPromises   { ids: [PromiseId] },           ## registered — O(1) wake
+      OnPredicates { fs: [{} -> Bool <...>] },     ## polled — the general escape hatch
+    |
 
-**CORRECTED 2026-11-16.** An earlier draft gave all three methods "a site-chosen
-free type variable". That is right for two and WRONG for `resume`, for a reason
-worth stating because it is the pattern behind this codebase's fresh-variable bug
-family:
+    type ParkOutcome = |
+      ParkReady { which: Int },
+      ParkCancelled { reason: CancelReason },
+    |
 
-> **A free return type variable is sound ONLY when the function cannot return.**
-> If it can, the caller picks the type and receives garbage — exactly
-> [[project_fresh_var_means_anything_not_unknown]]: a fresh tyvar means "ANY type
-> is fine", not "unknown".
+    newtype PromiseId = Int                        ## `type PromiseId = Int` is V0713
+    newtype TaskId = Int
+    newtype WaitSetId = Int
 
-`abort` and `suspend` are DIVERGENT — control never comes back to their call
-site — so `-> 'b` is an ordinary bottom and vacuously sound. That is why `abort`'s
-existing typing works, verified:
+The registered/polled split is a PERFORMANCE distinction, not a typing one: an
+event loop wants an O(1) wake by registration, while an opaque predicate forces
+the machine to poll, which is what the blocking native already does today.
 
-    impl Ex for Choosy where {
-      throw = { error } -> if error.len {} > 3 then abort { val = 0 } else 7,
-    }
+**No deadline constructor.** A deadline would have the RUNTIME read a clock,
+bypassing the `Time` effect and silently breaking the deterministic test
+scheduler this design exists to enable. Deadlines are predicates that perform
+`Time`, and effectful predicates already ship — today's `park` takes
+`{ predicate: {} -> Bool <...> }`.
 
-`abort { val = 0 }` unifies with a plain `7` because `'b` instantiates to `Int`
-at that site; the standing rule is that a bare value must not PIN it. There is no
-named bottom type in Mezze.
+### Implicit resume
 
-`resume` DOES return, so it is concretely **`-> {}`**.
-
-And it needs no second signature, because **`cont.resume` is never used in a
-handler**: producing a value already resumes, and that is the measured cheaper
-path. Resume exists only for a STORED continuation, called from `drive` or a
-completion path — and neither needs its result. If the task finished, the task's
-own code settled its promise; if it suspended again, `suspend` re-registered it.
-The two meanings I had conflated were one redundant meaning and one real one.
-
-### Implicit resume stays
-
-A performer op body that falls off the end with a value RESUMES — the value is
-handed back at the perform site. Measured, and it is also the fast path: every
-`resume` mention in the stdlib is a COMMENT explaining that the bare value is
-used instead because it is **~2.4x cheaper**. There are zero bare `resume {`
-calls in stdlib code.
-
-So the 99% handler is untouched by all of this:
+A performer op body that falls off the end with a value RESUMES. That is
+measured, and it is also the fast path: every `resume` mention in the stdlib is
+a COMMENT saying the bare value is used instead because it is ~2.4x cheaper, and
+there are ZERO bare `resume {` calls in stdlib code. So the 99% handler is
+untouched:
 
     impl FileRead for LocalFs where {
       read_text = { path } -> __native_fs_read_text { path = path },
     }
 
-No `cont`, no suspension, today's direct-call path, today's cost.
+No `cont`, no suspension, today's direct call, today's cost.
 
 ### `drive` — the third impl-only field
 
-When a task suspends, control returns to the **perform boundary**, not to user
-code: `perform RunQueue {} in body {}` must not evaluate to "suspended", or
-every `perform` in the language would have to return a variant. So the performer
+Control returns to the PERFORM BOUNDARY when a task parks, not to user code:
+`perform EventLoop {} in body {}` must not evaluate to "suspended", or every
+`perform` in the language would have to return a variant. So the performer
 supplies a hook the runtime calls while the body is parked.
 
-`initialize_scope` and `finalize_scope` are the precedent — `async.mz` describes
-them as *"runtime plumbing — not declared in the ability but expected by the
-effect driver to bracket the structured concurrency scope. Kept as impl-only
-fields."* `drive` joins that family: expected by the driver, invisible in the
-ability.
+`initialize_scope` and `finalize_scope` are the precedent — `async.mz` calls them
+*"runtime plumbing — not declared in the ability but expected by the effect
+driver"*. `drive` joins them.
 
-The runtime loop: run the body; if it suspends, call `drive`; if `drive` reports
-progress, continue; if `drive` reports idle **while the body is still
-suspended**, nothing can ever wake it.
+**It is a SELECTOR, not a bookkeeping loop:**
 
-### A complete scheduler
+    drive = { runnable } -> runnable.first {}                 ## FIFO, fair
+    drive = { runnable } -> runnable.last {}                  ## LIFO, cache-friendly
+    drive = { runnable } -> runnable.min_by { f = { t } -> t.deadline }
+    drive = { runnable } -> runnable.at { i = scope.rng.next_below { … } }  ## deterministic replay
 
-    impl Sched for RunQueue { capacity: Int } where {
-      initialize_scope = {} -> {
-        ready    = new_queue {},     ## runnable now
-        waiting  = new_table {},     ## cont, keyed by job id
-        outcomes = new_table {},
-      },
+**`runnable` MUST be an opaque handle with O(1) `first`/`last`, never a
+materialized list** — otherwise FIFO costs O(N) per switch and O(N²) per round,
+which dwarfs every number in the measurement record below.
 
-      ## Deliver a cancellation to every still-parked task so its OWN cleanup runs.
-      finalize_scope = {} -> scope.waiting.drain_each { f = { w } ->
-        w.deliver { d = DeliverCancelled {} } },
+### A scheduler, whole
 
-      drive = {} -> do
-        scope.poll_io {}
-        match scope.ready.take_front {} is
-          QueueEmpty {} -> DriveIdle {}
-          QueueResumer { deliver } -> do
-            deliver { d = DeliverReady {} }
-            DriveProgressed {}
-          QueueTask { task } -> do
-            task {}
-            DriveProgressed {},
+    impl Async for EventLoop where {
+      initialize_scope = {} -> { … },
+      finalize_scope   = {} -> … ,
 
-      submit = { f } -> scope.ready.push { task = f },
-
-      wait = { j } -> match scope.outcomes.get { key = j.id } is
-        JobDone { val } -> val                     ## implicit resume
-        JobPending {} -> do
-          scope.waiting.put {
-            key = j.id,
-            ## ONE closure, both outcomes. `'a` is known HERE and erased by the
-            ## closure's own type, which is what makes the table homogeneous.
-            deliver = { d } -> match d is
-              DeliverReady {} -> cont.resume { val = scope.outcomes.get { key = j.id } }
-              DeliverCancelled {} -> cont.abort { val = Err { error = SchedCancelled {} } }
-          }
-          cont.suspend {},
-    }
-
-### A scheduler stores RESUMERS, not continuations
-
-**CORRECTED 2026-11-16.** An earlier draft wrote
-`scope.waiting.put { key = j.id, cont = cont }`. **That cannot be typed.**
-`await: { p: Promise 'a } -> Result 'a AsyncError` makes the continuation
-`Cont (Result 'a AsyncError)` — a DIFFERENT type per task — so one table cannot
-hold them, and Mezze has no existentials.
-
-The fix is the erasing closure above, and `resume` returning `{}` is what lets it
-type at all, so the two corrections depend on each other. The stored value is
-uniformly
-
-    scope.waiting : Table Int ({ d: Delivery } -> {})
-
-    type Delivery = |
-      DeliverReady {},
-      DeliverCancelled {},
-    |
-
-One closure covers waking AND cancelling, so there is no second structure to
-forget — which also deletes the double-store mistake from the leak analysis
-below, since a task is only ever filed in one place.
-
-`cont` and `scope` appear only in op bodies, `drive` and `finalize_scope`.
-Nothing is a bare function — a top-level `let` cannot see `scope`, so completion
-handling lives in `drive`.
-
-### Scheduling policy IS `drive`
-
-The continuation carries no priority, identity or ordering. Where you file it is
-the entire policy, which is what makes async swappable:
-
-    drive = {} -> match scope.ready.take_front {} is …    ## FIFO, fair
-    drive = {} -> match scope.ready.take_back {} is …     ## LIFO, cache-friendly
-    drive = {} -> match scope.ready.take_min { by = { t } -> t.deadline } is …
-    drive = {} -> match scope.ready.take_at { i = scope.rng.next_below { … } } is …  ## deterministic replay
-
-Same program, same ops, different `drive`.
-
-### Loom, both ways
-
-**`LoomAsync` — blocking. Needs nothing new.** The body blocks a virtual thread
-rather than suspending, so control never returns to the perform boundary and
-`drive` is never called:
-
-    impl Async for LoomAsync where {
-      initialize_scope = {} -> __native_async_init_scope {},
-      finalize_scope   = {} -> __native_async_finalize_scope { tracker = scope },
-      spawn     = { f } -> __native_async_spawn_tracked { f = f, max_concurrent = 0, tracker = scope },
-      await     = { p } -> __native_async_await { p = p },
-      yield_now = {} -> __native_async_yield_now {},
-      cancel    = { p, reason } -> __native_async_cancel { p = p, reason = reason },
-    }
-
-No `cont`, no `drive`, and identical to today's code except that `await`,
-`yield_now` and `cancel` are now ops (Phase A). **It keeps the one capability a
-BDSL continuation does not have: it parks across native frames**, because it
-freezes the whole Java stack.
-
-**`VirtualPool` — virtual threads as an executor, continuations as the
-mechanism.** Suspension is the core's job; Loom is only a pool, reached through
-public API, so no `jdk.internal.vm` and no `--add-exports`:
-
-    impl Async for VirtualPool { workers: Int } where {
-      initialize_scope = {} -> {
-        pool = __native_vthread_pool { size = workers },
-        ready = new_queue {}, waiting = new_table {},
-      },
-      finalize_scope = {} -> do
-        scope.waiting.drain_each { f = { w } -> w.deliver { d = DeliverCancelled {} } }
-        scope.pool.shutdown {},
-
-      drive = {} -> match scope.ready.take_front {} is
-        QueueEmpty {} -> DriveIdle {}
-        QueueResumer { deliver } -> do
-          scope.pool.submit { task = {} -> deliver { d = DeliverReady {} } }
-          DriveProgressed {},
+      drive = { runnable } -> runnable.first {},
 
       await = { p } -> match p.state {} is
-        PromiseSettled { val } -> val
-        PromisePending {} -> do
-          scope.waiting.put { key = p.id, deliver = { d } -> match d is
-            DeliverReady {} -> cont.resume { val = p.settled_val {} }
-            DeliverCancelled {} -> cont.abort { val = Err { error = AsyncCancelled {} } } }
-          cont.suspend {},
+        PromiseSettled { val } -> val                          ## implicit resume
+        PromisePending {} -> match cont.park { on = OnPromises { ids = [p.id {}] },
+                                               set = WaitDefault {} } is
+          ParkReady {} -> p.settled_val {}
+          ParkCancelled { reason } -> Err { error = AsyncCancelled { reason = reason } },
     }
 
-This one requires **Phase B**: it resumes on a different thread than parked, and
-the handler chain is per-thread today. The cross-thread resume itself is measured
-working.
+No `waiting` table, no resumer closures, no `finalize_scope` discipline to
+remember.
 
-| | `LoomAsync` | `VirtualPool` | single-threaded loop |
-|---|---|---|---|
-| mechanism | blocks a virtual thread | BDSL continuation | BDSL continuation |
-| mentions `cont` / has `drive` | no / no | yes / yes | yes / yes |
-| parks across native frames | **yes** | no | no |
-| per switch | thread park, ~µs | 21 ns | 21 ns |
-| parallelism | yes | yes | no |
-| deterministic | no | no | **yes** |
-| needs Phase B | no | **yes** | no |
+### The machine
 
----
+Per task, owned by the runtime:
 
-## Which call sites carry a suspension check
+    Running          — executing now
+    Parked(on, e)    — suspended on a condition, epoch e
+    Runnable(v)      — condition satisfied, carrying what to deliver
+    Done(v) | Cancelled(r)
 
-**Any call whose effect row is non-empty. A pure call carries none.**
+Per scope: `Active -> Finalizing -> Closed`.
 
-No declaration, no new keyword, no inference over impls, no cross-module
-coherence question about whether some impl started parking. The justification is
-the measurement: the check costs **38 ps**, inside the noise, so precision buys
-nothing. A `FileRead` performer that never parks still has call sites carrying a
-check that always falls through, and that is cheaper than inventing syntax to
-avoid it.
+**Epochs are load-bearing.** Each park bumps one, so a wake aimed at a stale
+epoch is a defined no-op AND COUNTABLE — the one case where silence would
+otherwise hide a bug.
 
-The effect row already exists and is inferred, so **nothing in this design asks
-the user to annotate anything** — not the handler, not the continuation, not the
-call site.
+**Visible in Mezze:** `ParkOn`, `ParkOutcome`, `WaitSet`, and an opaque `Task`
+handle. **Internal:** task records, the ready set, promise->task indices, epochs
+— so they can be laid out properly (intrusive records, an array ring, the waiter
+stored ON the promise rather than in a side table).
 
-## What the typechecker covers
+### What this costs and buys
 
-These belong in a standalone validator pass emitting ordinary `V####`
-diagnostics, not in unification. The precedent is exact: **V0503 is enforced by
-`HandlerTailPositionValidator`**, a separate pass, and is indistinguishable from
-a type error to the user.
+Both earlier holes are STRUCTURALLY ABSENT rather than patched:
 
-| caught | derived from |
+| | |
 |---|---|
-| `cont` referenced outside a performer op body | scoping, as `scope` already is (V0702) |
-| `cont.resume { val = v }` payload type | the op's return type, via `Cont 'a` |
-| `cont.suspend` where the chain crosses a non-resumable native | the callback's INFERRED row plus compiler metadata on the native |
-| unreachable code after `cont.suspend {}` | its site-chosen `'a` never returning |
-| a performer that mentions `cont` but declares no `drive` | its tasks could never be woken — syntactic |
-| `cont` stored into two different structures in one handler body | syntactic; the obvious half of the double-store bug |
-| effect obligations at the call site | the inferred row, unchanged |
+| the untypeable `waiting` table | gone — `Cont (Result 'a AsyncError)` differs per task, but userland holds none |
+| `resume`'s return type | gone — there is no userland `resume`; the only remaining method is divergent, where a free `'b` is sound |
+| resume twice | **impossible**, not a silenced no-op |
+| stale resumer dropped | impossible — no resumers in userland |
+| resume after `finalize_scope` | impossible — the machine cancels parked tasks before finalize runs |
+| cleanup never running | the machine cancels; a performer cannot forget |
 
-## What stays silent
+**The only reported error is deadlock** — no runnable task, body parked, nothing
+pending. A genuine program fault, and it must be loud.
 
-The author's rule for this design: no runtime errors, silent behaviour is fine.
-So `resume` is **total** — a used-bit on the handle, the 179 ps measured, now the
-mechanism of "no-op" rather than the trigger for a raise.
+### What it gives up
 
-| | behaviour |
+| | |
 |---|---|
-| resume twice | second is a no-op — the task already moved on |
-| `cont` in two places, both fire | first wins |
-| resume after the scope finalized | no-op; finalize already woke it with `raise` |
-| a promise that never settles | parked until its scope ends, then `raise`d |
-| resumed with a well-typed but wrong value | undetectable; ordinary logic bug |
-| cleanup order when finalize wakes several at once | the scope's iteration order |
+| generators | **nothing lost** — `iter` already is the lazy structure |
+| direct handoff / continuation-stealing | **dropped deliberately.** Its real use is fine-grained fork-join, which Mezze answers with `par_map` and native parallelism, not userland schedulers |
+| per-primitive wakeup order | **kept**, via named wait sets — without them you cannot write a fair mutex or a LIFO channel, a more ordinary want than continuation-stealing |
 
-**`cont.suspend {}` registers the continuation with its enclosing scope** before
-yielding. The scheduler's own table is its index for FINDING a continuation; it
-is not what keeps it reachable. So nothing can become unreachable, and
-`finalize_scope` can always wake every parked task — which closes the leak OCaml
-still has open, where a dropped continuation's cleanup never runs.
+### Where this sits in the literature
 
-Nothing above is an unbounded leak. A task parked forever under a `perform` that
-never ends is a server waiting for work, not a leak.
+**Delimited, one-shot, SECOND-CLASS continuations with userland scheduling
+policy.** The nearest prior art is **Rust's `Future` / `Waker` / executor split**
+— a runtime-owned suspension protocol with a userland executor choosing what to
+poll; `cont.park` is registering a Waker and `drive` is the poll loop. The
+difference is in our favour: Rust builds its state machine at COMPILE time,
+which is why `async fn` colours every function, while we capture a real stack and
+an ordinary function parks with only its effect row changing.
 
-**The one reported error:** `drive` returning idle while the body is still
-suspended. Nothing can wake it; that is a deadlock, and it is the single case the
-runtime must report rather than pass over.
-
-## No linear types, no L2
-
-One-shot is handled by the total no-op. A linear `Cont` would require the user to
-annotate linearity, which collides with the standing rule that no annotation is
-ever required (an annotation fixing something means inference is wrong). L2 — the
-type-level proof language — is a separate project and has nothing to do with this.
-
-## Migration cost
-
-**User code that does not define performers: zero change.** `perform X in …`,
-effect calls, and handlers that never park are all untouched.
-
-**Performers using bare `abort`: 7 code sites in the stdlib**, all mechanical:
-
-| file | sites |
-|---|---|
-| `std/effects/exception.mz` | 4 |
-| `std/effects/condition.mz` | 2 |
-| `std/effects/early_return.mz` | 1 |
-
-each `abort { val = v }` becoming `cont.abort { val = v }`. **Zero bare
-`resume {` calls exist in stdlib code** — every mention is a comment explaining
-the bare value is used instead because it is ~2.4x cheaper.
-
-Phase A is non-breaking at call sites if the stdlib keeps `await`/`park`/`cancel`
-as thin wrappers delegating to the new ops.
-
-## Phases
-
-| | state | what |
-|---|---|---|
-| **A** | to do | promote `await`, `yield_now`, `park`, `park_until`, `cancel` to ops of `Async`. Stdlib only, no runtime work, independent. `async.mz:342` declares `spawn` as the SOLE op, which is why all four shipped performers can differ only in `spawn`. |
-| **B** | to do | handler evidence travels with the call rather than a per-thread chain. PREREQUISITE, not an optimisation: continuations are thread-portable while the handler chain is not. Also ~41 → ~16 ns per op. |
-| **C1** | to do | carry the inferred effect row to the call IR. The only unbuilt mechanism; call IR nodes carry no effect information today. |
-| **C2** | **proven** | propagate the suspension at those call sites. |
-| **C3** | **proven** | stack-walking driver. |
-| **C4** | **proven** | callback-taking natives hold loop state on the heap. |
-| **D** | to do | `drive` as a third impl-only field, and `cont.suspend` registering with its scope. |
-
----
+Also on the map: **Effekt** (second-class capabilities — closest on that axis,
+and the source of the claim that second-class continuations cannot express
+userland schedulers, which is only true if the SCHEDULER must hold them);
+**OCaml 5** (delimited, one-shot, but first-class and escapable — what we gave
+up); **Kotlin** coroutines (`suspend` + CPS + userland `Dispatchers`, compile-time
+machine again); **Go** (runtime-owned `gopark`/`goready`, no user-visible
+continuations — we are Go plus swappable policy); and **scheduler activations**
+(Anderson et al. 1992), the original "kernel owns the mechanism, user owns the
+policy" argument, which is exactly this division.
 
 ## Open rules to settle before implementation
 
