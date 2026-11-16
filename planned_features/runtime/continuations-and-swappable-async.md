@@ -181,6 +181,77 @@ continuations — we are Go plus swappable policy); and **scheduler activations*
 (Anderson et al. 1992), the original "kernel owns the mechanism, user owns the
 policy" argument, which is exactly this division.
 
+## Execution risks — what would surprise you, measured where countable
+
+Written before starting, because two of these are bigger than the design
+narrative implies.
+
+### 1. PARKING IS NOT ASYNC-ONLY, and the machine cannot live in the scheduler's scope
+
+`sleep` performs **`<Time>`**, not `<Async>`:
+
+    pub let sleep: { ms: Int } -> {} <Time> = { ms } ->
+      Time.sleep { d = duration_millis { n = ms } }
+
+So a **Time performer parks a task that the Async machine owns.** `cont` is
+available in ANY performer op body, so any effect can park. That breaks the
+convenient story that the machine belongs to the scheduler's scope: it has to be
+reachable from every performer, which means it belongs to the CONTEXT (or the
+fiber), with scopes holding only the set of task ids suspended inside them.
+
+This is the sharpest architectural gap in the design and the thing most likely
+to force a rewrite mid-implementation. Settle it first.
+
+### 2. C4 IS 154 NATIVES, NOT "map and fold"
+
+Counted: **1217 distinct natives are referenced by the stdlib, and 154 of them
+take a guest callback.** Not all need to be resumable — many can fail loudly —
+but each needs a DECISION, and that is the work. The earlier framing ("rewrite
+the callback-taking HOFs") implied a handful.
+
+### 3. There are EXISTING parkers to migrate, and they are not all `await`
+
+`semaphore.acquire`, `channel.recv`, `park`, `park_until`, `park_any`, STM
+retry, `workflow.retry`, `http.retry`. Nine call sites of the park natives
+across the stdlib. Semaphores and channels are also the vindication of keeping
+NAMED WAIT SETS: each wants its own wakeup order.
+
+### 4. BDSL CONTINUATIONS UNDER NATIVE-IMAGE ARE UNVERIFIED
+
+The AOT test in the measurement record below is **Loom's**, not BDSL's. The
+BDSL prototype and the five suites added this session all run on the JVM. Since
+AOT was billed as the top risk and then cleared, note precisely what was cleared:
+Loom. `ParkOutcome` is a variant, so `just aot-parity` and
+[[project_aot_variant_tag_dispatch]] apply to it. **Verify a BDSL yield under
+native-image before relying on it.**
+
+### 5. `drive` sits in the EFFECT DRIVER's hot path
+
+Not just the parking path. A new branch in the driver's loop touches every
+effect op, which measured 16-41 ns. Take a before/after on the effect-op
+microbenchmark, not only on park/resume.
+
+### 6. C1 changes an IR node's shape
+
+Adding the effect row to `CallDirectIR` changes content hashes and therefore
+declaration identity and cache validity ([[project_decl_identity_resolution_aware]]).
+Expect churn. And `EmitFileSizeRatchetTest` trips on `TypedAstBuilder.kt` /
+`TypedASTCompiler.kt` growth — it fired twice in one session already.
+
+### 7. Three places where a park is impossible and must fail LOUDLY
+
+- the **module top-level body**, which is not BDSL-compiled (`__entry__` still
+  uses the AST path), so a top-level `perform` cannot park;
+- **comptime**, where `perform ComptimeEvalCodebase` runs at compile time;
+- **across a polyglot boundary**, where a Mezze callback invoked from JS or
+  Python sits under foreign frames that cannot be suspended.
+
+### 8. `scoped` is unexamined
+
+Structured concurrency takes `{ sc: Scope 'a }` and brackets child tasks. How it
+interacts with the machine's states — particularly `Finalizing` — has not been
+worked through.
+
 ## Open rules to settle before implementation
 
 Five things the design does not pin down. None is a hole in the mechanism; each
