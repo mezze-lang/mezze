@@ -7458,12 +7458,39 @@ Not about chaining and not about interpolation: all three undeclared forms
 
 ### THE FIX: reject, do not accommodate
 
-The stdlib is unanimous — **1264 impl methods declare `it`, ZERO use it
-undeclared** — and abilities ALREADY require the declaration (an op whose params
-omit `it` gives "Undefined variable 'it'"; measured earlier this session on
-`tick = { n } -> n + it.base`). So the undeclared form is not a supported
-spelling that happens to be broken; it is an unsupported spelling that is not
-being rejected.
+**The ABILITY path already does exactly this**, measured:
+
+    ability Bulkiness for 'a where { bulkiness: { it: 'a } -> Int }
+
+    impl Bulkiness for Box where { bulkiness = {} -> it.v }
+    → error[V0702]: ... operation 'bulkiness' implementation: Undefined variable 'it'
+
+    impl Bulkiness for Box where { bulkiness = { it } -> it.v }
+    → Check passed; prints 21
+
+So BUG 47 is the INHERENT path missing a check the ABILITY path performs.
+The stdlib agrees unanimously: **1264 impl methods declare `it`, ZERO use it
+undeclared.** The undeclared form is not a supported spelling that happens to be
+broken; it is an unsupported spelling that is not being rejected.
+
+### The three impl kinds — do not conflate them
+
+An earlier version of this entry cited
+`impl Tick for Counter where { tick = { n } -> n + it.base }` as the
+"abilities already reject it" precedent. **That was an EFFECT impl, where `it`
+never exists at all**, so it proved nothing about abilities. The author
+corrected it: "effect impls don't take an `it`, only ability impls do, or anon
+impls — effects are not on types."
+
+| impl kind | `it` | body uses `it` undeclared |
+|---|---|---|
+| **effect** (performer), `impl Async for LoomAsync` | none exists; reach data via bare performer params and `scope` | n/a — there is no receiver |
+| **ability**, `impl Eq for Int` | the receiver; its type comes from the ability's declared op | **V0702 at check time** |
+| **inherent/anon**, `impl Box where` | the receiver; NOTHING declares it anywhere | accepted -> T0206 later, or a runtime crash |
+
+The middle column is the whole bug: an inherent impl is the only kind where `it`
+has no declaration to come from, and it is also the only kind that does not
+check.
 
 So: emit "Undefined variable 'it'" for an inherent impl body that names `it`
 without declaring it, pointing at the `it` rather than at a later call.
