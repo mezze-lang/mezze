@@ -392,6 +392,51 @@ today's async stays exactly as fast as today's async.
    requires Phase B first (handler evidence passed, not read from a per-thread
    chain) and then a measurement. Do not assume it works.
 
+### EFFECTFUL CALLBACKS SURVIVE — measured, and my blanket warning was too broad
+
+Challenged on the claim that a native frame in the chain is a problem: do
+effectful callbacks (and exceptions, which use abort) still work? **Measured on
+both sides. Three of the four shapes need no suspension at all and keep working;
+exactly one breaks.**
+
+At the language level, on today's build (`scratchpad/effcb`):
+
+    1. perform inside native map : [10, 20, 30, 40, 50]
+    2. perform inside native fold: 150
+    3. abort through native map  : [-1]
+    4. perform nested 2 natives  : [20, 40, 60, 80, 100]
+
+A perform inside a native HOF's callback works, nested through TWO native frames
+works, and an **abort fired inside a native callback escapes the native frame**
+and ends the perform block with its payload. Why: a handled perform is a PIC'd
+direct call and abort is a Java throw — neither needs a suspendable stack. (The
+typechecker also pinned the abort payload to the block's type, refusing `Int`
+where the block was `[Int]`: T0201, correct.)
+
+At the mechanism level, `BdslYieldAcrossNativeFrameTest` (2 tests, passing) pins
+the one that does break:
+
+| shape | needs suspension? | works |
+|---|---|---|
+| handler resumes immediately (the common case) | no — direct call | **yes** |
+| handler aborts | no — Java throw | **yes** |
+| no effect in the callback | no | **yes** |
+| handler **parks via `cont`** | YES | **NO** |
+
+And the failure mode is the dangerous kind, which is why it must be loud: the
+native loop **runs to completion** and each callback result comes back as a
+`ContinuationResult` that a native HOF would store as the mapped element. Silent
+garbage, not an exception. Resuming one resumes only the guest tail — the native
+loop's state is already gone, so there is no way to re-enter the map.
+
+**This is the measured case for keeping BOTH performers.** Loom freezes Java
+frames, so it CAN park inside a native HOF's callback (`Cycle` suspends through
+200 Java frames); BDSL cannot. So the split is not taste:
+
+- `LoomAsync` — parks anywhere, including inside `map`'s callback. Real threads.
+- a BDSL-cont performer — cheap, deterministic, single-threaded, and **cannot
+  park inside a native callback**.
+
 ### The per-function-root caveat — THE top risk
 
 A BDSL continuation suspends only frames whose root is a `ContinuationRootNode`.
