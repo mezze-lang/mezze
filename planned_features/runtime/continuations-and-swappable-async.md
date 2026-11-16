@@ -131,6 +131,53 @@ deadline, so it consumes. It cannot EXPOSE `Time`, because V0701 gives a
 performer name exactly one effect — it is an `Async` performer, not a `Time` one.
 A program on Loom installs `SystemTime` or `MockTime` itself.
 
+### MEASURED END TO END: what swapping a performer actually buys
+
+One program, run twice, changing only the performer list. This is the clearest
+statement of why the design is worth building, and both halves are measured.
+
+    let fetch = { url, ms } -> do
+      sleep { ms }
+      "$(url) replied"
+
+    let main = {} -> do
+      let clock = test_clock_at { i = epoch {} }
+      perform Console, LoomAsync, MockTime { clock = clock } in do
+        let fast = Async.spawn { f = {} -> fetch { url = "eu", ms = 10 } }
+        let slow = Async.spawn { f = {} -> fetch { url = "us", ms = 500 } }
+        match [fast, slow].race {} is
+          Ok { val } -> println { msg = val }
+          Err { error } -> println { msg = "both failed: $(error.to_dbg {})" }
+
+(Checked and run. Note what the surface already permits: comma-separated
+performers in ONE `perform`, field punning in `sleep { ms }`, `#` as well as
+`##` comments, and `[fast, slow].race {}` dispatching a `{ ps: [Promise 'a] }`
+function method-style on its first parameter.)
+
+With `SystemTime`: prints `eu replied`, and does NOT wait for the slow task.
+With only the Time performer swapped to `MockTime`:
+
+    eu replied
+    virtual clock now: 510ms
+
+both sleeps virtual, 510 ms of simulated time in ~0 ms real.
+
+**And 510 is the finding.** Under real concurrency the answer should be
+`max(10, 500) = 500` — the sleeps OVERLAP. It is 510 because `MockTime.sleep`
+ADVANCES a shared clock instead of waiting, so concurrent sleeps ACCUMULATE.
+
+| swap | available | what it gives |
+|---|---|---|
+| `SystemTime` -> `MockTime` | **today** | virtual time: fast tests, no real waiting |
+| `LoomAsync` -> a cont scheduler | **needs this design** | determinism, AND correct virtual-time semantics |
+
+So MockTime with real threads is fast but NOT deterministic — the threads still
+race and the clock accumulates. A single-threaded scheduler that advances the
+clock TO THE EARLIEST DEADLINE from `drive` is what makes concurrent sleeps
+overlap properly and the outcome reproducible. That is the
+`drive`-advances-the-clock refinement above, now with a measured reason to want
+it rather than an argued one.
+
 ### Implicit resume
 
 A performer op body that falls off the end with a value RESUMES. That is
