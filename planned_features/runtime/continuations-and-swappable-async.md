@@ -392,6 +392,80 @@ today's async stays exactly as fast as today's async.
    requires Phase B first (handler evidence passed, not read from a per-thread
    chain) and then a measurement. Do not assume it works.
 
+## A YIELD SUSPENDS EXACTLY ONE ROOT — the inhibitor, and it is not about natives
+
+Asked for callbacks to work with PROPER continuations rather than leaning on the
+Java-throw path. The decisive experiment —
+`BdslYieldComposesAcrossRootsTest` — says composition does NOT hold today:
+
+    outer: fn(x) -> inner(x) + 100
+    inner: fn(x) -> (yield "op:park") + 1
+
+    UnsupportedSpecializationException: Unexpected values provided for
+    AddLong_Node: [ContinuationResult...]
+
+The inner root yielded; `CallDirect1` returned its `ContinuationResult` as an
+ordinary value; the outer root's `AddLong` received a continuation as a number.
+**The outer root did not suspend, and it IS a continuation root** (`enableYield
+= true` is on every BDSL root). So being a `ContinuationRootNode` is NECESSARY
+BUT NOT SUFFICIENT — the problem is the CALL SITE, not the frame type.
+
+Which means the native-HOF limit recorded below is not a native-code problem at
+all. It is the same defect wearing a different hat: **any** intermediate frame
+that does not cooperate receives the continuation as data. A Java `map` loop and
+a BDSL caller fail identically.
+
+**CORRECTION, and it reverses what this document said one commit ago.** I wrote
+that "Phase C is not 'build a continuation mechanism', it is re-emit the yield at
+perform sites" and that this was far smaller than the Path C estimate. **That was
+wrong.** I read D0's single-root success as composability. Composition requires
+every call site that might suspend to propagate the suspension, which is the CPS
+taint that Path C's "CPS-at-IR transform" meant and that Path D was believed to
+avoid. Path D avoids the WORKER-THREAD half, not the taint.
+
+### What could solve it
+
+**1. Propagate at the call site (mandatory).** A call that might suspend lowers
+to: call; if the result is a `ContinuationResult`, yield it onward. Resuming
+walks the chain — which is exactly what `YieldDriver.drive` already does, a loop
+over a CHAIN of `ContinuationResult`s. The driver was built for this; the emit
+was not. Expressible in the builder today, no framework change.
+
+*The cost is a branch per call site — and the EFFECT ROW says which sites need
+it.* A call whose row is pure cannot suspend and needs no check. That is static,
+sound, and already in the type system, so the tax lands only on effectful calls.
+**This is the next thing to measure, and it is the number that decides Phase C.**
+
+**2. Callback-taking natives must become resumable.** Loop state has to live on
+the heap, not in Java locals, so the native can return a continuation that
+resumes the loop at index `i` with the accumulated output. Per-element fast-path
+cost: one `instanceof`. Worth checking first: the natives that take GUEST
+callbacks are already scalar per-element — a vectorised path folds the operation
+into a kernel and has no guest frame to park in — so this likely costs no
+vectorisation. See [[project_flp_only_pays_when_it_vectorises]].
+
+**3. Re-expressing those natives as BDSL loops does NOT help on its own.** The
+measurement is explicit: a BDSL caller fails exactly as a Java caller does. (3)
+is only useful combined with (1).
+
+### What this does to the Loom comparison
+
+Loom composes for FREE: it freezes the whole Java stack, so `Cycle` suspends
+through 200 frames, natives included, with no taint anywhere. That is why Loom
+async works today with none of this machinery. Sharpened:
+
+| | Loom | BDSL cont |
+|---|---|---|
+| composes across frames | **free** | needs a check at every suspendable call site |
+| crosses native frames | **yes** | no, unless the native is made resumable |
+| switch cost | ~100 ns measured | unmeasured with a live emit |
+| native-image | needs `--add-exports` | **clean** |
+| shots | one | **multi** |
+
+So Loom is the stronger candidate for the PRIMARY async path, and a BDSL-cont
+scheduler is the deterministic/testable option — the reverse of the emphasis this
+document had before the measurement.
+
 ### EFFECTFUL CALLBACKS SURVIVE — measured, and my blanket warning was too broad
 
 Challenged on the claim that a native frame in the chain is a problem: do
