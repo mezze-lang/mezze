@@ -67,17 +67,28 @@ scheduler this design exists to enable. Deadlines are predicates that perform
 Author's ruling: *"abstraction should expose time"* and *"LoomAsync can consume
 it or not, either is fine — loom sleep definitely does."*
 
-So the waiting ops declare it and `spawn` does not, because fanning out involves
-no waiting:
+**CORRECTED: only the DEADLINE ops need it, not every waiting op.** A first
+draft here put `<Time>` on `await` and `yield_now` too. The author pushed back —
+*"why await needs it? I get park_until"* — and is right: `await` waits on an
+EVENT (the promise settling), not a deadline. No `ms` parameter, no clock read,
+under Loom or a reactor. `yield_now` reschedules immediately. Conflating
+"waiting" with "time" was the error.
 
     effect Async where {
       spawn:      { f: {} -> 'a <...> } -> Promise 'a <Async>,
-      await:      { p: Promise 'a } -> Result 'a AsyncError <Async, Time>,
-      yield_now:  {} -> {} <Async, Time>,
-      park:       { predicate: {} -> Bool <...> } -> {} <Async, Time, ...>,
-      park_until: { predicate: {} -> Bool <...>, ms: Int } -> Bool <Async, Time, ...>,
+      await:      { p: Promise 'a } -> Result 'a AsyncError <Async>,        ## event, not clock
+      yield_now:  {} -> {} <Async>,                                          ## immediate
+      park:       { predicate: {} -> Bool <...> } -> {} <Async, Time, ...>,  ## arguably: back-off
+      park_until: { predicate: …, ms: Int } -> Bool <Async, Time, ...>,      ## HAS a deadline
       cancel:     { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async>,
     }
+
+`park` is the judgement call: it polls a predicate, and a polling impl plausibly
+wants to sleep between polls, so the declaration should permit it.
+
+**This mostly dissolves the Phase A breakage flagged below.** `await` is the op
+every program calls; `park_until` is rare. With `await` clean, almost no written
+annotation changes.
 
 This needs no new rule. An impl may NARROW its effects and never widen
 ([[project_what_an_impl_may_change]]), so a pure scheduler that touches no clock
@@ -101,16 +112,24 @@ somebody had to make. The failure it prevents:
 A cont-based scheduler wants a `Time` performer that PARKS or ADVANCES instead,
 and declaring `<Time>` on the waiting ops is what makes that pairing visible.
 
-**THE COST, and it re-costs Phase A.** Rows are exact, so every annotated
-function that awaits gains an obligation, and so does every annotated caller up
-the chain:
+**THE COST, now small.** Rows are exact, so an annotated function gains `Time`
+only if it calls `park` or `park_until`. With `await` and `yield_now` clean, that
+is a handful of sites rather than every async caller, and Phase A stays close to
+the cheap stdlib-only phase it was costed as.
 
-    let fetch_all: { urls: [Str] } -> [Str] <Async> = …        ## today
-    let fetch_all: { urls: [Str] } -> [Str] <Async, Time> = …  ## after
+**AND A REAL FINDING IN THE SHIPPED CODE.** `park_until`'s own documentation says
+*"The deadline is measured by the thread that WAITS, which is what makes a
+timeout built on this predictable."* So the deadline is measured IN THE NATIVE
+and bypasses the `Time` effect: **a timeout under `MockTime` is not virtual
+today** — it waits real milliseconds while the rest of the program's clock is
+fake. Declaring `<Time>` on `park_until` AND having the impl perform it rather
+than read a native clock is what fixes that, and is the strongest concrete reason
+for the declaration.
 
-Mechanical but wide. Phase A was described above as the cheap, non-breaking,
-stdlib-only phase; **under this decision it is no longer non-breaking**, and the
-annotation sweep belongs in its estimate.
+**LOOM CONSUMES, IT DOES NOT EXPOSE.** `LoomAsync` reads time in `park_until`'s
+deadline, so it consumes. It cannot EXPOSE `Time`, because V0701 gives a
+performer name exactly one effect — it is an `Async` performer, not a `Time` one.
+A program on Loom installs `SystemTime` or `MockTime` itself.
 
 ### Implicit resume
 
