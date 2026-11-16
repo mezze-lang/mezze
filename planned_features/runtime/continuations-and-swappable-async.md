@@ -62,6 +62,56 @@ scheduler this design exists to enable. Deadlines are predicates that perform
 `Time`, and effectful predicates already ship — today's `park` takes
 `{ predicate: {} -> Bool <...> }`.
 
+### DECIDED: the Async ABSTRACTION declares `Time`; performers may narrow
+
+Author's ruling: *"abstraction should expose time"* and *"LoomAsync can consume
+it or not, either is fine — loom sleep definitely does."*
+
+So the waiting ops declare it and `spawn` does not, because fanning out involves
+no waiting:
+
+    effect Async where {
+      spawn:      { f: {} -> 'a <...> } -> Promise 'a <Async>,
+      await:      { p: Promise 'a } -> Result 'a AsyncError <Async, Time>,
+      yield_now:  {} -> {} <Async, Time>,
+      park:       { predicate: {} -> Bool <...> } -> {} <Async, Time, ...>,
+      park_until: { predicate: {} -> Bool <...>, ms: Int } -> Bool <Async, Time, ...>,
+      cancel:     { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async>,
+    }
+
+This needs no new rule. An impl may NARROW its effects and never widen
+([[project_what_an_impl_may_change]]), so a pure scheduler that touches no clock
+is legal, and `LoomAsync` — whose sleep consumes real time — is equally legal.
+The effect declares the widest row an impl might need; impls narrow; callers
+answer for the declaration.
+
+**What the change actually buys, stated precisely.** `LoomAsync` + `MockTime`
+ALREADY works today, because `sleep` is already a `<Time>` function handled by
+whichever `Time` performer is installed. The row change does not enable that
+combination — it creates the OBLIGATION, which is what turns "a blocking
+`SystemTime` stalls my single-threaded loop" from an accident into a choice
+somebody had to make. The failure it prevents:
+
+    perform SystemTime in perform MyPureReactor {} in do
+      Async.spawn { f = {} -> do
+        Time.sleep { d = duration_seconds { n = 5 } }   ## SystemTime BLOCKS the
+        work {} } }                                     ## carrier thread, so every
+                                                        ## ready task waits 5s too
+
+A cont-based scheduler wants a `Time` performer that PARKS or ADVANCES instead,
+and declaring `<Time>` on the waiting ops is what makes that pairing visible.
+
+**THE COST, and it re-costs Phase A.** Rows are exact, so every annotated
+function that awaits gains an obligation, and so does every annotated caller up
+the chain:
+
+    let fetch_all: { urls: [Str] } -> [Str] <Async> = …        ## today
+    let fetch_all: { urls: [Str] } -> [Str] <Async, Time> = …  ## after
+
+Mechanical but wide. Phase A was described above as the cheap, non-breaking,
+stdlib-only phase; **under this decision it is no longer non-breaking**, and the
+annotation sweep belongs in its estimate.
+
 ### Implicit resume
 
 A performer op body that falls off the end with a value RESUMES. That is
