@@ -309,6 +309,23 @@ effect op:
         test_clock_advance { c = scope.clock, d = scope.until_earliest_deadline {} }
         runnable.first {}
 
+**CAN A USERLAND SCHEDULER BYPASS `Time` ALTOGETHER? NO — measured.** This is
+what makes the determinism story real rather than conventional. The native that
+`SystemTime` itself uses is unreachable from user code:
+
+    let sneaky_now = {} -> __native_instant_now {}
+    → error[V0702]: Undefined variable or function: __native_instant_now
+
+Natives are stdlib-only, so every clock read in userland goes through `Time`.
+Therefore **a performer whose row is `<Async>` alone provably does not read a
+clock**, and a test installing `MockTime` controls all of its time. A
+third-party scheduler cannot quietly consult the wall clock.
+
+The honest caveat: bypass is not impossible, it is VISIBLE. A scheduler could
+read a clock through `Polyglot` (`Date.now()` in JS) or through the filesystem —
+but each of those is itself an effect and appears in the row. There is no
+invisible route, which is the property that matters.
+
 The general rule: a performer needing another effect either bundles and
 DISCHARGES it (caller sees nothing) or DECLARES it in the row (callers are
 answerable). Performing without doing either is a performer widening past its
