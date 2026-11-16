@@ -417,6 +417,54 @@ only if its heap loop state is COPIED per shot. That is a bounded, known fix on
 the C4 shape — and one more reason the one-shot default is right, with multi-shot
 as an opt-in.
 
+### THE HEADLINE PERFORMANCE NUMBERS — BDSL park/resume, measured at last
+
+The ~100 ns in this document was always LOOM's. The BDSL mechanism had never been
+timed. Four arms interleaved in one process (`SuspendResumeCostTest`):
+
+| arm | cost |
+|---|---|
+| plain call, no yield | **6.62 ns** |
+| park + resume (one full cycle) | **21.37 ns** |
+| + a ONE-SHOT GUARD (wrapper + used flag) | **21.55 ns** — delta **179 ps**, free |
+| composed 2-level, via the stack driver | **46.18 ns** (~24.8 ns per extra level) |
+
+Suspend overhead over a plain call: **14.75 ns**.
+
+**BDSL is ~5x cheaper than Loom for a shallow park** (21 ns against ~100 ns), and
+that is the common case — one effectful frame between the `await` and the handler.
+
+**But the slope is the opposite way round, and this matters.** Each propagated
+level costs another yield+resume (~25 ns), whereas Loom pays ~100 ns once and
+then ~0.6 ns/frame:
+
+    nested effectful frames | BDSL propagate | Loom freeze
+       1                    |     21.4 ns    |   100.6 ns   BDSL
+       2                    |     46.2 ns    |   101.2 ns   BDSL
+       4                    |     95.8 ns    |   102.4 ns   BDSL (tie)
+       6                    |    145.4 ns    |   103.6 ns   LOOM
+      12                    |    294.2 ns    |   107.2 ns   LOOM
+
+Crossover at about **four nested effectful frames**. So a BDSL core is the right
+default and deep effectful call chains are its weak spot — which is a third,
+independent reason to keep a Loom performer rather than delete it, and a reason
+to keep propagation depth short.
+
+### ONE-SHOT ONLY: possible, nearly free, and it DELETES the native hazard
+
+Enforcement is a handle wrapping the `ContinuationResult` with a `used` flag;
+`resume` checks and flips it. **Measured at 179 ps** — free.
+
+And refusing multi-shot removes the C4 problem entirely: the resumable native's
+shared heap loop state can only be written twice if a continuation is resumed
+twice, so one-shot makes "copy the loop state per shot" unnecessary rather than
+merely deferred. That turns the one real multi-shot defect into a non-issue by
+construction.
+
+Multi-shot remains available as a later opt-in (the framework gives it for free
+for guest code, including across composition), and would then owe the
+copy-per-shot work on natives.
+
 ### Everything measurable is now measured
 
 Nothing in this plan is waiting on a number. What remains is implementation: C1
