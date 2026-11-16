@@ -23,9 +23,9 @@ A performer op body can already reference three runtime-bound names: `scope`,
 so the count goes from **three to two**.
 
     cont                        ## the one bound name, beside `scope`
-    cont.resume  { val = v }    ## continue the block with v
-    cont.abort   { val = v }    ## end the block with v
-    cont.suspend {}             ## park; control returns to the perform boundary
+    cont.resume  { val = v }    ## -> {}   resume a STORED continuation
+    cont.abort   { val = v }    ## -> 'b   DIVERGENT: end the block with v
+    cont.suspend {}             ## -> 'b   DIVERGENT: park, control to the boundary
 
 `cont` is bound exactly where `scope` is — a performer op body. Referencing it
 anywhere else is V0702, which is already the behaviour for `scope` (verified:
@@ -40,18 +40,38 @@ see *Rejected framings*.
 were a record you could write `let f = cont.resume` and get a bare function —
 precisely the `let k = resume` trap V0503 exists to kill.
 
-All three methods return a **site-chosen free type variable**, written `'a`, the
-same shape `abort` has today. There is no named bottom type in Mezze. Verified:
+### Return types — only TWO of the three may be polymorphic
+
+**CORRECTED 2026-11-16.** An earlier draft gave all three methods "a site-chosen
+free type variable". That is right for two and WRONG for `resume`, for a reason
+worth stating because it is the pattern behind this codebase's fresh-variable bug
+family:
+
+> **A free return type variable is sound ONLY when the function cannot return.**
+> If it can, the caller picks the type and receives garbage — exactly
+> [[project_fresh_var_means_anything_not_unknown]]: a fresh tyvar means "ANY type
+> is fine", not "unknown".
+
+`abort` and `suspend` are DIVERGENT — control never comes back to their call
+site — so `-> 'b` is an ordinary bottom and vacuously sound. That is why `abort`'s
+existing typing works, verified:
 
     impl Ex for Choosy where {
       throw = { error } -> if error.len {} > 3 then abort { val = 0 } else 7,
     }
 
-`abort { val = 0 }` unifies with a plain `7` because `'a` instantiates to `Int`
-at that site. The standing rule is that a bare value must not PIN `'a`. In a
-handler `'a` becomes the block's type; in a `drive` body resuming a stored
-continuation it instantiates to `{}`, because the call stands in statement
-position. One signature, both uses.
+`abort { val = 0 }` unifies with a plain `7` because `'b` instantiates to `Int`
+at that site; the standing rule is that a bare value must not PIN it. There is no
+named bottom type in Mezze.
+
+`resume` DOES return, so it is concretely **`-> {}`**.
+
+And it needs no second signature, because **`cont.resume` is never used in a
+handler**: producing a value already resumes, and that is the measured cheaper
+path. Resume exists only for a STORED continuation, called from `drive` or a
+completion path — and neither needs its result. If the task finished, the task's
+own code settled its promise; if it suspended again, `suspend` re-registered it.
+The two meanings I had conflated were one redundant meaning and one real one.
 
 ### Implicit resume stays
 
@@ -95,16 +115,16 @@ suspended**, nothing can ever wake it.
         outcomes = new_table {},
       },
 
-      ## Wake every still-parked task so its OWN cleanup runs.
+      ## Deliver a cancellation to every still-parked task so its OWN cleanup runs.
       finalize_scope = {} -> scope.waiting.drain_each { f = { w } ->
-        w.cont.raise { err = SchedCancelled {} } },
+        w.deliver { d = DeliverCancelled {} } },
 
       drive = {} -> do
         scope.poll_io {}
         match scope.ready.take_front {} is
           QueueEmpty {} -> DriveIdle {}
-          QueueCont { cont, val } -> do
-            cont.resume { val = val }
+          QueueResumer { deliver } -> do
+            deliver { d = DeliverReady {} }
             DriveProgressed {}
           QueueTask { task } -> do
             task {}
@@ -113,11 +133,41 @@ suspended**, nothing can ever wake it.
       submit = { f } -> scope.ready.push { task = f },
 
       wait = { j } -> match scope.outcomes.get { key = j.id } is
-        JobDone { val } -> val                            ## implicit resume
+        JobDone { val } -> val                     ## implicit resume
         JobPending {} -> do
-          scope.waiting.put { key = j.id, cont = cont }   ## keep it
-          cont.suspend {},                                 ## park
+          scope.waiting.put {
+            key = j.id,
+            ## ONE closure, both outcomes. `'a` is known HERE and erased by the
+            ## closure's own type, which is what makes the table homogeneous.
+            deliver = { d } -> match d is
+              DeliverReady {} -> cont.resume { val = scope.outcomes.get { key = j.id } }
+              DeliverCancelled {} -> cont.abort { val = Err { error = SchedCancelled {} } }
+          }
+          cont.suspend {},
     }
+
+### A scheduler stores RESUMERS, not continuations
+
+**CORRECTED 2026-11-16.** An earlier draft wrote
+`scope.waiting.put { key = j.id, cont = cont }`. **That cannot be typed.**
+`await: { p: Promise 'a } -> Result 'a AsyncError` makes the continuation
+`Cont (Result 'a AsyncError)` — a DIFFERENT type per task — so one table cannot
+hold them, and Mezze has no existentials.
+
+The fix is the erasing closure above, and `resume` returning `{}` is what lets it
+type at all, so the two corrections depend on each other. The stored value is
+uniformly
+
+    scope.waiting : Table Int ({ d: Delivery } -> {})
+
+    type Delivery = |
+      DeliverReady {},
+      DeliverCancelled {},
+    |
+
+One closure covers waking AND cancelling, so there is no second structure to
+forget — which also deletes the double-store mistake from the leak analysis
+below, since a task is only ever filed in one place.
 
 `cont` and `scope` appear only in op bodies, `drive` and `finalize_scope`.
 Nothing is a bare function — a top-level `let` cannot see `scope`, so completion
@@ -165,19 +215,21 @@ public API, so no `jdk.internal.vm` and no `--add-exports`:
         ready = new_queue {}, waiting = new_table {},
       },
       finalize_scope = {} -> do
-        scope.waiting.drain_each { f = { w } -> w.cont.raise { err = AsyncCancelled {} } }
+        scope.waiting.drain_each { f = { w } -> w.deliver { d = DeliverCancelled {} } }
         scope.pool.shutdown {},
 
       drive = {} -> match scope.ready.take_front {} is
         QueueEmpty {} -> DriveIdle {}
-        QueueCont { cont, val } -> do
-          scope.pool.submit { task = {} -> cont.resume { val = val } }
+        QueueResumer { deliver } -> do
+          scope.pool.submit { task = {} -> deliver { d = DeliverReady {} } }
           DriveProgressed {},
 
       await = { p } -> match p.state {} is
         PromiseSettled { val } -> val
         PromisePending {} -> do
-          scope.waiting.put { key = p.id, cont = cont }
+          scope.waiting.put { key = p.id, deliver = { d } -> match d is
+            DeliverReady {} -> cont.resume { val = p.settled_val {} }
+            DeliverCancelled {} -> cont.abort { val = Err { error = AsyncCancelled {} } } }
           cont.suspend {},
     }
 
@@ -297,6 +349,36 @@ as thin wrappers delegating to the new ops.
 | **D** | to do | `drive` as a third impl-only field, and `cont.suspend` registering with its scope. |
 
 ---
+
+## Open rules to settle before implementation
+
+Five things the design does not pin down. None is a hole in the mechanism; each
+is a rule the runtime must commit to.
+
+**`drive` must not be re-entered.** Inside `drive` you deliver to a task; that
+task may suspend again. If the runtime calls `drive` recursively, the stack grows
+per switch and the flat-trampoline property measured in `Reactor` (max depth 5
+across 11 switches) is lost. The rule: a delivery from `drive` returns when the
+task next suspends, and `drive` reports progress — never re-entry.
+
+**Nested performers that both declare `drive`.** `perform A in perform B in body`
+— when an op of B suspends, whose `drive` runs? Presumably B's, but the outer one
+still needs a turn eventually, and "the performer whose op suspended" has to be
+stated rather than assumed.
+
+**Suspension during `finalize_scope`.** Finalize delivers `DeliverCancelled` to
+parked tasks; a task's cleanup may itself `await` and park again, DURING
+finalization. Needs either a prohibition or a quiescence loop with a bound.
+
+**Which scope auto-registers.** `cont.suspend {}` registers with "its enclosing
+scope" for liveness. With nested scopes, which one — and what happens when an
+outer one finalizes first?
+
+**Stale resumers after re-parking.** A task parks, is delivered to, and parks
+again — the second park yields a NEW continuation. A scheduler still holding the
+first resumer gets a silent no-op, so a dropped wake looks like nothing
+happening. This is the one place totality HIDES a bug rather than taming one, and
+the one place a lint earns its keep.
 
 ## Rejected framings — things tried and dropped
 
