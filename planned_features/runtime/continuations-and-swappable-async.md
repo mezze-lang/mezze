@@ -450,6 +450,61 @@ default and deep effectful call chains are its weak spot — which is a third,
 independent reason to keep a Loom performer rather than delete it, and a reason
 to keep propagation depth short.
 
+### CORRECTIONS to how this document framed depth, leaks and scopes
+
+**1. Loom and BDSL are NOT competitors, and the table above implied they are.**
+The author: *"it is not that bdsl continuation and loom are competitors. loom
+scheduler is used for async and parallel and that's it."* Correct, and it is the
+layering this document already agreed. The real axis is **blocking vs
+suspending**: today's `LoomAsync` BLOCKS a virtual thread on `await`, captures
+nothing and pays NO depth cost — it pays a thread per task instead. A
+`cont`-based scheduler suspends and pays per level. Read the depth table as that
+trade, not as a choice of mechanism.
+
+**2. What depth MEANS: non-tail effectful frames, not nesting.** Depth is the
+frames between the park site and the handler that STILL HAVE WORK LEFT:
+
+    let a = {} -> b {} + 1    ## work after the call -> must suspend
+    let b = {} -> c {} + 1    ## same
+    let c = {} -> Async.await { p = p } + 1
+
+**A TAIL call needs no propagation**, and `CallDirectIR` ALREADY CARRIES
+`isTailCall`: with nothing after the call the callee's continuation IS the
+caller's, so no extra yield. The cost is therefore the count of NON-TAIL
+effectful frames, which in idiomatic code is far smaller than the call depth.
+That is the main mitigation and it is free.
+
+**And ABORT costs nothing at any depth** — it does not park, it throws and
+unwinds, capturing nothing. Measured escaping a native `map` callback correctly.
+Only PARKING pays.
+
+**3. Making a native resumable costs 383 ps/element — MEASURED.**
+`ResumableNativeCostTest`, same data and callback, arms interleaved:
+
+    plain     ps/element: 7680 7856 7893 (min 7680)
+    resumable ps/element: 8077 8063 8151 (min 8063)
+    delta per element: 383 ps (0.383 ns)
+
+~5% on a per-element cost already dominated by the guest call, and only for
+callback-taking HOFs. Vectorised paths are unaffected — they fold the operation
+into a kernel and have no guest callback to park in. No state object is allocated
+unless something actually parks.
+
+**4. "Dropped continuations are a new leak shape" was OVERSTATED.** A
+continuation is an ordinary heap object; it leaks exactly as much as any object a
+scheduler forgets. The resource APIs bound it — a scope holding parked
+continuations can invalidate them at `finalize_scope` — and
+`AsyncNatives.SuspendedOps` already reports suspended ops when a context closes.
+Not a special leak class.
+
+**5. "Resume after scope finalize is detected, not prevented" was the WRONG
+PHRASE.** With scope-driven invalidation the unsafe ACT is prevented: finalize
+kills the scope's parked continuations, so a later resume hits a dead handle and
+fails loudly rather than touching a closed pool. What is not prevented is the
+PROGRAM containing the mistake, because that needed the confinement rule dropped
+so a scheduler's queue could outlive its tasks. It is **prevented at runtime, not
+statically.**
+
 ### ONE-SHOT ONLY: possible, nearly free, and it DELETES the native hazard
 
 Enforcement is a handle wrapping the `ContinuationResult` with a `used` flag;
