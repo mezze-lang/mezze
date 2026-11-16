@@ -7402,58 +7402,103 @@ guarded by `mezze-python`'s own "str method dispatch" / "int method dispatch"
 checks; or try raw first and fall back to the helper, which needs a crossing to
 detect failure and so costs a round trip per call.
 
-## BUG 47 — OPEN: an inherent method on a user record breaks TWO ways
+## BUG 47 — OPEN: an inherent impl method that uses `it` WITHOUT declaring it
 
 Found 2026-11-16 while designing `cont`'s helper methods, which would be
-inherent impls — so this blocks that design, not just itself.
+inherent impls. **Diagnosed to the line; fix NOT landed** — see "the attempt
+that failed" below, which is the useful part.
 
-### 47a — a host exception reaches the user
+### The program
 
-Checks clean, then crashes. A HOST exception reaching a user is a compiler bug
-(see [[project_runtime_failure_host_vs_guest]], the I0004 class).
-
-    use std::effects::log::{ Console, println }
     type Box = { v: Int }
     impl Box where {
-      double = {} -> it.v * 2,
+      get = {} -> it.v,
     }
     pub let main = {} -> perform Console in do
       let b = { v = 21 }
-      println { msg = "double $(b.double {}.to_str {})" }
+      println { msg = "get $(b.get {}.to_str {})" }
 
-    Check passed: ids (1248.3ms)
-    Error: com.oracle.truffle.api.frame.FrameSlotTypeException: Frame slot kind
-           Object expected, but got Illegal at frame slot index 2
+### Two symptoms, one cause
 
-Fresh `.build` (deleted and rebuilt), zero build errors, so it is not stale-binary
-skew. The chained call `b.double {}.to_str {}` inside an interpolation is what
-reaches it.
+| how the result is used | what happens |
+|---|---|
+| `let d = b.get {}` then `d.to_str {}` | **T0206** "the receiver's type could not be determined. Annotate the receiver" |
+| chained `b.get {}.to_str {}` | **checks clean**, then `FrameSlotTypeException: Frame slot kind Object expected, but got Illegal at frame slot index 2` |
 
-### 47b — the return type does not flow to a `let`
+A diagnostic whose advice is to annotate means inference is wrong, per
+[[feedback_no_required_type_annotations]]. And a HOST exception reaching a user
+is the I0004 class ([[project_runtime_failure_host_vs_guest]]). Fresh `.build`,
+zero build errors — not stale-binary skew.
 
-Split the same program and it fails typechecking instead:
+### THE CAUSE — the two halves disagree about where `it` comes from
 
-    let d = b.double {}
-    println { msg = "double $(d.to_str {})" }
+- **Typechecker**: `ConstraintGenerator.processInherentImpl` binds `it` only when
+  the LAMBDA lists it as a parameter —
+  `paramNames.associateWith { if (name == Keywords.IT) targetType else fresh() }`
+  over `lambda.params`. For `{} -> it.v` there are no params, so `it` is not
+  bound to the target type, the field read yields a fresh variable, and the
+  method's registered return type never resolves. Confirmed by instrumentation:
+  `itParam=null`, `bodyT=VarType('l2)`, unchanged after solving.
+- **Emit**: `CallEmit` always passes the receiver under
+  `receiverFieldName = Keywords.IT`. But a lambda written `{}` declares no `it`
+  parameter, so **there is no frame slot to bind it to** — hence reading an
+  Illegal slot at run time.
 
-    error[T0206]: Cannot resolve inherent method 'to_str': the receiver's type
-    could not be determined. Annotate the receiver or call the method ...
+### Isolation (each line a separate run)
 
-`double = {} -> it.v * 2` returns `Int`, so `d` is `Int`. Nothing determines it.
-A diagnostic whose advice is "annotate" means inference is wrong here, per
-[[feedback_no_required_type_annotations]] — "annotation fixing it = inference
-BUGGY".
+| variant | result |
+|---|---|
+| `answer = {} -> 42` — body never uses `it` | **works** |
+| `impl Meters where { doubled = {} -> 7 }` on a `newtype` | **works** |
+| `get = { it } -> it.v` — `it` DECLARED | **works end to end, prints 21** |
+| `get = {} -> it.v` — `it` undeclared | T0206 / FrameSlotTypeException |
 
-**Note the pair.** Chained, it compiles and crashes; split, it refuses to
-compile. Same program either way, and neither outcome is right. Related:
-[[project_method_chaining_needs_inherent_impl]] (`recv.f{}` needs
-`impl T where { f }`, which is exactly what this is),
-[[project_method_nominal_structural_route]].
+Not about chaining and not about interpolation: all three undeclared forms
+(let-bound, chained inside a string, chained outside) crash identically.
 
-**Verified facts gathered alongside** (these all behave correctly):
+### THE FIX: reject, do not accommodate
+
+The stdlib is unanimous — **1264 impl methods declare `it`, ZERO use it
+undeclared** — and abilities ALREADY require the declaration (an op whose params
+omit `it` gives "Undefined variable 'it'"; measured earlier this session on
+`tick = { n } -> n + it.base`). So the undeclared form is not a supported
+spelling that happens to be broken; it is an unsupported spelling that is not
+being rejected.
+
+So: emit "Undefined variable 'it'" for an inherent impl body that names `it`
+without declaring it, pointing at the `it` rather than at a later call.
+
+### THE ATTEMPT THAT FAILED, and why it is recorded
+
+I first tried the opposite — binding `it` to the impl's target type in
+`processInherentImpl` when the lambda omits it, plus refreshing the registered
+method type with the SOLVED function type instead of the constraint-time
+skeleton. That made all four typechecker cases pass.
+
+**It was wrong, and worse than the bug.** The typechecker then accepted a
+program emit still cannot lower, so the let-bound case went from a compile error
+to the same runtime `FrameSlotTypeException`. Reverted.
+
+The lesson is general: **the receiver's binding is agreed in TWO places, and a
+fix to one half without the other converts a compile error into a crash.** Any
+accommodate-style fix must add the `it` parameter so a frame slot exists, which
+is a lowering change; the rejection needs neither half to move.
+
+### Tests
+
+`typechecker/.../InherentMethodReturnTypeTest.kt` — two regression guards for the
+DECLARED form, and two characterization tests pinning the undeclared form's
+current behaviour. When this is fixed those two will fail, and should be
+rewritten to assert the rejection.
+
+### Verified id-type facts gathered alongside
 
 | | |
 |---|---|
+| `newtype PromiseId = Int` | **accepted** — this is how a distinct id type is spelled; constructor is `PromiseId.(7)` |
 | `type PromiseId = Int` | V0713 — "renames something that already has a name: `Int` is a built-in primitive" |
 | `type A = { n: Int }` and `type B = { n: Int }` | V0701 — identical closed record aliases are refused |
-| one-field records with DISTINCT field names | accepted — this is how a distinct id type is spelled |
+
+(An earlier version of this entry said distinct one-field records were the way to
+spell an id type. That was only true because I had tested `type` and not
+`newtype`.)
