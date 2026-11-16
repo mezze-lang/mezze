@@ -350,6 +350,48 @@ A/D comparison, and got 22 ns vs 21 ns. **It compares nothing.**
 variable — and the emit it used to gate is gone. Both arms were the same code.
 The real question (what a live yield emit costs per perform) is UNMEASURED.
 
+### LOOM STAYS — the two live on different layers
+
+Asked whether Loom can remain one way to do async if the mechanism is BDSL.
+**Yes, and they are complementary rather than competing.** BDSL yield is HOW a
+perform site suspends a guest computation; Loom virtual threads are WHO runs
+what, on which threads. A Loom performer needs no continuation at all: `spawn`
+starts a virtual thread and `await` blocks on it.
+
+Four performers of `Async` already exist and none would change:
+`LoomAsync`, `LoomAsyncWith { max_concurrent }`, `OSThreadAsync`,
+`OSThreadAsyncWith { pool_size }` (`stdlib/std/effects/async.mz`). They differ
+ONLY in `spawn` — which is Phase A's case made by the source itself: line 342
+declares `spawn` as the sole op, while `await` (56), `cancel` (89),
+`yield_now` (126), `park` (129) and `park_until` (144) are plain `pub let`s
+straight to natives, so **not even `LoomAsync` can intercept them today.**
+
+| | Loom performer | reactor (BDSL cont) |
+|---|---|---|
+| mechanism | blocking on virtual threads | yield / `continueWith` |
+| **crosses native frames** | **YES** (freezes Java frames) | **NO** (ContinuationRootNode only) |
+| parallelism | real, multi-core | single-threaded unless resumed cross-thread |
+| determinism | no | yes — the point for test schedulers |
+| touches `cont` | never | yes |
+
+So Loom is not the legacy path: it is the one that works EVERYWHERE, including
+through a native HOF, and a reactor is the cheap deterministic one with a
+constraint. Both belong.
+
+**The compatibility guarantee:** the capability tax is only paid by a block whose
+handler mentions `cont` (a syntactic check). A Loom performer never does, so
+today's async stays exactly as fast as today's async.
+
+**Two hazards of mixing, neither yet addressed:**
+
+1. A BLOCKING Loom `await` inside a reactor task blocks the reactor's driver
+   thread — the classic event-loop sin. A lint should catch a blocking performer
+   reached from inside a `cont`-using handler.
+2. **Resuming a `ContinuationResult` on a DIFFERENT thread** is what a
+   work-stealing scheduler needs, and whether that is sound is UNKNOWN. It
+   requires Phase B first (handler evidence passed, not read from a per-thread
+   chain) and then a measurement. Do not assume it works.
+
 ### The per-function-root caveat — THE top risk
 
 A BDSL continuation suspends only frames whose root is a `ContinuationRootNode`.
