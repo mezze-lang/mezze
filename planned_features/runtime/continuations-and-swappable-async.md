@@ -308,6 +308,57 @@ ops "when a context closes holding one".
 
 Bought: userland async (the requirement), and generators/streams free with it.
 
+## THE MECHANISM IS TRUFFLE'S, NOT LOOM'S — and it is already wired up
+
+Asked whether GraalVM/Truffle has its own performant continuation abstraction.
+**It does, we enabled it, and we already built an effect path on it.** Truffle
+Bytecode DSL `enableYield = true` is set on `MezzeBytecodeRootNode`; a yield
+makes the root's `callTarget.call` return a `ContinuationResult`, whose
+`getResult()` is the yielded value and `continueWith(v)` resumes.
+`BdslContinuationPrototypeTest` **passes on today's build** (2 tests, 0 failures,
+per the JUnit XML — note the `-i` log prints no `PASSED` lines for this module,
+so count the XML, not the log).
+
+Against Loom, measured and documented, it wins on every axis that was a worry:
+
+| | Loom | Truffle BDSL |
+|---|---|---|
+| native-image | works, needs `--add-exports java.base/jdk.internal.vm` (nothing in the build has it; D7 wanted exports removed) | **clean** — ordinary Truffle objects, no flag |
+| shots | one | **multi-shot for free** (same `ContinuationResult`, different values) |
+| compiler | an intrinsic the JIT knows | **PE-friendly framework primitive** |
+| frames | freeze/thaw of Java frames | framework materialises, no manual capture |
+| the handle | a `Continuation` | `getContinuationCallTarget()` — **a VALUE** |
+
+So Phase C is not "build a continuation mechanism". It is **re-emit the yield at
+perform sites and give the driver a real resume** — far smaller than this
+document's Path C estimate, which assumed a CPS-at-IR transform.
+
+**Why it is not live.** D1 lowered `PerformOpIR` to `beginYield / MakeRecord /
+endYield`; **D4 replaced that with a direct `PerformD` op**, so a
+`ContinuationResult` no longer flows. `beginYield`/`endYield` appear NOWHERE in
+production today — only in a doc comment — and `YieldDispatch.driveWithChainDispatch`
+says so itself: *"walks a ContinuationResult chain if one flows out (which no
+longer happens after D4 ... but kept for the D2 test harness)"*. `YieldDriver` is
+a proven mechanism sitting unwired. Compare
+[[project_iter_count_all_declared_with_no_users]] and the dead `KnownMutOps`
+layer: this is the third time a capability has been found declared-but-unreached.
+
+**A VOID MEASUREMENT, recorded so nobody repeats it.** I benchmarked one effect
+op at `MEZZE_BDSL=1 MEZZE_BDSL_YIELD=1` against the default expecting a Path
+A/D comparison, and got 22 ns vs 21 ns. **It compares nothing.**
+`MEZZE_BDSL_YIELD` survives only in a TEST COMMENT — production reads no such
+variable — and the emit it used to gate is gone. Both arms were the same code.
+The real question (what a live yield emit costs per perform) is UNMEASURED.
+
+### The per-function-root caveat — THE top risk
+
+A BDSL continuation suspends only frames whose root is a `ContinuationRootNode`.
+Guest code is fine: BDSL is already the sole path for `FunctionIR`. But a
+**native Java frame in the chain is not one** — a native HOF calling back into
+guest code (`map`, `fold`, the `Seq` natives) cannot be suspended through. Under
+[[feedback_no_fallbacks]] that must FAIL LOUDLY at the suspend attempt, never
+silently degrade to Loom or to a wrong value.
+
 ### The original Step 0, as written before the measurements
 
 1. Does `jdk.internal.vm.Continuation` work under **native-image**? Biggest
