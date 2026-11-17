@@ -641,6 +641,24 @@ class ExpressionConstraintGenerator {
      * — a pure/closed callback contributes no tail, so nothing is raised and the
      * caller closes.
      */
+    /**
+     * BUG 52 / BUG 59: a FORWARDED callback — an argument field that is still a
+     * bare type variable, `{ g } -> apply2 { f = g }` or `{ c, g } -> c.each { f = g }`
+     * — carries no row to collect, yet it WILL be unified with the callee's
+     * declared callback type, so the declared field's row variable is the row it
+     * ends up with. Every call path raises these, or the forwarder infers pure
+     * while its parameter's slot is open, and a pure-declared caller launders the
+     * callback's effects through it.
+     */
+    internal fun forwardedCallbackRowVars(declaredParamType: MezzeType?, argType: MezzeType): Set<RowVar> {
+        val declared = (declaredParamType as? MezzeType.RecordType)?.fields ?: return emptySet()
+        val actual = (argType as? MezzeType.RecordType)?.fields ?: return emptySet()
+        return actual.mapNotNullTo(LinkedHashSet()) { (name, a) ->
+            if (a !is MezzeType.VarType) null
+            else (declared[name] as? MezzeType.FunctionType)?.effects?.rowVar
+        }
+    }
+
     internal fun collectClosureArgRowVars(argType: MezzeType): Set<RowVar> {
         if (argType !is MezzeType.RecordType) return emptySet()
         val rowVars = mutableSetOf<RowVar>()

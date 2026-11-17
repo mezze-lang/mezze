@@ -1260,12 +1260,7 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
                     // and the println never ran. That argument WILL be unified with
                     // the callee's declared callback type, so the declared field's
                     // row is the row it ends up with; raise that one.
-                    val declared = (functionType.paramType as? MezzeType.RecordType)?.fields.orEmpty()
-                    (argumentResult.type as? MezzeType.RecordType)?.fields?.forEach { (name, actual) ->
-                        if (actual !is MezzeType.VarType) return@forEach
-                        (declared[name] as? MezzeType.FunctionType)?.effects?.rowVar
-                            ?.let { collector.effectRowVars.add(it) }
-                    }
+                    collector.effectRowVars.addAll(forwardedCallbackRowVars(functionType.paramType, argumentResult.type))
                 } else {
                     collector.effectRowVars.add(effectRow.rowVar!!)
                 }

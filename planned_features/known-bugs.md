@@ -8069,3 +8069,25 @@ comes from the pattern as a variable not linked to the impl's `'a`, so the
 dispatch finds no dictionary slot and falls back to Box's own `desc`.
 Pinned, disabled: `GenericImplInferredConstraintTest` "a nested generic impl
 over a VARIANT dispatches each level too".
+
+## BUG 59 — FIXED 2026-11-17: forwarding a callback into an ABILITY method laundered its effect
+
+```mezze
+ability Each for 'a where { each: { it: 'a, f: { x: Int } -> {} <...> } -> {} <...> }
+let visit = { c, g } -> c.each { f = g }
+pub let go: {} -> {} = {} -> visit { c = b, g = { x } -> println { msg = "x" } }
+```
+
+ACCEPTED with `go` pure, and the println never ran. This is BUG 52's shape on
+the method-call paths, which BUG 52's fix (function calls only) did not reach:
+the receiver ability-method, receiverless ability-op and inherent-method
+generators harvest a callback's CONCRETE effect names but raised no row for a
+forwarded `g`, which is still a bare variable when the call is generated.
+
+Fix: one helper, `forwardedCallbackRowVars`, used by all four call paths. It
+raises the declared callback field's row for each argument field that is a bare
+variable.
+
+Tests: `AbilityEffectSpecRowTest` BUG 59 section (ability method, its mirror,
+receiverless op); all 3 fail without the method-path change. Gates: typechecker
+5460/0, interpreter 8175/0.

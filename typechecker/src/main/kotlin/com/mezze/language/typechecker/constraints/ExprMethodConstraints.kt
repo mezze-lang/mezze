@@ -201,7 +201,8 @@ internal fun ExpressionConstraintGenerator.tryGenerateStaticAbilityOpCall(
         constraints = constraints,
         effects = (base.effects + declaredEffects + harvestedEffects) - caughtByOp,
         effectInstances = base.effectInstances + declaredEffectInstances,
-        effectRowVars = base.effectRowVars + setOfNotNull(opType.effects?.rowVar),
+        effectRowVars = base.effectRowVars + setOfNotNull(opType.effects?.rowVar) +
+            forwardedCallbackRowVars(opType.paramType, argumentResult.type),
         performed = base.performed || (opType.effects?.performed ?: false),
         abilityConstraints = base.abilityConstraints + abilityConstraint,
         associatedTypeConstraints = base.associatedTypeConstraints + associatedTypeConstraints,
@@ -884,6 +885,8 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     val merged = ConstraintResult.mergeOf(callType, constraints, receiverResult, argumentResult)
     return merged.copy(
         effects = (merged.effects + methodDeclaredEffects + abilityHarvestedEffects) - abilityCaughtByOp,
+        effectRowVars = merged.effectRowVars +
+            forwardedCallbackRowVars(strippedMethodType.paramType, argumentResult.type),
         effectInstances = merged.effectInstances + methodDeclaredEffectInstances,
         abilityConstraints = abilityConstraints,
         associatedTypeConstraints = associatedTypeConstraints,
@@ -1562,6 +1565,7 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     val merged = ConstraintResult.mergeOf(callType, constraints, receiverResult, argumentResult)
     return merged.copy(
         effects = (merged.effects + methodDeclaredEffects + inherentHarvestedEffects) - inherentCaughtByOp,
+        effectRowVars = merged.effectRowVars + forwardedCallbackRowVars(inherentFnType?.paramType, argumentResult.type),
         effectInstances = merged.effectInstances + methodDeclaredEffectInstances,
         abilityConstraints = merged.abilityConstraints + inherentMethodAbilityConstraints,
         methodCallResolutions = merged.methodCallResolutions + (if (inherentMethodCallInfo != null) mapOf((expr.loc to inherentMethodCallInfo.methodName) to inherentMethodCallInfo) else emptyMap()),

@@ -519,4 +519,67 @@ class AbilityEffectSpecRowTest : AbilityEffectSpecBase() {
         kotlin.test.assertFalse(msg.contains("with Noisy"), "not a discharged obligation: $msg")
         kotlin.test.assertTrue(msg.contains("-> Int <Tick>"), "the fix uses the real return type: $msg")
     }
+    // ── BUG 59: forwarding a callback into an ABILITY method ──
+    // BUG 52's fix covered the function-call path only. `{ c, g } -> c.each { f = g }`
+    // raised no row for the bare `g`, so `visit` inferred pure and a pure-declared
+    // caller performed Tick through it.
+
+    private val bag = """
+        type Bag = { xs: [Int] }
+        ability Each for 'a where { each: { it: 'a, f: { x: Int } -> Int <...> } -> Int <...> }
+        impl Each for Bag where { each = { it, f } -> f { x = 1 } }
+        let visit = { c, g } -> c.each { f = g }
+    """.trimIndent()
+
+    @Test
+    fun `forwarding a callback into an ability method does not launder`() {
+        rejects(
+            """
+            $tick
+            $bag
+            let leak: {} -> Int = {} -> do
+              let b: Bag = { xs = [1] }
+              visit { c = b, g = { x } -> Tick.tick {} }
+            $MAIN
+            """,
+            "T0210",
+            "`visit`'s result row is `g`'s row",
+        )
+    }
+
+    @Test
+    fun `forwarding a callback into an ability method carries exactly its effect`() {
+        accepts(
+            """
+            $tick
+            $bag
+            let ok: {} -> Int <Tick> = {} -> do
+              let b: Bag = { xs = [1] }
+              visit { c = b, g = { x } -> Tick.tick {} }
+            let pure: {} -> Int = {} -> do
+              let b: Bag = { xs = [1] }
+              visit { c = b, g = { x } -> x }
+            $MAIN
+            """,
+            "the mirrors: Tick arrives exactly, and a pure callback stays pure",
+        )
+    }
+
+    @Test
+    fun `forwarding a callback into a receiverless ability op does not launder`() {
+        rejects(
+            """
+            $tick
+            ability Gen for 'a where { gen: { f: {} -> Int <...> } -> 'a <...> }
+            impl Gen for Int where { gen = { f } -> f {} }
+            let make = { g } -> do
+              let n: Int = Gen.gen { f = g }
+              n
+            let leak: {} -> Int = {} -> make { g = {} -> Tick.tick {} }
+            $MAIN
+            """,
+            "T0210",
+            "the receiverless path raises the forwarded row too",
+        )
+    }
 }
