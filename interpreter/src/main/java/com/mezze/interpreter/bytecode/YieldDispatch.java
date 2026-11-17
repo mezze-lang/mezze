@@ -183,21 +183,22 @@ public final class YieldDispatch {
     // the impl does AFTER calling resume is discarded. See class-doc
     // "What resume does" for the caveat.
 
-    private static volatile MezzeFunction CACHED_FALLTHROUGH_RESUME_FN = null;
-
+    // Cached on the MezzeLanguage INSTANCE, not statically: the root node belongs
+    // to one engine's sharing layer, and a static handed it to every engine.
     public static MezzeFunction fallThroughResumeFnPublic() {
         return fallThroughResumeFn();
     }
 
     private static MezzeFunction fallThroughResumeFn() {
-        MezzeFunction cached = CACHED_FALLTHROUGH_RESUME_FN;
-        if (cached != null) return cached;
+        Object cached = MezzeLanguage.get(null).fallThroughResumeFn;
+        if (cached != null) return (MezzeFunction) cached;
         return buildAndCacheFallThroughResumeFn();
     }
 
     @TruffleBoundary
     private static synchronized MezzeFunction buildAndCacheFallThroughResumeFn() {
-        if (CACHED_FALLTHROUGH_RESUME_FN != null) return CACHED_FALLTHROUGH_RESUME_FN;
+        MezzeLanguage language = MezzeLanguage.get(null);
+        if (language.fallThroughResumeFn != null) return (MezzeFunction) language.fallThroughResumeFn;
         FrameDescriptor fd = FrameDescriptor.newBuilder().build();
         MezzeNode body = new MezzeNode() {
             @Override
@@ -212,7 +213,7 @@ public final class YieldDispatch {
             }
         };
         RootCallTarget target = new MezzeRootNode(
-            MezzeLanguage.get(null),
+            language,
             fd,
             body,
             "path-d-resume-fallthrough",
@@ -221,7 +222,7 @@ public final class YieldDispatch {
             new int[0]
         ).getCallTarget();
         MezzeFunction fn = new MezzeFunction(target, "resume", new Object[0]);
-        CACHED_FALLTHROUGH_RESUME_FN = fn;
+        language.fallThroughResumeFn = fn;
         return fn;
     }
 

@@ -133,7 +133,8 @@ public final class EffectHandlerDriver {
     // MezzeFunction). #88.
     // ----------------------------------------------------------------
 
-    private static volatile MezzeFunction CACHED_ABORT_FN = null;
+    // Cached on the MezzeLanguage INSTANCE (see MezzeLanguage.fallThroughResumeFn):
+    // a static handed one engine's root node to every engine.
 
     /**
      * Get the (cached) {@code abort} function for op handler bodies.
@@ -143,14 +144,15 @@ public final class EffectHandlerDriver {
      * {@code Handle} @Operation catches.
      */
     public static MezzeFunction makeAbortFunction() {
-        MezzeFunction cached = CACHED_ABORT_FN;
-        if (cached != null) return cached;
+        Object cached = MezzeLanguage.get(null).abortFn;
+        if (cached != null) return (MezzeFunction) cached;
         return buildAndCacheAbortFunction();
     }
 
     @TruffleBoundary
     private static synchronized MezzeFunction buildAndCacheAbortFunction() {
-        if (CACHED_ABORT_FN != null) return CACHED_ABORT_FN;
+        MezzeLanguage language = MezzeLanguage.get(null);
+        if (language.abortFn != null) return (MezzeFunction) language.abortFn;
         FrameDescriptor fd = FrameDescriptor.newBuilder().build();
         MezzeNode abortBody = new MezzeNode() {
             @Override
@@ -166,7 +168,7 @@ public final class EffectHandlerDriver {
             }
         };
         RootCallTarget target = new MezzeRootNode(
-            MezzeLanguage.get(null),
+            language,
             fd,
             abortBody,
             "effect-handler-abort",
@@ -175,7 +177,7 @@ public final class EffectHandlerDriver {
             new int[0]
         ).getCallTarget();
         MezzeFunction fn = new MezzeFunction(target, ScopedEffectConstants.ABORT, new Object[0]);
-        CACHED_ABORT_FN = fn;
+        language.abortFn = fn;
         return fn;
     }
 

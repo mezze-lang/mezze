@@ -141,13 +141,11 @@ fun org.gradle.api.tasks.testing.Test.applyCommonTestConfig() {
         showStandardStreams = true
     }
 
-    // Single fork (#379): the interpreter suite contains wall-clock timing
-    // assertions (e.g. VirtualThreadEffectIntegrationTest "parallel faster than
-    // sequential", which asserts < 200ms) that assume exclusive CPU access.
-    // Parallel test forks oversubscribe the CPU and starve those tasks of cores,
-    // so the timing assertions flake. Parallelism was measured (4 forks: 3m33s vs
-    // 6m26s single-fork) but forced this test red — timing tests are fundamentally
-    // incompatible with fork contention, so the suite stays single-fork.
+    // Single fork by default (#379): wall-clock assertions (e.g.
+    // VirtualThreadEffectIntegrationTest "parallel faster than sequential",
+    // < 200ms) assume exclusive CPU access and flake under fork contention.
+    // `tasks.test` overrides this for everything EXCEPT those classes, which run
+    // alone afterwards in `testTiming` — see `timingClassPatterns`.
     maxParallelForks = 1
 
     systemProperty("mezze.project.root", rootProject.projectDir.absolutePath)
@@ -207,8 +205,40 @@ val benchClassPatterns = listOf(
     "**/MicroBenchmarkTest*",
 )
 
+// Classes whose assertions read the CLOCK. They need the machine to themselves,
+// so `test` excludes them and `testTiming` runs them in one fork AFTER the
+// parallel run, never beside it. Measured 2026-11-17: 12.6 min of test time over
+// 665 classes, none dominant — forks are the lever, and these are why it was 1.
+// A class that asserts on elapsed time belongs here (a missing one shows up as a
+// flake under `test`, not as a failure in this list).
+val timingClassPatterns = listOf(
+    "**/*Concurrency*",
+    "**/*Parallel*",
+    "**/*VirtualThread*",
+    "**/*Loom*",
+    "**/CheckpointStrategyTest*",
+    "**/DapEndToEndTest*",
+    "**/MezzeDapServerTest*",
+    "**/DeepPropagationCostTest*",
+    "**/EffectPicIntegrationTest*",
+    "**/FileWatchEffectTest*",
+    "**/FileWriteModeTest*",
+    "**/HandlerChainSnapshotMeasurementTest*",
+    "**/ResumableNativeCostTest*",
+    "**/SleepRouteVerifyTest*",
+    "**/StructuredConcurrencyTest*",
+    "**/SuspendCheckCostTest*",
+    "**/SuspendResumeCostTest*",
+    "**/TimeEffectTest*",
+)
+
 tasks.test {
     applyCommonTestConfig()
+    // Everything that does not read the clock runs in parallel forks; each fork
+    // is its own JVM with its own shared Engine, so the isolation below holds.
+    maxParallelForks = (System.getenv("MEZZE_TEST_FORKS")?.toIntOrNull() ?: 4)
+    timingClassPatterns.forEach { exclude(it) }
+    finalizedBy("testTiming")
     // Test-isolation: the correctness suite shares one Engine
     // (MezzeTestHelper.sharedEngine) across every test, so Language-level
     // CallTarget caches + the BDSL compiler's compiled-caller cache persist and a
@@ -225,6 +255,21 @@ tasks.test {
     // WireProtocolIntegrationTest spawns a JVM against the runtime shadow
     // jar; without this dep, the test runs before the jar exists and fails
     // its locateRuntimeJar precondition.
+    dependsOn("runtimeShadowJar")
+}
+
+// The clock-reading classes, alone in one fork, after the parallel run finishes
+// (see `timingClassPatterns`). Runs whenever `test` does.
+val testTiming by tasks.registering(Test::class) {
+    description = "Interpreter tests that assert on wall-clock time, run serially after `test`."
+    group = "verification"
+    applyCommonTestConfig()
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    systemProperty("mezze.test.isolation", "true")
+    timingClassPatterns.forEach { include(it) }
+    benchClassPatterns.forEach { exclude(it) }
+    mustRunAfter(tasks.test)
     dependsOn("runtimeShadowJar")
 }
 

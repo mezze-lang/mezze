@@ -471,17 +471,18 @@ public final class OpCallNode extends MezzeNode {
      * Object[]} allocations per op-call dispatch — meaningful at high
      * op-call rates (1M op-calls = 4M fewer allocations).
      */
-    private static volatile MezzeFunction CACHED_CHAIN_RESUME_FN = null;
+    // Cached on the MezzeLanguage INSTANCE (see MezzeLanguage.fallThroughResumeFn).
 
     public static MezzeFunction makeChainResumeFunction() {
-        MezzeFunction cached = CACHED_CHAIN_RESUME_FN;
-        if (cached != null) return cached;
+        Object cached = MezzeLanguage.get(null).chainResumeFn;
+        if (cached != null) return (MezzeFunction) cached;
         return buildAndCacheChainResumeFunction();
     }
 
     @TruffleBoundary
     private static synchronized MezzeFunction buildAndCacheChainResumeFunction() {
-        if (CACHED_CHAIN_RESUME_FN != null) return CACHED_CHAIN_RESUME_FN;
+        MezzeLanguage language = MezzeLanguage.get(null);
+        if (language.chainResumeFn != null) return (MezzeFunction) language.chainResumeFn;
         FrameDescriptor fd = FrameDescriptor.newBuilder().build();
         MezzeNode resumeBody = new MezzeNode() {
             @Override
@@ -496,7 +497,7 @@ public final class OpCallNode extends MezzeNode {
             }
         };
         RootCallTarget target = new MezzeRootNode(
-            MezzeLanguage.get(null),
+            language,
             fd,
             resumeBody,
             "chain-dispatch-resume",
@@ -504,9 +505,9 @@ public final class OpCallNode extends MezzeNode {
             1,
             new int[0]
         ).getCallTarget();
-        CACHED_CHAIN_RESUME_FN = new MezzeFunction(
-            target, ScopedEffectConstants.RESUME, new Object[0]);
-        return CACHED_CHAIN_RESUME_FN;
+        MezzeFunction fn = new MezzeFunction(target, ScopedEffectConstants.RESUME, new Object[0]);
+        language.chainResumeFn = fn;
+        return fn;
     }
 
     @TruffleBoundary

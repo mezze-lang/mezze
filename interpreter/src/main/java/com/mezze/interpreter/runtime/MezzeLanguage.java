@@ -248,6 +248,19 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         }
     }
     private volatile com.mezze.interpreter.bytecode.BytecodeCompiler bdslCompiler;
+
+    /**
+     * The fall-through `resume` function (see YieldDispatch), ONE PER LANGUAGE
+     * INSTANCE. It was a JVM-wide static, built against whichever engine asked
+     * first, so every later engine executed a node from a foreign sharing layer:
+     * "Invalid sharing of AST nodes", reached by any multi-engine host (the LSP,
+     * eval sessions, the test suite once run in parallel forks).
+     */
+    public volatile Object fallThroughResumeFn;
+    /** Same reason: EffectHandlerDriver's `abort` function. */
+    public volatile Object abortFn;
+    /** Same reason: OpCallNode's chain-dispatch `resume` function. */
+    public volatile Object chainResumeFn;
     private final java.util.concurrent.atomic.AtomicLong bdslHits = new java.util.concurrent.atomic.AtomicLong();
     private final java.util.concurrent.atomic.AtomicLong bdslMisses = new java.util.concurrent.atomic.AtomicLong();
 
