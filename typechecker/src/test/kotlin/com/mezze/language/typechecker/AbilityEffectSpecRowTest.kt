@@ -387,4 +387,64 @@ class AbilityEffectSpecRowTest : AbilityEffectSpecBase() {
             "the mirror",
         )
     }
+    // ── BUG 54: a PERFORMER op body dropped its ability obligations ──
+    // Ability and inherent impl bodies report an unsatisfied obligation; a
+    // performer body reported only T0201, so `m + 1` with `m: Str` compiled and
+    // died at run time with "cannot add a Str and an Int".
+
+    private val say = """
+        effect Say where { say: { m: Str } -> Int <Say>, }
+    """.trimIndent()
+
+    @Test
+    fun `a performer op body may not use an operator its types lack`() {
+        rejects(
+            """
+            $say
+            impl Say for S where {
+              initialize_scope = {} -> {},
+              finalize_scope = {} -> {},
+              say = { m } -> m + 1,
+            }
+            $MAIN
+            """,
+            "V0402",
+            "`m` is Str by the op's signature; `NumAdd Str Int` has no impl",
+        )
+    }
+
+    @Test
+    fun `a performer op body may not call an ability its types lack`() {
+        rejects(
+            """
+            $say
+            ability Wt for 'a where { wt: { it: 'a } -> Int }
+            impl Say for S where {
+              initialize_scope = {} -> {},
+              finalize_scope = {} -> {},
+              say = { m } -> Wt.wt { it = m },
+            }
+            $MAIN
+            """,
+            "V0402",
+            "a user ability, same rule",
+        )
+    }
+
+    @Test
+    fun `a performer op body's satisfied obligations stay legal`() {
+        accepts(
+            """
+            effect Chk where { chk: { v: 'a } -> Bool <Chk>, n: { k: Int } -> Int <Chk>, }
+            impl Chk for C where {
+              initialize_scope = {} -> {},
+              finalize_scope = {} -> {},
+              chk = { v } -> v == v,
+              n = { k } -> k + 1,
+            }
+            $MAIN
+            """,
+            "the mirrors: a SITE-chosen `'a` is not settled here, and Int + Int is fine",
+        )
+    }
 }

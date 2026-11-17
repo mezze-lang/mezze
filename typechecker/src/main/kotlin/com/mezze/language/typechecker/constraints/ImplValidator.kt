@@ -1387,6 +1387,30 @@ internal class ImplValidator(
                                     code = ErrorCode.T0201_TYPE_MISMATCH,
                                 )
                             }
+                            // BUG 54: an unsatisfied ability obligation is settled the
+                            // same way — once nothing in it can still be pinned at a use
+                            // site. Only T0201 was ever reported here, so `{ m } -> m + 1`
+                            // with `m: Str` (`NumAdd Str Int`, a V0402) was dropped as
+                            // provisional and died at run time adding a Str to an Int.
+                            // Ability and inherent bodies already report it; a performer
+                            // body was the one place it fell through.
+                            // The DEFERRED re-check carries a placeholder constraint —
+                            // it validates the accumulated set against the finished
+                            // substitution — so only a direct AbilityRequired can still
+                            // be provisional, and only while a type argument is open.
+                            val unsatisfied = solveResult.errors.firstOrNull { e ->
+                                e.code == ErrorCode.V0402_ABILITY_NOT_SATISFIED &&
+                                    (e.constraint as? Constraint.AbilityRequired)
+                                        ?.typeArgs?.any { it.holdsTypeVar() } != true
+                            }
+                            if (unsatisfied != null) {
+                                throw TypeCheckError(
+                                    "Type error in impl '${impl.performerName}' operation '${implOp.name}': ${unsatisfied.message}",
+                                    unsatisfied.constraint.loc ?: implOp.implementation.loc,
+                                    code = ErrorCode.V0402_ABILITY_NOT_SATISFIED,
+                                    hints = unsatisfied.hints,
+                                )
+                            }
                         }
                         true
                     },

@@ -7880,3 +7880,32 @@ scheme for an hour. Dump `rowVar` explicitly.
 Tests: `AbilityEffectSpecRowTest` (BUG 51/52/53 sections, every claim mirrored;
 11 of 12 fail without the fixes, the 12th is the pure-stays-pure guard).
 Gates: typechecker 5447/0, interpreter 8165/0.
+
+## BUG 54 — FIXED 2026-11-17: a PERFORMER op body dropped its ability obligations
+
+```mezze
+effect Say where { say: { m: Str } -> {} <Say>, }
+impl Say for S where { …, say = { m } -> println { msg = m + 1 } }
+```
+
+ACCEPTED, then died at run time: `MezzeInternalError: cannot add a Str and an
+Int` — a host exception reaching the user (I0004 class). `m` WAS typed `Str`
+(`let n: Int = m` is refused); only the OBLIGATION was lost. Ability and inherent
+impl bodies report the same program; a performer body was the one place it fell
+through.
+
+Cause: `ImplValidator`'s performer `onSolveFailure` reported a failure only when it
+was a concrete T0201, treating everything else as "provisional, pinned at the use
+site". The solve did fail with V0402, and it was discarded. Fix: a V0402 is settled
+too unless it is a direct `AbilityRequired` whose type arguments still hold a
+variable. The DEFERRED re-check (`finalizeDeferredAbilities`) attaches a
+placeholder `Equality(Int, Int)` and validates against the finished substitution,
+so it is settled by construction. A site-chosen `'a` (`chk = { v } -> v == v`)
+and a `having`-bound `'state` stay legal.
+
+Measured along the way: `"a" + "!"` is refused EVERYWHERE (`NumAdd Str Str` has
+no impl). The probe that printed `a!` from a performer body was this bug, not a
+legal program.
+
+Tests: `AbilityEffectSpecRowTest` BUG 54 section (both refusals fail without the
+fix; the mirror passes both ways). Gates: typechecker 5450/0, interpreter 8165/0.
