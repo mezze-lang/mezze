@@ -45,7 +45,7 @@ class EventLoopSchedulerTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     private val imports = """
-        use std::effects::async::{ Async, EventLoop, await, yield_now, park, park_until, cancel, is_done, spawn_task, inspect,
+        use std::effects::async::{ Async, EventLoop, await, yield_now, park, park_until, cancel, is_done, spawn_task, inspect, all, race,
                                    settled_result, promise_id, ParkOn, WaitSet, ParkOutcome, PromiseState, AsyncError,
                                    CancelReason, CancelOutcome, RunQueue, Task }
         use std::effects::log::{ Console, println }
@@ -255,6 +255,26 @@ class EventLoopSchedulerTest {
         assertTrue(msg.contains("park was dropped"), "names the condition: $msg")
         assertTrue(msg.contains("native"), "and the cause: $msg")
     }
+
+    /** BUG 65: the stdlib's own helpers looped with native HOFs over `await`/`cancel`;
+     *  under a cooperative scheduler that is a park through a native. Now Mezze loops. */
+    @Test
+    fun `await_all and race work under EventLoop`() = assertEquals(
+        listOf("all=[Ok { val = 1 }, Ok { val = 2 }]", "race=Ok { val = 10 }"),
+        lines(program(imports, """
+            perform Console, SystemTime, EventLoop in do
+              let a = Async.spawn { f = {} -> do
+                yield_now {}
+                1 }
+              let b = Async.spawn { f = {} -> 2 }
+              println { msg = "all=${'$'}((all { ps = [a, b] }).to_dbg {})" }
+              let slow = Async.spawn { f = {} -> do
+                park { predicate = {} -> False }
+                99 }
+              let fast = Async.spawn { f = {} -> 10 }
+              println { msg = "race=${'$'}((race { ps = [slow, fast] }).to_dbg {})" }
+        """)),
+    )
 
     @Test
     fun `nothing runnable and nothing that can wake is a deadlock, named`() {

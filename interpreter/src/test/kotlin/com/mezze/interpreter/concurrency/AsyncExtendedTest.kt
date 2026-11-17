@@ -1,5 +1,6 @@
 package com.mezze.interpreter.concurrency
 
+import com.mezze.interpreter.TimingSensitive
 import com.mezze.interpreter.MezzeTestHelper
 import com.mezze.interpreter.values.MezzeRecord
 import org.junit.jupiter.api.Test
@@ -17,6 +18,9 @@ import org.junit.jupiter.api.parallel.ExecutionMode
  * Migrated from V1 to V2 with unboxed values.
  */
 @Execution(ExecutionMode.SAME_THREAD)
+// Loom races: `try_par_filter` answered -1 once under four parallel forks and 27/27
+// three times alone (2026-11-17). Serial, like the other Loom suites.
+@TimingSensitive
 class AsyncExtendedTest {
 
     @BeforeEach

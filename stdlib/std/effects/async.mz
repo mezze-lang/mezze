@@ -524,6 +524,22 @@ pub let go: { f: {} -> 'a <...> } -> {} <Async, ...> = { f } -> do
 ##
 ## Built on `park` (suspend until predicate True) + `inspect` (pure
 ## non-blocking state read) + `cancel`.
+## Mezze loops for callbacks that may PARK — `await`, `cancel` under a cooperative
+## scheduler. A native such as `seq::map` cannot be suspended through (V0513 says
+## so for user code; BUG 65 was these very sites), so the helpers below are plain
+## recursion. Inputs are a handful of promises; the recursion is the right tool.
+let each_parking = { xs, f } -> match xs is
+  [] -> {}
+  [x, ...rest] -> do
+    let _ = f { x = x }
+    each_parking { xs = rest, f = f }
+
+let map_parking_acc = { xs, f, acc } -> match xs is
+  [] -> acc
+  [x, ...rest] -> map_parking_acc { xs = rest, f = f, acc = seq::push { xs = acc, x = f { x = x } } }
+
+let map_parking = { xs, f } -> map_parking_acc { xs = xs, f = f, acc = [] }
+
 pub let race: { ps: [Promise 'a] } -> Result 'a AsyncError <Async, ...> = { ps } ->
   do
     park { predicate = {} -> seq::any { xs = ps, p = { x } -> is_done { p = x } } }
@@ -532,7 +548,7 @@ pub let race: { ps: [Promise 'a] } -> Result 'a AsyncError <Async, ...> = { ps }
         error = AsyncFailed { msg = "race: park woke but no promise settled" },
       }
       Some { val = winner } -> do
-        seq::for_each { xs = ps, f = { x } -> match is_done { p = x } is
+        each_parking { xs = ps, f = { x } -> match is_done { p = x } is
           True -> {}
           False -> do
             cancel { p = x, reason = CancelLostRace }
@@ -549,7 +565,7 @@ pub let race: { ps: [Promise 'a] } -> Result 'a AsyncError <Async, ...> = { ps }
 ## Wait for all promises; return each one's Result in input order. Never
 ## raises; the per-promise Result carries success/failure information.
 pub let all: { ps: [Promise 'a] } -> [Result 'a AsyncError] <Async> = { ps } ->
-  seq::map { xs = ps, f = { x } -> await { p = x } }
+  map_parking { xs = ps, f = { x } -> await { p = x } }
 
 ## Run two thunks concurrently, return both Results.
 pub let join
@@ -638,7 +654,7 @@ pub let for_each_concurrent
           None -> w
     }
     ## Drain what the window still holds when the source ran out.
-    seq::for_each { xs = leftover, f = { x } -> do
+    each_parking { xs = leftover, f = { x } -> do
       let _ = await { p = x }
       {}
     }
@@ -798,7 +814,7 @@ pub let with_timeout: { ms: Int, p: Promise 'a } -> Result 'a AsyncError <Async,
 ## unwrapped values in input order.
 pub let try_all: { ps: [Promise 'a] } -> Result ['a] AsyncError <Async, ...> = { ps } ->
   do
-    let results = seq::map { xs = ps, f = { x } -> await { p = x } }
+    let results = map_parking { xs = ps, f = { x } -> await { p = x } }
     match seq::find { xs = results, p = { x } -> result::is_err { result = x } } is
       Some { val = first_err } -> match first_err is
         Err { error = e } -> Err { error = e }
@@ -897,7 +913,7 @@ pub let try_par_filter
 ## Ok, return its value (cancelling the rest).
 pub let try_any: { ps: [Promise 'a] } -> Result 'a AsyncError <Async, ...> = { ps } ->
   do
-    let results = seq::map { xs = ps, f = { x } -> await { p = x } }
+    let results = map_parking { xs = ps, f = { x } -> await { p = x } }
     match seq::find { xs = results, p = { x } -> result::is_ok { result = x } } is
       Some { val = winner } -> match winner is
         Ok { val = v } -> Ok { val = v }
