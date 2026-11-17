@@ -22,6 +22,9 @@ import org.junit.jupiter.api.Test
  *  - `park { predicate }` wakes when another task's progress makes it true.
  *  - Nothing runnable and nothing that can wake is a DEADLOCK, raised as an error
  *    that names the parked tasks and what they wait on; an EMPTY wait set is one.
+ *  - Scope teardown: a boundary owns the tasks spawned under it; at exit the
+ *    runnable ones finish, the parked ones are delivered `ParkCancelled`, and an
+ *    inner boundary never touches an outer one's tasks.
  */
 class EventLoopSchedulerTest {
 
@@ -126,6 +129,57 @@ class EventLoopSchedulerTest {
               println { msg = "spawned" }
               park { predicate = {} -> is_done { p = t } }
               println { msg = "after" }
+        """)),
+    )
+
+    @Test
+    fun `a task never awaited still completes before the perform returns`() = assertEquals(
+        listOf("end", "late", "out"),
+        lines(program(imports, """
+            perform Console in do
+              let r = perform EventLoop in do
+                let t = Async.spawn { f = {} -> do
+                  yield_now {}
+                  println { msg = "late" }
+                  {} }
+                println { msg = "end" }
+                1
+              println { msg = "out" }
+        """)),
+    )
+
+    @Test
+    fun `a task parked forever is cancelled at scope teardown and sees ParkCancelled`() = assertEquals(
+        listOf("end", "cancelled"),
+        lines(program(imports, """
+            perform Console, EventLoop in do
+              let never = Async.spawn { f = {} -> do
+                park { predicate = {} -> False }
+                1 }
+              let w = Async.spawn { f = {} -> match await { p = never } is
+                Ok { val } -> println { msg = "ok" }
+                Err { error } -> println { msg = "cancelled" } }
+              println { msg = "end" }
+        """)),
+    )
+
+    @Test
+    fun `an inner boundary drives only its own tasks`() = assertEquals(
+        listOf("u", "mid", "t"),
+        lines(program(imports, """
+            perform Console, EventLoop in do
+              let t = Async.spawn { f = {} -> do
+                yield_now {}
+                yield_now {}
+                println { msg = "t" }
+                {} }
+              let inner = perform EventLoop in do
+                let u = Async.spawn { f = {} -> do
+                  println { msg = "u" }
+                  {} }
+                await { p = u }
+              println { msg = "mid" }
+              await { p = t }
         """)),
     )
 

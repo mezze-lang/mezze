@@ -1,5 +1,6 @@
 package com.mezze.interpreter.stdlib
 
+import com.mezze.interpreter.TimingSensitive
 import com.mezze.interpreter.MezzeTestHelper
 import org.junit.jupiter.api.Test
 import kotlin.test.assertTrue
@@ -24,6 +25,9 @@ import kotlin.test.assertTrue
  * one caller that opts out, via `runAllowingDroppedEffects`, because the drop is
  * what it is asserting.
  */
+// Gives a Loom task "a turn" with a fixed number of yields and asserts the task got
+// there: a race against the carrier, lost under four parallel forks (measured 2026-11-17).
+@TimingSensitive
 class DroppedEffectReportTest {
 
     private fun stderrOf(body: () -> Unit): String {

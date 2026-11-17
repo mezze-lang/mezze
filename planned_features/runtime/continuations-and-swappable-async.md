@@ -680,10 +680,37 @@ error naming the tasks and what they wait on, and an EMPTY wait set is one.
   optimisation over this, same semantics). A promise settling on another thread
   (Loom-backed) is waited for; only "no external promise pending" is a deadlock.
 
-Stated limitations, each the next slice's subject: tasks run under the DRIVING
-boundary's handler chain (Phase B lifts it); leftover tasks at boundary exit are
-not yet drained or cancelled (scope teardown, next); `park_until` parks on the
-predicate alone until `Time` lands; a `WaitNamed` set is accepted and ignored.
+**Risk 5 measured** (`bench/scripts/ab.sh one effectsurface 1 3 4`, same build,
+`MEZZE_SUSPEND_PROPAGATION=0` as the run-time kill switch, two interleaved
+rounds): the per-perform-op wrapper costs nothing visible — op kernel 902/1019 ps
+with it vs 975/1038 without, control 229–267 vs 220, explicit resume noisier both
+ways. The check is one type test on a local; the JIT folds it.
+
+**D2 — boundaries own their tasks; scope teardown. LANDED 2026-11-17.** The
+machine now runs the WHOLE boundary lifetime: `DriveParked` receives the body's
+thunk, the machine pushes a `Boundary`, calls the body as its task, drives, tears
+down, pops. A boundary has to exist before the body runs because `spawn` happens
+inside it, before any park — the first cut (drive after the body suspended) could
+not know who owned a task. Settled by code, three of the open rules:
+
+- *Nested performers* (rule 2): an inner boundary drives ONLY the tasks spawned
+  under it; an outer task is never run or cancelled by an inner teardown
+  (asserted: `u, mid, t`).
+- *Teardown* (rule 3): when the body is done, leftover runnable tasks finish
+  (`end, late, out` — a never-awaited task still completes before the perform
+  returns), tasks still parked are delivered `ParkCancelled { reason =
+  CancelScopeTeardown }` and finish (`end, cancelled`), and a task that keeps
+  re-parking during teardown is an error after 8 rounds — the bound the rule
+  asked for. `finalize_scope` runs after, outside the boundary, as before.
+- *Auto-registration* (rule 4) is answered by ownership: a task belongs to the
+  innermost boundary at its spawn; there is nothing to register.
+
+Stated limitations, each a later slice's subject: tasks run under the DRIVING
+boundary's handler chain (Phase B lifts it); `park_until` parks on the predicate
+alone until `Time` lands; a `WaitNamed` set is accepted and ignored; cancellation
+is delivered only at teardown — `Async.cancel` on a machine task settles its
+promise but does not yet interrupt its park (rule 5, stale resumers, is moot: a
+task has exactly one leaf continuation and the machine holds it).
 Measured gotchas: `Mut` is hermetic and cannot share a row with `Async`, so the
 tests log through Console; the test harness evaluates the module's top-level
 expression and never calls `main`.

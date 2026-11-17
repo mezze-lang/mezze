@@ -6039,22 +6039,25 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
-     * The perform BOUNDARY of a cont-capable handler. The body is its own root; when
-     * it suspends, this is the frame that catches the continuation — inside the
-     * handler pushes, so a resumed op body still dispatches against this perform's
-     * chain — and hands it to the context's {@link
-     * com.mezze.interpreter.nodes.continuation.TaskMachine}, which drives every task
-     * (the body and whatever it spawned) until the body is done. A body that never
-     * suspends costs one type test.
+     * The perform BOUNDARY of a cont-capable handler. The operand is the body's THUNK
+     * (its own root); the context's {@link
+     * com.mezze.interpreter.nodes.continuation.TaskMachine} calls it as this
+     * boundary's body task — inside the handler pushes, so a resumed op body still
+     * dispatches against this perform's chain — drives whatever it spawns until the
+     * body is done, and tears the boundary's tasks down. The boundary has to exist
+     * BEFORE the body runs: `spawn` happens inside the body, before any park.
      */
     @Operation
     public static final class DriveParked {
         @Specialization
         @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
-        public static Object doDrive(Object value) {
-            if (!(value instanceof com.oracle.truffle.api.bytecode.ContinuationResult)) return value;
-            return com.mezze.interpreter.runtime.MezzeContext.get(null).taskMachine().driveBoundary(
-                value, com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.topHandler());
+        public static Object doDrive(Object thunk) {
+            if (!(thunk instanceof com.mezze.interpreter.values.MezzeFunction fn)) {
+                throw new IllegalStateException("DriveParked expects the perform body's thunk, got "
+                    + (thunk == null ? "null" : thunk.getClass().getName()));
+            }
+            return com.mezze.interpreter.runtime.MezzeContext.get(null).taskMachine().runBoundary(
+                fn, com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.topHandler());
         }
     }
 

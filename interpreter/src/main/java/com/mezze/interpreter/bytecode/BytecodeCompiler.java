@@ -8819,7 +8819,13 @@ public final class BytecodeCompiler {
     private final java.util.Set<NodeIR> suspendWrapped =
         java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
 
+    /** A/B kill switch for the suspension-propagation wrapper (read at run time —
+     *  the lowering runs in the process that executes): MEZZE_SUSPEND_PROPAGATION=0. */
+    private static final boolean SUSPEND_PROPAGATION =
+        !"0".equals(System.getenv("MEZZE_SUSPEND_PROPAGATION"));
+
     private static boolean needsSuspendPropagation(NodeIR node) {
+        if (!SUSPEND_PROPAGATION) return false;
         if (node instanceof CallDirectIR c) return c.getMaySuspend() && !c.isTailCall();
         if (node instanceof CallIndirectIR ci) return ci.getMaySuspend() && !ci.isTailCall();
         if (node instanceof com.mezze.language.truffleir.CallIndirectScalarIR cs) return cs.getMaySuspend() && !cs.isTailCall();
@@ -8877,11 +8883,17 @@ public final class BytecodeCompiler {
                 emitNode(body, b, argCount, localMap);
                 b.endBindHandlerChainIntoResult();
             } else if (bodyIsThunk) {
-                // Continuations: the body is its own root; this is the frame that
-                // catches its suspension, INSIDE the handler pushes, so the chain a
-                // resumed op body dispatches against is still this perform's.
+                // Continuations: the body is its own root, and the MACHINE calls it —
+                // the boundary must exist before the body runs (spawn happens inside
+                // it) and this frame, INSIDE the handler pushes, is where its
+                // suspension is caught. The IR carries the call; the machine wants
+                // the thunk, so the call is unwrapped here.
+                if (!(body instanceof CallIndirectIR thunkCall)) {
+                    throw new IllegalStateException("a thunk-bodied HandleIR must carry CallIndirectIR(thunk, {}), got "
+                        + body.getClass().getSimpleName());
+                }
                 b.beginDriveParked();
-                emitNode(body, b, argCount, localMap);
+                emitNode(thunkCall.getFunction(), b, argCount, localMap);
                 b.endDriveParked();
             } else {
                 emitNode(body, b, argCount, localMap);

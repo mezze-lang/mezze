@@ -1,5 +1,6 @@
 package com.mezze.interpreter.stdlib
 
+import com.mezze.interpreter.TimingSensitive
 import com.mezze.interpreter.MezzeTestHelper
 import org.junit.jupiter.api.Test
 import kotlin.test.assertTrue
@@ -19,6 +20,9 @@ import kotlin.test.assertEquals
  * Reporting it on stderr made it audible. A line on stderr is still something a
  * test runs straight past, so the report is now latched and `run` raises on it.
  */
+// Gives a Loom task "a turn" with a fixed number of yields and asserts the task got
+// there: a race against the carrier, lost under four parallel forks (measured 2026-11-17).
+@TimingSensitive
 class DroppedEffectFailsTheRunTest {
 
     @Test

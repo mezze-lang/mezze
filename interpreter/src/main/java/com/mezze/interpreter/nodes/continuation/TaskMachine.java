@@ -40,6 +40,13 @@ import java.util.Iterator;
  * semantics are the same). When nothing is runnable and nothing can wake — no
  * external promise pending — that is a DEADLOCK, the one error the machine raises.
  *
+ * <p>A BOUNDARY — one cont-capable `perform` — owns the tasks spawned while it is
+ * the innermost one, drives only those, and at exit tears them down: leftover
+ * runnable tasks run to completion, tasks still parked are delivered
+ * {@code ParkCancelled { reason = CancelScopeTeardown }} and run to completion,
+ * with a bound on re-parking during teardown (open rule 3). An inner boundary
+ * therefore never runs or cancels an outer boundary's tasks.
+ *
  * <p>D1 limitation, stated: tasks run under the handler chain of the boundary that
  * drives them (Phase B — evidence travelling with the task — is what lifts it).
  */
@@ -70,26 +77,34 @@ public final class TaskMachine {
     /** Opaque to Mezze: `RunQueue` — the ready set as the performer's `drive` sees it. */
     public static final class RunQueue implements TruffleObject {
         private final TaskMachine m;
-        RunQueue(TaskMachine m) { this.m = m; }
-        public Object first() { return m.ready.peekFirst(); }
-        public Object last() { return m.ready.peekLast(); }
-        public long len() { return m.ready.size(); }
+        private final Boundary b;
+        RunQueue(TaskMachine m, Boundary b) { this.m = m; this.b = b; }
+        public Object first() { return b.ready.peekFirst(); }
+        public Object last() { return b.ready.peekLast(); }
+        public long len() { return b.ready.size(); }
         public Object at(long i) {
-            if (i < 0 || i >= m.ready.size()) throw new MezzeGuestException(
-                "RunQueue.at: index " + i + " out of range, " + m.ready.size() + " runnable");
-            Iterator<Task> it = m.ready.iterator();
+            if (i < 0 || i >= b.ready.size()) throw new MezzeGuestException(
+                "RunQueue.at: index " + i + " out of range, " + b.ready.size() + " runnable");
+            Iterator<Task> it = b.ready.iterator();
             for (long k = 0; k < i; k++) it.next();
             return it.next();
         }
     }
 
-    private final ArrayDeque<Task> ready = new ArrayDeque<>();
-    private final ArrayList<Task> parked = new ArrayList<>();
+    /** One cont-capable perform: its body task and the tasks spawned under it. */
+    private static final class Boundary {
+        final ArrayDeque<Task> ready = new ArrayDeque<>();
+        final ArrayList<Task> parked = new ArrayList<>();
+        final MezzeFunction drive;
+        final RunQueue runQueue;
+        Boundary(MezzeFunction drive, TaskMachine m) { this.drive = drive; this.runQueue = new RunQueue(m, this); }
+    }
+
+    private final ArrayDeque<Boundary> boundaries = new ArrayDeque<>();
     private long nextTaskId = 1;
     private final IdentityHashMap<MezzePromise, Long> promiseIds = new IdentityHashMap<>();
     private final HashMap<Long, MezzePromise> promisesById = new HashMap<>();
     private final IdentityHashMap<MezzePromise, Boolean> ownPromises = new IdentityHashMap<>();
-    private final RunQueue runQueue = new RunQueue(this);
     /** Stale wakes — aimed at an epoch the task has left. Countable, never silent. */
     public long staleWakes;
 
@@ -98,10 +113,14 @@ public final class TaskMachine {
     /** `__native_task_spawn { f }`: register `f {}` as a new task; its promise settles when it finishes. */
     @TruffleBoundary
     public MezzePromise spawn(MezzeFunction f) {
+        Boundary b = boundaries.peek();
+        if (b == null) throw new MezzeGuestException(
+            "spawn_task outside a scheduler: a task needs a cont-capable `perform` (one whose "
+            + "performer mentions `cont`) to be driven by");
         MezzePromise p = new MezzePromise(null, null);
         ownPromises.put(p, Boolean.TRUE);
         Task t = new Task(nextTaskId++, f, p);
-        ready.addLast(t);
+        b.ready.addLast(t);
         return p;
     }
 
@@ -116,31 +135,66 @@ public final class TaskMachine {
         return id;
     }
 
-    public RunQueue runQueue() { return runQueue; }
 
     // ---------------------------------------------------------------- the boundary
 
+    /** Re-parks tolerated during teardown before it is an error (open rule 3). */
+    private static final int TEARDOWN_ROUNDS = 8;
+
     /**
-     * The perform body already ran and SUSPENDED ({@code first} is its continuation).
-     * Drive the machine until the body is done, then hand its value back. The body
-     * is a task like any other, except that its failure propagates instead of
-     * settling a promise.
+     * Run a cont-capable perform's body thunk as this boundary's body task, drive
+     * the boundary until the body is done, tear its tasks down, and hand the body's
+     * value back. A body that never suspends and spawns nothing costs one push, one
+     * call, one type test and one pop.
      */
     @TruffleBoundary
-    public Object driveBoundary(Object first, MezzeRecord handler) {
-        Task body = new Task(nextTaskId++, null, null);
-        MezzeFunction drive = driveOf(handler);
-        absorb(body, first);
-        while (body.state != DONE) {
-            if (ready.isEmpty()) {
-                if (!wakeParked()) blockOrDeadlock();
-                continue;
+    public Object runBoundary(MezzeFunction bodyThunk, MezzeRecord handler) {
+        Boundary b = new Boundary(driveOf(handler), this);
+        boundaries.push(b);
+        try {
+            Task body = new Task(nextTaskId++, null, null);
+            absorb(b, body, callWith(bodyThunk, MezzeRecord.empty()));
+            while (body.state != DONE) {
+                if (b.ready.isEmpty()) {
+                    if (!wakeParked(b)) blockOrDeadlock(b);
+                    continue;
+                }
+                run(b, pick(b));
+                wakeParked(b);
             }
-            Task t = pick(drive);
-            run(t);
-            wakeParked();
+            teardown(b);
+            return body.result;
+        } finally {
+            boundaries.pop();
         }
-        return body.result;
+    }
+
+    /** The body is done. Leftover runnable tasks finish; tasks still parked are
+     *  cancelled and finish; a task that keeps re-parking is an error after a bound. */
+    private void teardown(Boundary b) {
+        for (int round = 0; round < TEARDOWN_ROUNDS; round++) {
+            drain(b);
+            if (b.parked.isEmpty()) return;
+            Object cancelled = parkCancelled(scopeTeardown());
+            for (Task t : b.parked) {
+                t.deliver = cancelled;
+                t.state = RUNNABLE;
+                b.ready.addLast(t);
+            }
+            b.parked.clear();
+        }
+        drain(b);
+        if (!b.parked.isEmpty()) throw new MezzeGuestException(
+            "scope teardown: " + b.parked.size() + " task(s) kept parking after being cancelled "
+            + TEARDOWN_ROUNDS + " times — a task's cleanup must not wait on the scope it is leaving");
+    }
+
+    /** Run everything runnable or wakeable; stop when only unwakeable parks remain. */
+    private void drain(Boundary b) {
+        while (true) {
+            if (!b.ready.isEmpty()) { run(b, pick(b)); wakeParked(b); continue; }
+            if (!wakeParked(b)) return;
+        }
     }
 
     private static MezzeFunction driveOf(MezzeRecord handler) {
@@ -149,11 +203,11 @@ public final class TaskMachine {
         return d instanceof MezzeFunction f ? f : null;
     }
 
-    private Task pick(MezzeFunction drive) {
-        if (drive == null) return ready.pollFirst();
-        Object chosen = callWith(drive, MezzeRecord.fromFields(
-            new String[]{com.mezze.language.ast.ScopedEffectConstants.DRIVE_RUNNABLE}, new Object[]{runQueue}));
-        if (!(chosen instanceof Task t) || !ready.remove(t)) {
+    private Task pick(Boundary b) {
+        if (b.drive == null) return b.ready.pollFirst();
+        Object chosen = callWith(b.drive, MezzeRecord.fromFields(
+            new String[]{com.mezze.language.ast.ScopedEffectConstants.DRIVE_RUNNABLE}, new Object[]{b.runQueue}));
+        if (!(chosen instanceof Task t) || !b.ready.remove(t)) {
             throw new MezzeGuestException(
                 "drive must return one of the runnable tasks (runnable.first {}, .last {}, .at { i }); got "
                 + (chosen == null ? "null" : chosen.toString()));
@@ -161,7 +215,7 @@ public final class TaskMachine {
         return t;
     }
 
-    private void run(Task t) {
+    private void run(Boundary b, Task t) {
         t.state = RUNNING;
         Object cur;
         try {
@@ -179,12 +233,12 @@ public final class TaskMachine {
             t.promise.fail(e);
             return;
         }
-        absorb(t, cur);
+        absorb(b, t, cur);
     }
 
     /** Walk a run's result: descend nested continuations to the leaf, park there, or
      *  hand completed values outward until the task is done. */
-    private void absorb(Task t, Object cur) {
+    private void absorb(Boundary b, Task t, Object cur) {
         while (true) {
             if (cur instanceof ContinuationResult cr) {
                 Object yielded = cr.getResult();
@@ -198,7 +252,7 @@ public final class TaskMachine {
                     t.parkedOn = pr;
                     t.epoch++;
                     t.state = PARKED;
-                    parked.add(t);
+                    b.parked.add(t);
                     return;
                 }
                 throw new IllegalStateException(
@@ -223,16 +277,16 @@ public final class TaskMachine {
     }
 
     /** Deliver to every parked task whose condition now holds. Returns whether any did. */
-    private boolean wakeParked() {
+    private boolean wakeParked(Boundary b) {
         boolean any = false;
-        for (int i = 0; i < parked.size(); ) {
-            Task t = parked.get(i);
+        for (int i = 0; i < b.parked.size(); ) {
+            Task t = b.parked.get(i);
             int which = readyIndex(t.parkedOn);
             if (which >= 0) {
-                parked.remove(i);
+                b.parked.remove(i);
                 t.deliver = parkReady(which);
                 t.state = RUNNABLE;
-                ready.addLast(t);
+                b.ready.addLast(t);
                 any = true;
             } else {
                 i++;
@@ -263,9 +317,9 @@ public final class TaskMachine {
 
     /** Nothing runnable, nothing woke. A promise settling on another thread can still
      *  wake someone — wait for it. Otherwise this is a deadlock, and it is an error. */
-    private void blockOrDeadlock() {
+    private void blockOrDeadlock(Boundary b) {
         boolean external = false;
-        for (Task t : parked) {
+        for (Task t : b.parked) {
             if (t.parkedOn.on instanceof MezzeVariant on && on.getConstructorName().equals("OnPromises")) {
                 for (Object id : seqItems(on.getPayloadFieldByName("ids"))) {
                     MezzePromise p = promisesById.get(asLong(id));
@@ -277,11 +331,11 @@ public final class TaskMachine {
             java.util.concurrent.locks.LockSupport.parkNanos(50_000L);
             return;
         }
-        StringBuilder sb = new StringBuilder("deadlock: ").append(parked.size())
-            .append(parked.size() == 1 ? " task is parked" : " tasks are parked")
+        StringBuilder sb = new StringBuilder("deadlock: ").append(b.parked.size())
+            .append(b.parked.size() == 1 ? " task is parked" : " tasks are parked")
             .append(" and nothing can wake ")
-            .append(parked.size() == 1 ? "it" : "them").append(" —");
-        for (Task t : parked) sb.append(' ').append(t).append(" on ").append(describe(t.parkedOn));
+            .append(b.parked.size() == 1 ? "it" : "them").append(" —");
+        for (Task t : b.parked) sb.append(' ').append(t).append(" on ").append(describe(t.parkedOn));
         throw new MezzeGuestException(sb.toString());
     }
 
@@ -314,6 +368,18 @@ public final class TaskMachine {
         if (o instanceof Long l) return l;
         if (o instanceof Integer i) return i;
         throw new IllegalStateException("expected an Int id, got " + o);
+    }
+
+    static Object parkCancelled(Object reason) {
+        var registry = MezzeVariant.TagRegistry.getGlobal();
+        int tag = registry.getOrCreateTag("ParkCancelled");
+        var rec = MezzeRecord.fromFields(new String[]{"reason"}, new Object[]{reason});
+        return MezzeVariant.singlePayload(registry, tag, rec);
+    }
+
+    static Object scopeTeardown() {
+        var registry = MezzeVariant.TagRegistry.getGlobal();
+        return MezzeVariant.noPayload(registry, registry.getOrCreateTag("CancelScopeTeardown"));
     }
 
     static Object parkReady(long which) {
