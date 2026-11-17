@@ -7578,9 +7578,23 @@ the shape matrix that had never been drawn.
     Error: com.oracle.truffle.api.CompilerDirectives$ShouldNotReachHere:
            no dictionary was supplied for ability...
 
-**Accepted at check time with TWO competing impls, then a HOST exception** — the
-I0004 class ([[project_runtime_failure_host_vs_guest]]). Nothing determines which
-impl to pick, and nothing says so.
+**Accepted at check time, then a HOST exception** — the I0004 class
+([[project_runtime_failure_host_vs_guest]]).
+
+**AND IT IS NOT ABOUT AMBIGUITY.** The first repro used two competing impls, which
+made it look like a "which one?" problem. Replace them with a SINGLE BLANKET
+impl — one candidate, zero ambiguity — and it still fails identically:
+
+    ability Mystery for 'a where { conjure: { n: Int } -> Int }
+    impl Mystery for 'a where { conjure = { n } -> n + 100 }
+    → Check passed, then: no dictionary was supplied for ability...
+
+So an undetermined class param means **no dictionary can be selected even when
+exactly one exists**. The defect is the signature, not the impl set.
+
+(Blanket coherence itself is sound, measured alongside: a blanket impl plus a
+concrete one is `V0407 Overlapping impl: impl Shout for Red conflicts with impl
+Shout for 'a`. Both directions are now claims in the spec suite.)
 
 ### Where it should be refused
 

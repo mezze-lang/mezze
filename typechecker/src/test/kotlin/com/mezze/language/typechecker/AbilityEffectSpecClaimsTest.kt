@@ -202,6 +202,35 @@ class AbilityEffectSpecClaimsTest : AbilityEffectSpecBase() {
         }
 
         @Test
+        fun `a blanket impl over a type variable is accepted`() {
+            accepts(
+                """
+                ability Shout for 'a where { shout: { it: 'a } -> Int }
+                impl Shout for 'a where { shout = { it } -> 1 }
+                $MAIN
+                """,
+                "a blanket impl covers every type; the stdlib ships ten of them",
+            )
+        }
+
+        @Test
+        fun `a blanket impl overlapping a concrete one is refused`() {
+            // The mirror of the rule above: coherence must refuse the overlap,
+            // or dispatch would pick by accident.
+            rejects(
+                """
+                type Red = { tag: Int }
+                ability Shout for 'a where { shout: { it: 'a } -> Int }
+                impl Shout for 'a where { shout = { it } -> 1 }
+                impl Shout for Red where { shout = { it } -> 2 }
+                $MAIN
+                """,
+                "V0407",
+                "`impl Shout for Red` conflicts with `impl Shout for 'a`",
+            )
+        }
+
+        @Test
         fun `a sibling reference from an inherent impl body resolves`() {
             accepts(
                 """
