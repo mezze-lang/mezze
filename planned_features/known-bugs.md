@@ -7933,3 +7933,34 @@ Koka's single row is.
 Tests: `AbilityEffectSpecRowTest` BUG 55 section (the FIRST-callback claim passes
 without the fix by construction — the first row was the one kept).
 Gates: typechecker 5453/0, interpreter 8165/0.
+
+## BUG 56 — FIXED 2026-11-17: a method on a callback's parameter was refused
+
+```mezze
+[1, 2].map { f = { x } -> x.to_str {} }      ## T0205: field access '.to_str' on 'Int'
+```
+
+The most common callback pattern there is. Long-standing (the 2026-11-01 nightly
+refuses it too). `receiverHasSolvableType` excluded EVERY lambda parameter as
+"unpinnable", so the call fell to a structural field access. That is right for a
+let-bound lambda, whose parameter is generalized and nothing pins (#216). It is
+wrong for a lambda passed STRAIGHT to a call: the call pins it.
+
+Fix: `ConstraintContext.withCallArguments` marks the lambdas a call's argument
+record holds directly (by location), at every argument-generation site,
+including the inherent path's second, push-down pass (`pushParamTypeIntoArgs`),
+which the first attempt missed. Their parameters (`callPinnedParams`) count as
+solvable; a nested lambda that shadows a name unpins it.
+
+The safety half: if such a receiver still never resolves, emit's
+`legacyInherentImplHash` fell back to the FIRST candidate, a silent
+mis-dispatch. That fallback now refuses (T0215) when the solved receiver is a
+variable. In practice the earlier T0206 ("the receiver's type could not be
+determined") fires first, which is the right diagnostic.
+
+Unchanged by design: `let s = { x } -> x.to_str {}` stays structural. `to_str`
+is inherent, not abstractable.
+
+Tests: `interpreter/.../typing/CallbackParamMethodInferenceTest` asserts VALUES
+(Int vs Float impl, `abs`, sibling-argument pinning, unpinned refusal); all 5
+fail without the fix. Gates: typechecker 5453/0, interpreter 8170/0.

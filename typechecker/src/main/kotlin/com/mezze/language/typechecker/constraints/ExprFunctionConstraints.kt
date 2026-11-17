@@ -464,7 +464,14 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
         // a do-block `let` in the body that reuses a param name is a same-scope
         // re-bind (T0306), while shadowing an outer name stays legal.
         .withFreshScope(paramNames.toSet())
-        .copy(calleeRowVar = RowVar.userOpen())
+        .copy(
+            calleeRowVar = RowVar.userOpen(),
+            // BUG 56: this lambda's params are pinned iff it was passed straight
+            // to a call; an outer pinned name it shadows is no longer pinned.
+            callPinnedParams = (context.callPinnedParams - paramNames.toSet()) +
+                (if (expr.loc in context.callArgumentLambdaLocs) paramNames else emptyList()),
+            callArgumentLambdaLocs = emptySet(),
+        )
 
     val bodyContext = if (expectedFunctionType != null) {
         extendedContext.withExpectedType(expectedFunctionType.returnType).inTailPosition()
@@ -988,7 +995,7 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
     // let the post-hoc Equality constraints below reconcile types as before.
     val calleeParamType = (functionResult.type as? MezzeType.FunctionType)?.paramType as? MezzeType.RecordType
     val argContext = context.notInTailPosition()
-    val argumentResult = generateWithExpected(expr.arguments, calleeParamType, argContext)
+    val argumentResult = generateWithExpected(expr.arguments, calleeParamType, argContext.withCallArguments(expr.arguments))
 
     // Tail-call marking: currently limited to SELF-tail-calls. General
     // cross-function TCO requires effect-safety analysis because

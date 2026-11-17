@@ -109,7 +109,7 @@ internal fun ExpressionConstraintGenerator.tryGenerateStaticAbilityOpCall(
         ?.entries?.any { it is ParsedRecordEntry.Spread } == true
     if (params.fields.containsKey(Keywords.IT) && !argCarriesSpread) return null
 
-    val argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
+    val argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition().withCallArguments(expr.arguments))
     val constraints = mutableListOf<Constraint>()
     constraints.addAll(argumentResult.constraints)
     constraints.add(
@@ -492,7 +492,7 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     // the argument's field names. Once strippedMethodType is known we re-generate
     // with its param type pushed down (bidirectional) — but only when it changes
     // anything (a lambda argument field). See pushParamTypeIntoArgs.
-    var argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
+    var argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition().withCallArguments(expr.arguments))
 
     val strippedMethodType: MezzeType.FunctionType
     val receiverConstraintType: MezzeType
@@ -948,6 +948,10 @@ internal fun ExpressionConstraintGenerator.receiverHasSolvableType(receiver: Par
         is ParsedMemberAccess -> receiverHasSolvableType(receiver.receiver, context)
         is ParsedIdentifier -> {
             if (receiver.qualifier != null) return false
+            // BUG 56: a param of a lambda passed STRAIGHT to a call is pinned by
+            // that call (`[1, 2].map { f = { x } -> x.to_str {} }`). If it never
+            // resolves after all, emit refuses the pick rather than guessing.
+            if (receiver.localName in context.callPinnedParams) return true
             // A lambda param is monomorphic-but-unpinnable; not solvable.
             if (receiver.localName in context.currentScopeBindings) return false
             val lookup = context.typingContext.lookup(receiver.localName)
@@ -1231,7 +1235,7 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     val receiverResult = generate(memberAccess.receiver, context.notInTailPosition())
     // Generated bottom-up first; re-generated with the resolved param type pushed
     // down once the inherent method is picked (bidirectional, lambda args only).
-    var argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
+    var argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition().withCallArguments(expr.arguments))
 
     val receiverType: MezzeType = receiverResult.type
 
@@ -1589,7 +1593,7 @@ internal fun ExpressionConstraintGenerator.generateDeferredInherentMethodCall(
     val methodName = memberAccess.member
 
     val receiverResult = generate(memberAccess.receiver, context.notInTailPosition())
-    val argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition())
+    val argumentResult = generate(expr.arguments, context.clearExpectedType().notInTailPosition().withCallArguments(expr.arguments))
 
     val receiverType: MezzeType = receiverResult.type
 

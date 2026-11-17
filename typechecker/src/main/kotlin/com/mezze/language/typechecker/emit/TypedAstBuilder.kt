@@ -317,6 +317,11 @@ class TypedAstBuilder(
     ): Hash? {
         if (methodInfo.candidateImpls.isEmpty()) return methodInfo.implContentHash
         val solvedReceiver = substitution.apply(receiverExpr.type)
+        // BUG 56: nothing solved the receiver. The old fallback below picked the FIRST candidate.
+        if (solvedReceiver is MezzeType.VarType) throw com.mezze.language.typechecker.TypeCheckError(
+            "Nothing determines the type of the value `.${methodInfo.methodName}` is called on, so no impl can be chosen.",
+            receiverExpr.loc, code = com.mezze.language.parsedast.diagnostics.ErrorCode.T0215_AMBIGUOUS_ABILITY_TYPE,
+        )
         // BUG 1: walk the receiver's hashes most-specific first — the applied hash
         // of `Result PyForeign IErr` before the bare `Result` constructor hash —
         // so two same-constructor impls resolve without a name comparison.

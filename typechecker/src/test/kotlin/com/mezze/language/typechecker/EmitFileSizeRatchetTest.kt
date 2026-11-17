@@ -307,7 +307,10 @@ class EmitFileSizeRatchetTest {
             // turbofish, so no caller can name such an `'a`. The rule (count a
             // constraint's vars only when it is anchored to the signature) has to
             // live where the frame's visible set is filled, which is here.
-            E + "TypedAstBuilder.kt" to 2414,    // was 3,107
+            // 2414 -> 2419: BUG 56. A deferred inherent pick whose receiver nothing
+            // solved fell back to the FIRST candidate — a silent mis-dispatch. The
+            // refusal belongs at that fallback, which lives here.
+            E + "TypedAstBuilder.kt" to 2419,    // was 3,107
         )
 
         val SPLIT_OUT = listOf(

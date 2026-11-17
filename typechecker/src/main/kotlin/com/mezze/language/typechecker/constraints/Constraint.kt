@@ -889,7 +889,29 @@ data class ConstraintContext(
      * dropped `g`'s effects. Effects union, so a shared row is sound.
      */
     val calleeRowVar: RowVar? = null,
+    /**
+     * BUG 56: lambdas written DIRECTLY as a call's argument (or a field of its
+     * argument record), by location. Their parameters are pinned by that call, so
+     * `[1, 2].map { f = { x } -> x.to_str {} }` may defer `to_str`'s impl pick to
+     * the solved `x`. A let-bound lambda is generalized and its params are not —
+     * that is what [receiverHasSolvableType] keeps excluding.
+     */
+    val callArgumentLambdaLocs: Set<Loc> = emptySet(),
+    /** BUG 56: parameter names pinned by an enclosing call (see above). */
+    val callPinnedParams: Set<String> = emptySet(),
 ) {
+    /** BUG 56: mark the lambdas [args] passes directly to a call. */
+    fun withCallArguments(args: ParsedExpr): ConstraintContext {
+        val locs = when (args) {
+            is ParsedLambda -> setOf(args.loc)
+            is ParsedRecordLit -> args.entries.mapNotNullTo(HashSet()) { e ->
+                ((e as? ParsedRecordEntry.Field)?.value as? ParsedLambda)?.loc
+            }
+            else -> emptySet()
+        }
+        return if (locs.isEmpty() && callArgumentLambdaLocs.isEmpty()) this
+            else copy(callArgumentLambdaLocs = locs)
+    }
 
     fun extend(name: String, type: MezzeType): ConstraintContext {
         return copy(typingContext = typingContext.extendMono(name, type))

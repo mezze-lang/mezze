@@ -601,7 +601,7 @@ class ExpressionConstraintGenerator {
     ): ConstraintResult {
         if (resolvedParamType !is MezzeType.RecordType) return inferredArgResult
         if (!recordLiteralHasLambdaField(argExpr)) return inferredArgResult
-        return generateWithExpected(argExpr, resolvedParamType, context.notInTailPosition())
+        return generateWithExpected(argExpr, resolvedParamType, context.notInTailPosition().withCallArguments(argExpr))
     }
 
     internal fun isRecordLiteralAccess(expr: ParsedExpr, context: ConstraintContext): Boolean {
