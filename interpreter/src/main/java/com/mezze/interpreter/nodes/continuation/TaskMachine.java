@@ -108,6 +108,34 @@ public final class TaskMachine {
     private final IdentityHashMap<MezzePromise, Boolean> ownPromises = new IdentityHashMap<>();
     /** Stale wakes — aimed at an epoch the task has left. Countable, never silent. */
     public long staleWakes;
+    /** Every `cont.park` creates one request; every request a boundary sees is
+     *  absorbed. A gap after a run means a continuation was SWALLOWED on its way
+     *  to the boundary — the one thing that must never be silent. */
+    private long parksRequested, parksAbsorbed;
+
+    /** `cont.park` was evaluated. Outside any boundary there is nothing that could
+     *  ever resume it, so that is an error here and now. */
+    @TruffleBoundary
+    public void notePark() {
+        if (boundaries.isEmpty()) throw new MezzeGuestException(
+            "cont.park outside a scheduler boundary: the perform that installed this performer is not "
+            + "one the runtime can suspend — the module top level, a comptime block, or a frame reached "
+            + "through a native or a polyglot call. Move the perform into a function (`main`) and keep "
+            + "parking performers out of native callbacks.");
+        parksRequested++;
+    }
+
+    private void checkNoneSwallowed(Task t) {
+        if (parksRequested == parksAbsorbed) return;
+        long lost = parksRequested - parksAbsorbed;
+        parksAbsorbed = parksRequested;   // report once
+        throw new MezzeGuestException(
+            "a park was dropped on its way to the perform boundary (" + lost + " in " + t + "): the "
+            + "suspension crossed a frame the runtime cannot suspend through. Today that is a callback "
+            + "handed to a native — `seq::for_each`, `iter::map`, `seq::fold` and the rest (C4, resumable "
+            + "natives, is not built) — or a polyglot call. Park from Mezze frames only: a `match`/`do` "
+            + "loop instead of the native HOF, or keep the callback free of the parking effect.");
+    }
 
     // ---------------------------------------------------------------- natives' side
 
@@ -169,12 +197,15 @@ public final class TaskMachine {
             Task body = new Task(nextTaskId++, null, null);
             body.owner = b;
             absorb(b, body, callWith(bodyThunk, MezzeRecord.empty()));
+            checkNoneSwallowed(body);
             while (body.state != DONE) {
                 if (b.ready.isEmpty()) {
                     if (!wakeParked(b)) blockOrDeadlock(b);
                     continue;
                 }
-                run(b, pick(b));
+                Task t = pick(b);
+                run(b, t);
+                checkNoneSwallowed(t);
                 wakeParked(b);
             }
             teardown(b);
@@ -207,7 +238,7 @@ public final class TaskMachine {
     /** Run everything runnable or wakeable; stop when only unwakeable parks remain. */
     private void drain(Boundary b) {
         while (true) {
-            if (!b.ready.isEmpty()) { run(b, pick(b)); wakeParked(b); continue; }
+            if (!b.ready.isEmpty()) { Task t = pick(b); run(b, t); checkNoneSwallowed(t); wakeParked(b); continue; }
             if (!wakeParked(b)) return;
         }
     }
@@ -263,6 +294,7 @@ public final class TaskMachine {
                     continue;
                 }
                 if (yielded instanceof ParkRequest pr) {
+                    parksAbsorbed++;
                     t.leaf = cr;
                     t.parkedOn = pr;
                     t.epoch++;

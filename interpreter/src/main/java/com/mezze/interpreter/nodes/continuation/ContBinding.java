@@ -43,6 +43,7 @@ public final class ContBinding {
                 if (!(last instanceof MezzeRecord rec)) {
                     throw new RuntimeException("cont.park expects a record argument { on, set }");
                 }
+                com.mezze.interpreter.runtime.MezzeContext.get(null).taskMachine().notePark();
                 return new ParkRequest(rec.getField("on"), rec.getField("set"));
             }
         };

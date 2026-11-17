@@ -231,6 +231,27 @@ class EventLoopSchedulerTest {
         """)),
     )
 
+    /** C4 is not built: a park inside a native HOF's callback cannot be resumed. Until
+     *  it is, it must FAIL, not drop the rest of the callback (measured: `after 1`
+     *  never printed, the program finished "normally"). */
+    @Test
+    fun `a park inside a native callback is a loud error, not a dropped continuation`() {
+        val e = assertThrows(Exception::class.java) {
+            lines(program(imports, """
+                use std::collections::seq
+                perform Console, SystemTime, EventLoop in do
+                  seq::for_each { xs = [1, 2], f = { x } -> do
+                    println { msg = "before" }
+                    yield_now {}
+                    println { msg = "after" } }
+                  println { msg = "done" }
+            """))
+        }
+        val msg = e.message ?: ""
+        assertTrue(msg.contains("park was dropped"), "names the condition: $msg")
+        assertTrue(msg.contains("native"), "and the cause: $msg")
+    }
+
     @Test
     fun `nothing runnable and nothing that can wake is a deadlock, named`() {
         val e = assertThrows(Exception::class.java) {
