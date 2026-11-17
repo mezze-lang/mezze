@@ -70,7 +70,7 @@ class DerivedEqRequiresFieldEqTest {
             let unn: { n: N } -> Int = { n } -> match n is
               N.(v) -> v
             impl Hash for N where {
-              hash = { it } -> __native_structural_hash { it = it }
+              hash = { it } -> 7
             }
             impl Eq for N where {
               eq = { it, r } -> unn { n = it } == unn { n = r },

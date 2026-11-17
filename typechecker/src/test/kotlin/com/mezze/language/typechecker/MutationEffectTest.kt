@@ -1357,10 +1357,15 @@ class MutationEffectTest {
         val source = """
             use std::effects::mutation::{Mut, seq_to_mut, seq_to_immut}
 
-            # User-defined custom performer
+            # User-defined custom performer. Natives are stdlib-only (#109, BUG 62),
+            # so the loop is written in Mezze.
+            let my_loop = {cond, body} -> if cond {} then do
+                body {}
+                my_loop {cond = cond, body = body}
+              else {}
             impl Mut for MyMut where {
                 mutate = {act} -> act {},
-                loop = {cond, body} -> __native_mutation_loop {cond = cond, body = body}
+                loop = {cond, body} -> my_loop {cond = cond, body = body}
             }
 
             let test = {} -> perform MyMut in do

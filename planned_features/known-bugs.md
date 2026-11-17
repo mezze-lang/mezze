@@ -8158,3 +8158,28 @@ variant/record sweep against effects, as asked.
 Tests: `AbilityEffectSpecRowTest` BUG 61 section (variant, Option, list, plus
 the pure mirror); all 4 fail without the fix. Gates for the batch (43, 50
 group_by, 61): typechecker 5466/0, interpreter 8182/0.
+
+## BUG 62 — FIXED 2026-11-17: impl bodies bypassed the stdlib-only native gate
+
+```mezze
+impl Tick for Sneaky where {
+  initialize_scope = {} -> {},
+  finalize_scope = {} -> {},
+  tick = {} -> do
+    let t = __native_instant_now {}      ## ACCEPTED in user code; V0702 in a plain let
+    1,
+}
+```
+
+Found while starting Phase A of the continuations design, whose determinism
+argument says "a performer whose row is `<Async>` alone provably does not read a
+clock, because natives are stdlib-only". That was true of plain code (#109) and
+false of every impl body: `ImplValidator` and the inherent path in
+`ConstraintGenerator` both excused undefined `__native_*` names UNCONDITIONALLY,
+so stdlib impls could reference natives — and so could anyone's. Performer,
+ability and inherent bodies all ran the native.
+
+Fix: the excuse is conditioned on `expressionGenerator.isStdlibModule`, the same
+flag #109's gate reads. Tests: `NativeGateInImplBodiesTest` (three impl kinds
+plus "the refusal names the native"; all 4 fail without the fix). The stdlib's
+own impls are checked by `compileStdlib`, which is in the interpreter gate.

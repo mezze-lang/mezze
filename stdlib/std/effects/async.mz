@@ -54,7 +54,7 @@ impl Eq for Scope 'a where {
 
 ## Block until the Promise resolves, returning success or AsyncError.
 pub let await: { p: Promise 'a } -> Result 'a AsyncError <Async> = { p } ->
-  __native_promise_await_result { p = p }
+  Async.await { p = p }
 
 ## Non-blocking snapshot of the Promise's state.
 pub let inspect: { p: Promise 'a } -> PromiseState 'a = { p } ->
@@ -87,7 +87,7 @@ pub let is_cancelled: { p: Promise 'a } -> Bool = { p } -> match __native_promis
 ## observers. If you don't have a natural category, pass
 ## `CancelCustom { tag = "...", detail = "..." }`.
 pub let cancel: { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async> = { p, reason } ->
-  __native_promise_cancel { p = p, reason = reason }
+  Async.cancel { p = p, reason = reason }
 
 ## Construct a Promise via a `setup` callback that receives a
 ## `{ complete, fail, on_cancel }` capability record. Whichever resolve
@@ -123,11 +123,11 @@ pub let sleep: { ms: Int } -> {} <Time> = { ms } ->
   Time.sleep { d = duration_millis { n = ms } }
 
 ## Voluntarily yield the current task's execution slot.
-pub let yield_now: {} -> {} <Async> = {} -> __native_async_yield_now {}
+pub let yield_now: {} -> {} <Async> = {} -> Async.yield_now {}
 
 ## Suspend until predicate returns True.
 pub let park: { predicate: {} -> Bool <...> } -> {} <Async, ...> = { predicate } ->
-  __native_async_park_until { predicate = predicate }
+  Async.park { predicate = predicate }
 
 ## Suspend until `predicate` returns True, or until `ms` milliseconds pass.
 ## True means the predicate won; False means the deadline did. `ms = 0` is a
@@ -142,7 +142,7 @@ pub let park: { predicate: {} -> Bool <...> } -> {} <Async, ...> = { predicate }
 ## spawned callback is absorbed at the spawn, so a caller with no `Time`
 ## performer installed hit that case with nothing in the types to warn them.
 pub let park_until: { predicate: {} -> Bool <...>, ms: Int } -> Bool <Async, ...> =
-  { predicate, ms } -> __native_async_park_until_deadline { predicate = predicate, ms = ms }
+  { predicate, ms } -> Async.park_until { predicate = predicate, ms = ms }
 
 ## Run f within a structured concurrency scope.
 pub let scoped: { f: { sc: Scope 'a } -> 'b <...> } -> 'b <Async, ...> = { f } ->
@@ -339,7 +339,16 @@ effect Async where {
   ## effect is then dropped at runtime unless somebody awaits — see
   ## `planned_features/runtime/concurrency-and-context-bugs.md` C1, and the
   ## report `AsyncNatives.SuspendedOps` prints when a context closes holding one.
-  spawn: { f: {} -> 'a <...> } -> Promise 'a <Async>
+  spawn: { f: {} -> 'a <...> } -> Promise 'a <Async>,
+  ## Wait for a Promise. A performer decides HOW to wait — block a thread
+  ## (LoomAsync) or park the task (a scheduler) — which is why this is an op
+  ## and not a function: until it was, `spawn` was the only thing a performer
+  ## could differ in, and `await` always blocked.
+  await: { p: Promise 'a } -> Result 'a AsyncError <Async>,
+  cancel: { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async>,
+  yield_now: {} -> {} <Async>,
+  park: { predicate: {} -> Bool <...> } -> {} <Async>,
+  park_until: { predicate: {} -> Bool <...>, ms: Int } -> Bool <Async>
 }
 
 ## Default handler using Project Loom virtual threads.
@@ -351,6 +360,11 @@ impl Async for LoomAsync where {
   initialize_scope = {} -> __native_async_init_scope {},
   finalize_scope = {} -> __native_async_finalize_scope { tracker = scope },
   spawn = { f } -> __native_async_spawn_tracked { f = f, max_concurrent = 0, tracker = scope },
+  await = { p } -> __native_promise_await_result { p = p },
+  cancel = { p, reason } -> __native_promise_cancel { p = p, reason = reason },
+  yield_now = {} -> __native_async_yield_now {},
+  park = { predicate } -> __native_async_park_until { predicate = predicate },
+  park_until = { predicate, ms } -> __native_async_park_until_deadline { predicate = predicate, ms = ms },
 }
 
 ## LoomAsync with configurable concurrency limit (0 = unbounded).
@@ -363,6 +377,11 @@ impl Async for LoomAsyncWith { max_concurrent: Int } where {
       max_concurrent = max_concurrent,
       tracker = scope,
     },
+  await = { p } -> __native_promise_await_result { p = p },
+  cancel = { p, reason } -> __native_promise_cancel { p = p, reason = reason },
+  yield_now = {} -> __native_async_yield_now {},
+  park = { predicate } -> __native_async_park_until { predicate = predicate },
+  park_until = { predicate, ms } -> __native_async_park_until_deadline { predicate = predicate, ms = ms },
 }
 
 ## OS platform thread implementation for true parallelism on CPU-bound work.
@@ -370,6 +389,11 @@ impl Async for OSThreadAsync where {
   initialize_scope = {} -> __native_async_init_scope_os {},
   finalize_scope = {} -> __native_async_finalize_scope_os { tracker = scope },
   spawn = { f } -> __native_async_spawn_tracked_os { f = f, pool_size = 0, tracker = scope },
+  await = { p } -> __native_promise_await_result { p = p },
+  cancel = { p, reason } -> __native_promise_cancel { p = p, reason = reason },
+  yield_now = {} -> __native_async_yield_now {},
+  park = { predicate } -> __native_async_park_until { predicate = predicate },
+  park_until = { predicate, ms } -> __native_async_park_until_deadline { predicate = predicate, ms = ms },
 }
 
 ## OSThreadAsync with configurable thread pool size (0 = unbounded).
@@ -378,6 +402,11 @@ impl Async for OSThreadAsyncWith { pool_size: Int } where {
   finalize_scope = {} -> __native_async_finalize_scope_os { tracker = scope },
   spawn = { f } ->
     __native_async_spawn_tracked_os { f = f, pool_size = pool_size, tracker = scope },
+  await = { p } -> __native_promise_await_result { p = p },
+  cancel = { p, reason } -> __native_promise_cancel { p = p, reason = reason },
+  yield_now = {} -> __native_async_yield_now {},
+  park = { predicate } -> __native_async_park_until { predicate = predicate },
+  park_until = { predicate, ms } -> __native_async_park_until_deadline { predicate = predicate, ms = ms },
 }
 
 ## Spawn and immediately await (synchronous helper).

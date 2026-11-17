@@ -132,7 +132,7 @@ class CrossModuleCoherenceTest {
               UserId.(v) -> v
 
             impl Hash for UserId where {
-              hash = { it } -> __native_structural_hash { it = it }
+              hash = { it } -> 7
             }
             impl Eq for UserId where {
               eq  = { it, r } -> unwrap { u = it } == unwrap { u = r },

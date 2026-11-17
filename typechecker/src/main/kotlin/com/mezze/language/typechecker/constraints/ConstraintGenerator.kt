@@ -1566,7 +1566,8 @@ class ConstraintGenerator(
             // once every module binding is in context.
             for (u in bodyResult.undefinedVariables) {
                 if (u.name == Keywords.IT) continue
-                if (u.name.startsWith(com.mezze.language.ast.MagicParams.NATIVE_PREFIX)) continue
+                // BUG 62: excused in the stdlib only (#109), as in ImplValidator.
+                if (u.name.startsWith(com.mezze.language.ast.MagicParams.NATIVE_PREFIX) && expressionGenerator.isStdlibModule) continue
                 inherentUndefined.add(Triple(op.name, u.name, u.loc))
             }
             bodyResult.undefinedVariables.firstOrNull { it.name == Keywords.IT }?.let { undefinedIt ->

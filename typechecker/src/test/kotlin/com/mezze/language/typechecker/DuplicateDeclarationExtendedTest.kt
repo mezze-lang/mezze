@@ -226,7 +226,7 @@ class DuplicateDeclarationExtendedTest {
             use std::abilities::compare::{ Eq, Hash }
             type P = { x: Int, y: Int }
             impl Hash for P where {
-              hash = { it } -> __native_structural_hash { it = it }
+              hash = { it } -> 7
             }
             impl Eq for P where {
                 eq = { it, r } -> it.x == r.x,
@@ -251,7 +251,7 @@ class DuplicateDeclarationExtendedTest {
             let unq: { n: Q } -> Int = { n } -> match n is
               Q.(v) -> v
             impl Hash for Q where {
-              hash = { it } -> __native_structural_hash { it = it }
+              hash = { it } -> 7
             }
             impl Eq for Q where {
                 eq = { it, r } -> unq { n = it } == unq { n = r },

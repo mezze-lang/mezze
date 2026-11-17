@@ -535,7 +535,25 @@ Everything above rests on these. Read them before re-litigating any choice.
 Every mechanism below was tested before being planned. Nine tests across five
 suites in `interpreter/src/test/java/com/mezze/interpreter/bytecode/`.
 
-### Phase A — make the ops interceptable. Stdlib only.
+### Phase A — make the ops interceptable. Stdlib only. **LANDED 2026-11-17.**
+
+`await`, `cancel`, `yield_now`, `park`, `park_until` are ops of `effect Async`;
+the plain names are forwarders (`await = { p } -> Async.await { p = p }`), so the
+8 stdlib callers and 89 test files are unchanged. The four shipped performers
+body each op with the native the plain `let` used to call. Measured: a userland
+performer written with NO natives (`spawn = { f } -> promise_of { val = f {} }`,
+`await` reading `inspect`) intercepts `await` — `AsyncOpsPromotedTest`; a
+performer omitting an op is V0404 naming it — `AsyncOpsPromotedSpecTest`. Gates:
+typechecker green, interpreter 8185/0.
+
+**Found on the way, fixed as BUG 62:** every impl body (performer, ability,
+inherent) bypassed the #109 stdlib-only native gate, so user code could call
+`__native_instant_now` from inside a performer whose row said `<Async>` alone —
+which would have voided the determinism argument in *CAN A USERLAND SCHEDULER
+BYPASS `Time`*. The gate now reaches impl bodies. One test that ASSERTED the
+hole (`InherentImplTest`, "inherent impl with native function call in body") now
+asserts the refusal.
+
 
 Promote `await`, `yield_now`, `park`, `park_until`, `cancel` to ops of `Async`.
 **The source makes the case:** `async.mz:342` declares `spawn` as the SOLE op,

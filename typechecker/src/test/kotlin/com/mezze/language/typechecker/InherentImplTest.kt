@@ -459,8 +459,14 @@ class InherentImplTest {
     // NATIVE FUNCTION CALLS IN BODY
     // ========================================================================
 
+    /**
+     * `__native_*` intrinsics are stdlib-only (#109). This test used to assert
+     * the OPPOSITE — that a user inherent impl may call one — and passed only
+     * because impl bodies bypassed the gate (BUG 62). A user module's impl body
+     * is user code; the native is undefined there, as it is in a plain `let`.
+     */
     @Test
-    fun `inherent impl with native function call in body`() {
+    fun `inherent impl may not call a native from user code`() {
         val source = """
             type T = {v: Int}
 
@@ -469,12 +475,11 @@ class InherentImplTest {
             }
         """.trimIndent()
 
-        // This should at least parse and type check without errors
         val parsedModule = parser.parseParsedModule(source, "test.mz")
-        val result = typeChecker.typeCheck(parsedModule, Paths.get("."))
-
-        val impl = parsedModule.decls.filterIsInstance<com.mezze.language.parsedast.ParsedImplAbilityDecl>().first()
-        assertTrue(impl.isInherent)
+        val err = assertThrows<com.mezze.language.typechecker.TypeCheckError> {
+            typeChecker.typeCheck(parsedModule, Paths.get("."))
+        }
+        kotlin.test.assertTrue(err.message?.contains("__native_int_to_str") == true, "names the native: ${err.message}")
     }
 
     // ========================================================================

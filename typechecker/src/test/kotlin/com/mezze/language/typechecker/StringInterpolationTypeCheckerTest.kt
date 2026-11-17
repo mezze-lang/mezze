@@ -98,7 +98,7 @@ class StringInterpolationTypeCheckerTest {
             }
 
             impl Show for Int where {
-                show = {it} -> __native_int_to_str {n = it}
+                show = {it} -> it.to_str {}
             }
 
             let display = {x: Int} -> "Value: $(x.show {})"
@@ -114,7 +114,7 @@ class StringInterpolationTypeCheckerTest {
             }
 
             impl Show for Int where {
-                show = {it} -> __native_int_to_str {n = it}
+                show = {it} -> it.to_str {}
             }
 
             let display: {val: 'a} with Show 'a -> Str = {val} ->
@@ -135,7 +135,7 @@ class StringInterpolationTypeCheckerTest {
             }
 
             impl Show for Int where {
-                show = {it} -> __native_int_to_str {n = it}
+                show = {it} -> it.to_str {}
             }
 
             impl Show for Str where {
@@ -157,7 +157,7 @@ class StringInterpolationTypeCheckerTest {
             }
 
             impl Show for Int where {
-                show = {it} -> __native_int_to_str {n = it}
+                show = {it} -> it.to_str {}
             }
 
             let wrap: {val: 'a} with Show 'a -> Str = {val} ->
@@ -590,7 +590,7 @@ class StringInterpolationTypeCheckerTest {
             }
 
             impl Show for Int where {
-                show = {it} -> __native_int_to_str {n = it}
+                show = {it} -> it.to_str {}
             }
 
             type Outcome = | Good { value: Int }, Bad { message: Str } |
@@ -624,7 +624,7 @@ class StringInterpolationTypeCheckerTest {
             }
 
             impl Show for Int where {
-                show = {it} -> __native_int_to_str {n = it}
+                show = {it} -> it.to_str {}
             }
 
             impl Show for Str where {

@@ -618,7 +618,12 @@ internal class ImplValidator(
         // check, not a substitute for it.
         val undefinedHandled = onUndefinedVars != null && onUndefinedVars(bodyResult)
         if (!undefinedHandled) {
-            val realUndefined = bodyResult.undefinedVariables.filter { !it.name.startsWith(com.mezze.language.ast.MagicParams.NATIVE_PREFIX) }
+            // BUG 62: a `__native_*` name is excused only where #109 allows it — the
+            // stdlib. This excused it everywhere, so user code read the wall clock
+            // from inside a performer whose row said `<Async>` alone.
+            val realUndefined = bodyResult.undefinedVariables.filter {
+                !(it.name.startsWith(com.mezze.language.ast.MagicParams.NATIVE_PREFIX) && expressionGenerator.isStdlibModule)
+            }
             if (realUndefined.isNotEmpty()) {
                 val undefinedVar = realUndefined.first()
                 throw TypeCheckError(
