@@ -7813,3 +7813,70 @@ performs Tick, but nothing discharges it` arrive with no `V####`, so a spec
 suite cannot assert on them and `--explain` has nothing to look up. The spec
 harness's own doctrine covers this: "Where a site has no code to carry, the fix
 is to give it one, not to stop asking."
+
+## BUG 51 — FIXED 2026-11-17: an unannotated higher-order function inferred its callback PURE
+
+```mezze
+let apply = { f } -> f {}
+pub let main = {} -> perform Console in apply { f = {} -> println { msg = "hi" } }
+```
+
+Refused (T0201: `expected { f: {} -> 'a } -> 'a but got { f: {} -> {} <Log> }`)
+unless the author wrote `{ f: {} -> 'a <...> } -> 'a <...>` by hand — an
+annotation REQUIRED for the most basic HOF there is. Sound (#215 rightly refuses
+an effectful argument in a pure slot) but not inferable.
+
+Cause: a call whose callee type is still a VARIABLE (`f` is an unannotated
+parameter) constrained it to `FunctionType(arg, ret)` with no effect row — pure
+by construction. Fix (`ExprFunctionConstraints`, the generic call path): give it
+an open `userOpen` row and raise it; #256 already ties a raised row to the
+enclosing lambda's return row, so `apply` now infers the principal
+`{ f: {} -> 'a <...> } -> 'a <...>`.
+
+## BUG 52 — FIXED 2026-11-17: FORWARDING a callback through a HOF laundered its effect
+
+```mezze
+let apply2: { f: {} -> 'a <...> } -> 'a <...> = { f } -> f {}
+let twice = { g } -> apply2 { f = g }
+pub let go: {} -> {} = {} -> twice { g = {} -> println { msg = "leaked" } }
+```
+
+ACCEPTED, and the println never ran — `go` is declared pure. Pre-existing, with
+`apply2` annotated. At the `apply2` call the #256 branch raises the row variables
+the ACTUAL callback arguments carry; a forwarded `g` is still a bare type variable
+there, so it carries none, and `twice` inferred pure while `g`'s slot was open.
+Fix: such an argument WILL be unified with the callee's declared callback type, so
+raise the declared field's row variable — the row `g` ends up with.
+
+## BUG 53 — FIXED 2026-11-17: a callback reaching the caller INDIRECTLY laundered its effect
+
+Two shapes, both accepted with a pure-declared caller performing `Log`:
+
+```mezze
+let delay = { f } -> {} -> f {}                                   ## S5: returned
+pub let go: {} -> {} = {} -> (delay { f = {} -> println { msg = "x" } }) {}
+
+let box = { f } -> { run = f }                                    ## S1: nested
+let fire = { b } -> b.run {}
+pub let go2: {} -> {} = {} -> fire { b = box { f = {} -> println { msg = "x" } } }
+```
+
+Effects reach a caller through call-site HARVESTS, not row bindings — row
+variables are deliberately kept out of the substitution (#312's comment: it broke
+12 interpreter tests). That works when a call PERFORMS the callback. S5's call
+performs nothing; it RETURNS a function whose row is `f`'s, and that `'r` is never
+bound, so the returned function looked pure. S1's callback sat two record levels
+down; the post-solve re-harvest looked one.
+
+Fix: `carryCallbackRowsIntoResult` carries an actual callback's row into every row
+of the call's RESULT type that shares the declared callback's variable (both call
+paths), and the re-harvest walks nested records. S5 was already a launder with
+`delay` ANNOTATED, so it was never inference's alone.
+
+DEBUGGING NOTE: `EffectRow.toString()` omits `rowVar`. An open row prints as
+`EffectRow()`, exactly like a closed empty one; that sent this trace to the
+scheme for an hour. Dump `rowVar` explicitly.
+
+Tests: `AbilityEffectSpecRowTest` (BUG 51/52/53 sections, every claim mirrored;
+11 of 12 fail without the fixes, the 12th is the pure-stays-pure guard).
+Gates: typechecker 5447/0, interpreter 8165/0.

@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.constraints
 
+import com.mezze.language.ast.RowVar
 import com.mezze.language.parsedast.diagnostics.DiagnosticHints
 import com.mezze.language.ast.*
 import com.mezze.language.parsedast.*
@@ -1244,6 +1245,19 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
                     ?.fields?.values?.any { it is MezzeType.FunctionType } == true
                 if (calleeHasCallbackParam) {
                     collectClosureArgRowVars(argumentResult.type).forEach { collector.effectRowVars.add(it) }
+                    // BUG 52: a FORWARDED callback — `{ g } -> apply2 { f = g }` —
+                    // is still a bare type variable here, so it carries no row to
+                    // collect, and the forwarder inferred PURE while `g`'s slot was
+                    // open: `go: {} -> {}` performed Log through it, was accepted,
+                    // and the println never ran. That argument WILL be unified with
+                    // the callee's declared callback type, so the declared field's
+                    // row is the row it ends up with; raise that one.
+                    val declared = (functionType.paramType as? MezzeType.RecordType)?.fields.orEmpty()
+                    (argumentResult.type as? MezzeType.RecordType)?.fields?.forEach { (name, actual) ->
+                        if (actual !is MezzeType.VarType) return@forEach
+                        (declared[name] as? MezzeType.FunctionType)?.effects?.rowVar
+                            ?.let { collector.effectRowVars.add(it) }
+                    }
                 } else {
                     collector.effectRowVars.add(effectRow.rowVar!!)
                 }
@@ -1289,7 +1303,10 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
                 )
             }
 
-            val (resultType, _, _) = wrapCallResultWithEffects(functionType.returnType, effectRow)
+            val (resultType, _, _) = wrapCallResultWithEffects(
+                carryCallbackRowsIntoResult(functionType, argumentResult.type, functionType.returnType),
+                effectRow,
+            )
 
             collector.callReturnTypes[expr.loc] = resultType
             return collector.toResult(resultType)
@@ -1313,11 +1330,22 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
         is ParsedIdentifier -> (expr.function as ParsedIdentifier).localName
         else -> null
     }
+    // BUG 51: calling a value whose type is not yet a function — an UNANNOTATED
+    // callback parameter, `{ f } -> f {}` — must not decide that it is pure.
+    // Give it an open row and raise that row here; #256 then ties it to the
+    // enclosing lambda's return row, and `apply` infers the principal
+    // `{ f: {} -> 'a <...> } -> 'a <...>` that the stdlib writes by hand.
+    // Without it a pure-inferred `f` refused every effectful argument (#215's
+    // directional rule, correctly), so the annotation was REQUIRED.
+    val calleeRow = if (functionResult.type is MezzeType.VarType) {
+        RowVar.userOpen().also { collector.effectRowVars.add(it) }
+    } else null
     collector.constraints.add(
         Constraint.Equality(
             left = MezzeType.FunctionType(
                 paramType = argumentResult.type,
-                returnType = returnType
+                returnType = returnType,
+                effects = calleeRow?.let { MezzeType.EffectRow(effects = emptySet(), rowVar = it) },
             ),
             right = functionResult.type,
             context = "Function application",
@@ -1462,7 +1490,15 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
 
     if (tailCallLocation != null) collector.tailCalls.add(tailCallLocation)
 
-    collector.callReturnTypes[expr.loc] = returnType
+    // BUG 53: the call's RESULT may be a function whose row is the callback's
+    // row — `delay = { f } -> {} -> f {}`. `returnType` is a fresh variable
+    // here, so a carried row needs the instantiated return type itself; its
+    // type variables are the ones the Equality above relates, so they agree.
+    val carriedResult = (functionResult.type as? MezzeType.FunctionType)?.let { ft ->
+        carryCallbackRowsIntoResult(ft, argumentResult.type, ft.returnType)
+            .takeIf { it !== ft.returnType }
+    } ?: returnType
+    collector.callReturnTypes[expr.loc] = carriedResult
     // The callee's arrow AS INSTANTIATED HERE. Emit otherwise re-derives the
     // function node's type from the declaration's scheme, and the per-site
     // vars the solver resolved — including a `with` constraint's operand — are
@@ -1471,7 +1507,7 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
     (functionResult.type as? MezzeType.FunctionType)?.let {
         collector.callFunctionTypes[expr.loc] = it
     }
-    return collector.toResult(returnType)
+    return collector.toResult(carriedResult)
 }
 
 
@@ -1559,4 +1595,62 @@ internal fun concreteTypeSupplying(
 
     walk(declared, actual)
     return found.distinct().singleOrNull()
+}
+
+/**
+ * BUG 53: a callee that RETURNS a function carrying its callback's row —
+ *
+ *     let delay = { f } -> {} -> f {}     ## { f: {} -> 'a <r> } -> ({} -> 'a <r>)
+ *
+ * performs nothing at the call, so no harvest fires, and `r` is never bound:
+ * effects reach a caller through call-site harvests, not row bindings. The
+ * returned function then looked pure, and `go: {} -> {} = {} -> (delay { f =
+ * <println> }) {}` was ACCEPTED with the println silently never running. So
+ * the actual callback's row is carried into every row of the RESULT that
+ * shares the declared callback's variable. An actual's own open tail replaces
+ * the variable (it is instantiated per call), keeping a forwarded row linked.
+ */
+internal fun carryCallbackRowsIntoResult(
+    callee: MezzeType.FunctionType,
+    argType: MezzeType,
+    result: MezzeType,
+): MezzeType {
+    val declared = (callee.paramType as? MezzeType.RecordType)?.fields ?: return result
+    val actual = (argType as? MezzeType.RecordType)?.fields ?: return result
+    val carried = HashMap<RowVar, MezzeType.EffectRow>()
+    for ((name, d) in declared) {
+        val dRow = (d as? MezzeType.FunctionType)?.effects ?: continue
+        val v = dRow.rowVar ?: continue
+        val aRow = (actual[name] as? MezzeType.FunctionType)?.effects ?: continue
+        val effects = aRow.effects - dRow.caughtByAncestor
+        val instances = aRow.effectInstances.filterTo(HashSet()) { it.name !in dRow.caughtByAncestor }
+        if (effects.isEmpty() && instances.isEmpty() && aRow.rowVar == null) continue
+        val prev = carried[v]
+        carried[v] = MezzeType.EffectRow(
+            effects = prev?.effects.orEmpty() + effects,
+            effectInstances = prev?.effectInstances.orEmpty() + instances,
+            rowVar = prev?.rowVar ?: aRow.rowVar,
+        )
+    }
+    if (carried.isEmpty()) return result
+    fun walk(t: MezzeType): MezzeType = when (t) {
+        is MezzeType.FunctionType -> {
+            val row = t.effects
+            val add = row?.rowVar?.let { carried[it] }
+            t.copy(
+                paramType = walk(t.paramType),
+                returnType = walk(t.returnType),
+                effects = if (add == null) row else row!!.copy(
+                    effects = row.effects + add.effects,
+                    effectInstances = row.effectInstances + add.effectInstances,
+                    rowVar = add.rowVar ?: row.rowVar,
+                ),
+            )
+        }
+        is MezzeType.RecordType -> t.copy(fields = t.fields.mapValues { (_, v) -> walk(v) })
+        is MezzeType.TypeApplication -> t.copy(args = t.args.map { walk(it) })
+        else -> t
+    }
+    val out = walk(result)
+    return if (out == result) result else out
 }

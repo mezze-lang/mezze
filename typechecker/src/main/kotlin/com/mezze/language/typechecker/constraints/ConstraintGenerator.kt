@@ -945,11 +945,21 @@ class ConstraintGenerator(
         for (harvest in pending) {
             when (val solved = substitution.apply(harvest.argType)) {
                 // An ARGUMENT record: the callbacks are its fields.
-                is MezzeType.RecordType ->
-                    for ((_, fieldType) in solved.fields) {
-                        (substitution.apply(fieldType) as? MezzeType.FunctionType)
-                            ?.let { take(it, harvest.caughtByOp) }
+                // BUG 53: walked to any depth. `fire { b = box { f = <println> } }`
+                // hands the callback over as `{ b: { run: fn <Log> } }`; one level
+                // found nothing and a pure-declared caller was accepted.
+                is MezzeType.RecordType -> {
+                    fun fields(r: MezzeType.RecordType, depth: Int) {
+                        for ((_, fieldType) in r.fields) {
+                            when (val f = substitution.apply(fieldType)) {
+                                is MezzeType.FunctionType -> take(f, harvest.caughtByOp)
+                                is MezzeType.RecordType -> if (depth < 8) fields(f, depth + 1)
+                                else -> {}
+                            }
+                        }
                     }
+                    fields(solved, 0)
+                }
                 // A CALLEE that was not a function type at generation time — a
                 // deferred method call's fresh result var. Post-solve it IS the
                 // applied function, so its own row is what the apply performs.

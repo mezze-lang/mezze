@@ -203,4 +203,188 @@ class AbilityEffectSpecRowTest : AbilityEffectSpecBase() {
             "`x.rank {}` could not pick, so the name belongs to one ability",
         )
     }
+    // ── BUG 51: an UNANNOTATED higher-order function is effect-polymorphic ──
+    // `{ f } -> f {}` used to infer a PURE `f`, so every effectful argument was
+    // refused and `<...>` was required by hand. Rows are exact, so declaring
+    // `<Tick>` on the caller proves the effect arrived — no more, no less.
+
+    @Test
+    fun `an unannotated HOF carries its callback's effect to the caller`() {
+        accepts(
+            """
+            $tick
+            let apply = { f } -> f {}
+            let ok: {} -> Int <Tick> = {} -> apply { f = {} -> Tick.tick {} }
+            $MAIN
+            """,
+            "the principal type is `{ f: {} -> 'a <...> } -> 'a <...>`; no annotation is needed",
+        )
+    }
+
+    @Test
+    fun `an unannotated HOF does not launder its callback's effect`() {
+        rejects(
+            """
+            $tick
+            let apply = { f } -> f {}
+            let leak: {} -> Int = {} -> apply { f = {} -> Tick.tick {} }
+            $MAIN
+            """,
+            "T0210",
+            "the mirror: inferring the row open must not let it vanish at the caller",
+        )
+    }
+
+    @Test
+    fun `an unannotated HOF given a pure callback stays pure`() {
+        accepts(
+            """
+            $tick
+            let apply = { f } -> f {}
+            let pure: {} -> Int = {} -> apply { f = {} -> 1 }
+            $MAIN
+            """,
+            "the open row binds to the argument's row, which here is empty",
+        )
+    }
+
+    // ── BUG 52: FORWARDING a callback through a HOF kept its row ──
+    // `{ g } -> apply_any { f = g }`: `g` is a bare variable when the call is
+    // generated, so it carried no row to raise, and the forwarder inferred pure
+    // while `g`'s slot was open. A pure-declared caller performed Tick through
+    // it, was ACCEPTED, and at run time the effect silently never happened.
+
+    @Test
+    fun `forwarding a callback through an annotated HOF does not launder`() {
+        rejects(
+            """
+            $tick
+            let apply_any: { f: {} -> Int <...> } -> Int <...> = { f } -> f {}
+            let fwd = { g } -> apply_any { f = g }
+            let leak: {} -> Int = {} -> fwd { g = {} -> Tick.tick {} }
+            $MAIN
+            """,
+            "T0210",
+            "the forwarder's result row IS its callback's row",
+        )
+    }
+
+    @Test
+    fun `forwarding a callback through an annotated HOF carries the effect`() {
+        accepts(
+            """
+            $tick
+            let apply_any: { f: {} -> Int <...> } -> Int <...> = { f } -> f {}
+            let fwd = { g } -> apply_any { f = g }
+            let ok: {} -> Int <Tick> = {} -> fwd { g = {} -> Tick.tick {} }
+            $MAIN
+            """,
+            "the mirror: the effect arrives, so the exact `<Tick>` matches",
+        )
+    }
+
+    @Test
+    fun `forwarding through an unannotated HOF carries the effect`() {
+        accepts(
+            """
+            $tick
+            let apply = { f } -> f {}
+            let fwd = { g } -> apply { f = g }
+            let ok: {} -> Int <Tick> = {} -> fwd { g = {} -> Tick.tick {} }
+            $MAIN
+            """,
+            "BUG 51 and 51 together: two unannotated layers, one row",
+        )
+    }
+
+    @Test
+    fun `forwarding through an unannotated HOF does not launder`() {
+        rejects(
+            """
+            $tick
+            let apply = { f } -> f {}
+            let fwd = { g } -> apply { f = g }
+            let leak: {} -> Int = {} -> fwd { g = {} -> Tick.tick {} }
+            $MAIN
+            """,
+            "T0210",
+            "the mirror of the above",
+        )
+    }
+    // ── BUG 53: a callback's effect reaching the caller INDIRECTLY ──
+    // Effects flow through call-site harvests, not row bindings. A callee that
+    // RETURNS a function carrying its callback's row performed nothing at the
+    // call, and a callback handed over inside a nested record was one level
+    // deeper than the harvest looked. Both let a pure-declared caller perform.
+
+    @Test
+    fun `a returned function carries its captured callback's effect`() {
+        rejects(
+            """
+            $tick
+            let delay = { f } -> {} -> f {}
+            let leak: {} -> Int = {} -> (delay { f = {} -> Tick.tick {} }) {}
+            $MAIN
+            """,
+            "T0210",
+            "`delay`'s result row IS `f`'s row; calling it performs Tick",
+        )
+    }
+
+    @Test
+    fun `a returned function carries the effect when annotated too`() {
+        rejects(
+            """
+            $tick
+            let delay: { f: {} -> Int <...> } -> {} -> Int <...> = { f } -> {} -> f {}
+            let leak: {} -> Int = {} -> (delay { f = {} -> Tick.tick {} }) {}
+            $MAIN
+            """,
+            "T0210",
+            "the same hole with the row written by hand — it was never inference's",
+        )
+    }
+
+    @Test
+    fun `a returned function's carried effect is exactly the callback's`() {
+        accepts(
+            """
+            $tick
+            let delay = { f } -> {} -> f {}
+            let ok: {} -> Int <Tick> = {} -> (delay { f = {} -> Tick.tick {} }) {}
+            let pure: {} -> Int = {} -> (delay { f = {} -> 1 }) {}
+            $MAIN
+            """,
+            "the mirrors: Tick arrives exactly, and a pure callback stays pure",
+        )
+    }
+
+    @Test
+    fun `a callback inside a nested record argument is harvested`() {
+        rejects(
+            """
+            $tick
+            let box = { f } -> { run = f }
+            let fire = { b } -> b.run {}
+            let leak: {} -> Int = {} -> fire { b = box { f = {} -> Tick.tick {} } }
+            $MAIN
+            """,
+            "T0210",
+            "`{ b: { run: fn <Tick> } }` — the callback is two levels down",
+        )
+    }
+
+    @Test
+    fun `a callback inside a nested record argument carries exactly its effect`() {
+        accepts(
+            """
+            $tick
+            let box = { f } -> { run = f }
+            let fire = { b } -> b.run {}
+            let ok: {} -> Int <Tick> = {} -> fire { b = box { f = {} -> Tick.tick {} } }
+            $MAIN
+            """,
+            "the mirror",
+        )
+    }
 }
