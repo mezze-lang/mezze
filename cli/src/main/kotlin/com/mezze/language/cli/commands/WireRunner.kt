@@ -601,8 +601,8 @@ object WireRunner {
         if (timing) System.err.println("[${ms()}ms] typechecked + lowered (${result.loweredFunctions.size} fns)")
 
         val decls = result.typedModule?.decls?.filterIsInstance<TypedLetDecl>().orEmpty()
-        EntryPointCheck.entryError(decls, entryName, result.metadataByHash)?.let { msg ->
-            System.err.println("Error: $msg")
+        EntryPointCheck.entryDiagnostic(decls, entryName, result.metadataByHash)?.let { d ->
+            System.err.println(d.render())
             return null
         }
         val entry = decls.first { it.name == entryName }

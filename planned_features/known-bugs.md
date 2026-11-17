@@ -7840,7 +7840,7 @@ fires.
 
 ### Related, and a smaller finding alongside
 
-**The entry-point checks emit UNCODED diagnostics.** Both
+**The entry-point checks emitted UNCODED diagnostics. FIXED 2026-11-17:** shape errors (missing, not a function, parameters, non-`{}` return) are `V0512_ENTRY_SIGNATURE`; an unhandled effect is the existing `V0501`. All three front doors (`check`, `build`, the wire runner) print `error[CODE]:`, and `--json` no longer stamps every one V0501. `--explain` has both; the two duplicate V0501 docs entries, written in syntax that no longer parses, are one correct entry now. Tests: `EntryPointCheckTest` (codes + rendering). Gates: cli 356/0, typechecker 5456/0. Original note: Both
 `Error: Entry 'main' must return `{}`, got: Int` and `Error: Entry 'main'
 performs Tick, but nothing discharges it` arrive with no `V####`, so a spec
 suite cannot assert on them and `--explain` has nothing to look up. The spec

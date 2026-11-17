@@ -421,12 +421,12 @@ class CheckCommand {
             val entryName = appConfig.entry
             val decls = typeCheckResult.typedModule?.decls
                 ?.filterIsInstance<TypedLetDecl>().orEmpty()
-            EntryPointCheck.entryError(decls, entryName, typeCheckResult.metadataByHash)?.let { msg ->
+            EntryPointCheck.entryDiagnostic(decls, entryName, typeCheckResult.metadataByHash)?.let { d ->
                 if (jsonMode) {
                     jsonExitWith(null, appConfig.name,
-                        DiagnosticJson(Severity.ERROR, code = "V0501", message = msg), exitCode = 4)
+                        DiagnosticJson(Severity.ERROR, code = d.code.display(), message = d.message), exitCode = 4)
                 }
-                println("Error: $msg")
+                println(d.render())
                 kotlin.system.exitProcess(4)
             }
 

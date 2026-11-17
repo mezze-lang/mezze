@@ -290,8 +290,8 @@ class BuildCommand {
             val entryName = appConfig.entry
             if (typedModuleForValidation != null) {
                 val decls = typedModuleForValidation.decls.filterIsInstance<TypedLetDecl>()
-                EntryPointCheck.entryError(decls, entryName, metadataForValidation)?.let { msg ->
-                    println("Error: $msg")
+                EntryPointCheck.entryDiagnostic(decls, entryName, metadataForValidation)?.let { d ->
+                    println(d.render())
                     kotlin.system.exitProcess(4)
                 }
             }

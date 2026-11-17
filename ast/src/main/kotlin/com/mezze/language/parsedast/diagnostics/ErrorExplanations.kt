@@ -446,8 +446,9 @@ fun ErrorCode.explain(): String = when (this) {
         "operation should take a receiver, declare it: `op: { it: 'a, … } -> …`."
 
     ErrorCode.V0501_EFFECT_NOT_HANDLED ->
-        "A performed effect is not handled. " +
-        "Wrap the expression in a `handle` block that provides a handler for this effect."
+        "A performed effect is not handled. Nothing above an entry point can handle it, " +
+        "so it would leak at run time as a suspended value instead of a result. Wrap the " +
+        "code that performs it in `perform <Performer> in …` with a performer for that effect."
 
     ErrorCode.V0502_TOP_LEVEL_PERFORM ->
         "Effects cannot be performed at the top level of a module. " +
@@ -845,6 +846,11 @@ fun ErrorCode.explain(): String = when (this) {
         "has already been finalized. Call it inside the block, or return its RESULT " +
         "instead of the function. Returning a function from an UNSCOPED `perform` is " +
         "fine: there is no finalizer for it to outlive."
+
+    ErrorCode.V0512_ENTRY_SIGNATURE ->
+        "The entry named by Mezze.toml's `entry = \"…\"` must exist and be a function of " +
+        "type `{} -> {} <*>`: no parameters, returns `{}`, and handles every effect it performs " +
+        "(that last part is V0501). A program's result is what it does, not what it returns."
 
     ErrorCode.I0001_UNKNOWN_TYPECHECK_FAILURE ->
         "An unexpected internal error occurred during type checking. " +

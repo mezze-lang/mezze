@@ -149,6 +149,8 @@ enum class ErrorCode {
      *  when the block exits — and the escaped function's ops would then run
      *  against a finalized scope. */
     V0511_SCOPED_HANDLER_ESCAPES,
+    /** The manifest's entry is missing, not a function, takes parameters, or returns non-`{}`. */
+    V0512_ENTRY_SIGNATURE,
 
     // ─── Validator: patterns (V06xx) ─────────────────────────────────────
     V0601_NON_EXHAUSTIVE_MATCH,

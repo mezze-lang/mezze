@@ -1,5 +1,6 @@
 package com.mezze.language.cli
 
+import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.cli.commands.EntryPointCheck
 import com.mezze.language.parser.MezzeParser
 import com.mezze.language.typechecker.TypeChecker
@@ -194,6 +195,31 @@ class EntryPointCheckTest {
 
         assertTrue(msg.contains("Oracle: Answer it with `perform Oracle42 in …`."), "this module's effect: $msg")
         assertTrue(msg.contains("Log: Wrap it in `perform Console in …`"), "the stdlib's effect: $msg")
+    }
+
+    /**
+     * Each entry error carries a CODE, so `mez check --json`, `--explain` and a
+     * spec suite can name it. They used to print `Error: …` with no code at all,
+     * and `--json` stamped every one of them V0501, the shape errors included.
+     */
+    @Test
+    fun `entry errors carry their codes`() {
+        fun code(src: String) = EntryPointCheck.entryDiagnostic(typedDecls(src), "main", emptyMap())?.code
+        assertEquals(ErrorCode.V0512_ENTRY_SIGNATURE, code("let other = {} -> {}"), "missing entry")
+        assertEquals(ErrorCode.V0512_ENTRY_SIGNATURE, code("let main = {} -> 5"), "returns Int")
+        assertEquals(ErrorCode.V0512_ENTRY_SIGNATURE, code("let main = { n } -> {}"), "takes a parameter")
+        assertEquals(
+            ErrorCode.V0501_EFFECT_NOT_HANDLED,
+            code("use std::effects::log::{println, Console}\n\nlet main = {} -> println { msg = \"hi\" }"),
+            "unhandled effect",
+        )
+        assertNull(code("let main = {} -> {}"), "an acceptable entry has no diagnostic")
+    }
+
+    @Test
+    fun `an entry diagnostic renders like every other coded error`() {
+        val d = EntryPointCheck.entryDiagnostic(typedDecls("let main = {} -> 5"), "main", emptyMap())!!
+        assertTrue(d.render().startsWith("error[V0512]: Entry 'main' must return"), d.render())
     }
 
     @Test

@@ -2,6 +2,8 @@ package com.mezze.language.cli.commands
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.parsedast.ParsedMetadata
+import com.mezze.language.parsedast.diagnostics.ErrorCode
+import com.mezze.language.parsedast.diagnostics.display
 import com.mezze.language.typedast.Hash
 import com.mezze.language.typedast.TypedLetDecl
 
@@ -84,11 +86,30 @@ object EntryPointCheck {
         decls: List<TypedLetDecl>,
         entryName: String,
         metadataByHash: Map<Hash, ParsedMetadata>,
-    ): String? {
+    ): String? = entryDiagnostic(decls, entryName, metadataByHash)?.message
+
+    /** An entry error with its code, so every front door can print `error[CODE]:`. */
+    data class Diagnostic(val code: ErrorCode, val message: String) {
+        /** The CLI's text form, matching every other coded error. */
+        fun render(): String = "error[${code.display()}]: $message"
+    }
+
+    fun entryDiagnostic(
+        decls: List<TypedLetDecl>,
+        entryName: String,
+        metadataByHash: Map<Hash, ParsedMetadata>,
+    ): Diagnostic? {
         val decl = decls.find { it.name == entryName }
-            ?: return "App must define a '$entryName' function with type `{} -> {} <*>` " +
-                "(the entry named by Mezze.toml's `entry = \"$entryName\"`)"
-        return errorMessage(check(decl), entryName, metadataByHash)
+            ?: return Diagnostic(
+                ErrorCode.V0512_ENTRY_SIGNATURE,
+                "App must define a '$entryName' function with type `{} -> {} <*>` " +
+                    "(the entry named by Mezze.toml's `entry = \"$entryName\"`)",
+            )
+        val result = check(decl)
+        val message = errorMessage(result, entryName, metadataByHash) ?: return null
+        val code = if (result is Result.UnhandledEffects) ErrorCode.V0501_EFFECT_NOT_HANDLED
+            else ErrorCode.V0512_ENTRY_SIGNATURE
+        return Diagnostic(code, message)
     }
 
     /** Format a [Result] into a one-line user-facing error, or null if Ok. */

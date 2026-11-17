@@ -175,33 +175,6 @@ object ExplainDocs {
               - `seq::filter { xs, p: { x } -> Bool }`
         """.trimIndent(),
 
-        "V0501" to """
-            # V0501: Effect not handled
-
-            An effect operation was performed but no handler is installed for that
-            effect at the call site. Mezze tracks effects in the type system — every
-            effectful operation must eventually be enclosed by a `perform`/`handle`
-            block that resolves it.
-
-            ## Example
-
-            ```mezze
-            effect Log { log: Str -> {} }
-            let main = do
-                Log.log { val = "hi" }
-            //  ^^^^^^^ effect `Log` is performed but not handled
-            end
-            ```
-
-            ## How to fix
-
-            - Wrap the expression in a `perform Logger in do ... end` block, where
-              `Logger` is a performer for the `Log` effect.
-            - Or, install an inline handler with `handle e is { ... } in expr`.
-            - If the effect should propagate up to the caller, annotate the
-              enclosing function with the effect in its return type.
-        """.trimIndent(),
-
         "V0601" to """
             # V0601: Non-exhaustive match
 
@@ -448,27 +421,60 @@ object ExplainDocs {
         "V0501" to """
             # V0501: Effect not handled
 
-            An effect operation was performed but no handler is installed for
-            that effect at the call site. Mezze tracks effects in the type
-            system — every effectful operation must eventually be enclosed by
-            a `perform`/`handle` block that resolves it.
+            An effect was performed and nothing handles it. Mezze tracks effects in
+            the type system, and an ENTRY point (the function Mezze.toml's `entry`
+            names) has nothing above it to handle anything, so every effect it
+            performs must be discharged inside it. Left alone, the program would end
+            with a suspended value instead of a result.
 
             ## Example
 
             ```mezze
-            effect Log { log: { msg: Str } -> {} }
-            let main = do
-                Log.log { msg = "hi" }
-            //  ^^^^^^^ effect `Log` is performed but not handled
-            end
+            use std::effects::log::{ println }
+
+            pub let main = {} -> println { msg = "hi" }   ## performs Log, unhandled
             ```
 
             ## How to fix
 
-            - Wrap the expression in `perform Logger in do ... end`, where
-              `Logger` is a performer for the `Log` effect.
-            - Or, if the effect should propagate to the caller, annotate the
-              enclosing function's return type so the effect is visible.
+            Wrap the code in `perform <Performer> in …`, with a performer for each
+            effect:
+
+            ```mezze
+            use std::effects::log::{ Console, println }
+
+            pub let main = {} -> perform Console in println { msg = "hi" }
+            ```
+
+            A function that is not the entry may instead let the effect flow to its
+            caller: it appears in the function's inferred row (`<Log>`), and the
+            caller handles it.
+        """.trimIndent(),
+
+        "V0512" to """
+            # V0512: Entry point has the wrong signature
+
+            The entry Mezze.toml names (`entry = "main"`) must exist and have type
+            `{} -> {} <*>`: no parameters, returns `{}`. The `<*>` means it may
+            perform effects as long as it handles them itself (otherwise: V0501).
+
+            ## Example
+
+            ```mezze
+            pub let main = {} -> 5            ## returns Int
+            pub let main = { n } -> {}        ## takes a parameter
+            ```
+
+            ## How to fix
+
+            A program's result is what it does, not what it returns. Print the
+            value instead:
+
+            ```mezze
+            use std::effects::log::{ Console, println }
+
+            pub let main = {} -> perform Console in println { msg = "5" }
+            ```
         """.trimIndent(),
 
         "V0603" to """
