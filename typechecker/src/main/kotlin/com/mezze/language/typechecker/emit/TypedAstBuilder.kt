@@ -2023,7 +2023,7 @@ class TypedAstBuilder(
         // check is SYNTACTIC on purpose — it is the capability tax's whole trigger,
         // and a handler that never says `cont` pays nothing (design: "the tax is
         // only paid by a block whose handler mentions `cont`").
-        val contCapable = resolvedDecl?.operations?.any { op -> mentionsCont(op.implementation) } ?: false
+        val contOps = contOpsOf(resolvedDecl)   // ContCapable.kt
 
         return TypedHandlerRef(
             performerHash = performerHash,
@@ -2032,7 +2032,9 @@ class TypedAstBuilder(
             params = paramsExpr,
             loc = loc,
             isScoped = isScoped,
-            contCapable = contCapable,
+            contCapable = contOps.isNotEmpty(),
+            contOps = contOps,
+            effectName = effectName ?: "",
         )
     }
 

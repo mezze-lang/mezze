@@ -57,6 +57,40 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
         )
     }
 
+    /** Op-granular: `spawn` is an op of `Async`, but EventLoop's `spawn` never parks —
+     *  only its `await`/`yield_now`/`park`/`park_until` mention `cont`. The first cut of
+     *  the rule flagged this line (measured on the CLI) and told the user to rewrite a
+     *  loop that was fine. */
+    @Test
+    fun `a callback that only reaches a non-parking op is fine - spawn in a map`() {
+        accepts(
+            """
+            $imports
+            pub let main = {} -> perform SystemTime, EventLoop in do
+              let ps = seq::map { xs = [1, 2], f = { x } -> Async.spawn { f = {} -> x * 10 } }
+              {}
+            """,
+            "`spawn` does not mention `cont` in EventLoop; the rule is per op, not per effect",
+        )
+    }
+
+    @Test
+    fun `a forwarder to a parking op is seen through - await in a map`() {
+        rejects(
+            """
+            $imports
+            use std::effects::async::{ await }
+            use std::result
+            pub let main = {} -> perform SystemTime, EventLoop in do
+              let ps = seq::map { xs = [1, 2], f = { x } -> Async.spawn { f = {} -> x * 10 } }
+              let rs = seq::map { xs = ps, f = { x } -> result::get_or { result = await { p = x }, def = -1 } }
+              {}
+            """,
+            "V0513",
+            "`await { p }` is `Async.await { p }`; the forwarder's lowered body says which op",
+        )
+    }
+
     @Test
     fun `a callback a native DEFERS is fine - spawn_task runs it as a task`() {
         accepts(

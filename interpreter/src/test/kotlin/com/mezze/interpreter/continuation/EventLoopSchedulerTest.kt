@@ -276,6 +276,24 @@ class EventLoopSchedulerTest {
         """)),
     )
 
+    /** The method-chain spelling is not seen by V0513 (an inherent op in between), and
+     *  the native stores the continuation IN ITS RESULT: measured as a raw
+     *  ClassCastException reaching the user. The machine owns the diagnosis. */
+    @Test
+    fun `a host exception after a dropped park is reported as the dropped park`() {
+        val e = assertThrows(Exception::class.java) {
+            lines(program(imports, """
+                perform Console, SystemTime, EventLoop in do
+                  let ps = [1, 2].map { f = { x } -> Async.spawn { f = {} -> x * 10 } }
+                  let rs = ps.map { f = { x } -> result::get_or { result = await { p = x }, def = -1 } }
+                  println { msg = rs.to_dbg {} }
+            """))
+        }
+        val msg = e.message ?: ""
+        assertTrue(msg.contains("park was dropped"), "the cause, not the symptom: $msg")
+        assertTrue(!msg.contains("ClassCastException"), "no host exception text: $msg")
+    }
+
     @Test
     fun `nothing runnable and nothing that can wake is a deadlock, named`() {
         val e = assertThrows(Exception::class.java) {

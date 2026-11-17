@@ -30,3 +30,8 @@ internal fun TypedAstBuilder.performBodyAsThunk(body: TypedExpr, loc: Loc): Type
         type = MezzeType.FunctionType(MezzeType.RecordType(emptyMap()), body.type),
         loc = loc,
     )
+
+/** The performer's ops whose bodies mention `cont` — the only places a park can
+ *  originate, since `cont` is V0702 anywhere else. Empty = not cont-capable. */
+internal fun contOpsOf(decl: ParsedPerformerDecl?): Set<String> =
+    decl?.operations?.filter { op -> mentionsCont(op.implementation) }?.map { it.name }?.toSet() ?: emptySet()

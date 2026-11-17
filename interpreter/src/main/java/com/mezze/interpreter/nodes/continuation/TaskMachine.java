@@ -125,16 +125,23 @@ public final class TaskMachine {
         parksRequested++;
     }
 
-    private void checkNoneSwallowed(Task t) {
+    private void checkNoneSwallowed(Task t) { checkNoneSwallowed(t, null); }
+
+    private void checkNoneSwallowed(Task t, Throwable cause) {
         if (parksRequested == parksAbsorbed) return;
         long lost = parksRequested - parksAbsorbed;
         parksAbsorbed = parksRequested;   // report once
-        throw new MezzeGuestException(
+        if (cause != null) throw new MezzeGuestException(droppedParkMessage(lost, t), cause);
+        throw new MezzeGuestException(droppedParkMessage(lost, t));
+    }
+
+    private static String droppedParkMessage(long lost, Task t) {
+        return
             "a park was dropped on its way to the perform boundary (" + lost + " in " + t + "): the "
             + "suspension crossed a frame the runtime cannot suspend through. Today that is a callback "
             + "handed to a native — `seq::for_each`, `iter::map`, `seq::fold` and the rest (C4, resumable "
             + "natives, is not built) — or a polyglot call. Park from Mezze frames only: a `match`/`do` "
-            + "loop instead of the native HOF, or keep the callback free of the parking effect.");
+            + "loop instead of the native HOF, or keep the callback free of the parking effect.";
     }
 
     // ---------------------------------------------------------------- natives' side
@@ -196,7 +203,14 @@ public final class TaskMachine {
         try {
             Task body = new Task(nextTaskId++, null, null);
             body.owner = b;
-            absorb(b, body, callWith(bodyThunk, MezzeRecord.empty()));
+            Object first;
+            try {
+                first = callWith(bodyThunk, MezzeRecord.empty());
+            } catch (Throwable e) {
+                checkNoneSwallowed(body, e);   // the body's own first run can drop a park too
+                throw e;
+            }
+            absorb(b, body, first);
             checkNoneSwallowed(body);
             while (body.state != DONE) {
                 if (b.ready.isEmpty()) {
@@ -274,6 +288,11 @@ public final class TaskMachine {
                 t.leaf = null; t.deliver = null;
             }
         } catch (Throwable e) {
+            // A park created during this run that never reached us is the real cause
+            // of whatever broke next — typically a native treating the callback's
+            // continuation as its value (measured: ClassCastException ContinuationResult
+            // → Long). Say that, not the host exception.
+            checkNoneSwallowed(t, e);
             if (t.promise == null) throw e;          // the body's failure is the perform's
             t.state = DONE;
             t.promise.fail(e);
@@ -315,6 +334,7 @@ public final class TaskMachine {
             try {
                 cur = t.frames.pop().continueWith(cur);
             } catch (Throwable e) {
+                checkNoneSwallowed(t, e);
                 if (t.promise == null) throw e;
                 t.state = DONE;
                 t.promise.fail(e);

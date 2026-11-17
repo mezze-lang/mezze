@@ -1229,7 +1229,7 @@ class TypedASTCompiler(
                 HandleIR(
                     compilePerformBody(expr, src),
                     expr.handlers.map { h ->
-                        if (h.contCapable) parkLedger.noteContCapable(h.effectHash, h.performerName, h.loc)
+                        if (h.contCapable) parkLedger.noteContCapable(h)
                         HandlerBindIR(h.performerHash, h.effectHash, h.performerName, h.params?.let { compileExpr(it) }, h.isScoped, contCapable = h.contCapable)
                     },
                     src,

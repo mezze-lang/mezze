@@ -745,13 +745,31 @@ family; the C4 gap). Two detectors, front door and backstop:
   the static rule cannot see). `cont.park` with no boundary at all — top level,
   comptime, a native or polyglot frame — is an error at the park.
 
-Exposed by the rule, and the stdlib's to fix before `EventLoop` is general: the
-async helpers themselves loop with native HOFs over `Async` callbacks —
-`seq::map { f = { x } -> await { p = x } }` (`await_all`, `join`), `seq::for_each`
-with `cancel` (`race`), `seq::any`/`find` over `is_done` predicates. Under
-`LoomAsync` they are fine; under `EventLoop` each would park through a native and
-hit the backstop. Rewrite them as Mezze loops (`iter`/recursion), which also makes
-them suspendable for free.
+Refined the same day after a CLI probe of the three common spellings:
+
+- **Op-granular.** The first cut flagged `seq::map { f = { x } -> Async.spawn … }`
+  — `spawn` is an op of `Async`, but `EventLoop`'s `spawn` never parks. The rule now
+  carries the performer's `contOps` (the ops whose bodies mention `cont` — the only
+  places a park can originate, since `cont` is V0702 anywhere else) and the
+  callback's reach at `(effect, op)` granularity: a `TypedPerformOp` names its op, a
+  forwarder (`await { p }` = `Async.await { p }`) is looked into through its lowered
+  `PerformOpIR`, any other effectful call counts as "some op of that effect".
+- **The method-chain spelling** (`ps.map { f = { x } -> await … }`) is not seen by
+  V0513 — an inherent op sits between the user and the native — and the native
+  stores the continuation IN ITS RESULT, so the first thing to break was a raw
+  `ClassCastException: ContinuationResult cannot be cast to Long` reaching the user.
+  The machine now diagnoses a host exception raised during a run with an
+  unabsorbed park as the dropped park (the exception kept as cause). Seeing through
+  inherent wrappers statically is the obvious next step for V0513.
+- **`mez check` does not lower** ("Checking needs types, not IR"), so V0513 shows in
+  `build`/`dev` only. Making it a `check` error needs the native-wrapper fact at the
+  type level (a flag on the export entry, set when the stdlib compiles) — a decision
+  for the author, since `check`'s no-lowering rule is deliberate.
+
+BUG 65 (FIXED the same day): the async helpers themselves looped with native HOFs
+over `await`/`cancel` — `race`, `all`, `try_all`, `try_any`, the bounded drain. They
+go through `each_parking`/`map_parking` (plain recursion) now; `all`/`race` are
+asserted under `EventLoop`.
 
 Stated limitations, each a later slice's subject: tasks run under the DRIVING
 boundary's handler chain (Phase B lifts it); a `WaitNamed` set is accepted and

@@ -328,7 +328,12 @@ data class TypedHandlerRef(
     val isScoped: Boolean = false,
     /** The performer's op bodies mention `cont`: a perform over it may park, so
      *  its body is compiled as its own root and driven at the boundary. */
-    val contCapable: Boolean = false
+    val contCapable: Boolean = false,
+    /** The ops whose bodies mention `cont` — the only places a park can originate
+     *  (`cont` is V0702 anywhere else). `spawn` on a scheduler is typically not one. */
+    val contOps: Set<String> = emptySet(),
+    /** For diagnostics: the effect's local name beside its hash. */
+    val effectName: String = "",
 )
 
 // TypedAbilityCall REMOVED — ability calls become TypedCall with BindingRef.ByHash.
