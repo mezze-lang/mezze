@@ -36,6 +36,7 @@ fun detectScopedEffectMembers(operations: List<ParsedPerformerOp>): ScopedEffect
         when (operation.name) {
             ScopedEffectConstants.INITIALIZE_SCOPE -> initializeScope = operation
             ScopedEffectConstants.FINALIZE_SCOPE -> finalizeScope = operation
+            ScopedEffectConstants.DRIVE -> {}   // the scheduler's selector: impl-only, not an op
             else -> regularOperations.add(operation)
         }
     }

@@ -6039,18 +6039,13 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
-     * Continuations, C3: the perform BOUNDARY's driver. Wraps the call of a
-     * cont-capable perform's body thunk. A plain value passes through. A
-     * continuation is driven with an explicit STACK — a nested suspension is a
-     * continuation whose yielded value is itself a continuation, and the flat
-     * loop in {@code YieldDriver} hands that inner continuation to the dispatcher
-     * as if it were an op record (measured, {@code BdslSuspendPropagationTest}).
-     *
-     * <p>Policy is deliberately absent at this stage: a park is answered at once
-     * with {@code ParkReady { which = 0 }}. That is the first slice — it proves
-     * suspension, propagation through every non-tail frame and resumption at the
-     * park site, in real compiled code. The scheduler (`drive`, wait sets, the
-     * task machine) replaces this one line.
+     * The perform BOUNDARY of a cont-capable handler. The body is its own root; when
+     * it suspends, this is the frame that catches the continuation — inside the
+     * handler pushes, so a resumed op body still dispatches against this perform's
+     * chain — and hands it to the context's {@link
+     * com.mezze.interpreter.nodes.continuation.TaskMachine}, which drives every task
+     * (the body and whatever it spawned) until the body is done. A body that never
+     * suspends costs one type test.
      */
     @Operation
     public static final class DriveParked {
@@ -6058,34 +6053,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
         public static Object doDrive(Object value) {
             if (!(value instanceof com.oracle.truffle.api.bytecode.ContinuationResult)) return value;
-            java.util.ArrayDeque<com.oracle.truffle.api.bytecode.ContinuationResult> waiting = new java.util.ArrayDeque<>();
-            Object cur = value;
-            while (true) {
-                if (cur instanceof com.oracle.truffle.api.bytecode.ContinuationResult cr) {
-                    Object yielded = cr.getResult();
-                    if (yielded instanceof com.oracle.truffle.api.bytecode.ContinuationResult nested) {
-                        waiting.push(cr);          // this frame waits for the inner one
-                        cur = nested;
-                        continue;
-                    }
-                    if (yielded instanceof com.mezze.interpreter.nodes.continuation.ParkRequest) {
-                        cur = cr.continueWith(parkReady(0));
-                        continue;
-                    }
-                    throw new IllegalStateException(
-                        "a root yielded something that is neither a nested continuation nor a park request: "
-                        + (yielded == null ? "null" : yielded.getClass().getName()));
-                }
-                if (waiting.isEmpty()) return cur;
-                cur = waiting.pop().continueWith(cur);   // hand the value outward
-            }
-        }
-
-        private static Object parkReady(long which) {
-            var registry = com.mezze.interpreter.values.MezzeVariant.TagRegistry.getGlobal();
-            int tag = registry.getOrCreateTag("ParkReady");
-            var rec = com.mezze.interpreter.values.MezzeRecord.fromFields(new String[]{"which"}, new Object[]{which});
-            return com.mezze.interpreter.values.MezzeVariant.singlePayload(registry, tag, rec);
+            return com.mezze.interpreter.runtime.MezzeContext.get(null).taskMachine().driveBoundary(
+                value, com.mezze.interpreter.nodes.continuation.HandlerChainRegistry.topHandler());
         }
     }
 

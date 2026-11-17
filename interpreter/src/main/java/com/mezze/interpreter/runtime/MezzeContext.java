@@ -184,6 +184,22 @@ public final class MezzeContext {
     private volatile Object parser;
     private volatile Object typeChecker;
 
+    // The task machine of continuations-and-swappable-async — per CONTEXT, not per
+    // scheduler scope: any performer may park (a Time performer parks a task the
+    // Async machine owns), so it has to be reachable from every one of them.
+    private volatile com.mezze.interpreter.nodes.continuation.TaskMachine taskMachine;
+
+    public com.mezze.interpreter.nodes.continuation.TaskMachine taskMachine() {
+        var m = taskMachine;
+        if (m == null) {
+            synchronized (this) {
+                m = taskMachine;
+                if (m == null) taskMachine = m = new com.mezze.interpreter.nodes.continuation.TaskMachine();
+            }
+        }
+        return m;
+    }
+
     public MezzeContext(MezzeLanguage language, Env env) {
         this.language = language;
         this.env = env;

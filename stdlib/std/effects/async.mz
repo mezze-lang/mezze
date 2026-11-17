@@ -310,6 +310,69 @@ pub newtype PromiseId = Int
 pub newtype TaskId = Int
 pub newtype WaitSetId = Int
 
+## The task machine's handles. `RunQueue` is what a performer's `drive` selector
+## receives — an opaque O(1) view of the ready set, never a materialised list —
+## and `Task` is what it returns. Both are runtime-owned; Mezze only names them.
+pub newtype RunQueue = __NativeRunQueue
+pub newtype Task = __NativeTask
+
+pub let runq_first: { q: RunQueue } -> Task = { q } -> __native_runq_first { q = q }
+pub let runq_last: { q: RunQueue } -> Task = { q } -> __native_runq_last { q = q }
+pub let runq_len: { q: RunQueue } -> Int = { q } -> __native_runq_len { q = q }
+pub let runq_at: { q: RunQueue, i: Int } -> Task = { q, i } -> __native_runq_at { q = q, i = i }
+pub let task_id: { t: Task } -> TaskId = { t } -> __native_task_id { t = t }
+
+impl RunQueue where {
+  first = { it } -> runq_first { q = it },
+  last = { it } -> runq_last { q = it },
+  len = { it } -> runq_len { q = it },
+  at = { it, i } -> runq_at { q = it, i = i },
+}
+
+impl Task where {
+  id = { it } -> task_id { t = it },
+}
+
+## A promise's identity as the machine knows it, for `OnPromises`.
+pub let promise_id: { p: Promise 'a } -> PromiseId = { p } -> __native_promise_id { p = p }
+
+## L1 mechanism: register `f {}` as a task of the machine. Its promise settles when
+## the task finishes. A userland scheduler's `spawn` is this plus its own policy.
+pub let spawn_task: { f: {} -> 'a <...> } -> Promise 'a = { f } -> __native_task_spawn { f = f }
+
+## The settled half of `await`: read a promise that is known to have settled.
+pub let settled_result: { p: Promise 'a } -> Result 'a AsyncError = { p } -> match inspect { p = p } is
+  PromiseCompleted { val } -> Ok { val = val }
+  PromiseFailed { err } -> Err { error = err }
+  PromisePending -> Err { error = AsyncFailed { msg = "woken for a promise that is still pending" } }
+
+## A single-threaded cooperative scheduler, written against the machine with no
+## native of its own but `spawn_task`: tasks run on the calling thread, a task
+## gives the loop a turn only at `await`, `yield_now`, `park` and `park_until`,
+## and the order is FIFO (no `drive`). `park_until`'s deadline waits for the
+## `Time` integration — today it parks on the predicate alone.
+impl Async for EventLoop where {
+  initialize_scope = {} -> {},
+  finalize_scope = {} -> {},
+  spawn = { f } -> spawn_task { f = f },
+  await = { p } -> match inspect { p = p } is
+    PromiseCompleted { val } -> Ok { val = val }
+    PromiseFailed { err } -> Err { error = err }
+    PromisePending -> match cont.park { on = OnPromises { ids = [promise_id { p = p }] }, set = WaitDefault } is
+      ParkReady { which } -> settled_result { p = p }
+      ParkCancelled { reason } -> Err { error = AsyncCancelled { reason = reason } },
+  cancel = { p, reason } -> __native_promise_cancel { p = p, reason = reason },
+  yield_now = {} -> match cont.park { on = OnPredicates { fs = [{} -> True] }, set = WaitDefault } is
+    ParkReady { which } -> {}
+    ParkCancelled { reason } -> {},
+  park = { predicate } -> match cont.park { on = OnPredicates { fs = [predicate] }, set = WaitDefault } is
+    ParkReady { which } -> {}
+    ParkCancelled { reason } -> {},
+  park_until = { predicate, ms } -> match cont.park { on = OnPredicates { fs = [predicate] }, set = WaitDefault } is
+    ParkReady { which } -> True
+    ParkCancelled { reason } -> False,
+}
+
 ## How `scoped_with` decides when to stop waiting for its children.
 ##
 ## - `OnFailure`    — wait for everyone; bail early on the first failure

@@ -53,7 +53,7 @@ object EffectHandlerBindings {
         return context.extendMono(ScopedEffectConstants.CONT, contType)
     }
 
-    private fun stdlibType(name: String): MezzeType? =
+    internal fun stdlibType(name: String): MezzeType? =
         com.mezze.language.typechecker.util.WellKnownTypeApp.resolveHash(name)
             ?.let { com.mezze.language.typechecker.util.WellKnownTypeApp.of(name, emptyList(), it) }
 

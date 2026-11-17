@@ -1023,8 +1023,36 @@ internal class ImplValidator(
             }
         }
 
+        // `drive` — the scheduler's selector, the third impl-only field. Typed as
+        // `{ runnable: RunQueue } -> Task` against the stdlib's handle types; it is
+        // not an op of the effect, so the loop below skips it like the scope hooks.
+        impl.operations.find { it.name == ScopedEffectConstants.DRIVE }?.let { driveOp ->
+            val lambda = driveOp.implementation as? ParsedLambda ?: throw TypeCheckError(
+                "`drive` in impl '${impl.performerName}' must be a function `{ runnable } -> …` that " +
+                    "returns one of the runnable tasks (`runnable.first {}`, `.last {}`, `.at { i }`).",
+                driveOp.loc, code = ErrorCode.T0201_TYPE_MISMATCH,
+            )
+            val runQueue = EffectHandlerBindings.stdlibType("RunQueue")
+            val task = EffectHandlerBindings.stdlibType("Task")
+            if (runQueue == null || task == null) throw TypeCheckError(
+                "`drive` needs the task machine's handle types `RunQueue` and `Task` from " +
+                    "`std::effects::async`, which this build did not load.",
+                driveOp.loc, code = ErrorCode.T0213_UNKNOWN_TYPE,
+            )
+            validateImplOperationBody(
+                lambda = lambda,
+                opName = ScopedEffectConstants.DRIVE,
+                opLoc = driveOp.loc,
+                expectedParamType = MezzeType.RecordType(mapOf(ScopedEffectConstants.DRIVE_RUNNABLE to runQueue)),
+                expectedReturnType = task,
+                baseContext = contextWithScope,
+                implLabel = "impl '${impl.performerName}'",
+                validationReason = "Scheduler drive validation",
+                recordLiteralBindings = if (scopeType != null) setOf("scope") else emptySet(),
+            )
+        }
         for (implOp in impl.operations) {
-            if (implOp.name == ScopedEffectConstants.INITIALIZE_SCOPE || implOp.name == ScopedEffectConstants.FINALIZE_SCOPE) {
+            if (ScopedEffectConstants.isScopeHook(implOp.name)) {
                 continue
             }
 

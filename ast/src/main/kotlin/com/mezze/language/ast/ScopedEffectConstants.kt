@@ -44,6 +44,14 @@ object ScopedEffectConstants {
     const val CONT = "cont"
     const val CONT_PARK = "park"
     const val CONT_ABORT = "abort"
+    /**
+     * The third impl-only field, after `initialize_scope`/`finalize_scope`: a
+     * SELECTOR the runtime calls while the perform body is parked —
+     * `drive = { runnable } -> runnable.first {}` — never a bookkeeping loop.
+     * `runnable` is an opaque O(1) view of the ready set (`RunQueue`).
+     */
+    const val DRIVE = "drive"
+    const val DRIVE_RUNNABLE = "runnable"
     /** Field name carried by `abort` and `resume` records. */
     const val VAL_FIELD = "val"
 
@@ -54,7 +62,7 @@ object ScopedEffectConstants {
      * them from a handler's op list, showing only the real operations.
      */
     fun isScopeHook(name: String): Boolean =
-        name == INITIALIZE_SCOPE || name == FINALIZE_SCOPE
+        name == INITIALIZE_SCOPE || name == FINALIZE_SCOPE || name == DRIVE
 }
 
 /**

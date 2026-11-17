@@ -3162,6 +3162,15 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_promise_await", (r, c) -> AsyncNatives.awaitOp(r));
         HANDLERS.put("__native_async_sleep", (r, c) -> AsyncNatives.sleep(r));
         HANDLERS.put("__native_async_yield_now", (r, c) -> AsyncNatives.yieldNow(r));
+        // The task machine (continuations-and-swappable-async): cooperative tasks the
+        // runtime owns, driven at a cont-capable perform boundary.
+        HANDLERS.put("__native_task_spawn", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.TaskNatives.spawn(r));
+        HANDLERS.put("__native_promise_id", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.TaskNatives.promiseId(r));
+        HANDLERS.put("__native_runq_first", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.TaskNatives.runqFirst(r));
+        HANDLERS.put("__native_runq_last", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.TaskNatives.runqLast(r));
+        HANDLERS.put("__native_runq_len", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.TaskNatives.runqLen(r));
+        HANDLERS.put("__native_runq_at", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.TaskNatives.runqAt(r));
+        HANDLERS.put("__native_task_id", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.TaskNatives.taskId(r));
         HANDLERS.put("__native_async_park_until", (r, c) -> AsyncNatives.parkUntil(r, c));
         HANDLERS.put("__native_async_park_until_deadline", (r, c) -> AsyncNatives.parkUntilDeadline(r, c));
         HANDLERS.put("__native_async_scope_cancel_all", (r, c) -> AsyncNatives.scopeCancelAll(r));

@@ -652,6 +652,42 @@ order. Pieces, each where the design said:
   and specced (`PerformerBodySolveErrorsSpecTest`); the stdlib's 957 impl ops
   all still check under the honest rule.
 
+**D1 — the task machine, `drive`, and a scheduler written in Mezze. LANDED
+2026-11-17.** `EventLoopSchedulerTest`, all on ONE thread, interleavings asserted
+as strings: `EventLoop` (stdlib, FIFO) runs two yielding workers `a1 b1 a2 b2 a3
+b3`; a userland performer with `drive = { runnable } -> runnable.last {}` — no
+native of its own — runs the same program `b1 b2 b3 a1 a2 a3`; `await` parks and
+resumes with the value through a nested await (42); `park { predicate }` wakes on
+another task's progress; nothing runnable + nothing that can wake is a DEADLOCK
+error naming the tasks and what they wait on, and an EMPTY wait set is one.
+
+- `TaskMachine` lives on the `MezzeContext` (risk 1 settled as the design said:
+  any performer may park, so the machine is reachable from all of them). A task's
+  suspension is a STACK of continuations (C3); resume = `leaf.continueWith(outcome)`
+  then hand values outward until a frame suspends again or the task is done.
+  Delivery is never re-entrant (open rule 1): a run returns when the task next
+  suspends; the loop is flat.
+- `drive` is the third impl-only field (`ScopedEffectConstants.DRIVE`; typed
+  `{ runnable: RunQueue } -> Task`, `DriveFieldSpecTest`), a SELECTOR over an
+  opaque O(1) view (`RunQueue.first/last/len/at`). No `drive` = FIFO. A selector
+  that returns anything but a runnable task is an error.
+- L1 mechanism in `std::effects::async`: `spawn_task` (the ONE native a scheduler
+  needs), `promise_id`, `settled_result`, the `RunQueue`/`Task` handles. The
+  `EventLoop` performer is otherwise plain Mezze: `await` = `cont.park` on
+  `OnPromises`, `yield_now` = park on `[{} -> True]`, `park` = park on the
+  predicate.
+- Wakes are a scan of parked tasks after every run (registered O(1) wake is an
+  optimisation over this, same semantics). A promise settling on another thread
+  (Loom-backed) is waited for; only "no external promise pending" is a deadlock.
+
+Stated limitations, each the next slice's subject: tasks run under the DRIVING
+boundary's handler chain (Phase B lifts it); leftover tasks at boundary exit are
+not yet drained or cancelled (scope teardown, next); `park_until` parks on the
+predicate alone until `Time` lands; a `WaitNamed` set is accepted and ignored.
+Measured gotchas: `Mut` is hermetic and cannot share a row with `Async`, so the
+tests log through Console; the test harness evaluates the module's top-level
+expression and never calls `main`.
+
 What C2 said before it landed, kept for the reasoning:
 `BdslSuspendPropagationTest`: with the caller yielding the callee's
 `ContinuationResult` onward, `outer(x) = inner(x) + 100` over

@@ -16,8 +16,10 @@ import org.junit.jupiter.api.Test
  * frame received the inner continuation AS A NUMBER. Here `inner` adds 1 and
  * `outer` adds 100 AFTER their calls, so both tails must run for 108.
  *
- * Scheduling policy is absent on purpose (every park is answered at once with
- * `ParkReady { which = 0 }`); this test is about the mechanism.
+ * The park's predicate is `{} -> True`, so the machine answers it on its next
+ * turn; this test is about the mechanism, not policy. (An EMPTY wait set,
+ * `fs = []`, is unsatisfiable and is a deadlock — asserted in
+ * `EventLoopSchedulerTest`.)
  */
 class ContParkPropagationTest {
 
@@ -35,7 +37,7 @@ class ContParkPropagationTest {
         impl Wait for Parker where {
           initialize_scope = {} -> {},
           finalize_scope = {} -> {},
-          wait = {} -> match cont.park { on = OnPredicates { fs = [] }, set = WaitDefault } is
+          wait = {} -> match cont.park { on = OnPredicates { fs = [{} -> True] }, set = WaitDefault } is
             ParkReady { which } -> 7 + which
             ParkCancelled { reason } -> 0 - 1,
         }

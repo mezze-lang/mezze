@@ -465,6 +465,14 @@ public final class HandlerChainRegistry {
      * the slot. No scope cleanup, no return value. Used by BDSL
      * PopHandlerChainSimple @Operation.
      */
+    /** The innermost handler record on this thread's chain, or null. The perform
+     *  boundary reads its performer's `drive` from it. */
+    @TruffleBoundary
+    public static MezzeRecord topHandler() {
+        EffectState s = STATE.get();
+        return s.depth == 0 ? null : s.handlers[s.depth - 1];
+    }
+
     @TruffleBoundary
     public static void popSimple() {
         EffectState s = STATE.get();
