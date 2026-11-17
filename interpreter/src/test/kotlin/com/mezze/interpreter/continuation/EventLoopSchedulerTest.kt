@@ -231,19 +231,23 @@ class EventLoopSchedulerTest {
         """)),
     )
 
-    /** C4 is not built: a park inside a native HOF's callback cannot be resumed. Until
-     *  it is, it must FAIL, not drop the rest of the callback (measured: `after 1`
-     *  never printed, the program finished "normally"). */
+    /** C4 is not built: a park inside a native HOF's callback cannot be resumed. The
+     *  direct spelling is V0513 at compile time (`ParkThroughNativeSpecTest`); this
+     *  reaches the native through a function VALUE, which the static rule cannot see,
+     *  so the runtime detector must FAIL loudly instead of dropping the rest of the
+     *  callback (measured before it: `after` never printed, the program finished). */
     @Test
     fun `a park inside a native callback is a loud error, not a dropped continuation`() {
         val e = assertThrows(Exception::class.java) {
             lines(program(imports, """
                 use std::collections::seq
+                let each = { xs, f } -> seq::for_each { xs = xs, f = f }
+                let via = { g } -> g { xs = [1, 2], f = { x } -> do
+                  println { msg = "before" }
+                  yield_now {}
+                  println { msg = "after" } }
                 perform Console, SystemTime, EventLoop in do
-                  seq::for_each { xs = [1, 2], f = { x } -> do
-                    println { msg = "before" }
-                    yield_now {}
-                    println { msg = "after" } }
+                  via { g = each }
                   println { msg = "done" }
             """))
         }

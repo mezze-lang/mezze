@@ -286,7 +286,10 @@ class EmitFileSizeRatchetTest {
             // The threading has to sit at the emit sites; the rule lives in its own file.
             // 5060 -> 5061: C2 — `HandleIR` now carries `bodyIsThunk`; the perform-body
             // compile itself went to SuspendSites.kt, this one line is the field.
-            C + "TypedASTCompiler.kt" to 5061,   // was 5,580 before the split
+            // 5061 -> 5066: V0513 — three lines at the emit sites (the ledger field, the
+            // per-call note, the per-handler note) and the check at the end; the rule and
+            // its scope live in ParkThroughNative.kt.
+            C + "TypedASTCompiler.kt" to 5066,   // was 5,580 before the split
             // +42 for `contextRowWithBodyAssocTypes`: an INLINE lambda was stamped
             // with the row from the pushed CONTEXT, so a callback's associated
             // type was the CALLEE's variable rather than what the body threw, and

@@ -8220,3 +8220,13 @@ there. Found through `cont.park { on = … }` (no `set`) type-checking. Fix: rep
 the first failure with its own code; the single provisional shape is BUG 54's —
 an `AbilityRequired` whose type ARGUMENT is still open. Spec:
 `PerformerBodySolveErrorsSpecTest`, `ContBindingSpecTest`.
+
+## BUG 65 — OPEN (stdlib): the async helpers loop with native HOFs over `Async` callbacks
+
+`await_all`/`join` (`seq::map { f = { x } -> await { p = x } }`), `race`
+(`seq::for_each` with `cancel`), `seq::any`/`find` over `is_done` in
+`std/effects/async.mz`. Fine under `LoomAsync`; under `EventLoop` each parks
+through a native frame and trips the runtime detector ("a park was dropped on its
+way to the perform boundary"). V0513 catches the same shape in USER code; stdlib
+sites are excluded from it on purpose (not the user's line). Fix: rewrite these
+loops in Mezze (`iter`/recursion). Found 2026-11-17 by V0513's first run.

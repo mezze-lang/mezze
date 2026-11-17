@@ -151,6 +151,7 @@ enum class ErrorCode {
     V0511_SCOPED_HANDLER_ESCAPES,
     /** The manifest's entry is missing, not a function, takes parameters, or returns non-`{}`. */
     V0512_ENTRY_SIGNATURE,
+    V0513_PARK_THROUGH_NATIVE, // a callback that may park is handed to a native that cannot be suspended through
 
     // ─── Validator: patterns (V06xx) ─────────────────────────────────────
     V0601_NON_EXHAUSTIVE_MATCH,

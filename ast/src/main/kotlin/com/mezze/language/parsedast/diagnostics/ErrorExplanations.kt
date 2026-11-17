@@ -852,6 +852,17 @@ fun ErrorCode.explain(): String = when (this) {
         "type `{} -> {} <*>`: no parameters, returns `{}`, and handles every effect it performs " +
         "(that last part is V0501). A program's result is what it does, not what it returns."
 
+    ErrorCode.V0513_PARK_THROUGH_NATIVE -> """
+        A callback that performs an effect a cont-capable performer (one that mentions
+        `cont`, such as `EventLoop`) may PARK on was handed to a native function that
+        runs it synchronously — `seq::for_each`, `iter::map`, `seq::fold` and the rest.
+        A native frame cannot be suspended through, so a park inside the callback
+        would be lost along with the rest of the callback. Until natives are
+        resumable (C4 of the continuations design), run the loop in Mezze — a
+        `match`, recursion, or `iter` — or keep the callback free of that effect.
+        The same program compiles under a performer that never parks (`LoomAsync`).
+    """.trimIndent()
+
     ErrorCode.I0001_UNKNOWN_TYPECHECK_FAILURE ->
         "An unexpected internal error occurred during type checking. " +
         "This is a compiler bug — please report it."

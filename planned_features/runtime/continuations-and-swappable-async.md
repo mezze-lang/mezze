@@ -466,7 +466,11 @@ Expect churn. And `EmitFileSizeRatchetTest` trips on `TypedAstBuilder.kt` /
 ### 7. Three places where a park is impossible and must fail LOUDLY
 
 - the **module top-level body**, which is not BDSL-compiled (`__entry__` still
-  uses the AST path), so a top-level `perform` cannot park;
+  uses the AST path), so a top-level `perform` cannot park; **moot in a build
+  (verified 2026-11-17): a bare top-level expression is already V0710** — "wrap it
+  in a function and use that as the entry point" — so no program the CLI accepts
+  can reach this. The test harness evaluates top-level expressions, and there the
+  boundary runs through BDSL (every scheduler test is written that way);
 - **comptime**, where `perform ComptimeEvalCodebase` runs at compile time;
 - **across a polyglot boundary**, where a Mezze callback invoked from JS or
   Python sits under foreign frames that cannot be suspended.
@@ -717,6 +721,37 @@ Console, SystemTime, EventLoop` is clean, and `LoomAsync` carries no obligation.
 With `MockTime` the whole run is deterministic: a task advances the clock, the
 waiter times out (`advanced, timed-out=False`). Rule 5 (stale resumers) is moot in
 this machine: a task has exactly one leaf continuation and the machine holds it.
+
+**D4 — a park that cannot reach its boundary is an ERROR, twice over. LANDED
+2026-11-17.** Measured first: `seq::for_each { f = { x } -> yield_now {} }` under
+`EventLoop` printed `before 1, before 2, done` — the native received the callback's
+continuation as a value and the rest of the callback was silently lost (risk 7's
+family; the C4 gap). Two detectors, front door and backstop:
+
+- **V0513 at compile time** (`ParkThroughNativeSpecTest`), decided from TYPES, not
+  names: the callee is a native wrapper (its lowered body is a `CallNativeIR`); it
+  RUNS the callback during the call — the callback parameter's row variable is the
+  callee's own (`for_each: { …, f: … <ρ> } -> {} <ρ>`; `spawn_task: { f: … <ρ> } ->
+  Promise 'a` does not share it, so a deferred callback is never flagged); and the
+  callback's body performs an effect this compile unit installs a cont-capable
+  performer for. Under `LoomAsync` the same program compiles. The callback's effects
+  are read from its BODY — a lambda literal's row lives on the enclosing function,
+  its own `FunctionType` carries none. Scope: the primary module's own call sites
+  against its own performers (the compiler instance is shared across modules and
+  carries imports as `additionalModules` under file paths).
+- **The runtime backstop**: the machine counts park requests created against parks
+  absorbed at a boundary and reports any gap after every run, naming the cause and
+  the fix (`EventLoopSchedulerTest`, reaching the native through a function value
+  the static rule cannot see). `cont.park` with no boundary at all — top level,
+  comptime, a native or polyglot frame — is an error at the park.
+
+Exposed by the rule, and the stdlib's to fix before `EventLoop` is general: the
+async helpers themselves loop with native HOFs over `Async` callbacks —
+`seq::map { f = { x } -> await { p = x } }` (`await_all`, `join`), `seq::for_each`
+with `cancel` (`race`), `seq::any`/`find` over `is_done` predicates. Under
+`LoomAsync` they are fine; under `EventLoop` each would park through a native and
+hit the backstop. Rewrite them as Mezze loops (`iter`/recursion), which also makes
+them suspendable for free.
 
 Stated limitations, each a later slice's subject: tasks run under the DRIVING
 boundary's handler chain (Phase B lifts it); a `WaitNamed` set is accepted and
