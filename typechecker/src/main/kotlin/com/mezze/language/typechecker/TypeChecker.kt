@@ -932,17 +932,36 @@ class TypeChecker(
                     performFullyDischarged = aggregated.performFullyDischarged,
                     performBodyFnRow = aggregated.performBodyFnRow,
                 )
-                val emitResult = PhaseTiming.phase(currentModulePath, "emit") { emitTypedModuleAndLower(
-                    parsedModule = parsedModule, module = module,
-                    solved = solvedModule,
-                    constraintResults = globallyResolvedConstraintResults,
-                    context = context, buildResult = buildResult,
-                    importContext = importContext, registry = registry,
-                    solver = solver, loadedModules = loadedModules,
-                    isStdlibModule = isStdlibModule,
-                    currentModulePath = currentModulePath,
-                    identityNames = identityNames,
-                ) }
+                val emitResult = try {
+                    PhaseTiming.phase(currentModulePath, "emit") { emitTypedModuleAndLower(
+                        parsedModule = parsedModule, module = module,
+                        solved = solvedModule,
+                        constraintResults = globallyResolvedConstraintResults,
+                        context = context, buildResult = buildResult,
+                        importContext = importContext, registry = registry,
+                        solver = solver, loadedModules = loadedModules,
+                        isStdlibModule = isStdlibModule,
+                        currentModulePath = currentModulePath,
+                        identityNames = identityNames,
+                    ) }
+                } catch (e: com.mezze.language.typechecker.TypeCheckError) {
+                    // An emit DIAGNOSTIC on a module the solver already rejected is
+                    // downstream of those errors — the same reasoning as the
+                    // `internalFailure` decision below, applied to a diagnostic. A
+                    // failed `use_a {x = MkB}` (B implements a different, same-named
+                    // `Show`) leaves `go` with an unanchored `with Show 'a`; emit's
+                    // T0215 then threw first and replaced "does not implement" — the
+                    // cause — with a consequence of it.
+                    if (collectedErrors.isEmpty()) throw e
+                    val seen = mutableSetOf<Pair<Loc?, String>>()
+                    return TypeCheckResult.Failure(
+                        errors = collapseInherentMethodErrors(collectedErrors)
+                            .filter { err -> seen.add(err.loc to err.message) },
+                        typedModule = null,
+                        expectedTypeAt = aggregated.expectedTypeAt,
+                        importContext = importContext,
+                    )
+                }
 
                 // S4.2 (#362): effect-conservation invariant — the emitted
                 // function-type effect row must be ⊇ the effects the body

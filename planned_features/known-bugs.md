@@ -7556,7 +7556,34 @@ rewritten to assert the rejection.
 spell an id type. That was only true because I had tested `type` and not
 `newtype`.)
 
-## BUG 48 — OPEN: the undetermined-class-param check fires only where an ANNOTATION exists
+## BUG 48 — FIXED 2026-11-17: the undetermined-class-param check fires only where an ANNOTATION exists
+
+### Fix, and why the three attempts below missed it
+
+The emit-time check (`TypedAstBuilder.judgeDictDemands`) was right and at the
+right site all along. A lambda's frame marks type variables VISIBLE (a caller can
+supply their dictionary); the fill added every `with` clause's variables, and
+`collectFreeTypeVars` on a `FunctionType` ALSO walks its own `abilityConstraints`.
+So a PHANTOM constraint — `{} -> Int with Tag 'a`, `'a` in neither params nor
+result, exactly what `let f = {} -> Tag.tag {…}` generalizes to — anchored
+itself, and the demand looked caller-supplied.
+
+Now the signature's variables are read with its own constraints stripped, and a
+constraint's variables count only when it shares one with that set. This is the
+one place Mezze is STRICTER than Rust, deliberately: Rust can still call such a
+function as `f::<Light>()`; Mezze has no turbofish, so no caller can name `'a`.
+
+Second change, same commit: emit runs BEFORE the solver's collected errors are
+reported, so an emit diagnostic replaced the root cause. It is now dropped when
+collected errors exist (the reasoning the `internalFailure` decision already
+states). That restored "does not implement" in
+`AbilityIdentityCrossModuleTest` and turned `QualifiedAbilityCallSpecTest`'s
+recorded-as-worth-improving T0215 into the real T0201 on `'msg`.
+
+Claim un-disabled: `AbilityEffectSpecClaimsTest` `a call in an UNANNOTATED binding
+is refused too`. Gates: typechecker 5435/0, interpreter 8165/0.
+
+### Original entry
 
 Found 2026-11-17 by the ability/effect spec sweep. Rescoped TWICE; this is the
 measured shape, and the rule that settles it is Rust's.

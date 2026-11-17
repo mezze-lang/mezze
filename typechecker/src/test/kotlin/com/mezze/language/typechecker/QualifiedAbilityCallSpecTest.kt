@@ -62,12 +62,12 @@ class QualifiedAbilityCallSpecTest : VariantSpecBase() {
             pub let p: Light = Receives.receive { target = Red, msg = 5 }
             $MAIN
             """,
-            "T0215",
+            "T0201",
             "`'msg = LightMsg` for this impl, and `5` is an Int. This was ACCEPTED. " +
-                "The code is T0215 rather than T0201 because the mismatch breaks the " +
-                "solve before the receiver binds, so the undetermined-type check " +
-                "reports first — the REFUSAL is the point here, and the message is " +
-                "recorded as worth improving.",
+                "It was then refused as T0215, because the mismatch broke the solve " +
+                "and emit's undetermined-type check threw first; that is now a " +
+                "cascade the root cause outranks, so the diagnostic is the real one: " +
+                "a type mismatch on the associated type `'msg`.",
         )
     }
 

@@ -299,7 +299,15 @@ class EmitFileSizeRatchetTest {
             // an argument is not a receiver, so a parameter mentioning the type
             // chooses no impl. The file was EXACTLY at its bound, so the honest
             // choice was this or a worse message, and the subject belongs here.
-            E + "TypedAstBuilder.kt" to 2400,    // was 3,107
+            // 2400 -> 2414: BUG 48. A `with` clause made its variables visible
+            // to the caller-supplied-dictionary check even when it was PHANTOM —
+            // `{} -> Int with Tag 'a`, `'a` in neither params nor result, which is
+            // what an unannotated `let f = {} -> Tag.tag {…}` generalizes to — so
+            // the call reached DictFallbackRootNode at run time. Mezze has no
+            // turbofish, so no caller can name such an `'a`. The rule (count a
+            // constraint's vars only when it is anchored to the signature) has to
+            // live where the frame's visible set is filled, which is here.
+            E + "TypedAstBuilder.kt" to 2414,    // was 3,107
         )
 
         val SPLIT_OUT = listOf(

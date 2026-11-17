@@ -65,7 +65,6 @@ class AbilityEffectSpecClaimsTest : AbilityEffectSpecBase() {
         }
 
         @Test
-        @org.junit.jupiter.api.Disabled("BUG 48 — the obligation never reaches the check here")
         fun `a call in an UNANNOTATED binding is refused too`() {
             // The annotated form above IS refused today. This one is not: the
             // check iterates the BINDING's `fnType.abilityConstraints`, and for a

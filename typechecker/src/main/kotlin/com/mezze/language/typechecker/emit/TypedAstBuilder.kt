@@ -1327,10 +1327,27 @@ class TypedAstBuilder(
 
                 val captures = collectCaptures(body, params.map { it.name }.toSet())
 
-                for (t in listOfNotNull(appliedCtx, substitution.apply(funcType)) + params.map { substitution.apply(it.type) }) {
-                    collectFreeTypeVars(t).mapTo(frame.visible) { it.id }
+                val sigTypes = listOfNotNull(appliedCtx, substitution.apply(funcType)) + params.map { substitution.apply(it.type) }
+                // `collectFreeTypeVars` on a FunctionType also walks its OWN
+                // `abilityConstraints`, so the signature's variables are read with
+                // those stripped — otherwise a phantom constraint anchors itself.
+                for (t in sigTypes) {
+                    val sig = if (t is MezzeType.FunctionType) t.copy(abilityConstraints = emptyList()) else t
+                    collectFreeTypeVars(sig).mapTo(frame.visible) { it.id }
+                }
+                // BUG 48: a `with` clause makes its variables visible only when it is
+                // ANCHORED to the signature — shares a variable with a parameter or
+                // the result. A PHANTOM constraint, `{} -> Int with Tag 'a` with `'a`
+                // nowhere else, is what an unannotated `let f = {} -> Tag.tag {…}`
+                // generalizes to; counting it made the demand look caller-supplied,
+                // and the call reached DictFallbackRootNode at run time. Rust can
+                // still call such a function (`f::<Light>()`); Mezze has no
+                // turbofish, so no caller can ever name `'a`.
+                val anchored = HashSet(frame.visible)
+                for (t in sigTypes) {
                     (t as? MezzeType.FunctionType)?.abilityConstraints?.forEach { c ->
-                        c.typeArgs.forEach { a -> collectFreeTypeVars(substitution.apply(a)).mapTo(frame.visible) { it.id } }
+                        val vars = c.typeArgs.flatMap { a -> collectFreeTypeVars(substitution.apply(a)) }.map { it.id }
+                        if (vars.any { it in anchored }) frame.visible.addAll(vars)
                     }
                 }
                 dictFrame = frame.parent
