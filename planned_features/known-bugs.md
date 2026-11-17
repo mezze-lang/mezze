@@ -7556,78 +7556,62 @@ rewritten to assert the rejection.
 spell an id type. That was only true because I had tested `type` and not
 `newtype`.)
 
-## BUG 48 — OPEN: an ability class param that appears NOWHERE in an op
+## BUG 48 — OPEN (RESCOPED): the sole-impl fallback crashes instead of diagnosing
 
-Found 2026-11-17 by the first file of the ability/effect spec sweep — a cell in
-the shape matrix that had never been drawn.
+Found 2026-11-17 by the ability/effect spec sweep. **Rescoped after a first fix
+attempt was wrong** — see "what the shape actually means" below.
 
-    ability Mystery for 'a where {
-      conjure: { n: Int } -> Int          ## `'a` is in neither params nor result
-    }
+### The shape
 
-    type Red = { tag: Int }
-    type Blue = { hue: Int }
-    impl Mystery for Red where { conjure = { n } -> n + 100 }
-    impl Mystery for Blue where { conjure = { n } -> n + 900 }
+An operation may mention NONE of its ability's type variables:
 
-    pub let main = {} -> perform Console in do
-      let r = Mystery.conjure { n = 7 }
-      println { msg = "conjure gave $(r.to_str {})" }
+    ability Tag for 'a where { tag: { n: Int } -> Int }
 
-    Check passed: nowhere (1275.6ms)
-    Error: com.oracle.truffle.api.CompilerDirectives$ShouldNotReachHere:
-           no dictionary was supplied for ability...
+**This is deliberate.** `AbilityDeclarationSpecTest` already claims it:
 
-**Accepted at check time, then a HOST exception** — the I0004 class
-([[project_runtime_failure_host_vs_guest]]).
+> `an op mentioning the for-type nowhere is accepted` — "Nothing to be the
+> receiver and nothing claiming to be: the rule does not fire, and the impl is
+> chosen by the one Mezze already has in scope."
 
-**AND IT IS NOT ABOUT AMBIGUITY.** The first repro used two competing impls, which
-made it look like a "which one?" problem. Replace them with a SINGLE BLANKET
-impl — one candidate, zero ambiguity — and it still fails identically:
+And it is pervasive: `ability Show for 'a where { show : {} -> Str }` is a
+long-standing fixture in `FunctionAbilityConstraintTypeCheckerTest`. So dispatch
+falls back to **the sole impl in scope**.
 
-    ability Mystery for 'a where { conjure: { n: Int } -> Int }
-    impl Mystery for 'a where { conjure = { n } -> n + 100 }
-    → Check passed, then: no dictionary was supplied for ability...
+### The bug: the fallback has no failure mode
 
-So an undetermined class param means **no dictionary can be selected even when
-exactly one exists**. The defect is the signature, not the impl set.
-
-(Blanket coherence itself is sound, measured alongside: a blanket impl plus a
-concrete one is `V0407 Overlapping impl: impl Shout for Red conflicts with impl
-Shout for 'a`. Both directions are now claims in the spec suite.)
-
-### Where it should be refused
-
-T0215 already exists for "this class param is undetermined", and the memory for
-[[project_two_holes_found_in_object_design_talk]] records it firing when `'a`
-appears nowhere in an op's PARAMS. It does not fire here, and the reason is the
-third spelling that table does not cover: `'a` may legitimately appear only in
-the RESULT, because a receiverless op dispatches on the type it produces
-(`CallEmit`: "An operation that declares no receiver is dispatched by the type it
-PRODUCES"). So the rule is not "appears in the params" but **"appears somewhere
-in the op's signature"**, and the nowhere-at-all case fell between the two.
-
-Measured while writing the claim:
-
-| op signature, ability `for 'a` | verdict |
+| impls in scope | outcome |
 |---|---|
-| `conjure: { it: 'a, n: Int } -> Int` | accepted — receiver determines it |
-| `conjure: { n: Int } -> 'a` | accepted — the RESULT determines it |
-| `conjure: { n: Int } -> Int` | **accepted, and should not be** |
+| exactly ONE concrete impl | works — the specified behaviour |
+| TWO concrete impls | **checks clean, then `ShouldNotReachHere: no dictionary was supplied`** |
+| ONE BLANKET impl (`impl Tag for 'a`) | **same host crash** |
 
-Refusing at the DECLARATION would be better than at the call: the declaration is
-already unusable, and one diagnostic beats one per call site. Pinned as a
-separate claim, since declaration-time is permissive today.
+Both failing rows are the I0004 class
+([[project_runtime_failure_host_vs_guest]]): a host exception reaching a user.
+"The one in scope" stops being a unique answer and nothing says so.
+
+The blanket row is the telling one — a single candidate, zero ambiguity, and it
+still fails. So the fallback does not merely lack a tie-break; it cannot consume
+a blanket at all.
+
+### What the shape actually means, and the fix that was WRONG
+
+My first fix refused the declaration outright: an op must mention some ability
+type variable. **It broke 18 tests across four suites**, including the spec claim
+above and the `Show` fixture, and was reverted. The shape is legal; what is
+missing is a diagnostic when the fallback cannot pick.
+
+So the fix belongs at DISPATCH, not at the declaration: when an op mentions no
+ability type variable and the sole-impl fallback finds anything other than one
+concrete candidate, emit a diagnostic naming the candidates instead of reaching
+the runtime.
 
 ### Related
 
 [[project_dictionary_not_arriving_family]] — "5 bugs; CHECK FIRST on 'no
-dictionary'". This is a sixth, and the first where the dictionary is missing
-because the SIGNATURE could never have supplied one, rather than because
-plumbing dropped it.
+dictionary'". A sixth, and the first where the dictionary is absent because
+NOTHING COULD HAVE CHOSEN ONE rather than because plumbing dropped it.
 
-Claim: `AbilityEffectSpecClaimsTest.Declaration`, `@Disabled("BUG 48")` until
-fixed — the house pattern for an unmet spec claim.
+Claim: `AbilityEffectSpecClaimsTest.Declaration`, `@Disabled("BUG 48")`.
 
 ## BUG 49 — OPEN: an impl that exists in another module is reported as missing
 

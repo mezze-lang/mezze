@@ -18,35 +18,50 @@ class AbilityEffectSpecClaimsTest : AbilityEffectSpecBase() {
     inner class Declaration {
 
         @Test
-        fun `declaring an op whose class param appears nowhere is accepted`() {
-            // Permissive at the DECLARATION; the refusal comes at the call, below.
-            // Whether it should fail eagerly here instead is an open question —
-            // pinned as-is rather than asserted as a gap.
+        fun `an op mentioning none of its ability's type variables is accepted with ONE impl`() {
+            // Deliberate, and already claimed by AbilityDeclarationSpecTest:
+            // "Nothing to be the receiver and nothing claiming to be: the rule
+            // does not fire, and the impl is chosen by the one Mezze already has
+            // in scope." `ability Show for 'a where { show : {} -> Str }` is a
+            // long-standing fixture, so the shape is pervasive too.
             accepts(
                 """
-                ability Mystery for 'a where {
-                  conjure: { n: Int } -> Int
-                }
+                type Light = |
+                  LitRed {},
+                  LitGreen {},
+                |
+                ability Tag for 'a where { tag: { n: Int } -> Int }
+                impl Tag for Light where { tag = { n } -> n }
                 $MAIN
                 """,
-                "declaration-time is permissive about an undetermined class param",
+                "the sole impl in scope is the one chosen",
             )
         }
 
         @Test
-        @org.junit.jupiter.api.Disabled("BUG 48 — accepted at check time, then a host crash")
-        fun `calling an op whose class param appears nowhere is refused`() {
+        @org.junit.jupiter.api.Disabled("BUG 48 — reaches the runtime as a host crash")
+        fun `the sole-impl fallback diagnoses rather than crashing when it cannot pick`() {
+            // TWO impls, so "the one in scope" is not a unique answer. Today this
+            // checks clean and dies as `ShouldNotReachHere: no dictionary was
+            // supplied`. A single BLANKET impl fails the same way.
             rejects(
                 """
-                ability Mystery for 'a where {
-                  conjure: { n: Int } -> Int
-                }
-                pub let main = {} -> Mystery.conjure { n = 1 }
+                type Light = |
+                  LitRed {},
+                  LitGreen {},
+                |
+                type Dark = |
+                  DarkRed {},
+                  DarkGreen {},
+                |
+                ability Tag for 'a where { tag: { n: Int } -> Int }
+                impl Tag for Light where { tag = { n } -> n + 1 }
+                impl Tag for Dark where { tag = { n } -> n + 2 }
+                let use_it: {} -> Int = {} -> Tag.tag { n = 1 }
+                $MAIN
                 """,
                 "T0215",
-                "`'a` is in neither the params nor the result, so the call cannot dispatch. " +
-                    "BUG 48: accepted today, and with two competing impls it reaches the " +
-                    "runtime as `ShouldNotReachHere: no dictionary was supplied`.",
+                "two candidates and nothing to choose between them must be a diagnostic",
             )
         }
 
