@@ -7997,3 +7997,51 @@ is inherent, not abstractable.
 Tests: `interpreter/.../typing/CallbackParamMethodInferenceTest` asserts VALUES
 (Int vs Float impl, `abs`, sibling-argument pinning, unpinned refusal); all 5
 fail without the fix. Gates: typechecker 5453/0, interpreter 8170/0.
+
+## BUG 57 — FIXED 2026-11-17: a generic impl's INFERRED constraint never became a dictionary
+
+```mezze
+type Wrap 'a = { inner: 'a }
+impl Desc for Wrap 'a where { desc = { it } -> "w($(it.inner.desc {}))" }
+let w: Wrap (Wrap Int) = { inner = { inner = 3 } }
+w.desc {}          ## RuntimeException: Expected record for field 'inner', got: Long
+```
+
+Type-checks, then crashes. One level (`Wrap Int`) worked by accident. Writing
+the constraint (`desc: { it: Wrap 'a } with Desc 'a -> Str = …`) made it work,
+so it was never the dictionary machinery: only an INFERRED `with Desc 'a` was
+lost.
+
+Cause: `ImplValidator` infers an impl op's residual obligations and they were
+folded into the use-site SOLVE only (`withUpdatedImplConstraints`), so call
+sites checked them (`Wrap Str` is V0402). Emit's LAYER 1 builds an op's
+dictionary parameter from the op's WRITTEN `abilityConstraints` and never saw
+the inferred ones, so the inner dispatch had no dictionary for `'a` and ran
+Wrap's own `desc` on the Int.
+
+Fix: the validator also keeps the obligations PER OP
+(`drainInferredImplOpConstraints`; the per-impl drain merges them so the solve
+is unchanged), and `TypeChecker.withInferredImplOpConstraints` writes them onto
+the parsed impl's ops before emit, exactly as if the author had. Only the op
+whose body needs the dictionary gets one.
+
+Tests: `interpreter/.../typing/GenericImplInferredConstraintTest` asserts
+values (2 levels, 3 levels, one-op-of-two); all 3 fail without the fix with
+the crash. Gates: typechecker 5457/0, interpreter 8174/0.
+
+## BUG 58 — OPEN: a pattern-bound VARIANT payload in a generic impl loses its dictionary
+
+```mezze
+type Box 'a = | Bx { inner: 'a } |
+impl Desc for Box 'a where { desc: { it: Box 'a } with Desc 'a -> Str = { it } -> match it is
+  Bx { inner } -> "b($(inner.desc {}))" }
+let w: Box (Box Int) = Bx { inner = Bx { inner = 3 } }
+w.desc {}          ## UnsupportedSpecializationException (written) / "no variant tag matched" (inferred)
+```
+
+Fails WITH the constraint written, which separates it from BUG 57. The record
+spelling (`it.inner.desc {}`) works. Hypothesis to test first: `inner`'s type
+comes from the pattern as a variable not linked to the impl's `'a`, so the
+dispatch finds no dictionary slot and falls back to Box's own `desc`.
+Pinned, disabled: `GenericImplInferredConstraintTest` "a nested generic impl
+over a VARIANT dispatches each level too".

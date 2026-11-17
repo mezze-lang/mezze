@@ -33,6 +33,8 @@ data class ProgramConstraintResult(
     // impl content hash. TypeChecker folds these into the frozen context's
     // AbilityImplInfo.operationConstraints before the final use-site solve.
     val inferredImplConstraints: Map<Hash, List<ParsedFnAbilityConstraint>> = emptyMap(),
+    // BUG 57: the same, per impl op — emit turns these into dictionary params.
+    val inferredImplOpConstraints: Map<Hash, Map<String, List<ParsedFnAbilityConstraint>>> = emptyMap(),
     // A.1: the impl-op body solves ImplValidator used to discard. TypeChecker
     // merges their side tables and substitutions into the module's, so emit can
     // read an impl body's types instead of rebuilding them from nothing.
@@ -878,6 +880,7 @@ class ConstraintGenerator(
             perBindingSubstitution = perBindingSubstitution,
             collectedTypeCheckErrors = collectedTypeCheckErrors,
             inferredImplConstraints = implValidator.drainInferredImplConstraints(),
+            inferredImplOpConstraints = implValidator.drainInferredImplOpConstraints(),
             implOpSolutions = implValidator.drainImplOpSolutions(),
             abortPayloadVars = implValidator.drainAbortPayloadVars(),
         )

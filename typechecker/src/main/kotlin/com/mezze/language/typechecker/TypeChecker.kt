@@ -936,7 +936,10 @@ class TypeChecker(
                 )
                 val emitResult = try {
                     PhaseTiming.phase(currentModulePath, "emit") { emitTypedModuleAndLower(
-                        parsedModule = parsedModule, module = module,
+                        parsedModule = withInferredImplOpConstraints(
+                            parsedModule, programConstraintResult.inferredImplOpConstraints,
+                        ),
+                        module = module,
                         solved = solvedModule,
                         constraintResults = globallyResolvedConstraintResults,
                         context = context, buildResult = buildResult,
@@ -1860,6 +1863,35 @@ class TypeChecker(
             loaded?.typedModule?.abilityImpls.orEmpty().filterNot { it.derived }
                 .mapNotNullTo(HashSet()) { impl -> localAbilityName[impl.abilityHash] }
         }
+    }
+
+
+    /**
+     * BUG 57: an impl op's body-inferred obligations, written onto the op as if
+     * the author had (`desc = { it } -> …it.inner.desc {}…` reads as
+     * `with Desc 'a`). Emit's LAYER 1 turns a written `with` into the op's
+     * dictionary parameter; an inferred one reached only the use-site solve, so a
+     * nested `Wrap (Wrap Int)` ran Wrap's `desc` on the inner Int at run time.
+     */
+    private fun withInferredImplOpConstraints(
+        parsedModule: ParsedModule,
+        inferred: Map<Hash, Map<String, List<ParsedFnAbilityConstraint>>>,
+    ): ParsedModule {
+        if (inferred.isEmpty()) return parsedModule
+        var changed = false
+        val decls = parsedModule.decls.map { decl ->
+            val perOp = (decl as? ParsedImplAbilityDecl)?.contentHash?.let { inferred[it] } ?: return@map decl
+            decl.copy(operations = decl.operations.map { op ->
+                val extra = perOp[op.name].orEmpty().filter { c ->
+                    op.abilityConstraints.none { it.abilityName == c.abilityName && it.typeArgs == c.typeArgs }
+                }.distinct()
+                if (extra.isEmpty()) op else {
+                    changed = true
+                    op.copy(abilityConstraints = op.abilityConstraints + extra)
+                }
+            })
+        }
+        return if (changed) parsedModule.copy(decls = decls) else parsedModule
     }
 
 }

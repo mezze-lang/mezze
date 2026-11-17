@@ -50,8 +50,27 @@ internal class ImplValidator(
      */
     private val inferredImplConstraints = mutableMapOf<Hash, MutableList<ParsedFnAbilityConstraint>>()
 
+    /**
+     * BUG 57: the same obligations, kept PER OP. The per-impl list feeds the
+     * use-site solve; emit needs to know which op's body needs which dictionary,
+     * so an inferred `with Desc 'a` becomes a dictionary parameter exactly as a
+     * written one does. Without it the op got none, and a nested
+     * `Wrap (Wrap Int)` dispatched its inner `desc` to the wrong impl.
+     */
+    private val inferredImplOpConstraints = mutableMapOf<Hash, MutableMap<String, MutableList<ParsedFnAbilityConstraint>>>()
+
+    fun drainInferredImplOpConstraints(): Map<Hash, Map<String, List<ParsedFnAbilityConstraint>>> {
+        val snapshot = inferredImplOpConstraints.mapValues { (_, ops) -> ops.mapValues { it.value.toList() } }
+        inferredImplOpConstraints.clear()
+        return snapshot
+    }
+
+    /** Per impl: everything any op of it needs. Drain BEFORE the per-op map. */
     fun drainInferredImplConstraints(): Map<Hash, List<ParsedFnAbilityConstraint>> {
-        val snapshot = inferredImplConstraints.mapValues { it.value.toList() }
+        val keys = inferredImplConstraints.keys + inferredImplOpConstraints.keys
+        val snapshot = keys.associateWith { k ->
+            inferredImplConstraints[k].orEmpty() + inferredImplOpConstraints[k].orEmpty().values.flatten()
+        }
         inferredImplConstraints.clear()
         return snapshot
     }
@@ -342,6 +361,10 @@ internal class ImplValidator(
             val expectedReturnType = stampTypeHashes(substituteTypeParams(convertTypeAnnotation(declOp.returnType), typeParamSubstitution))
 
             if (implOp.implementation is ParsedLambda) {
+                val opSink: MutableList<ParsedFnAbilityConstraint>? = inferredSink?.let {
+                    inferredImplOpConstraints.getOrPut(impl.contentHash!!) { mutableMapOf() }
+                        .getOrPut(implOp.name) { mutableListOf() }
+                }
                 validateImplOperationBody(
                     lambda = implOp.implementation as ParsedLambda,
                     opName = implOp.name,
@@ -352,7 +375,7 @@ internal class ImplValidator(
                     implLabel = "ability '$abilityName'",
                     validationReason = "Ability body validation",
                     implForallVars = implForallVars,
-                    inferredSink = inferredSink,
+                    inferredSink = opSink,
                     onBodyResult = { bodyResult, _ ->
                         validateImplOpEffectContract(
                             declOp = declOp,
