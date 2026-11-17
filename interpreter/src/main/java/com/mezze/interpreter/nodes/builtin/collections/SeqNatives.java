@@ -1192,6 +1192,56 @@ public final class SeqNatives {
         return MezzeSeq.fromArray(result);
     }
 
+    /**
+     * Group by key under the KEY's own instances (BUG 50, old series): two keys a
+     * hand-written `Eq` calls equal land in one group, which a `LinkedHashMap`
+     * keyed by Java `equals` never did. First-seen key order is kept, as the
+     * structural form keeps it. Shared by the seq, list and set evidence forms;
+     * each wraps the groups in its own container. Null when there is no evidence.
+     */
+    public static java.util.List<Object[]> groupKeysWithEvidence(
+            Iterable<Object> elems, ScalarCall ctx,
+            com.oracle.truffle.api.nodes.IndirectCallNode callNode, ElementHashing hashing) {
+        java.util.ArrayList<Object[]> groups = new java.util.ArrayList<>();   // {key, ArrayList}
+        java.util.HashMap<Integer, java.util.ArrayList<Integer>> byHash = new java.util.HashMap<>();
+        for (Object elem : elems) {
+            Object key = ctx.call1(callNode, elem);
+            int h = hashing.hashOf(key);
+            java.util.ArrayList<Integer> bucket = byHash.computeIfAbsent(h, k -> new java.util.ArrayList<>());
+            Object[] found = null;
+            for (int gi : bucket) {
+                if (hashing.eq(groups.get(gi)[0], key)) { found = groups.get(gi); break; }
+            }
+            if (found == null) {
+                found = new Object[]{key, new java.util.ArrayList<Object>()};
+                bucket.add(groups.size());
+                groups.add(found);
+            }
+            @SuppressWarnings("unchecked")
+            java.util.ArrayList<Object> values = (java.util.ArrayList<Object>) found[1];
+            values.add(elem);
+        }
+        return groups;
+    }
+
+    public static MezzeSeq groupByWithEvidence(MezzeSeq seq, MezzeFunction keyFn,
+                                               MezzeFunction hashFn, MezzeFunction eqFn,
+                                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        ElementHashing hashing = ClosureHashing.of(hashFn, eqFn);
+        if (hashing == null) return groupBy(seq, keyFn, callNode);
+        var ctx = ScalarCall.prepare1(keyFn, "x");
+        java.util.ArrayList<Object> elems = new java.util.ArrayList<>(seq.size());
+        for (int i = 0; i < seq.size(); i++) elems.add(seq.get(i));
+        var groups = groupKeysWithEvidence(elems, ctx, callNode, hashing);
+        Object[] result = new Object[groups.size()];
+        for (int i = 0; i < result.length; i++) {
+            Object[] g = groups.get(i);
+            result[i] = MezzeRecord.fromFields(FIELD_KEY_VALUES,
+                new Object[]{g[0], MezzeSeq.fromArray(((java.util.ArrayList<?>) g[1]).toArray())});
+        }
+        return MezzeSeq.fromArray(result);
+    }
+
     // ==================== Enumerate/ForEach/Scan ====================
 
     @TruffleBoundary

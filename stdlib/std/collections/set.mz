@@ -251,7 +251,7 @@ pub let flat_map: { s: Set 'a, f: { val: 'a } -> Set 'b <...> } -> Set 'b <...> 
 
 ## Groups elements by a key function.
 pub let group_by
-  : { s: Set 'a, f: { val: 'a } -> 'b <...> }
+  : { s: Set 'a, f: { val: 'a } -> 'b <...> } with Eq 'b, Hash 'b
   -> List { key: 'b, values: Set 'a } <...>
   = { s, f } -> __native_set_group_by { s = s, f = f }
 

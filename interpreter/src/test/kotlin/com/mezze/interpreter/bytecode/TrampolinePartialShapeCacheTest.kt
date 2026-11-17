@@ -161,23 +161,15 @@ class TrampolinePartialShapeCacheTest {
     )
 
     /**
-     * A PRE-EXISTING DEFECT, FOUND BY THIS WORK AND NOT CAUSED BY IT: a partial
-     * application called from inside ANOTHER FUNCTION does not complete. It
-     * returns a function, and the arithmetic around it fails with "Cannot add
-     * Long and MezzeFunction".
+     * BUG 43, FIXED: a partial application called from inside ANOTHER FUNCTION
+     * returned a function instead of completing.
      *
-     * <p>It fails identically with the shape cache reverted, which is how I
-     * know whose it is. Recursion is not involved — the shape below is the
-     * minimal one, a plain lambda — and the same call AT TOP LEVEL works, which
-     * is `a partial application still works after a complete call to the same
-     * function` above. So the difference is being called through a capture.
-     *
-     * <p>Disabled rather than deleted: it is the only record of the minimal
-     * shape, and it should start passing the day the capture path merges the
-     * stored arguments before the completeness check rather than after.
+     * <p>The guess recorded here was merge order in the trampoline. It was not:
+     * `add1`'s type carries `NumAdd`, so the monomorphizer cloned the THUNK, and
+     * the call site, rewritten to the clone's hash, fell out of the compiler's
+     * non-lambda-let set (#389). It was CallDirect'ed, and a thunk ignores its
+     * argument and returns the partial again. A clone of a thunk is now a thunk.
      */
-    @org.junit.jupiter.api.Disabled(
-        "pre-existing: a captured partial application does not complete when called inside a function")
     @Test
     fun `a captured partial application completes when called inside a function`() = assertEquals(
         2L,
@@ -191,4 +183,30 @@ class TrampolinePartialShapeCacheTest {
         ),
     )
 
+    @Test
+    fun `a captured partial completes inside a recursive loop`() = assertEquals(
+        10L,
+        run(
+            """
+            let add = { a, b } -> a + b
+            let add1 = add { a = 1 }
+            let loop = { n, acc } -> if n == 0 then acc else loop { n = n - 1, acc = add1 { b = acc } }
+            loop { n = 10, acc = 0 }
+            """,
+        ),
+    )
+
+    @Test
+    fun `a two-step captured partial completes`() = assertEquals(
+        6L,
+        run(
+            """
+            let add3 = { a, b, c } -> a + b + c
+            let p1 = add3 { a = 1 }
+            let p2 = p1 { b = 2 }
+            let call = { x } -> p2 { c = x }
+            call { x = 3 }
+            """,
+        ),
+    )
 }

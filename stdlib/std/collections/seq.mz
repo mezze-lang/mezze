@@ -382,7 +382,7 @@ pub let product: { xs: [Int] } -> Int = { xs } -> __native_seq_product { xs = xs
 pub let product_float: { xs: [Float] } -> Float = { xs } -> __native_seq_product_float { xs = xs }
 
 ## Groups elements by a key function into records of {key, values}.
-pub let group_by: { xs: ['a], f: { x: 'a } -> 'k <...> } -> [{ key: 'k, values: ['a] }] <...> = { xs, f } ->
+pub let group_by: { xs: ['a], f: { x: 'a } -> 'k <...> } with Eq 'k, Hash 'k -> [{ key: 'k, values: ['a] }] <...> = { xs, f } ->
   __native_seq_group_by { xs = xs, f = f }
 
 ## Pairs each element with its index (same as zip_with_index).

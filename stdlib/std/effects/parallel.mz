@@ -201,7 +201,7 @@ pub let partition
 ## halves is O(N * K) worst case which defeats the point of parallelism
 ## unless the reduction is careful. Wraps seq::group_by; parallelism
 ## for group_by can be added later with a proper hash-merge helper.
-pub let group_by: { xs: ['a], f: { x: 'a } -> 'k <...> } -> [{ key: 'k, values: ['a] }] <Parallel, ...> = { xs, f } ->
+pub let group_by: { xs: ['a], f: { x: 'a } -> 'k <...> } with Eq 'k, Hash 'k -> [{ key: 'k, values: ['a] }] <Parallel, ...> = { xs, f } ->
   seq::group_by { xs = xs, f = f }
 
 ## Reduce with an associative operation. Empty input → None.

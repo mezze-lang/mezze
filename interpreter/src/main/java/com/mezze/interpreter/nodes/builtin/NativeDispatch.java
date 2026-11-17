@@ -811,6 +811,11 @@ public final class NativeDispatch extends MezzeNode {
         // Group By — HOF, PE-visible
         HANDLERS.put("__native_seq_group_by", (r, c) ->
             SeqNatives.groupBy(getSeq(r, "xs"), getFunction(r, "f"), c));
+        // BUG 50 (old series): the key's hand-written Eq/Hash, routed by the
+        // compiler's evidence table. The list and set forms sit beside theirs.
+        HANDLERS.put("__native_seq_group_by_with_evidence", (r, c) ->
+            SeqNatives.groupByWithEvidence(getSeq(r, "xs"), getFunction(r, "f"),
+                getFunction(r, "hash"), getFunction(r, "eq"), c));
 
         // Enumerate/ForEach/Scan
         HANDLERS.put("__native_seq_enumerate", (r, c) ->
@@ -1158,6 +1163,9 @@ public final class NativeDispatch extends MezzeNode {
         // Group By
         HANDLERS.put("__native_list_group_by", (r, c) ->
             ListNatives.groupBy(getList(r, "xs"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_list_group_by_with_evidence", (r, c) ->
+            ListNatives.groupByWithEvidence(getList(r, "xs"), getFunction(r, "f"),
+                getFunction(r, "hash"), getFunction(r, "eq"), c));
 
         // Enumerate/ForEach/Scan/ZipWithIndex
         HANDLERS.put("__native_list_enumerate", (r, c) ->
@@ -1448,6 +1456,9 @@ public final class NativeDispatch extends MezzeNode {
             SetNatives.flatMap(getSet(r, "s"), getFunction(r, "f"), c));
         HANDLERS.put("__native_set_group_by", (r, c) ->
             SetNatives.groupBy(getSet(r, "s"), getFunction(r, "f"), c));
+        HANDLERS.put("__native_set_group_by_with_evidence", (r, c) ->
+            SetNatives.groupByWithEvidence(getSet(r, "s"), getFunction(r, "f"),
+                getFunction(r, "hash"), getFunction(r, "eq"), c));
         HANDLERS.put("__native_set_symmetric_difference", (r, c) ->
             SetNatives.symmetricDifference(getSet(r, "s1"), getSet(r, "s2")));
 
@@ -1711,6 +1722,8 @@ public final class NativeDispatch extends MezzeNode {
             MapNatives.reduce(getMap(r, "m"), getFunction(r, "f"), c));
         HANDLERS.put("__native_map_group_by_value", (r, c) ->
             MapNatives.groupByValue(getMap(r, "m")));
+        HANDLERS.put("__native_map_group_by_value_with_evidence", (r, c) ->
+            MapNatives.groupByValueWithEvidence(getMap(r, "m"), getFunction(r, "hash"), getFunction(r, "eq")));
 
         // Task #29: Key operations
         HANDLERS.put("__native_map_map_keys", (r, c) ->

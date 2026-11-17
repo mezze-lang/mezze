@@ -6331,7 +6331,21 @@ existing comment in `MezzeBytecodeRootNode` that BDSL `Uncached` node paths do
 not respect `@TruffleBoundary`, which is how a similar reference reached the SVM
 blocklist before.
 
-## BUG 43 — a captured partial application never completes
+## BUG 43 — FIXED 2026-11-17: a captured partial application never completes
+
+### Fix
+
+The guess below (merge order in the trampoline) was wrong. `add1 = add { a = 1 }`
+carries `NumAdd`, so the MONOMORPHIZER cloned the thunk; the call site inside
+`call`, rewritten to the clone's hash, was no longer in the compiler's #389
+non-lambda-let set, so it was CallDirect'ed — and a thunk ignores its argument
+and hands the partial back. Top level never went through mono, which is why it
+worked there. Fix: a specialization of a thunk is registered as a thunk where
+the specs are registered (`TypedASTCompiler`). Tests un-disabled in
+`TrampolinePartialShapeCacheTest`, plus a recursive loop and a two-step partial;
+all 3 fail without the fix.
+
+### Original entry
 
 A partial application called from inside ANOTHER FUNCTION returns a function
 instead of completing. The arithmetic around it then fails with
@@ -6965,9 +6979,10 @@ and it took four minutes.
 | `deque::unique` | NOTHING | 2 | 1 | FIXED |
 | `map::invert` | NOTHING | 2 | 1 | FIXED |
 | `sorted_map::to_map` | NOTHING | 2 | 1 | FIXED |
-| `seq::group_by` | NOTHING | 2 | 1 | **OPEN** |
-| `list::group_by` | NOTHING | 2 | 1 | **OPEN** |
-| `set::group_by` | NOTHING | — | — | **OPEN** (same source shape) |
+| `seq::group_by` | NOTHING | 2 | 1 | FIXED 2026-11-17 |
+| `list::group_by` | NOTHING | 2 | 1 | FIXED 2026-11-17 |
+| `set::group_by` | NOTHING | — | — | FIXED 2026-11-17 |
+| `map::group_by_value` | NOTHING | 4 | 2 | FIXED 2026-11-17 (found by the same grep: keyed by the VALUE) |
 
 Measured with a newtype `P` whose `Eq`/`Hash` bucket by `un/10`, so `P.(10)` and
 `P.(11)` are ONE element/key. Every row above must answer 1.
@@ -7002,7 +7017,14 @@ the question and the comparator stops being it. The probe makes the two visible
 at once: the sorted map correctly still holds 2 under a deliberately finer raw
 `Ord`, and the hash map it converts to must hold 1.
 
-**`group_by` IS LEFT OPEN ON PURPOSE.** It is the same mechanical fix a fourth,
+**`group_by` FIXED 2026-11-17.** `with Eq 'k, Hash 'k` on the key (`parallel::group_by`
+wraps `seq::group_by`, so it needed the constraint too — the whole gate went red
+when it did not), four `evidenceNativeForm` rows, and one shared
+`SeqNatives.groupKeysWithEvidence` that buckets by the author's hash/eq keeping
+first-seen order; each container wraps the groups in its own shape. Tests:
+`GroupByEvidenceTest` (all four fail without the routing).
+
+The note as it stood: **`group_by` IS LEFT OPEN ON PURPOSE.** It is the same mechanical fix a fourth,
 fifth and sixth time, but it needs a keyed accumulation under the author's
 hash/eq that preserves INSERTION ORDER (what `LinkedHashMap` was providing), in
 three classes with three different result shapes (`[{key, values: [..]}]`,
@@ -8116,3 +8138,23 @@ receiver's type could not be determined"). Inherent methods are not abstractable
 Tests: `InherentMethodNoGuessTest` (the refusal fails without the fix: the
 definition was accepted; the #184 case passes both ways and its pinning test is
 untouched). Gates: typechecker 5462/0, interpreter 8175/0.
+
+## BUG 61 — FIXED 2026-11-17: an effectful function inside a VARIANT payload or container laundered its effect
+
+```mezze
+let fire = { a } -> match a is
+  Run { go } -> go {}
+  Idle -> {}
+pub let bad: {} -> {} = {} -> fire { a = Run { go = {} -> println { msg = "x" } } }
+```
+
+ACCEPTED with `bad` pure. Same for `Some { val = <println> }` and
+`[{ run = <println> }]`. The post-solve harvest (BUG 53) walked nested RECORDS;
+it stopped at a variant payload, a type application's arguments and a newtype.
+It now walks all of them, over-approximating as the harvest always has (a
+function handed in is assumed to be called). Found by re-running the exhaustive
+variant/record sweep against effects, as asked.
+
+Tests: `AbilityEffectSpecRowTest` BUG 61 section (variant, Option, list, plus
+the pure mirror); all 4 fail without the fix. Gates for the batch (43, 50
+group_by, 61): typechecker 5466/0, interpreter 8182/0.

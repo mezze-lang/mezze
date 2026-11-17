@@ -582,4 +582,77 @@ class AbilityEffectSpecRowTest : AbilityEffectSpecBase() {
             "the receiverless path raises the forwarded row too",
         )
     }
+    // ── BUG 61: an effectful function inside a VARIANT payload or a container ──
+    // The post-solve harvest walked nested records (BUG 53) but not variant
+    // payloads, lists or Options, so each of these reached a pure-declared caller.
+
+    private val fire = """
+        let fire = { a } -> match a is
+          Run { go } -> go {}
+          Idle -> 0
+    """.trimIndent()
+
+    @Test
+    fun `a callback inside an anonymous variant payload is harvested`() {
+        rejects(
+            """
+            $tick
+            $fire
+            let leak: {} -> Int = {} -> fire { a = Run { go = {} -> Tick.tick {} } }
+            $MAIN
+            """,
+            "T0210",
+            "`Run { go }` carries the function; fire calls it",
+        )
+    }
+
+    @Test
+    fun `a callback inside an Option is harvested`() {
+        rejects(
+            """
+            $tick
+            let maybe = { o } -> match o is
+              Some { val } -> val {}
+              None -> 0
+            let leak: {} -> Int = {} -> maybe { o = Some { val = {} -> Tick.tick {} } }
+            $MAIN
+            """,
+            "T0210",
+            "an Option's payload is a type argument the walker must enter",
+        )
+    }
+
+    @Test
+    fun `a callback inside a list is harvested`() {
+        rejects(
+            """
+            $tick
+            let first = { rs } -> match rs is
+              [h, ...t] -> h.run {}
+              [] -> 0
+            let leak: {} -> Int = {} -> first { rs = [{ run = {} -> Tick.tick {} }] }
+            $MAIN
+            """,
+            "T0210",
+            "a list element is a type argument too",
+        )
+    }
+
+    @Test
+    fun `a pure callback inside a variant or container stays pure`() {
+        accepts(
+            """
+            $tick
+            $fire
+            let maybe = { o } -> match o is
+              Some { val } -> val {}
+              None -> 0
+            let a: {} -> Int = {} -> fire { a = Run { go = {} -> 1 } }
+            let b: {} -> Int = {} -> maybe { o = Some { val = {} -> 2 } }
+            let c: {} -> Int <Tick> = {} -> fire { a = Run { go = {} -> Tick.tick {} } }
+            $MAIN
+            """,
+            "the mirrors: no effect where none is performed, exactly Tick where it is",
+        )
+    }
 }

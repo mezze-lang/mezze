@@ -343,7 +343,7 @@ pub let product_float: { xs: List Float } -> Float = { xs } ->
 
 ## Groups elements by a key function.
 pub let group_by
-  : { xs: List 'a, f: { x: 'a } -> 'k <...> }
+  : { xs: List 'a, f: { x: 'a } -> 'k <...> } with Eq 'k, Hash 'k
   -> List { key: 'k, values: List 'a } <...>
   = { xs, f } -> __native_list_group_by { xs = xs, f = f }
 

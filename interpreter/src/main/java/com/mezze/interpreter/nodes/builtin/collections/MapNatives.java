@@ -734,6 +734,41 @@ public final class MapNatives {
         return MezzeMap.fromEntries(outK, outV, n);
     }
 
+    /**
+     * `group_by_value` under the VALUE's own `Eq`/`Hash`: the result is keyed by
+     * the values, so two values a hand-written `Eq` calls equal are one group. The
+     * structural form bucketed them by Java `equals` (BUG 50, old series — the
+     * fourth sibling of `group_by`). First-seen value order is kept.
+     */
+    @TruffleBoundary
+    public static MezzeMap groupByValueWithEvidence(MezzeMap map, MezzeFunction hashFn, MezzeFunction eqFn) {
+        ElementHashing hashing = ClosureHashing.of(hashFn, eqFn);
+        if (hashing == null) return groupByValue(map);
+        java.util.ArrayList<Object[]> groups = new java.util.ArrayList<>();   // {value, ArrayList keys}
+        java.util.HashMap<Integer, java.util.ArrayList<Integer>> byHash = new java.util.HashMap<>();
+        map.walkEntries((k, v) -> {
+            int h = hashing.hashOf(v);
+            java.util.ArrayList<Integer> bucket = byHash.computeIfAbsent(h, x -> new java.util.ArrayList<>());
+            Object[] found = null;
+            for (int gi : bucket) {
+                if (hashing.eq(groups.get(gi)[0], v)) { found = groups.get(gi); break; }
+            }
+            if (found == null) {
+                found = new Object[]{v, new java.util.ArrayList<Object>()};
+                bucket.add(groups.size());
+                groups.add(found);
+            }
+            @SuppressWarnings("unchecked")
+            java.util.ArrayList<Object> keys = (java.util.ArrayList<Object>) found[1];
+            keys.add(k);
+        });
+        MezzeMap result = withHashing(MezzeMap.empty(), hashing);
+        for (Object[] g : groups) {
+            result = result.put(g[0], MezzeList.of(((java.util.ArrayList<?>) g[1]).toArray()));
+        }
+        return result;
+    }
+
     // ==================== Task #29: Key Operations ====================
 
     /**

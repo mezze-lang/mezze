@@ -271,7 +271,7 @@ pub let reduce
   = { m, f } -> __native_map_reduce { m = m, f = f }
 
 ## Groups keys by their values.
-pub let group_by_value: { m: Map 'k 'v } -> Map 'v (List 'k) = { m } ->
+pub let group_by_value: { m: Map 'k 'v } with Eq 'v, Hash 'v -> Map 'v (List 'k) = { m } ->
   __native_map_group_by_value { m = m }
 
 ## Transforms all keys using f.

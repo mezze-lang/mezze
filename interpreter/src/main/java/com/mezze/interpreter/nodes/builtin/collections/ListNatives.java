@@ -891,6 +891,23 @@ public final class ListNatives {
         return MezzeList.of(result);
     }
 
+    /** `group_by` under the key's own `Eq`/`Hash` — see SeqNatives.groupKeysWithEvidence. */
+    public static MezzeList groupByWithEvidence(MezzeList list, MezzeFunction keyFn,
+                                                MezzeFunction hashFn, MezzeFunction eqFn,
+                                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        ElementHashing hashing = ClosureHashing.of(hashFn, eqFn);
+        if (hashing == null) return groupBy(list, keyFn, callNode);
+        var ctx = ScalarCall.prepare1(keyFn, "x");
+        var groups = SeqNatives.groupKeysWithEvidence(java.util.Arrays.asList(list.toArray()), ctx, callNode, hashing);
+        Object[] result = new Object[groups.size()];
+        for (int i = 0; i < result.length; i++) {
+            Object[] g = groups.get(i);
+            result[i] = MezzeRecord.fromFields(new String[]{"key", "values"},
+                new Object[]{g[0], MezzeList.of(((java.util.ArrayList<?>) g[1]).toArray())});
+        }
+        return MezzeList.of(result);
+    }
+
     // ==================== Enumerate/ForEach/Scan ====================
 
     @TruffleBoundary

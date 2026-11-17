@@ -278,7 +278,10 @@ class EmitFileSizeRatchetTest {
             // impl). THE DECISION ITSELF WENT TO `DictEvidence.kt`, the sibling that
             // owns dictionary evidence, which is what this test asks for; what is left
             // here is the plumbing that reads the locals the decision needs.
-            C + "TypedASTCompiler.kt" to 5050,   // was 5,580 before the split
+            // 5050 -> 5057: BUG 43 (a mono clone of a non-lambda let is a thunk, set where
+            // the specs are registered) and four `evidenceNativeForm` entries — the
+            // group_by family, BUG 50 old series. Table rows belong in the table.
+            C + "TypedASTCompiler.kt" to 5057,   // was 5,580 before the split
             // +42 for `contextRowWithBodyAssocTypes`: an INLINE lambda was stamped
             // with the row from the pushed CONTEXT, so a callback's associated
             // type was the CALLEE's variable rather than what the body threw, and

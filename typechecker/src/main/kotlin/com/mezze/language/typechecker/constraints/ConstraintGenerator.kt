@@ -952,16 +952,25 @@ class ConstraintGenerator(
                 // hands the callback over as `{ b: { run: fn <Log> } }`; one level
                 // found nothing and a pure-declared caller was accepted.
                 is MezzeType.RecordType -> {
-                    fun fields(r: MezzeType.RecordType, depth: Int) {
-                        for ((_, fieldType) in r.fields) {
-                            when (val f = substitution.apply(fieldType)) {
-                                is MezzeType.FunctionType -> take(f, harvest.caughtByOp)
-                                is MezzeType.RecordType -> if (depth < 8) fields(f, depth + 1)
-                                else -> {}
-                            }
+                    // BUG 61: and through VARIANT payloads — `Run { go = <println> }`
+                    // handed an effectful function over inside an anonymous variant,
+                    // and a pure-declared caller was accepted. Same for a list or an
+                    // Option holding one. Over-approximates, as the one-level harvest
+                    // always did: a function handed in is assumed to be called.
+                    fun walk(t: MezzeType, depth: Int) {
+                        if (depth > 8) return
+                        when (val v = substitution.apply(t)) {
+                            is MezzeType.FunctionType -> take(v, harvest.caughtByOp)
+                            is MezzeType.RecordType -> v.fields.values.forEach { walk(it, depth + 1) }
+                            is MezzeType.VariantType -> v.constructors.values.forEach { p -> p?.let { walk(it, depth + 1) } }
+                            // …and container / generic arguments: `[{ run = … }]`,
+                            // `Some { val = … }` carried the function past it too.
+                            is MezzeType.TypeApplication -> v.args.forEach { walk(it, depth + 1) }
+                            is MezzeType.NewtypeType -> walk(v.wrappedType, depth + 1)
+                            else -> {}
                         }
                     }
-                    fields(solved, 0)
+                    solved.fields.values.forEach { walk(it, 0) }
                 }
                 // A CALLEE that was not a function type at generation time — a
                 // deferred method call's fresh result var. Post-solve it IS the

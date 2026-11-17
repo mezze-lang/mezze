@@ -481,6 +481,8 @@ class TypedASTCompiler(
             if (body is TypedLambda) {
                 hashToParamNames[spec.specializedHash] = body.params.map { it.name }
             }
+            // BUG 43: a clone of a thunk is a thunk, or CallDirect on it ignores its arg.
+            if (spec.genericHash in nonLambdaUserLetHashes) nonLambdaUserLetHashes.add(spec.specializedHash)
         }
         specsByGeneric = monoSpecializations.groupBy { it.genericHash }
 
@@ -3375,6 +3377,11 @@ class TypedASTCompiler(
         "__native_deque_unique" to "__native_deque_unique_with_evidence",
         "__native_map_invert" to "__native_map_invert_with_evidence",
         "__native_sorted_map_to_map" to "__native_sorted_map_to_map_with_evidence",
+        // `group_by`: the KEY's instances decide what one group is (BUG 50, old).
+        "__native_seq_group_by" to "__native_seq_group_by_with_evidence",
+        "__native_list_group_by" to "__native_list_group_by_with_evidence",
+        "__native_set_group_by" to "__native_set_group_by_with_evidence",
+        "__native_map_group_by_value" to "__native_map_group_by_value_with_evidence",
     )
 
     /**
