@@ -39,8 +39,7 @@ class AbilityEffectSpecClaimsTest : AbilityEffectSpecBase() {
         }
 
         @Test
-        @org.junit.jupiter.api.Disabled("BUG 48 — reaches the runtime as a host crash")
-        fun `the sole-impl fallback diagnoses rather than crashing when it cannot pick`() {
+        fun `a call whose class param nothing determines is refused`() {
             // TWO impls, so "the one in scope" is not a unique answer. Today this
             // checks clean and dies as `ShouldNotReachHere: no dictionary was
             // supplied`. A single BLANKET impl fails the same way.
@@ -62,6 +61,31 @@ class AbilityEffectSpecClaimsTest : AbilityEffectSpecBase() {
                 """,
                 "T0215",
                 "two candidates and nothing to choose between them must be a diagnostic",
+            )
+        }
+
+        @Test
+        @org.junit.jupiter.api.Disabled("BUG 48 — the obligation never reaches the check here")
+        fun `a call in an UNANNOTATED binding is refused too`() {
+            // The annotated form above IS refused today. This one is not: the
+            // check iterates the BINDING's `fnType.abilityConstraints`, and for a
+            // non-generalized binding like `main` the obligation never becomes a
+            // constraint there — so the loop is skipped entirely and the call
+            // reaches the runtime as `no dictionary was supplied`.
+            rejects(
+                """
+                type Light = |
+                  LitRed {},
+                  LitGreen {},
+                |
+                ability Tag for 'a where { tag: { n: Int } -> Int }
+                impl Tag for Light where { tag = { n } -> n + 1 }
+                pub let main = {} -> do
+                  let r = Tag.tag { n = 1 }
+                  {}
+                """,
+                "T0215",
+                "an unannotated binding must not be a way past the check",
             )
         }
 

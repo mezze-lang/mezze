@@ -7655,6 +7655,37 @@ an UNANNOTATED binding, not a new check elsewhere. For an unannotated binding th
 inferred type already mentions the var, so it counts as "named by the signature"
 and the existing loop skips it.
 
+### Attempt 3, also ineffective — and it located the real obstacle
+
+Changed `producesParam` from `mentions(op.returnType) && !mentions(op.paramType)`
+to `!mentions(op.paramType)`, so an op mentioning the class param NOWHERE would
+also count. Gate stayed green at 5434/0 — and all three crashing shapes still
+checked clean. **The change did nothing**, and was reverted.
+
+Why: the enclosing loop starts
+
+    if (fnType.abilityConstraints.isEmpty()) continue
+
+and iterates the BINDING's own ability constraints. For a non-generalized binding
+— `pub let main = {} -> do let r = Tag.tag { n = 1 } …` — the obligation never
+becomes a constraint on `main`'s function type, so the loop is skipped before any
+of the gates are consulted. The annotated form is refused only because
+annotating creates a constraint to iterate.
+
+**So the obligation never reaches ANY check.** That is the real obstacle, and it
+rules out all three attempted sites:
+
+| attempt | site | result |
+|---|---|---|
+| 1 | ability DECLARATION | 18 failures; contradicts a deliberate spec claim |
+| 2 | GLOBAL post-solve, like the inherent path | 4965 failures; per-binding vars are meaningless in the global substitution |
+| 3 | the existing `producesParam` gate | no effect; the loop is skipped before it |
+
+**What is left:** check the solver's deferred obligations at the END OF EACH
+PER-BINDING SOLVE, where that binding's own substitution is live — not via the
+binding's generalized constraints (attempt 3), not globally (attempt 2). That is
+a fourth, untried location.
+
 ### Two earlier framings, both wrong, recorded so they are not retried
 
 - *"Refuse the declaration."* Broke 18 tests across four suites, including the
