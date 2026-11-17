@@ -464,6 +464,7 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
         // a do-block `let` in the body that reuses a param name is a same-scope
         // re-bind (T0306), while shadowing an outer name stays legal.
         .withFreshScope(paramNames.toSet())
+        .copy(calleeRowVar = RowVar.userOpen())
 
     val bodyContext = if (expectedFunctionType != null) {
         extendedContext.withExpectedType(expectedFunctionType.returnType).inTailPosition()
@@ -1338,7 +1339,7 @@ internal fun ExpressionConstraintGenerator.generateFunctionCall(expr: ParsedFunc
     // Without it a pure-inferred `f` refused every effectful argument (#215's
     // directional rule, correctly), so the annotation was REQUIRED.
     val calleeRow = if (functionResult.type is MezzeType.VarType) {
-        RowVar.userOpen().also { collector.effectRowVars.add(it) }
+        (context.calleeRowVar ?: RowVar.userOpen()).also { collector.effectRowVars.add(it) }
     } else null
     collector.constraints.add(
         Constraint.Equality(

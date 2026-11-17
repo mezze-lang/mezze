@@ -882,7 +882,15 @@ data class ConstraintContext(
     // binding whose RHS is itself a bare identifier aliasing a free param is NOT in
     // this set (receiverHasSolvableType(rhs) is false there), so it correctly refines.
     val solvableLetBindings: Set<String> = emptySet(),
+    /**
+     * BUG 55: the ONE open row every unannotated callee called in this lambda
+     * body shares. Separate rows per callee lost all but the first — a body
+     * carries a single tail — so `compose = { f, g } -> { x } -> g { x = f {…} }`
+     * dropped `g`'s effects. Effects union, so a shared row is sound.
+     */
+    val calleeRowVar: RowVar? = null,
 ) {
+
     fun extend(name: String, type: MezzeType): ConstraintContext {
         return copy(typingContext = typingContext.extendMono(name, type))
     }

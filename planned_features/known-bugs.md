@@ -7909,3 +7909,27 @@ legal program.
 
 Tests: `AbilityEffectSpecRowTest` BUG 54 section (both refusals fail without the
 fix; the mirror passes both ways). Gates: typechecker 5450/0, interpreter 8165/0.
+
+## BUG 55 — FIXED 2026-11-17: a body calling TWO unannotated callbacks kept only one's effects
+
+```mezze
+let compose = { f, g } -> { x } -> g { x = f { x = x } }
+pub let go: {} -> Int = {} -> (compose { f = { x } -> x + 1, g = { x } -> do
+  println { msg = "x" }
+  x }) { x = 1 }
+```
+
+ACCEPTED with `go` pure. Each unannotated callee got its own open row (BUG 51),
+and a body carries ONE tail — #256's own comment: "we take the first … (a
+fully-polymorphic 2nd tail is the rare gap)". `compose` is not rare. Unifying two
+tails does not work either: `unifyEffectRows` binds a tail only to EXTRA effects,
+so two empty open rows link nothing.
+
+Fix: one row per lambda body. `ConstraintContext.calleeRowVar` is minted where a
+lambda opens its scope, and every unannotated callee called in that body uses it.
+Effects union anyway, so sharing is sound — slightly less general, in the way
+Koka's single row is.
+
+Tests: `AbilityEffectSpecRowTest` BUG 55 section (the FIRST-callback claim passes
+without the fix by construction — the first row was the one kept).
+Gates: typechecker 5453/0, interpreter 8165/0.

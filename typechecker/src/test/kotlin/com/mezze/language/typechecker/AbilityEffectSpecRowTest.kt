@@ -447,4 +447,51 @@ class AbilityEffectSpecRowTest : AbilityEffectSpecBase() {
             "the mirrors: a SITE-chosen `'a` is not settled here, and Int + Int is fine",
         )
     }
+    // ── BUG 55: two unannotated callbacks called in one body ──
+    // Each got its own open row and a body carries one tail, so all but the
+    // first were dropped: `compose`'s `g` performed Tick under a pure caller.
+
+    private val compose = "let compose = { f, g } -> { x } -> g { x = f { x = x } }"
+
+    @Test
+    fun `compose carries the SECOND callback's effect`() {
+        rejects(
+            """
+            $tick
+            $compose
+            let leak: {} -> Int = {} -> (compose { f = { x } -> x + 1, g = { x } -> Tick.tick {} }) { x = 1 }
+            $MAIN
+            """,
+            "T0210",
+            "`g`'s row was the one dropped",
+        )
+    }
+
+    @Test
+    fun `compose carries the FIRST callback's effect`() {
+        rejects(
+            """
+            $tick
+            $compose
+            let leak: {} -> Int = {} -> (compose { g = { x } -> x + 1, f = { x } -> Tick.tick {} }) { x = 1 }
+            $MAIN
+            """,
+            "T0210",
+            "the mirror by position",
+        )
+    }
+
+    @Test
+    fun `compose's carried effect is exactly the callbacks'`() {
+        accepts(
+            """
+            $tick
+            $compose
+            let ok: {} -> Int <Tick> = {} -> (compose { f = { x } -> x + 1, g = { x } -> Tick.tick {} }) { x = 1 }
+            let pure: {} -> Int = {} -> (compose { f = { x } -> x + 1, g = { x } -> x * 2 }) { x = 1 }
+            $MAIN
+            """,
+            "the mirrors: Tick arrives exactly; two pure callbacks stay pure",
+        )
+    }
 }
