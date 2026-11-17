@@ -3,8 +3,8 @@ use std::collections::iter
 use std::abilities::compare::{ Eq, Hash, structural_hash }
 use std::result
 use std::effects::exception::{ Exception, unwrap }
-use std::effects::time::{ Time }
-use std::datetime::{ duration_millis }
+use std::effects::time::{ Time, now }
+use std::datetime::{ duration_millis, add, after }
 use std::int
 use std::bool
 
@@ -349,8 +349,11 @@ pub let settled_result: { p: Promise 'a } -> Result 'a AsyncError = { p } -> mat
 ## A single-threaded cooperative scheduler, written against the machine with no
 ## native of its own but `spawn_task`: tasks run on the calling thread, a task
 ## gives the loop a turn only at `await`, `yield_now`, `park` and `park_until`,
-## and the order is FIFO (no `drive`). `park_until`'s deadline waits for the
-## `Time` integration — today it parks on the predicate alone.
+## and the order is FIFO (no `drive`). `park_until` parks on TWO predicates, the
+## caller's and "the deadline has passed" — so the performer performs `Time`, and
+## an entry that installs `EventLoop` installs a `Time` performer beside it
+## (`SystemTime`, or `MockTime` for a deterministic run). The runtime never reads
+## a clock on its own: that is what keeps a test scheduler deterministic.
 impl Async for EventLoop where {
   initialize_scope = {} -> {},
   finalize_scope = {} -> {},
@@ -368,9 +371,11 @@ impl Async for EventLoop where {
   park = { predicate } -> match cont.park { on = OnPredicates { fs = [predicate] }, set = WaitDefault } is
     ParkReady { which } -> {}
     ParkCancelled { reason } -> {},
-  park_until = { predicate, ms } -> match cont.park { on = OnPredicates { fs = [predicate] }, set = WaitDefault } is
-    ParkReady { which } -> True
-    ParkCancelled { reason } -> False,
+  park_until = { predicate, ms } -> do
+    let deadline = add { i = now {}, d = duration_millis { n = ms } }
+    match cont.park { on = OnPredicates { fs = [predicate, {} -> after { a = now {}, b = deadline }] }, set = WaitDefault } is
+      ParkReady { which } -> which == 0
+      ParkCancelled { reason } -> False,
 }
 
 ## How `scoped_with` decides when to stop waiting for its children.

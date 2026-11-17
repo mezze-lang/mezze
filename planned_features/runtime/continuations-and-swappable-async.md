@@ -705,12 +705,24 @@ not know who owned a task. Settled by code, three of the open rules:
 - *Auto-registration* (rule 4) is answered by ownership: a task belongs to the
   innermost boundary at its spawn; there is nothing to register.
 
+**D3 — cancellation reaches a park; deadlines are `Time` predicates. LANDED
+2026-11-17.** `Async.cancel` on a machine task's promise wakes the task, if parked,
+with `ParkCancelled { reason }` (the promise's cancel hook; the performer's arm
+decides what cancellation means — asserted `cancel-sent, woke`). `EventLoop`'s
+`park_until` parks on TWO predicates, the caller's and `{} -> after { now, deadline }`,
+so the performer performs `Time` — and the DECIDED obligation surfaces exactly as
+written above, verified on the CLI: `perform Console, EventLoop in …` as an entry
+is **V0501 "Entry 'main' performs Time, but nothing discharges it"**, `perform
+Console, SystemTime, EventLoop` is clean, and `LoomAsync` carries no obligation.
+With `MockTime` the whole run is deterministic: a task advances the clock, the
+waiter times out (`advanced, timed-out=False`). Rule 5 (stale resumers) is moot in
+this machine: a task has exactly one leaf continuation and the machine holds it.
+
 Stated limitations, each a later slice's subject: tasks run under the DRIVING
-boundary's handler chain (Phase B lifts it); `park_until` parks on the predicate
-alone until `Time` lands; a `WaitNamed` set is accepted and ignored; cancellation
-is delivered only at teardown — `Async.cancel` on a machine task settles its
-promise but does not yet interrupt its park (rule 5, stale resumers, is moot: a
-task has exactly one leaf continuation and the machine holds it).
+boundary's handler chain (Phase B lifts it); a `WaitNamed` set is accepted and
+ignored; `sleep` under `EventLoop` is still the Time performer's blocking sleep —
+a cooperative `Time` performer that parks on the clock is the natural next
+performer, and the first one written against `cont` outside `Async`.
 Measured gotchas: `Mut` is hermetic and cannot share a row with `Async`, so the
 tests log through Console; the test harness evaluates the module's top-level
 expression and never calls `main`.

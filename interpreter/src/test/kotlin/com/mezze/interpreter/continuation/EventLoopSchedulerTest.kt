@@ -45,9 +45,12 @@ class EventLoopSchedulerTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     private val imports = """
-        use std::effects::async::{ Async, EventLoop, await, yield_now, park, is_done, spawn_task, inspect, settled_result,
-                                   promise_id, ParkOn, WaitSet, ParkOutcome, PromiseState, AsyncError, CancelOutcome, RunQueue, Task }
+        use std::effects::async::{ Async, EventLoop, await, yield_now, park, park_until, cancel, is_done, spawn_task, inspect,
+                                   settled_result, promise_id, ParkOn, WaitSet, ParkOutcome, PromiseState, AsyncError,
+                                   CancelReason, CancelOutcome, RunQueue, Task }
         use std::effects::log::{ Console, println }
+        use std::effects::time::{ Time, SystemTime, MockTime }
+        use std::datetime::{ test_clock_at, test_clock_advance, duration_millis, epoch }
         use std::result
     """.trimIndent()
 
@@ -71,7 +74,7 @@ class EventLoopSchedulerTest {
     @Test
     fun `EventLoop is FIFO - two yielding workers interleave`() = assertEquals(
         listOf("a1", "b1", "a2", "b2", "a3", "b3", "end"),
-        lines(program(imports, twoWorkers, "perform Console, EventLoop in program {}")),
+        lines(program(imports, twoWorkers, "perform Console, SystemTime, EventLoop in program {}")),
     )
 
     /** A userland scheduler: same ops as EventLoop, LIFO `drive`. No native of its own. */
@@ -110,7 +113,7 @@ class EventLoopSchedulerTest {
     fun `await parks the awaiting task and resumes it with the value - nested`() = assertEquals(
         42L,
         eval(program(imports, """
-            perform EventLoop in do
+            perform SystemTime, EventLoop in do
               let inner = Async.spawn { f = {} -> 20 }
               let outer = Async.spawn { f = {} -> result::get_or { result = await { p = inner }, def = -1 } + 22 }
               result::get_or { result = await { p = outer }, def = -1 }
@@ -121,7 +124,7 @@ class EventLoopSchedulerTest {
     fun `park on a predicate another task's progress makes true`() = assertEquals(
         listOf("spawned", "flip", "after"),
         lines(program(imports, """
-            perform Console, EventLoop in do
+            perform Console, SystemTime, EventLoop in do
               let t = Async.spawn { f = {} -> do
                 yield_now {}
                 println { msg = "flip" }
@@ -137,7 +140,7 @@ class EventLoopSchedulerTest {
         listOf("end", "late", "out"),
         lines(program(imports, """
             perform Console in do
-              let r = perform EventLoop in do
+              let r = perform SystemTime, EventLoop in do
                 let t = Async.spawn { f = {} -> do
                   yield_now {}
                   println { msg = "late" }
@@ -152,7 +155,7 @@ class EventLoopSchedulerTest {
     fun `a task parked forever is cancelled at scope teardown and sees ParkCancelled`() = assertEquals(
         listOf("end", "cancelled"),
         lines(program(imports, """
-            perform Console, EventLoop in do
+            perform Console, SystemTime, EventLoop in do
               let never = Async.spawn { f = {} -> do
                 park { predicate = {} -> False }
                 1 }
@@ -167,13 +170,13 @@ class EventLoopSchedulerTest {
     fun `an inner boundary drives only its own tasks`() = assertEquals(
         listOf("u", "mid", "t"),
         lines(program(imports, """
-            perform Console, EventLoop in do
+            perform Console, SystemTime, EventLoop in do
               let t = Async.spawn { f = {} -> do
                 yield_now {}
                 yield_now {}
                 println { msg = "t" }
                 {} }
-              let inner = perform EventLoop in do
+              let inner = perform SystemTime, EventLoop in do
                 let u = Async.spawn { f = {} -> do
                   println { msg = "u" }
                   {} }
@@ -184,10 +187,55 @@ class EventLoopSchedulerTest {
     )
 
     @Test
+    fun `cancel wakes a parked task with ParkCancelled`() = assertEquals(
+        listOf("cancel-sent", "woke"),
+        lines(program(imports, """
+            perform Console, SystemTime, EventLoop in do
+              let t = Async.spawn { f = {} -> do
+                park { predicate = {} -> False }
+                println { msg = "woke" }
+                {} }
+              yield_now {}
+              let c = cancel { p = t, reason = CancelUserRequested { msg = "stop" } }
+              println { msg = "cancel-sent" }
+        """)),
+    )
+
+    /** The deadline is a PREDICATE performing `Time`; with `MockTime` the whole run is
+     *  deterministic: a task advances the clock, the waiter times out. */
+    @Test
+    fun `park_until times out on a mock clock another task advances`() = assertEquals(
+        listOf("advanced", "timed-out=False"),
+        lines(program(imports, """
+            let clock = test_clock_at { i = epoch {} }
+            perform Console, MockTime { clock = clock }, EventLoop in do
+              let t = Async.spawn { f = {} -> do
+                yield_now {}
+                test_clock_advance { c = clock, d = duration_millis { n = 150 } }
+                println { msg = "advanced" }
+                {} }
+              let r = park_until { predicate = {} -> False, ms = 100 }
+              println { msg = "timed-out=${'$'}(r.to_dbg {})" }
+        """)),
+    )
+
+    @Test
+    fun `park_until answers True when the predicate wins`() = assertEquals(
+        listOf("True"),
+        lines(program(imports, """
+            let clock = test_clock_at { i = epoch {} }
+            perform Console, MockTime { clock = clock }, EventLoop in do
+              let t = Async.spawn { f = {} -> 1 }
+              let r = park_until { predicate = {} -> is_done { p = t }, ms = 100 }
+              println { msg = r.to_dbg {} }
+        """)),
+    )
+
+    @Test
     fun `nothing runnable and nothing that can wake is a deadlock, named`() {
         val e = assertThrows(Exception::class.java) {
             eval(program(imports, """
-                perform EventLoop in do
+                perform SystemTime, EventLoop in do
                   park { predicate = {} -> False }
                   1
             """))

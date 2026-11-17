@@ -66,6 +66,7 @@ public final class TaskMachine {
         int state = RUNNABLE;
         final MezzePromise promise;                // null for a boundary body
         Object result;
+        Boundary owner;                            // the boundary that drives this task
 
         Task(long id, MezzeFunction thunk, MezzePromise promise) {
             this.id = id; this.thunk = thunk; this.promise = promise;
@@ -120,8 +121,21 @@ public final class TaskMachine {
         MezzePromise p = new MezzePromise(null, null);
         ownPromises.put(p, Boolean.TRUE);
         Task t = new Task(nextTaskId++, f, p);
+        t.owner = b;
         b.ready.addLast(t);
+        // `Async.cancel` on the task's promise: a PARKED task is woken with
+        // `ParkCancelled { reason }` so its performer's arm decides what cancellation
+        // means; a running or runnable one just finds its promise settled.
+        p.setCancelHook(reason -> cancelParked(t, reason));
         return p;
+    }
+
+    private void cancelParked(Task t, Object reason) {
+        if (t.state != PARKED || t.owner == null) return;
+        t.owner.parked.remove(t);
+        t.deliver = parkCancelled(reason);
+        t.state = RUNNABLE;
+        t.owner.ready.addLast(t);
     }
 
     @TruffleBoundary
@@ -153,6 +167,7 @@ public final class TaskMachine {
         boundaries.push(b);
         try {
             Task body = new Task(nextTaskId++, null, null);
+            body.owner = b;
             absorb(b, body, callWith(bodyThunk, MezzeRecord.empty()));
             while (body.state != DONE) {
                 if (b.ready.isEmpty()) {
