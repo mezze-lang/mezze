@@ -7630,6 +7630,31 @@ The symmetric change:
 must not be flagged — which is exactly Rust's `T: Tag` case. One implementation,
 three holes closed and one over-strictness removed.
 
+### THE FIX SITE: per-binding, not global — attempt 2 proved it
+
+**Attempt 2 (reverted): a global post-solve check, mirroring
+`undispatchableInherentMethodErrors`.** Recorded `AbilityRequired` obligations at
+`AbilityChecker.solveAbilityRequired`'s not-all-concrete branch, surfaced them
+through `ConstraintSolver.getUnresolvedAbilityObligations()`, and reported T0215
+post-solve for any whose class args were still bare and not in
+`generalizedVarIds`.
+
+**4965 failures out of 5434.** It compiles and it is the wrong shape.
+
+Why, and this is the useful part: **obligation type-vars from a PER-BINDING solve
+are not meaningful in the GLOBAL substitution.** The inherent-method precedent
+works because it re-checks against the COMPOSED (global ∘ per-binding)
+substitution AND `aggregated.callReturnTypes` — two sources that pin the
+per-call-site resolution. An obligation list drained from the solver has neither,
+so nearly every legitimate polymorphic obligation reads as undetermined.
+
+So the check CANNOT be global. It belongs where the existing T0215 already is —
+the per-binding block in `ConstraintGenerator`, where that binding's substitution
+is live — and the fix is to how `determined` / `namedBySignature` is computed for
+an UNANNOTATED binding, not a new check elsewhere. For an unannotated binding the
+inferred type already mentions the var, so it counts as "named by the signature"
+and the existing loop skips it.
+
 ### Two earlier framings, both wrong, recorded so they are not retried
 
 - *"Refuse the declaration."* Broke 18 tests across four suites, including the
