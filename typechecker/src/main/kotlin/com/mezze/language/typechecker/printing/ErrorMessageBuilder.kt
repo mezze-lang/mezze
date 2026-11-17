@@ -350,12 +350,27 @@ private fun findFieldTypeMismatch(
         }
     }
 
+    private fun anchoredConstraints(fn: MezzeType.FunctionType): List<MezzeType.FunctionAbilityConstraint> {
+        val sig = com.mezze.language.ast.solving.collectFreeTypeVars(
+            MezzeType.FunctionType(fn.paramType, fn.returnType),
+        ).map { it.id }.toSet()
+        return fn.abilityConstraints.filter { c ->
+            c.typeArgs.any { a -> com.mezze.language.ast.solving.collectFreeTypeVars(a).any { it.id in sig } } ||
+                c.typeArgs.none { a -> com.mezze.language.ast.solving.collectFreeTypeVars(a).isNotEmpty() }
+        }
+    }
+
     private fun describeEffectRowDifference(actual: MezzeType, expected: MezzeType): String? {
         if (actual !is MezzeType.FunctionType || expected !is MezzeType.FunctionType) return null
 
         if (actual.paramType != expected.paramType) return null
         if (actual.returnType != expected.returnType) return null
-        if (actual.abilityConstraints != expected.abilityConstraints) return null
+        // An obligation on a variable in neither the params nor the result is the
+        // RECEIVER of a call the solve already discharged (`b.noise {}` with
+        // `b: Bx` leaves `with Noisy 'a` here). It cannot be why the annotation
+        // differs, and comparing it hid the real cause — the row — behind a type
+        // printing `{} with Noisy 'a -> Int <Tick>`.
+        if (anchoredConstraints(actual) != anchoredConstraints(expected)) return null
 
         val actualEffects = actual.effects?.effects ?: emptySet()
         val expectedEffects = expected.effects?.effects ?: emptySet()
@@ -369,8 +384,8 @@ private fun findFieldTypeMismatch(
                 val names = extra.joinToString(", ") { "<$it>" }
                 if (extra.size == 1) {
                     "the body performs effect $names but the annotation doesn't allow it. " +
-                    "Either add $names to the return type (e.g. `... -> Str $names`), " +
-                    "or wrap the call in a `perform <handler> in do ... end` block."
+                    "Either add it to the annotation (`... -> ${prettyPrintType(actual.returnType)} $names`), " +
+                    "or handle it inside the body with `perform <Performer> in …`."
                 } else {
                     "the body performs effects $names but the annotation doesn't allow them. " +
                     "Either declare them on the return type, or install handlers."

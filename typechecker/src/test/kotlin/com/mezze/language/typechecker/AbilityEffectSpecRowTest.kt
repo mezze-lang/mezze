@@ -494,4 +494,29 @@ class AbilityEffectSpecRowTest : AbilityEffectSpecBase() {
             "the mirrors: Tick arrives exactly; two pure callbacks stay pure",
         )
     }
+    // ── A row mismatch is explained as a row mismatch ──
+    // The receiver obligation of `b.noise {}` (discharged against `Bx`) stayed on
+    // the inferred type as `with Noisy 'a`, the explainer bailed on the
+    // difference, and the user read `{} with Noisy 'a -> Int <Tick>` instead of
+    // "the body performs <Tick>".
+
+    @Test
+    fun `an effectful ability op under a pure annotation names the effect`() {
+        val r = check(
+            """
+            $tick
+            type Bx = { v: Int }
+            ability Noisy for 'a where { noise: { it: 'a } -> Int <Tick> }
+            impl Noisy for Bx where { noise = { it } -> Tick.tick {} }
+            let go: {} -> Int = {} -> do
+              let b: Bx = { v = 1 }
+              b.noise {}
+            $MAIN
+            """.trimIndent(),
+        )
+        val msg = r.exceptionOrNull()?.message ?: ""
+        kotlin.test.assertTrue(msg.contains("performs effect <Tick>"), "the cause, in words: $msg")
+        kotlin.test.assertFalse(msg.contains("with Noisy"), "not a discharged obligation: $msg")
+        kotlin.test.assertTrue(msg.contains("-> Int <Tick>"), "the fix uses the real return type: $msg")
+    }
 }
