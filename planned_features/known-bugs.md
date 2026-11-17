@@ -7732,7 +7732,40 @@ nothing could have chosen one.
 
 Claim: `AbilityEffectSpecClaimsTest.Declaration`, `@Disabled("BUG 48")`.
 
-## BUG 49 — OPEN: an impl that exists in another module is reported as missing
+## BUG 49 — FIXED 2026-11-17: an impl that exists in another module is reported as missing
+
+### Fix
+
+**49a.** `AbilityChecker.concreteImplHome` extends the import hint to a CONCRETE
+impl, but only when the receiver provably IS its target: a closed record receiver
+with exactly the target record's field names and field types, or a nominal
+receiver that prints as the target's name. The blanket-only rationale below still
+holds for everything looser. Two obstacles, both measured:
+- the impl's module is by definition not loaded, so `getAllParsedModules()` never
+  holds it. `unloadedProjectModules()` recovers the project root from a LOADED
+  project module (`a::b` at `<root>/a/b.mz`) and parses the rest, on the error
+  path only, capped at 200 files;
+- a raw parse of `impl Bump for Box` is a `ParsedPerformerDecl`, because only
+  resolution tells an ability impl from a performer, so that shape is matched too.
+
+The message now reads: "`{ v: Int }` does not implement 'Bump' here: `boxmod` has
+`impl Bump for Box`, and `{ v: Int }` is `Box`, but nothing in this module imports
+`boxmod`. Add `use boxmod::{ Box }`, and do not write a second impl."
+
+**49b.** `UnusedImportLinter` takes a callback the typechecker supplies: the local
+names of the abilities a `use`'s module implements, by identity (the typed
+impl's `abilityHash`; `abilityDeclHashByImpl` turned out to be empty on this
+path). A selective `use` none of whose items is named is load-bearing when its
+module implements an ability this module uses. Asked only for such a `use`, so
+the body read stays rare.
+
+Tests: `AbilityEffectSpecCrossModuleTest`. The 49a claim is un-disabled, with a
+mirror (`{ v, w }` is not a Box and must not be pointed at boxmod). The 49b
+claim has a mirror too (a dead `use other::{ Other }` is still flagged). The
+typechecker suite now has 0 skipped. Gates: typechecker 5456/0, interpreter
+8170/0.
+
+### Original entry
 
 Found 2026-11-17 by the ability/effect spec sweep, cross-module axis. Two halves
 that together form a trap: you are told to write an impl that already exists, and

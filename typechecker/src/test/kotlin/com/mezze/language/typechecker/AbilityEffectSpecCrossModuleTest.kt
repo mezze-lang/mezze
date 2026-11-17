@@ -68,7 +68,6 @@ class AbilityEffectSpecCrossModuleTest : AbilityEffectSpecBase() {
     }
 
     @Test
-    @Disabled("BUG 49a — V0402 says 'write an impl' when one exists in another module")
     fun `V0402 names the module whose impl was not imported`() {
         writeModule("abil", "ability Bump for 'a where { bump: { it: 'a } -> Int }")
         writeModule(
@@ -92,5 +91,91 @@ class AbilityEffectSpecCrossModuleTest : AbilityEffectSpecBase() {
             "the advice must point at the existing impl, not tell the user to write a " +
                 "duplicate that would then be V0407 or V0406. Got: $msg",
         )
+    }
+    @Test
+    fun `V0402 does not claim coverage for a record that is not the impl's type`() {
+        writeModule("abil", "ability Bump for 'a where { bump: { it: 'a } -> Int }")
+        writeModule(
+            "boxmod",
+            """
+            use abil::{ Bump }
+            pub type Box = { v: Int }
+            impl Bump for Box where { bump = { it } -> it.v + 100 }
+            """,
+        )
+        val r = checkMain(
+            """
+            use abil::{ Bump }
+            let use_it: {} -> Int = {} -> Bump.bump { it = { v = 1, w = 2 } }
+            $MAIN
+            """.trimIndent(),
+        )
+        val msg = r.exceptionOrNull()?.message ?: ""
+        kotlin.test.assertTrue(
+            msg.contains("V0402") || msg.contains("does not implement"),
+            "still refused: $msg",
+        )
+        kotlin.test.assertFalse(
+            msg.contains("boxmod"),
+            "`{ v, w }` is not a Box; pointing at boxmod would claim coverage that is not there. Got: $msg",
+        )
+    }
+
+    // ── BUG 49b: an import that only feeds DISPATCH is not "unused" ──
+
+    private fun w0102(r: Result<TypeCheckResult>): List<String> =
+        r.getOrThrow().warnings
+            .filter { it.code?.toString()?.startsWith("W0102") == true }
+            .map { it.message }
+
+    @Test
+    fun `an import that brings a dispatched impl is not reported unused`() {
+        writeModule("abil", "ability Bump for 'a where { bump: { it: 'a } -> Int }")
+        writeModule(
+            "boxmod",
+            """
+            use abil::{ Bump }
+            pub type Box = { v: Int }
+            impl Bump for Box where { bump = { it } -> it.v + 100 }
+            """,
+        )
+        val r = checkMain(
+            """
+            use abil::{ Bump }
+            use boxmod::{ Box }
+            let use_it: {} -> Int = {} -> Bump.bump { it = { v = 1 } }
+            $MAIN
+            """.trimIndent(),
+        )
+        kotlin.test.assertEquals(
+            emptyList(), w0102(r),
+            "deleting `use boxmod::{ Box }` makes this V0402 — the import is load-bearing",
+        )
+    }
+
+    @Test
+    fun `an import from a module with no relevant impl is still reported unused`() {
+        writeModule("abil", "ability Bump for 'a where { bump: { it: 'a } -> Int }")
+        writeModule(
+            "boxmod",
+            """
+            use abil::{ Bump }
+            pub type Box = { v: Int }
+            impl Bump for Box where { bump = { it } -> it.v + 100 }
+            """,
+        )
+        writeModule("other", "pub type Other = { w: Int }")
+        val r = checkMain(
+            """
+            use abil::{ Bump }
+            use boxmod::{ Box }
+            use other::{ Other }
+            let use_it: {} -> Int = {} -> Bump.bump { it = { v = 1 } }
+            $MAIN
+            """.trimIndent(),
+        )
+        val found = w0102(r)
+        kotlin.test.assertEquals(1, found.size, "exactly the dead import: $found")
+        kotlin.test.assertTrue(found.single().contains("'Other'"), "the mirror: $found")
     }
 }

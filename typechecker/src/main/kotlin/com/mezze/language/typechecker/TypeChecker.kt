@@ -767,7 +767,9 @@ class TypeChecker(
                     ((importContext?.importedAbilities ?: emptyMap()).values +
                         parsedModule.decls.filterIsInstance<ParsedAbilityDecl>())
                         .associate { decl -> decl.name to decl.operations.map { it.name }.toSet() }
-                warnings.addAll(UnusedImportLinter.lint(parsedModule, abilityOps).map {
+                warnings.addAll(UnusedImportLinter.lint(
+                    parsedModule, abilityOps, implementedAbilitiesOf(parsedModule, importContext, loadedModules),
+                ).map {
                     TypeCheckWarning(message = it.message, loc = it.loc, code = it.code)
                 })
 
@@ -1834,4 +1836,30 @@ class TypeChecker(
             return ModuleResolver.getFromCache(World.DEFAULT, modulePath)?.parsedModule
         }
     }
+
+    /**
+     * BUG 49b: the LOCAL names of the abilities a selective `use`'s module
+     * implements, resolved by identity (the typed impl's ability hash). Asked only for a
+     * `use` none of whose items is named, so the body read stays rare.
+     */
+    private fun implementedAbilitiesOf(
+        parsedModule: ParsedModule,
+        importContext: ModuleImportContext?,
+        loadedModules: Map<ModulePath, TypedModuleResult>,
+    ): (ParsedUseDecl) -> Set<String> {
+        val ctx = importContext ?: return { emptySet() }
+        val localAbilityName by lazy {
+            HashMap<Hash, String>().also { m ->
+                ctx.abilitiesByHash.forEach { (h, d) -> m[h] = d.name }
+                parsedModule.decls.filterIsInstance<ParsedAbilityDecl>().forEach { d -> d.contentHash?.let { m[it] = d.name } }
+            }
+        }
+        return { decl ->
+            val path = decl.path as? ParsedUsePath.Selective
+            val loaded = path?.let { loadedModules[ModulePath(it.modulePath.segments)] }
+            loaded?.typedModule?.abilityImpls.orEmpty().filterNot { it.derived }
+                .mapNotNullTo(HashSet()) { impl -> localAbilityName[impl.abilityHash] }
+        }
+    }
+
 }

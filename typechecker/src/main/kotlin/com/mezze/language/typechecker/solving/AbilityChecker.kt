@@ -1696,6 +1696,79 @@ class AbilityChecker internal constructor(
     }
 
     /**
+     * BUG 49a: the module holding a CONCRETE impl of [abilityName] whose target
+     * [receiver] provably IS — the case [blanketImplHome]'s rationale does not
+     * cover. "Provably" is kept strict: a record receiver must have exactly the
+     * target record's field names and field types, or a nominal receiver must
+     * print as the target's name. Anything looser stays the skeleton, because
+     * telling someone their type is covered when it is not is the worse error.
+     */
+    private fun concreteImplHome(abilityName: String, receiver: MezzeType?): AbilityHome? {
+        if (receiver == null || receiver is MezzeType.VarType) return null
+        val shown = prettyPrintType(receiver)
+        for ((modulePath, module) in ModuleResolver.getAllParsedModules() + unloadedProjectModules()) {
+            for (decl in module.decls) {
+                // A module nothing loaded is a RAW parse, where `impl Bump for Box`
+                // is still a performer-shaped decl — only resolution converts it.
+                val targetName: String = when {
+                    decl is ParsedImplAbilityDecl && !decl.derived -> {
+                        val target = decl.target
+                        if (target !is ParsedImplTarget.Named || target.ability.localName != abilityName) continue
+                        (decl.targetTypes.lastOrNull() as? ParsedNamedType)?.name ?: continue
+                    }
+                    decl is ParsedPerformerDecl && decl.effect.localName == abilityName && decl.params.isEmpty() ->
+                        decl.performerName
+                    else -> continue
+                }
+                val named = ParsedNamedType(targetName, decl.loc)
+                if (named.name.startsWith("'")) continue
+                if (shown == named.name) return AbilityHome(modulePath, named.name)
+                val rec = receiver as? MezzeType.RecordType ?: continue
+                val def = module.decls.filterIsInstance<ParsedTypeDecl>()
+                    .firstOrNull { it.name == named.name && it.typeParams.isEmpty() }
+                    ?.definition as? ParsedRecordDef ?: continue
+                if (def.isOpen || rec.rowVar != null) continue
+                if (def.fields.map { it.name }.toSet() != rec.fields.keys) continue
+                val same = def.fields.all { f ->
+                    rec.fields[f.name]?.let { prettyPrintType(it) } == renderAnnotation(f.type)
+                }
+                if (same) return AbilityHome(modulePath, named.name)
+            }
+        }
+        return null
+    }
+
+    /**
+     * BUG 49a: the project modules nothing has loaded — by definition where an
+     * UNIMPORTED impl lives. The root is recovered from a loaded project module:
+     * module `a::b` at `<root>/a/b.mz`. Error path only, and capped.
+     */
+    private fun unloadedProjectModules(): Map<String, com.mezze.language.parsedast.ParsedModule> {
+        val loaded = ModuleResolver.getAllStampedSources()
+        val known = loaded.map { it.modulePath }.toSet()
+        val roots = loaded.filterNot { com.mezze.language.ast.ModulePathConventions.isStdlib(it.modulePath) }
+            .mapNotNullTo(LinkedHashSet()) { m ->
+                val rel = m.modulePath.replace("::", "/") + ".mz"
+                m.filePath.takeIf { it.endsWith(rel) }?.removeSuffix(rel)
+            }
+        val out = LinkedHashMap<String, com.mezze.language.parsedast.ParsedModule>()
+        for (root in roots) {
+            val base = java.nio.file.Paths.get(root.ifEmpty { "." })
+            if (!java.nio.file.Files.isDirectory(base)) continue
+            java.nio.file.Files.walk(base, 4).use { paths ->
+                for (f in paths.filter { it.toString().endsWith(".mz") }.limit(200)) {
+                    val mp = base.relativize(f).toString().removeSuffix(".mz").replace(java.io.File.separatorChar.toString(), "::")
+                    if (mp in known || mp in out || mp.startsWith(".")) continue
+                    runCatching {
+                        com.mezze.language.parser.MezzeParser().parseParsedModule(java.nio.file.Files.readString(f), file = f.toString())
+                    }.getOrNull()?.let { out[mp] = it }
+                }
+            }
+        }
+        return out
+    }
+
+    /**
      * The advice that goes with [generateAbilityErrorMessage] when the ability is
      * only missing an import: a `= hint:` line each, plus an `Import` fix hint so
      * an editor can offer one click.
@@ -1764,6 +1837,14 @@ class AbilityChecker internal constructor(
             // check whether one already exists and is merely unimported.
             val home = if (abilityImpls(abilityName).isEmpty()) blanketImplHome(abilityName) else null
             if (home != null) return "`$abilityName` isn't imported here, so `$typeNames` can't use it"
+            // BUG 49a: an impl for exactly this type exists, in a module nothing
+            // here imports. Writing the suggested skeleton would be V0407 or V0406.
+            concreteImplHome(abilityName, typeArgs.firstOrNull())?.let { h ->
+                return "$typeNames does not implement '$abilityName' here: `${h.modulePath}` has " +
+                    "`impl $abilityName for ${h.implTarget}`, and `$typeNames` is `${h.implTarget}`, but " +
+                    "nothing in this module imports `${h.modulePath}`. Add " +
+                    "`use ${h.modulePath}::{ ${h.implTarget} }` — do not write a second impl."
+            }
             val candidates = formatAbilityCandidates(abilityName)
             // A candidate that asks for something is the likely fix, and the
             // skeleton is the likely MISTAKE: writing `impl Show for W U`

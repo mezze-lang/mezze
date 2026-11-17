@@ -33,6 +33,7 @@ object UnusedImportLinter {
     fun lint(
         module: ParsedModule,
         abilityOperations: Map<String, Set<String>> = emptyMap(),
+        implementedAbilities: (ParsedUseDecl) -> Set<String> = { emptySet() },
     ): List<Finding> {
         val referenced = HashSet<String>()
         for (decl in module.decls) collectReferenced(decl, referenced)
@@ -54,6 +55,11 @@ object UnusedImportLinter {
             // whole `use a::{ used, unused }` line (B-1).
             val path = decl.path
             if (path !is ParsedUsePath.Selective) continue
+            // BUG 49b: importing ANYTHING from a module brings its impls into
+            // dispatch. When that module implements an ability this module USES
+            // and no item is named, the `use` is load-bearing as a whole —
+            // deleting it turned a working program into V0402.
+            if (isLoadBearingForDispatch(decl, path, referenced, implementedAbilities)) continue
             for (item in unusedItemNodes(path, referenced)) {
                 val local = item.alias ?: item.name
                 out.add(Finding(
@@ -85,12 +91,16 @@ object UnusedImportLinter {
         module: ParsedModule,
         useDecl: ParsedUseDecl,
         abilityOperations: Map<String, Set<String>> = emptyMap(),
+        implementedAbilities: (ParsedUseDecl) -> Set<String> = { emptySet() },
     ): List<String> {
         val referenced = HashSet<String>()
         for (decl in module.decls) collectReferenced(decl, referenced)
         for ((abilityName, ops) in abilityOperations) {
             if (ops.any { it in referenced }) referenced.add(abilityName)
         }
+        val path = useDecl.path
+        if (path is ParsedUsePath.Selective &&
+            isLoadBearingForDispatch(useDecl, path, referenced, implementedAbilities)) return emptyList()
         return unusedItems(useDecl, referenced)
     }
 
@@ -105,6 +115,16 @@ object UnusedImportLinter {
      * implicitly by resolution and never appear by name — flagging those would
      * be a false positive.
      */
+    private fun isLoadBearingForDispatch(
+        decl: ParsedUseDecl,
+        path: ParsedUsePath.Selective,
+        referenced: Set<String>,
+        implementedAbilities: (ParsedUseDecl) -> Set<String>,
+    ): Boolean {
+        if (path.items.any { (it.alias ?: it.name) in referenced }) return false
+        return implementedAbilities(decl).any { it in referenced }
+    }
+
     private fun unusedItems(decl: ParsedUseDecl, referenced: Set<String>): List<String> =
         when (val path = decl.path) {
             is ParsedUsePath.Module -> emptyList()
