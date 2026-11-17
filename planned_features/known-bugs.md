@@ -7555,3 +7555,62 @@ rewritten to assert the rejection.
 (An earlier version of this entry said distinct one-field records were the way to
 spell an id type. That was only true because I had tested `type` and not
 `newtype`.)
+
+## BUG 48 — OPEN: an ability class param that appears NOWHERE in an op
+
+Found 2026-11-17 by the first file of the ability/effect spec sweep — a cell in
+the shape matrix that had never been drawn.
+
+    ability Mystery for 'a where {
+      conjure: { n: Int } -> Int          ## `'a` is in neither params nor result
+    }
+
+    type Red = { tag: Int }
+    type Blue = { hue: Int }
+    impl Mystery for Red where { conjure = { n } -> n + 100 }
+    impl Mystery for Blue where { conjure = { n } -> n + 900 }
+
+    pub let main = {} -> perform Console in do
+      let r = Mystery.conjure { n = 7 }
+      println { msg = "conjure gave $(r.to_str {})" }
+
+    Check passed: nowhere (1275.6ms)
+    Error: com.oracle.truffle.api.CompilerDirectives$ShouldNotReachHere:
+           no dictionary was supplied for ability...
+
+**Accepted at check time with TWO competing impls, then a HOST exception** — the
+I0004 class ([[project_runtime_failure_host_vs_guest]]). Nothing determines which
+impl to pick, and nothing says so.
+
+### Where it should be refused
+
+T0215 already exists for "this class param is undetermined", and the memory for
+[[project_two_holes_found_in_object_design_talk]] records it firing when `'a`
+appears nowhere in an op's PARAMS. It does not fire here, and the reason is the
+third spelling that table does not cover: `'a` may legitimately appear only in
+the RESULT, because a receiverless op dispatches on the type it produces
+(`CallEmit`: "An operation that declares no receiver is dispatched by the type it
+PRODUCES"). So the rule is not "appears in the params" but **"appears somewhere
+in the op's signature"**, and the nowhere-at-all case fell between the two.
+
+Measured while writing the claim:
+
+| op signature, ability `for 'a` | verdict |
+|---|---|
+| `conjure: { it: 'a, n: Int } -> Int` | accepted — receiver determines it |
+| `conjure: { n: Int } -> 'a` | accepted — the RESULT determines it |
+| `conjure: { n: Int } -> Int` | **accepted, and should not be** |
+
+Refusing at the DECLARATION would be better than at the call: the declaration is
+already unusable, and one diagnostic beats one per call site. Pinned as a
+separate claim, since declaration-time is permissive today.
+
+### Related
+
+[[project_dictionary_not_arriving_family]] — "5 bugs; CHECK FIRST on 'no
+dictionary'". This is a sixth, and the first where the dictionary is missing
+because the SIGNATURE could never have supplied one, rather than because
+plumbing dropped it.
+
+Claim: `AbilityEffectSpecClaimsTest.Declaration`, `@Disabled("BUG 48")` until
+fixed — the house pattern for an unmet spec claim.
