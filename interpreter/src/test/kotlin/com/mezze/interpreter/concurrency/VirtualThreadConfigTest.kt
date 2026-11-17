@@ -1,5 +1,7 @@
 package com.mezze.interpreter.concurrency
 
+import com.mezze.interpreter.TimingSensitive
+
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
@@ -25,6 +27,7 @@ import java.util.concurrent.ThreadFactory
  * - Thread naming and tracking
  * - Thread limits and monitoring
  */
+@TimingSensitive
 class VirtualThreadConfigTest {
 
     private var executor: java.util.concurrent.ExecutorService? = null

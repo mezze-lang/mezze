@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *   peekHandlerForEffect → identity check → DirectCallNode call.
  *   No chain snapshot, no dispatch fiber, no resume/abort plumbing.
  */
+@TimingSensitive
 class EffectPicIntegrationTest {
 
     private Object eval(String src) {

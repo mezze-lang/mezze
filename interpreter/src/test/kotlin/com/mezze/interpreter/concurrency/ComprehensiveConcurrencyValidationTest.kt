@@ -1,5 +1,7 @@
 package com.mezze.interpreter.concurrency
 
+import com.mezze.interpreter.TimingSensitive
+
 import com.mezze.interpreter.MezzeTestHelper
 import com.mezze.datastructures.list.MezzeList
 import com.mezze.interpreter.values.MezzeRecord
@@ -28,6 +30,7 @@ import kotlin.system.measureTimeMillis
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @Execution(ExecutionMode.SAME_THREAD)
+@TimingSensitive
 class ComprehensiveConcurrencyValidationTest {
 
     @BeforeEach

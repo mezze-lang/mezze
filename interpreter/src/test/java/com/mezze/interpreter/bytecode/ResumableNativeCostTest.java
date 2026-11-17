@@ -1,5 +1,7 @@
 package com.mezze.interpreter.bytecode;
 
+import com.mezze.interpreter.TimingSensitive;
+
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.bytecode.BytecodeConfig;
 import com.oracle.truffle.api.bytecode.BytecodeParser;
@@ -24,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * <p>Two loops over the same data with the same guest callback, one plain and
  * one resumable, arms interleaved in one process.
  */
+@TimingSensitive
 class ResumableNativeCostTest {
 
     record PartialMap(long[] xs, Object[] out, int at, ContinuationResult pending) {}

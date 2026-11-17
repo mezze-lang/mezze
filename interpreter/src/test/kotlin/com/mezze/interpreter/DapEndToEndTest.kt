@@ -28,6 +28,7 @@ import kotlin.test.assertTrue
  * all flow through MezzeDapServer → GraalDapBridge → GraalVM Debugger, on the
  * bridge's own socket (no wire protocol, no dap-tool).
  */
+@TimingSensitive
 class DapEndToEndTest {
 
     private val clientSeq = AtomicInteger(1)

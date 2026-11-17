@@ -1,5 +1,7 @@
 package com.mezze.interpreter.concurrency
 
+import com.mezze.interpreter.TimingSensitive
+
 import com.mezze.interpreter.MezzeTestHelper
 import com.mezze.interpreter.values.MezzeRecord
 import com.mezze.interpreter.values.MezzeVariant
@@ -30,6 +32,7 @@ import org.junit.jupiter.api.parallel.ExecutionMode
  * - cancel: {} (unit)
  */
 @Execution(ExecutionMode.SAME_THREAD)
+@TimingSensitive
 class ParallelErrorPropagationTest {
 
     @BeforeEach

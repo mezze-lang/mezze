@@ -1,5 +1,7 @@
 package com.mezze.interpreter.bytecode;
 
+import com.mezze.interpreter.TimingSensitive;
+
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.bytecode.BytecodeConfig;
 import com.oracle.truffle.api.bytecode.BytecodeParser;
@@ -24,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * <p>Two roots, identical but for the check, called the same number of times
  * with the arms INTERLEAVED in one process so neither can drift.
  */
+@TimingSensitive
 class SuspendCheckCostTest {
 
     /** inner(x) = x + 1 */

@@ -1,5 +1,7 @@
 package com.mezze.interpreter.concurrency
 
+import com.mezze.interpreter.TimingSensitive
+
 import com.mezze.interpreter.MezzeTestHelper
 import com.mezze.datastructures.list.MezzeList
 import com.mezze.datastructures.seq.MezzeSeq
@@ -24,6 +26,7 @@ import org.junit.jupiter.api.parallel.ExecutionMode
  * Migrated from V1 to V2 with unboxed values.
  */
 @Execution(ExecutionMode.SAME_THREAD)
+@TimingSensitive
 class ParallelEffectTest {
 
     @BeforeEach

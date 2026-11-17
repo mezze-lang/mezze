@@ -1,5 +1,7 @@
 package com.mezze.interpreter.concurrency
 
+import com.mezze.interpreter.TimingSensitive
+
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
@@ -20,6 +22,7 @@ import kotlin.system.measureTimeMillis
  * Migrated from V1 BasicConcurrencyValidationTest.kt
  * V2 uses Java's virtual threads directly rather than a LoomConcurrencyManager wrapper.
  */
+@TimingSensitive
 class BasicConcurrencyValidationTest {
 
     @BeforeEach

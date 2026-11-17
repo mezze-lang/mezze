@@ -1,5 +1,7 @@
 package com.mezze.interpreter.stdlib
 
+import com.mezze.interpreter.TimingSensitive
+
 import com.mezze.interpreter.MezzeTestHelper
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
@@ -29,6 +31,7 @@ import java.nio.file.Path
  * Both backends throughout, because the divergences are where the bugs were
  * last time.
  */
+@TimingSensitive
 class FileWriteModeTest {
 
     @BeforeEach

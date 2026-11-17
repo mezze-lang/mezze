@@ -1,5 +1,7 @@
 package com.mezze.interpreter.bytecode;
 
+import com.mezze.interpreter.TimingSensitive;
+
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.bytecode.BytecodeConfig;
 import com.oracle.truffle.api.bytecode.BytecodeParser;
@@ -24,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * full park + resume through the stack-walking driver at a range of depths, so
  * the SLOPE is observed rather than assumed linear.
  */
+@TimingSensitive
 class DeepPropagationCostTest {
 
     /** level 0: fn(x) -> (yield "op:park") + 1 */

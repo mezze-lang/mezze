@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * Uses DeterministicSequential handler to avoid timing flakiness while
  * testing the combinator logic.
  */
+@TimingSensitive
 class ParallelChunkFusionTest {
 
     @BeforeEach

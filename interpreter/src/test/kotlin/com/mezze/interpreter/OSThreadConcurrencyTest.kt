@@ -19,6 +19,7 @@ import org.junit.jupiter.api.parallel.ExecutionMode
  * IMPORTANT: Tests are run sequentially to avoid thread scheduler issues.
  */
 @Execution(ExecutionMode.SAME_THREAD)
+@TimingSensitive
 class OSThreadConcurrencyTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 

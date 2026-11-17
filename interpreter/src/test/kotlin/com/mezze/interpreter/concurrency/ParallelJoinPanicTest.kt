@@ -1,5 +1,7 @@
 package com.mezze.interpreter.concurrency
 
+import com.mezze.interpreter.TimingSensitive
+
 import com.mezze.interpreter.MezzeTestHelper
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -23,6 +25,7 @@ import org.junit.jupiter.api.parallel.ExecutionMode
  * then get rethrown by {@code propagateBatchFailure} lines 217-221.
  */
 @Execution(ExecutionMode.SAME_THREAD)
+@TimingSensitive
 class ParallelJoinPanicTest {
 
     @BeforeEach

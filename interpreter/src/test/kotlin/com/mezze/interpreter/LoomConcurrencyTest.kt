@@ -24,6 +24,7 @@ import org.junit.jupiter.api.parallel.ExecutionMode
  * Migrated from V1 to V2 with unboxed values.
  */
 @Execution(ExecutionMode.SAME_THREAD)
+@TimingSensitive
 class LoomConcurrencyTest {
     // Runs a test body wrapped in `perform LoomAsync in do` with stdlib
     // Async imported. Top-level user-space wrappers `spawn`/`await` map

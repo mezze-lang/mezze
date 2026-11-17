@@ -1,5 +1,7 @@
 package com.mezze.interpreter.concurrency
 
+import com.mezze.interpreter.TimingSensitive
+
 import com.mezze.interpreter.MezzeTestHelper
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -24,6 +26,7 @@ import org.junit.jupiter.api.parallel.ExecutionMode
  * Migrated from V1 with unboxed values.
  */
 @Execution(ExecutionMode.SAME_THREAD)
+@TimingSensitive
 class LoomConcurrencyManagerTest {
 
     @BeforeEach

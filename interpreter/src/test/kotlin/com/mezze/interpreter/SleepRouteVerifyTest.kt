@@ -9,6 +9,7 @@ import java.util.concurrent.TimeUnit
  * #274 — sleep routes through Time.sleep. Verify it actually
  * blocks when SystemTime is installed.
  */
+@TimingSensitive
 class SleepRouteVerifyTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 

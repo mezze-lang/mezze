@@ -1,5 +1,7 @@
 package com.mezze.interpreter.concurrency
 
+import com.mezze.interpreter.TimingSensitive
+
 import com.mezze.interpreter.MezzeTestHelper
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -16,6 +18,7 @@ import org.junit.jupiter.api.parallel.ExecutionMode
  * baseline for all inputs; these tests lock that in.
  */
 @Execution(ExecutionMode.SAME_THREAD)
+@TimingSensitive
 class ParallelNumericFastPathTest {
 
     @BeforeEach

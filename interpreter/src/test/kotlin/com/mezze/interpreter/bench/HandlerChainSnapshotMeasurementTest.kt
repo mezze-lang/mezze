@@ -1,5 +1,7 @@
 package com.mezze.interpreter.bench
 
+import com.mezze.interpreter.TimingSensitive
+
 import com.mezze.interpreter.nodes.continuation.HandlerChainRegistry
 import com.mezze.interpreter.values.MezzeRecord
 import com.mezze.language.typedast.Hash
@@ -29,6 +31,7 @@ import org.junit.jupiter.api.Test
  * `:interpreter:bench` is fixed this file should switch back to using
  * BenchRecorder.bench { ... }.
  */
+@TimingSensitive
 class HandlerChainSnapshotMeasurementTest {
 
     // Cheap sentinel handler + effect hash — content doesn't matter for

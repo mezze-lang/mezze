@@ -1,5 +1,7 @@
 package com.mezze.interpreter.stdlib
 
+import com.mezze.interpreter.TimingSensitive
+
 import com.mezze.interpreter.MezzeTestHelper
 import com.mezze.interpreter.values.MezzeRecord
 import org.junit.jupiter.api.Assertions.*
@@ -14,6 +16,7 @@ import org.junit.jupiter.api.Test
  * now opaque Instant/Duration native handles, extracted back to Int
  * via std::datetime accessors (instant_to_millis, duration_to_nanos).
  */
+@TimingSensitive
 class TimeEffectTest {
 
     @BeforeEach

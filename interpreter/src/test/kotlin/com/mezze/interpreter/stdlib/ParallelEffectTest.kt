@@ -1,5 +1,7 @@
 package com.mezze.interpreter.stdlib
 
+import com.mezze.interpreter.TimingSensitive
+
 import com.mezze.interpreter.MezzeTestHelper
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
@@ -10,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach
  * Tests data parallel operations using LoomParallel handler for deterministic testing.
  * Migrated from V1 to V2 with unboxed values.
  */
+@TimingSensitive
 class ParallelEffectTest {
 
     @BeforeEach

@@ -1,5 +1,7 @@
 package com.mezze.interpreter.concurrency
 
+import com.mezze.interpreter.TimingSensitive
+
 import com.mezze.interpreter.MezzeTestHelper
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
@@ -20,6 +22,7 @@ import kotlin.system.measureTimeMillis
  * V2 tests parallelism through the Mezze language Parallel effect API.
  */
 @Execution(ExecutionMode.SAME_THREAD)
+@TimingSensitive
 class AutomaticParallelismValidationTest {
 
     @BeforeEach

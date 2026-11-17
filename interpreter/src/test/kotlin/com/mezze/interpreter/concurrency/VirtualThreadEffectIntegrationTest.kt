@@ -1,5 +1,7 @@
 package com.mezze.interpreter.concurrency
 
+import com.mezze.interpreter.TimingSensitive
+
 import com.mezze.interpreter.MezzeTestHelper
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
@@ -27,6 +29,7 @@ import java.util.concurrent.atomic.AtomicReference
  * - Context preservation across threads
  */
 @Execution(ExecutionMode.SAME_THREAD)
+@TimingSensitive
 class VirtualThreadEffectIntegrationTest {
 
     @BeforeEach

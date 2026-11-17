@@ -20,6 +20,7 @@ import kotlin.test.assertTrue
  * server's onLaunch callback. No GraalVM Debugger involved yet — this validates
  * the socket, Content-Length framing, and the request/response protocol.
  */
+@TimingSensitive
 class MezzeDapServerTest {
 
     private val clientSeq = AtomicInteger(1)

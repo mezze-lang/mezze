@@ -1,5 +1,7 @@
 package com.mezze.interpreter.bytecode;
 
+import com.mezze.interpreter.TimingSensitive;
+
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.bytecode.BytecodeConfig;
 import com.oracle.truffle.api.bytecode.BytecodeParser;
@@ -27,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *   <li>a COMPOSED two-level park + resume driven by the stack driver</li>
  * </ol>
  */
+@TimingSensitive
 class SuspendResumeCostTest {
 
     /** A one-shot continuation handle — what `cont` would be if multi-shot is refused. */

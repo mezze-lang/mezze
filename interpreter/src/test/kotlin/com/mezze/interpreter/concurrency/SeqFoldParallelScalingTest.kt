@@ -1,5 +1,7 @@
 package com.mezze.interpreter.concurrency
 
+import com.mezze.interpreter.TimingSensitive
+
 import com.mezze.interpreter.MezzeTestHelper
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
@@ -30,6 +32,7 @@ import java.util.concurrent.TimeUnit
  */
 @Disabled("perf smoke — run manually. Baseline 5M, true 4-way fanout: seq~310ms par~120ms ratio 0.38× (2.6× real speedup). Per-leaf spread <10ms rules out JIT staggering; residual gap to 4× is memory bandwidth on concurrent 40MB fold reads.")
 @Execution(ExecutionMode.SAME_THREAD)
+@TimingSensitive
 class SeqFoldParallelScalingTest {
 
     private val program = """

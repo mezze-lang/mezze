@@ -22,6 +22,7 @@ import org.junit.jupiter.api.parallel.ExecutionMode
  * scheduler saturation when many tests spawn threads concurrently.
  */
 @Execution(ExecutionMode.SAME_THREAD)
+@TimingSensitive
 class StructuredConcurrencyTest {
     // Runs a test body wrapped in `perform LoomAsync in do` with stdlib
     // Async imported. Top-level user-space wrappers `spawn`/`await` map

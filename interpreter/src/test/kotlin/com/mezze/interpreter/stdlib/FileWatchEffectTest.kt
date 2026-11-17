@@ -1,5 +1,7 @@
 package com.mezze.interpreter.stdlib
 
+import com.mezze.interpreter.TimingSensitive
+
 import com.mezze.interpreter.MezzeTestHelper
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
@@ -20,6 +22,7 @@ import java.nio.file.Path
  * weaker — a real WatchService may coalesce or delay, so asserting an exact
  * event sequence there would be a flake generator.
  */
+@TimingSensitive
 class FileWatchEffectTest {
 
     @BeforeEach

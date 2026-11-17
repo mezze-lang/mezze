@@ -1,5 +1,7 @@
 package com.mezze.interpreter.effects
 
+import com.mezze.interpreter.TimingSensitive
+
 import com.mezze.interpreter.MezzeTestHelper
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
@@ -21,6 +23,7 @@ import org.junit.jupiter.api.BeforeEach
  * - Effect handlers with virtual threads
  * - Cancellation token propagation
  */
+@TimingSensitive
 class SimpleVirtualThreadTest {
 
     @BeforeEach

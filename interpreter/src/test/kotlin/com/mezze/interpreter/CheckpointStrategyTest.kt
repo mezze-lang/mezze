@@ -20,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach
  * Migrated from V1 to V2. These are standalone strategy classes that don't depend
  * on the interpreter runtime, so they can be tested in isolation.
  */
+@TimingSensitive
 class CheckpointStrategyTest {
 
     // =============================================================================

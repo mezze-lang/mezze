@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Assertions.*
  *
  * Migrated from V1 to V2 with unboxed values.
  */
+@TimingSensitive
 class TruffleAndLoomIntegrationTest {
     // Runs `body` inside `perform LoomAsync in do` with stdlib Async
     // imported and top-level `spawn`/`await` wrappers around Async.spawn
