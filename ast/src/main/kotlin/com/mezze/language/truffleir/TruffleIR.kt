@@ -260,12 +260,22 @@ sealed interface StringPartIR {
      * comptime call, so the pass needs no hash to recognise one.
      */
     val comptimeShape: PrintType? = null,
+    /**
+     * C1 of continuations-and-swappable-async: the callee's solved effect row
+     * names an effect or has an open tail, so this call MAY suspend and the
+     * lowering must propagate a suspension through it. A `<*>`-only callee
+     * handles its own effects and cannot suspend outward. Set by the compiler
+     * from the type; carried ON the node (the lowering runs in another process
+     * for `mez dev`/`exec` and receives nothing but serialized IR). Defaulted, so
+     * every existing serialized node reads back unchanged.
+     */
+    val maySuspend: Boolean = false,
 ) : NodeIR
 /** Direct call to a known function hash with INCOMPLETE args (partial application).
  *  Returns a curried closure capturing partialFields; subsequent calls fill in
  *  remaining params. Field names matter — runtime matches them against callee paramNames. */
 @Serializable data class PartialApplyDirectIR(val targetHash: Hash, val partialFields: List<FieldIR>, val isTailCall: Boolean, override val src: SourceInfo, val typeTag: String? = null) : NodeIR
-@Serializable data class CallLocalIR(val slot: Int, val arg: NodeIR, val isTailCall: Boolean, override val src: SourceInfo) : NodeIR
+@Serializable data class CallLocalIR(val slot: Int, val arg: NodeIR, val isTailCall: Boolean, override val src: SourceInfo, val maySuspend: Boolean = false) : NodeIR
 /**
  * Call into a built-in native operation.
  *
@@ -324,7 +334,7 @@ sealed interface StringPartIR {
     val isScalarABI: Boolean get() = argKinds.isNotEmpty()
 }
 /** Indirect call — evaluate function expression, then invoke */
-@Serializable data class CallIndirectIR(val function: NodeIR, val arg: NodeIR, val isTailCall: Boolean, override val src: SourceInfo) : NodeIR
+@Serializable data class CallIndirectIR(val function: NodeIR, val arg: NodeIR, val isTailCall: Boolean, override val src: SourceInfo, val maySuspend: Boolean = false) : NodeIR
 /**
  * Type-driven Inspect (`x.to_dbg {}` / `x.to_str {}`), #394. The auto-derived
  * Inspect ability has no impl body, so the typechecker lowers a call directly
@@ -346,7 +356,7 @@ sealed interface StringPartIR {
  *  argFieldNames mirrors args 1:1 — needed for the receiver's fallback path
  *  (build a single-field MezzeRecord) when the cached callee turns out to want
  *  a record (e.g. partial application). The fast path doesn't read names. */
-@Serializable data class CallIndirectScalarIR(val function: NodeIR, val args: List<NodeIR>, val argFieldNames: List<String>, val isTailCall: Boolean, override val src: SourceInfo) : NodeIR
+@Serializable data class CallIndirectScalarIR(val function: NodeIR, val args: List<NodeIR>, val argFieldNames: List<String>, val isTailCall: Boolean, override val src: SourceInfo, val maySuspend: Boolean = false) : NodeIR
 
 /** Dictionary-or-dynamic ability method dispatch.
  *  Reads a dict param from the frame: if it holds a MezzeFunction, call it directly.
@@ -354,7 +364,8 @@ sealed interface StringPartIR {
 @Serializable data class DictMethodCallIR(
     val dictSlot: Int,   // Frame slot holding the resolved impl function
     val arg: NodeIR,     // Argument record (with receiver injected as "it")
-    override val src: SourceInfo
+    override val src: SourceInfo,
+    val maySuspend: Boolean = false,   // C1 — see CallDirectIR.maySuspend
 ) : NodeIR
 
 /** Inline binary operator — compiles to DirectAddNode/DirectSubtractNode etc. */

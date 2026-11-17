@@ -579,8 +579,18 @@ with the continuation rather than be read off whichever thread resumes it.
 
 ### Phase C — composable suspension. FOUR parts; three are PROVEN, the gating one is not built.
 
-**C1 — carry "can this call suspend" on the call IR. NOT PRESENT TODAY, and it
-gates the rest.** `CallDirectIR` carries `targetHash`, `args`, `isTailCall`,
+**C1 — carry "can this call suspend" on the call IR. LANDED 2026-11-17.**
+`maySuspend: Boolean = false` on `CallDirectIR`, `CallLocalIR`, `CallIndirectIR`,
+`CallIndirectScalarIR`, `DictMethodCallIR`, set by `TypedASTCompiler` from the
+callee's solved row (`SuspendSites.kt`: named effect or open tail → `true`;
+`<*>`-only → `false`; a wrapper whose target row is not in hand → `true`,
+conservatively). Defaulted, so serialized IR read back unchanged — the churn
+risk 6 predicted did not materialise; only the file-size ratchet fired, and the
+rule moved to its own file. Asserted on the IR in `CallMaySuspendIRTest`:
+pure `false`, effectful `true`, `<*>` `false`, callback parameter `true`.
+Gates: typechecker green, interpreter 8185/0.
+
+What it said before it landed, kept for the reasoning: `CallDirectIR` carries `targetHash`, `args`, `isTailCall`,
 `typeTag`, `isScalarABI`, `comptimeShape` — and **no effect information at all**.
 Neither does `CallLocalIR`, `CallIndirectIR` or the rest. So the repeated claim
 in this document that "the effect row picks the sites, pure calls stay free" is

@@ -1255,7 +1255,7 @@ class TypedASTCompiler(
             is TypedPipe -> {
                 val rightIR = compileExpr(expr.right)
                 val leftIR = compileExpr(expr.left)
-                CallIndirectIR(rightIR, leftIR, false, src)
+                CallIndirectIR(rightIR, leftIR, false, src, maySuspend = rowMaySuspend(expr.right.type))   // C1
             }
         }
     }
@@ -1562,6 +1562,7 @@ class TypedASTCompiler(
 
     private fun compileCall(expr: TypedCall, src: SourceInfo): NodeIR {
         val fn = expr.function
+        val calleeMaySuspend = rowMaySuspend(fn.type)   // C1: one verdict for every node this call becomes
         val argIR = compileArgWithDictWrapping(expr.arg, src)
 
         // Check for method call: receiver.method { args }
@@ -1922,7 +1923,7 @@ class TypedASTCompiler(
                 val strip = if (specialized != null) monoStripBySiteLoc[expr.loc] else null
                 val finalRecordIR = if (strip.isNullOrEmpty()) recordIR
                 else MakeRecordIR(recordIR.fields.filter { it.name !in strip }, src)
-                return emitCallDirect(effectiveHash, finalRecordIR, expr.isTailCall, src)
+                return emitCallDirect(calleeMaySuspend, effectiveHash, finalRecordIR, expr.isTailCall, src)
             }
 
             // VarType receiver — try dictionary passing first, then fall back to dynamic dispatch.
@@ -1959,7 +1960,7 @@ class TypedASTCompiler(
                     if (argRecord is MakeRecordIR) {
                         for (f in argRecord.fields) if (f.name != Keywords.IT) evidenceFields.add(f)
                     }
-                    return emitCallDirect(
+                    return emitCallDirect(calleeMaySuspend, 
                         evidenceOpHash, MakeRecordIR(evidenceFields, src), expr.isTailCall, src,
                     )
                 }
@@ -2053,7 +2054,7 @@ class TypedASTCompiler(
                     if (dictParamIdx >= 0) {
                         val dictSlot = currentCaptureCount + dictParamIdx
                         census.methodDictCallee++
-                        return DictMethodCallIR(dictSlot, recordIR, src)
+                        return DictMethodCallIR(dictSlot, recordIR, src, maySuspend = calleeMaySuspend)
                     }
                     // #195 B3: also look in captures. A nested lambda may have
                     // gained `__dict_<m>` via synthetic closure capture (see
@@ -2062,7 +2063,7 @@ class TypedASTCompiler(
                     val dictCaptureIdx = currentCaptureNames[dictParamName]
                     if (dictCaptureIdx != null) {
                         census.methodDictCallee++
-                        return DictMethodCallIR(dictCaptureIdx, recordIR, src)
+                        return DictMethodCallIR(dictCaptureIdx, recordIR, src, maySuspend = calleeMaySuspend)
                     }
 
                     // VarType receiver, multi-candidate, no dict param —
@@ -2087,14 +2088,14 @@ class TypedASTCompiler(
                     census.methodDictCallee++
                     val slot = abilityOpDictSlotOrNull(binding)
                     if (slot != null) {
-                        DictMethodCallIR(slot, compileExpr(expr.arg), src)
+                        DictMethodCallIR(slot, compileExpr(expr.arg), src, maySuspend = calleeMaySuspend)
                     } else {
                         // No slot: inside a specialization the result type is
                         // concrete, and for a receiver-less op that IS the
                         // dispatch. `expr.type` is the call's result here.
                         val ref = receiverlessOpRef(binding, expr.type, src)
-                        if (ref != null) CallIndirectIR(ref, compileExpr(expr.arg), false, src)
-                        else DictMethodCallIR(abilityOpDictSlot(binding), compileExpr(expr.arg), src)
+                        if (ref != null) CallIndirectIR(ref, compileExpr(expr.arg), false, src, maySuspend = calleeMaySuspend)
+                        else DictMethodCallIR(abilityOpDictSlot(binding), compileExpr(expr.arg), src, maySuspend = calleeMaySuspend)
                     }
                 }
                 is BindingRef.ByHash -> {
@@ -2127,7 +2128,7 @@ class TypedASTCompiler(
                         val strip = monoStripBySiteLoc[expr.loc]
                         val finalArgIR = if (strip.isNullOrEmpty() || argIR !is MakeRecordIR) argIR
                         else MakeRecordIR(argIR.fields.filter { it.name !in strip }, src)
-                        return emitCallDirect(specialized, finalArgIR, expr.isTailCall, src)
+                        return emitCallDirect(calleeMaySuspend, specialized, finalArgIR, expr.isTailCall, src)
                     }
 
                     // Check if the callee needs dictionary params. If so, inject
@@ -2136,7 +2137,7 @@ class TypedASTCompiler(
                     if (calleeDictMethods != null && calleeDictMethods.isNotEmpty()) {
                         val enrichedArgIR = dictEnrichedArg(calleeHash, fn, expr, argIR, calleeDictMethods, src)
                         census.byHashDictInject++
-                        emitCallDirect(calleeHash, enrichedArgIR, expr.isTailCall, src)
+                        emitCallDirect(calleeMaySuspend, calleeHash, enrichedArgIR, expr.isTailCall, src)
                     } else if (isNonLambdaUserLet(calleeHash)) {
                         // #389 — a top-level user let whose value is NOT a
                         // lambda (e.g. `let partialMul = multiply {x=2}`) is a
@@ -2151,14 +2152,14 @@ class TypedASTCompiler(
                         // Only user-let thunks trigger this — ability ops and
                         // other ByHash refs still get the CallDirect fast path.
                         census.indirect++
-                        emitCallIndirect(fnIR, argIR, expr.isTailCall, src)
+                        emitCallIndirect(calleeMaySuspend, fnIR, argIR, expr.isTailCall, src)
                     } else {
                         // Always use CallDirectIR for hash-based bindings.
                         // DO NOT check localsByName — a user variable with the same name
                         // (e.g., "let chars = str::chars {s = s}") would shadow the function
                         // reference and read from an uninitialized slot.
                         census.byHashPlain++
-                        emitCallDirect(binding.hash, argIR, expr.isTailCall, src)
+                        emitCallDirect(calleeMaySuspend, binding.hash, argIR, expr.isTailCall, src)
                     }
                 }
                 is BindingRef.Native -> {
@@ -2244,7 +2245,7 @@ class TypedASTCompiler(
                         val methods = dictMethodsForHash[ownHash]
                             ?: throw IllegalStateException("constrained local lambda '${fn.name}' has no registered dictionaries")
                         census.byHashDictInject++
-                        return emitCallIndirect(fnIR, dictEnrichedArg(ownHash, fn, expr, argIR, methods, src), expr.isTailCall, src)
+                        return emitCallIndirect(calleeMaySuspend, fnIR, dictEnrichedArg(ownHash, fn, expr, argIR, methods, src), expr.isTailCall, src)
                     }
                     val aliasTargetHash = localFnAliases[fn.name]
                     val aliasDictMethods = aliasTargetHash?.let { dictMethodsForHash[it] }
@@ -2255,7 +2256,7 @@ class TypedASTCompiler(
                             val strip = monoStripBySiteLoc[expr.loc]
                             val finalArgIR = if (strip.isNullOrEmpty() || argIR !is MakeRecordIR) argIR
                             else MakeRecordIR(argIR.fields.filter { it.name !in strip }, src)
-                            return emitCallDirect(specialized, finalArgIR, expr.isTailCall, src)
+                            return emitCallDirect(calleeMaySuspend, specialized, finalArgIR, expr.isTailCall, src)
                         }
                         // Derive constraint types + generic-ness the same way the
                         // direct-call ByHash path does (~1846), so dict resolution
@@ -2274,7 +2275,7 @@ class TypedASTCompiler(
                             argIR, expr.arg, aliasDictMethods, constraintTypes, calleeConstraintsAreGeneric, src
                         )
                         census.byHashDictInject++
-                        return emitCallDirect(aliasTargetHash, enrichedArgIR, expr.isTailCall, src)
+                        return emitCallDirect(calleeMaySuspend, aliasTargetHash, enrichedArgIR, expr.isTailCall, src)
                     }
                     if (resolvedSlot >= 0) {
                         // Devirtualise a call through a capture-free let-bound
@@ -2288,10 +2289,10 @@ class TypedASTCompiler(
                             plainLocalLambdaBySlot[resolvedSlot] else null
                         if (devirtTarget != null && monoCallSiteRewrites[expr.loc] == null) {
                             census.byHashPlain++
-                            return emitCallDirect(devirtTarget, argIR, expr.isTailCall, src)
+                            return emitCallDirect(calleeMaySuspend, devirtTarget, argIR, expr.isTailCall, src)
                         }
                         census.indirect++
-                        emitCallIndirect(ReadLocalIR(resolvedSlot, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
+                        emitCallIndirect(calleeMaySuspend, ReadLocalIR(resolvedSlot, SlotKind.OBJECT, src), argIR, expr.isTailCall, src)
                     } else {
                         // Recursive-let self-TAIL-call from within the lambda
                         // body: emit CallDirectIR so the bytecode compiler can
@@ -2306,7 +2307,7 @@ class TypedASTCompiler(
                         val recursiveLet = recursiveLetLambdas[fn.name]
                         if (recursiveLet != null && expr.isTailCall) {
                             census.byHashPlain++
-                            return emitCallDirect(recursiveLet.hash, argIR, true, src)
+                            return emitCallDirect(calleeMaySuspend, recursiveLet.hash, argIR, true, src)
                         }
                         // A call to a CAPTURED capture-free helper. `fnIR` is
                         // what says so: `compileVar` has already resolved this
@@ -2319,7 +2320,7 @@ class TypedASTCompiler(
                             monoCallSiteRewrites[expr.loc] == null) {
                             currentCaptureLambdaHashes[capturedFn.index]?.let { ownHash ->
                                 census.byHashPlain++
-                                return emitCallDirect(ownHash, argIR, expr.isTailCall, src)
+                                return emitCallDirect(calleeMaySuspend, ownHash, argIR, expr.isTailCall, src)
                             }
                         }
                         // If depth > 0 and not found locally, check if it's a top-level
@@ -2358,19 +2359,19 @@ class TypedASTCompiler(
                             val topDecl = declIndex?.values?.find { it.name == fn.name }
                             if (topDecl != null && !isNonLambdaUserLet(topDecl.hash)) {
                                 census.byHashPlain++
-                                return emitCallDirect(topDecl.hash, argIR, expr.isTailCall, src)
+                                return emitCallDirect(calleeMaySuspend, topDecl.hash, argIR, expr.isTailCall, src)
                             }
                         }
                         census.indirect++
-                        emitCallIndirect(fnIR, argIR, expr.isTailCall, src)
+                        emitCallIndirect(calleeMaySuspend, fnIR, argIR, expr.isTailCall, src)
                     }
                 }
-                is BindingRef.Param -> { census.indirect++; emitCallIndirect(ReadLocalIR(currentCaptureCount + binding.index, SlotKind.OBJECT, src), argIR, expr.isTailCall, src) }
-                is BindingRef.Capture -> { census.indirect++; emitCallIndirect(ReadCaptureIR(binding.index, SlotKind.OBJECT, src), argIR, expr.isTailCall, src) }
+                is BindingRef.Param -> { census.indirect++; emitCallIndirect(calleeMaySuspend, ReadLocalIR(currentCaptureCount + binding.index, SlotKind.OBJECT, src), argIR, expr.isTailCall, src) }
+                is BindingRef.Capture -> { census.indirect++; emitCallIndirect(calleeMaySuspend, ReadCaptureIR(binding.index, SlotKind.OBJECT, src), argIR, expr.isTailCall, src) }
             }
         }
         census.indirect++
-        return emitCallIndirect(fnIR, argIR, expr.isTailCall, src)
+        return emitCallIndirect(calleeMaySuspend, fnIR, argIR, expr.isTailCall, src)
     }
 
     /**
@@ -3040,7 +3041,7 @@ class TypedASTCompiler(
                 localNames = emptyList(),
                 captureSlots = emptyList(),
                 captureNames = emptyList(),
-                body = CallDirectIR(opHash, listOf(MakeRecordIR(innerArgFields, src)), false, src),
+                body = CallDirectIR(opHash, listOf(MakeRecordIR(innerArgFields, src)), false, src, maySuspend = true),   // C1: see SuspendSites.kt
                 sourceFile = src.fileIndex.toString(),
                 sourceSection = src
             ))
@@ -3209,7 +3210,7 @@ class TypedASTCompiler(
             innerArgFields.add(FieldIR(dictEntry.first, ReadLocalIR(i, SlotKind.OBJECT, src)))
         }
         val innerArgIR = MakeRecordIR(innerArgFields, src)
-        val wrapperBodyIR = CallDirectIR(binding.hash, listOf(innerArgIR), false, src)
+        val wrapperBodyIR = CallDirectIR(binding.hash, listOf(innerArgIR), false, src, maySuspend = true)   // C1: conservative, see above
 
         // Create the wrapper FunctionIR
         val wrapperFnIR = FunctionIR(
@@ -4765,6 +4766,7 @@ class TypedASTCompiler(
      *    - field name set == callee paramNames set (full application)
      */
     private fun emitCallDirect(
+        maySuspend: Boolean,
         targetHash: Hash,
         argIR: NodeIR,
         isTailCall: Boolean,
@@ -4792,11 +4794,11 @@ class TypedASTCompiler(
                         if (inlined != null) return inlined
                     }
 
-                    return CallDirectIR(targetHash, orderedArgs, isTailCall, src, typeTag, isScalarABI = true)
+                    return CallDirectIR(targetHash, orderedArgs, isTailCall, src, typeTag, isScalarABI = true, maySuspend = maySuspend)
                 }
             }
         }
-        return CallDirectIR(targetHash, listOf(argIR), isTailCall, src, typeTag, isScalarABI = false)
+        return CallDirectIR(targetHash, listOf(argIR), isTailCall, src, typeTag, isScalarABI = false, maySuspend = maySuspend)
     }
 
     /** Inlining cap — keep body size small to prevent IR blowup in callers
@@ -5027,6 +5029,7 @@ class TypedASTCompiler(
      *  so positional binding at index 0 is correct. Wider arities defer to the
      *  record path because we can't statically know the callee's param order. */
     private fun emitCallIndirect(
+        maySuspend: Boolean,
         fnIR: NodeIR,
         argIR: NodeIR,
         isTailCall: Boolean,
@@ -5051,7 +5054,7 @@ class TypedASTCompiler(
                 isTailCall, src
             )
         }
-        return CallIndirectIR(fnIR, argIR, isTailCall, src)
+        return CallIndirectIR(fnIR, argIR, isTailCall, src, maySuspend = maySuspend)
     }
 
 }

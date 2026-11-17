@@ -281,7 +281,10 @@ class EmitFileSizeRatchetTest {
             // 5050 -> 5057: BUG 43 (a mono clone of a non-lambda let is a thunk, set where
             // the specs are registered) and four `evidenceNativeForm` entries — the
             // group_by family, BUG 50 old series. Table rows belong in the table.
-            C + "TypedASTCompiler.kt" to 5057,   // was 5,580 before the split
+            // 5057 -> 5060: C1 of continuations — every call site threads its callee's
+            // `maySuspend` verdict (computed in SuspendSites.kt) into the node it emits.
+            // The threading has to sit at the emit sites; the rule lives in its own file.
+            C + "TypedASTCompiler.kt" to 5060,   // was 5,580 before the split
             // +42 for `contextRowWithBodyAssocTypes`: an INLINE lambda was stamped
             // with the row from the pushed CONTEXT, so a callback's associated
             // type was the CALLEE's variable rather than what the body threw, and
