@@ -333,7 +333,14 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
                 itType != null && getFreeTypeVariables(itType).isEmpty()
             }
             if (concrete.size == 1) {
-                return generateInherentMethodCall(expr, memberAccess, concrete, context)
+                // BUG 60: this used to COMMIT to the one concrete candidate — a
+                // guess. For `{ ys } -> ys.map {…}` it picked `Bytes.map` (the only
+                // concrete `map`) and the call site was told `ys` "expects Bytes".
+                // What #184 needed was the pick to WAIT for the solved receiver
+                // (`Ok { val } -> val.is_ok {}`, val: Resp), and the deferred
+                // resolve does exactly that over every candidate, refusing loudly
+                // (T0206) if nothing ever pins the receiver.
+                return generateDeferredInherentMethodCall(expr, memberAccess, inherentMethods, context)
             }
             // #160: the receiver's concrete type isn't known yet (e.g.
             // `help {a=5,b=6}.abs {}` where help is polymorphic and the args pin

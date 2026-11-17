@@ -8091,3 +8091,28 @@ variable.
 Tests: `AbilityEffectSpecRowTest` BUG 59 section (ability method, its mirror,
 receiverless op); all 3 fail without the method-path change. Gates: typechecker
 5460/0, interpreter 8175/0.
+
+## BUG 60 — FIXED 2026-11-17: an unresolved inherent receiver was GUESSED to the one concrete candidate
+
+```mezze
+let mapper = { ys } -> ys.map { f = { x } -> x }
+pub let r = mapper { ys = [1, 2] }      ## "Field `ys` expects Bytes but got [Int]"
+```
+
+Pre-existing (the 2026-11-01 nightly does the same). With several inherent
+candidates and a receiver nothing had typed, #184 committed to the single
+CONCRETE candidate (`Bytes.map`, against the generic `Seq`/`List` ones), so the
+definition was ACCEPTED as Bytes-only and the error surfaced at a call site,
+naming a type the author never wrote.
+
+#184 had a real case to protect: `Ok { val } -> val.is_ok {}`, where the solve
+DOES determine `val: Resp`, and the old field-access fallback crashed at run
+time. What it needed was for the pick to WAIT. The branch now emits the
+deferred `InherentMethodResolve` over every candidate: `val.is_ok` still lands
+on Resp, and `{ ys } -> ys.map` is refused at the definition with T0206 ("the
+receiver's type could not be determined"). Inherent methods are not abstractable
+(the `to_str` rule), so that refusal is the language's answer, not a gap.
+
+Tests: `InherentMethodNoGuessTest` (the refusal fails without the fix: the
+definition was accepted; the #184 case passes both ways and its pinning test is
+untouched). Gates: typechecker 5462/0, interpreter 8175/0.
