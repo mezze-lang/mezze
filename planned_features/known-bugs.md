@@ -7646,8 +7646,26 @@ following the suggestion would be a coherence violation (V0407) or an orphan
 `use boxmod::{ Box }`.
 
 A hint for this shape already exists for BLANKET impls
-([[project_unimported_blanket_impl_hint]]) — it was never extended to concrete
-ones.
+(`AbilityChecker.blanketImplHome`), and its limitation to blankets was
+DELIBERATE, with a rationale worth quoting before anyone "fixes" it:
+
+> Only a BLANKET impl earns this message. For `Ord`, where impls are written per
+> type, a type with no impl really does need one, and saying "import
+> std::abilities::compare" would send the reader somewhere useless. The blanket
+> case is the only one where "your type is already covered" is provable, and it
+> is exactly the case the old message got wrong.
+
+**49a is the case that rationale does not cover.** Here coverage IS provable:
+`boxmod` holds `impl Bump for Box`, and the receiver is a bare `{ v = 1 }` that
+adopts to `Box`. So the hint should extend not to "all concrete impls" but to
+"a concrete impl whose target matches this receiver" — which keeps the stated
+principle (never claim coverage that is not provable) while covering this shape.
+
+**The work that makes it non-trivial:** matching a bare record receiver against
+an alias target across modules needs the alias resolved structurally, since the
+receiver carries no declared identity of its own. `blanketImplHome` sidesteps
+this by matching on the target being a type VARIABLE, which needs no receiver
+comparison at all.
 
 ### 49b — and the import that fixes it is reported as unused
 
