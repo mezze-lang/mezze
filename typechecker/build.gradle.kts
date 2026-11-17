@@ -43,7 +43,11 @@ tasks.test {
     // well under ncpu (16 GB machine): 4 forks × 1.5g = 6g fits with headroom
     // for the OS + Gradle client, and avoids oversubscribing the CPU with heavy
     // Truffle JVMs.
-    maxParallelForks = 4
+    // MEASURED 2026-11-17 (27 GB, 16 cores, --rerun): 4 forks 193s, 8 forks 230s,
+    // 12 forks 270s. More forks INFLATE the work rather than divide it — the summed
+    // test time went 10.1 → 40 min at 12, every JVM loading the stdlib at once. The
+    // suite is ~10 min of test time, ~151s balanced over 4: already near its floor.
+    maxParallelForks = (System.getenv("MEZZE_TEST_FORKS")?.toIntOrNull() ?: 4)
     maxHeapSize = "1500m"
 
     // 120s (was 60s): ExhaustivenessFuzzTest's runSweep(seed, 300) sits right at
