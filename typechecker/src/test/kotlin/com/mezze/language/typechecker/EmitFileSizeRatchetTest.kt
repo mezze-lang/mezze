@@ -324,7 +324,9 @@ class EmitFileSizeRatchetTest {
             // 2419 -> 2428: BUG 48 (phantom `with` constraints are not anchors) and BUG 56
             // (an unsolved inherent receiver is refused, not guessed) — both are the
             // builder's own resolution rules. The continuation code went to ContCapable.kt.
-            E + "TypedAstBuilder.kt" to 2428,    // was 3,107
+            // 2428 -> 2430: two more fields threaded onto TypedHandlerRef at the emit site
+            // (`contOps`, `effectName`); the computation lives in ContCapable.kt.
+            E + "TypedAstBuilder.kt" to 2430,    // was 3,107
         )
 
         val SPLIT_OUT = listOf(
