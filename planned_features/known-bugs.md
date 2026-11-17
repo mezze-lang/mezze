@@ -7556,60 +7556,96 @@ rewritten to assert the rejection.
 spell an id type. That was only true because I had tested `type` and not
 `newtype`.)
 
-## BUG 48 — OPEN (RESCOPED): the sole-impl fallback crashes instead of diagnosing
+## BUG 48 — OPEN: the undetermined-class-param check fires only where an ANNOTATION exists
 
-Found 2026-11-17 by the ability/effect spec sweep. **Rescoped after a first fix
-attempt was wrong** — see "what the shape actually means" below.
+Found 2026-11-17 by the ability/effect spec sweep. Rescoped TWICE; this is the
+measured shape, and the rule that settles it is Rust's.
 
-### The shape
+### The one rule
 
-An operation may mention NONE of its ability's type variables:
+**A call to an ability op is legal iff the class param is DETERMINED at that
+site.** The number of impls is irrelevant. Rust is explicit about this:
 
-    ability Tag for 'a where { tag: { n: Int } -> Int }
+    trait Tag { fn tag(n: i32) -> i32; }
+    impl Tag for Light { fn tag(n: i32) -> i32 { n + 1 } }
+    Tag::tag(1);                   // ERROR: type annotations needed
+    <Light as Tag>::tag(1);        // OK — you name the type
 
-**This is deliberate.** `AbilityDeclarationSpecTest` already claims it:
+    impl<T> Tag for T { fn tag(n: i32) -> i32 { n + 100 } }
+    Tag::tag(1);                   // STILL an error — T is undetermined
 
-> `an op mentioning the for-type nowhere is accepted` — "Nothing to be the
-> receiver and nothing claiming to be: the rule does not fire, and the impl is
-> chosen by the one Mezze already has in scope."
+**So a BLANKET impl does not rescue an undetermined type**, even though every
+instantiation would answer the same. That answers the author's question directly:
+it should not work.
 
-And it is pervasive: `ability Show for 'a where { show : {} -> Str }` is a
-long-standing fixture in `FunctionAbilityConstraintTypeCheckerTest`. So dispatch
-falls back to **the sole impl in scope**.
+### What Mezze does today — measured, five call sites
 
-### The bug: the fallback has no failure mode
+    type Light = |
+      LitRed {},
+      LitGreen {},
+    |
+    ability Tag for 'a where { tag: { n: Int } -> Int }    ## 'a nowhere in the op
+    impl Tag for Light where { tag = { n } -> n + 1 }
 
-| impls in scope | outcome |
-|---|---|
-| exactly ONE concrete impl | works — the specified behaviour |
-| TWO concrete impls | **checks clean, then `ShouldNotReachHere: no dictionary was supplied`** |
-| ONE BLANKET impl (`impl Tag for 'a`) | **same host crash** |
+| call site | `'a` determined by | today | Rust |
+|---|---|---|---|
+| `let use_it: {} -> Int = {} -> Tag.tag { n = 1 }` | nothing | **T0215** | error |
+| `let use_it = {} -> Tag.tag { n = 1 }` (unannotated) | nothing | **accepted -> host crash** | error |
+| `pub let main = {} -> do let r = Tag.tag { n = 1 } …` | nothing | **accepted -> host crash** | error |
+| inside `let f: { x: 'a } with Tag 'a -> Int` | the constraint | **T0215** | **allowed** (`T::tag(1)`) |
+| `'a` in the RESULT, pinned: `let u: {} -> Light = {} -> Make.make { n = 1 }` | expected type | accepted | OK |
+| `'a` in the RESULT, unpinned | nothing | **accepted -> host crash** | error |
 
-Both failing rows are the I0004 class
-([[project_runtime_failure_host_vs_guest]]): a host exception reaching a user.
-"The one in scope" stops being a unique answer and nothing says so.
+Three holes where an undetermined call is accepted and reaches
+`ShouldNotReachHere: no dictionary was supplied` (the I0004 class), and one place
+Mezze is STRICTER than Rust.
 
-The blanket row is the telling one — a single candidate, zero ambiguity, and it
-still fails. So the fallback does not merely lack a tie-break; it cannot consume
-a blanket at all.
+**The pattern: the check fires when the binding carries an ANNOTATION and misses
+when it does not** — the inverse of the usual complaint, and the same family as
+[[feedback_no_required_type_annotations]]. The T0215 site in
+`ConstraintGenerator` compares a binding's ability constraints against what the
+binding's TYPE mentions (`namedBySignature`); for an unannotated binding the
+inferred type already mentions the var, so everything looks determined.
 
-### What the shape actually means, and the fix that was WRONG
+### The fix, mirroring an existing precedent exactly
 
-My first fix refused the declaration outright: an op must mention some ability
-type variable. **It broke 18 tests across four suites**, including the spec claim
-above and the `Show` fixture, and was reverted. The shape is legal; what is
-missing is a diagnostic when the fallback cannot pick.
+`TypeChecker.undispatchableInherentMethodErrors` already does this for INHERENT
+methods: the solver retains `SolveResult.Success.unresolvedInherentMethods`, and
+post-solve TypeChecker re-checks each against the COMPOSED (global ∘ per-binding)
+substitution plus `callReturnTypes`, reporting T0206 when the receiver is still a
+bare var — while excluding `generalizedVarIds`, the legitimately-generalized
+params.
 
-So the fix belongs at DISPATCH, not at the declaration: when an op mentions no
-ability type variable and the sole-impl fallback finds anything other than one
-concrete candidate, emit a diagnostic naming the candidates instead of reaching
-the runtime.
+The symmetric change:
+
+1. add `unresolvedAbilityObligations: List<Constraint.AbilityRequired>` to
+   `ConstraintSolver.SolveResult.Success`;
+2. populate it in `AbilityChecker.solveAbilityRequired` wherever an obligation is
+   deferred with its class args still unresolved;
+3. post-solve in `TypeChecker`, beside the inherent check, report T0215 for any
+   whose class args remain bare vars AND are not in `generalizedVarIds`.
+
+**Step 3's exclusion is what also fixes the over-strict row**: inside
+`with Tag 'a` the var IS a generalized param, so it is a genuine deferral and
+must not be flagged — which is exactly Rust's `T: Tag` case. One implementation,
+three holes closed and one over-strictness removed.
+
+### Two earlier framings, both wrong, recorded so they are not retried
+
+- *"Refuse the declaration."* Broke 18 tests across four suites, including the
+  deliberate claim `AbilityDeclarationSpecTest: an op mentioning the for-type
+  nowhere is accepted` and the fixture
+  `ability Show for 'a where { show : {} -> Str }`. The DECLARATION is legal in
+  Rust too; only the call is refused.
+- *"It is about ambiguity between impls."* No: a single blanket impl fails
+  identically, and so does a single CONCRETE impl called from an unannotated
+  binding. Impl count never enters the rule.
 
 ### Related
 
 [[project_dictionary_not_arriving_family]] — "5 bugs; CHECK FIRST on 'no
 dictionary'". A sixth, and the first where the dictionary is absent because
-NOTHING COULD HAVE CHOSEN ONE rather than because plumbing dropped it.
+nothing could have chosen one.
 
 Claim: `AbilityEffectSpecClaimsTest.Declaration`, `@Disabled("BUG 48")`.
 
