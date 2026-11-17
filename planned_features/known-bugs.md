@@ -8029,7 +8029,31 @@ Tests: `interpreter/.../typing/GenericImplInferredConstraintTest` asserts
 values (2 levels, 3 levels, one-op-of-two); all 3 fail without the fix with
 the crash. Gates: typechecker 5457/0, interpreter 8174/0.
 
-## BUG 58 — OPEN: a pattern-bound VARIANT payload in a generic impl loses its dictionary
+## BUG 58 — FIXED 2026-11-17: a pattern-bound VARIANT payload in a generic impl loses its dictionary
+
+### Fix
+
+The hypothesis held, and was measured: `inner`'s binding type was `'w10`, the
+separately-solved impl body's own variable, while the structural read off the
+scrutinee `Box 'a` gave the signature's `'a`. `buildMatchCase` kept the solver's
+answer, a BARE variable carrying no information, so a monomorphized
+specialization (whose substitution matches the signature's variables) left
+`inner` untyped with no dictionary slot, and dispatch fell back to Box's own
+`desc` on the inner Int. The generic compile worked; only the specialization
+failed, which is why `params=[it]` with no `__dict_desc` showed in the trace.
+
+Now a bare solver variable yields to the structural read, but only when the
+scrutinee is a declared generic TYPE APPLICATION, where the payload's type is
+that application's own argument. The first, unnarrowed version broke
+`InspectPolymorphicReceiverTest`: on an undeclared variant the structural read
+mints an unrelated variable, and replacing the solver's lost `n.to_str {}`'s
+refinement.
+
+Tests: `GenericImplInferredConstraintTest` (the variant claim un-disabled, plus
+a two-constructor `Opt (Opt Int)`; both fail without the fix with "no variant
+tag matched"). Gates: typechecker 5457/0, interpreter 8175/0.
+
+### Original entry
 
 ```mezze
 type Box 'a = | Bx { inner: 'a } |

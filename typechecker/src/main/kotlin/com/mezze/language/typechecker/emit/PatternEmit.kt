@@ -159,10 +159,28 @@ internal fun TypedAstBuilder.buildMatchCase(
         if (scrutineeType == null || scrutineeType.holdsTypeVar()) emptyMap()
         else case.patterns.fold(emptyMap()) { acc, p -> acc + patternBindingTypes(p, scrutineeType) }
 
+    val scrutineeIsDeclaredApplication =
+        scrutineeType?.let { substitution.apply(it) } is MezzeType.TypeApplication
     val resolvedTypes = bindingNames.associateWith { name ->
         val solverTy = solverBindings[name]?.let { substitution.apply(it) }
         if (solverTy != null) {
-            if (solverTy.holdsTypeVar()) determinedBindings[name] ?: solverTy else solverTy
+            when {
+                !solverTy.holdsTypeVar() -> solverTy
+                // BUG 58: a BARE solver variable says nothing, and in an impl-op
+                // body it is the separately-solved body's own (`'w10`), linked to
+                // nothing here. The structural read off `Box 'a` gives the
+                // signature's `'a`, which specialization substitutes and the dict
+                // lookup keys on. Keeping `'w10` left `inner.desc {}` with no
+                // dictionary in a specialization, and `Box (Box Int)` crashed.
+                // Only when the scrutinee is a DECLARED generic application, where
+                // the payload's type is that application's own argument. On an
+                // undeclared variant the structural read mints an unrelated
+                // variable, and replacing the solver's lost `n.to_str {}`'s
+                // refinement (InspectPolymorphicReceiverTest).
+                solverTy is MezzeType.VarType && scrutineeIsDeclaredApplication ->
+                    determinedBindings[name] ?: structuralBindings[name] ?: solverTy
+                else -> determinedBindings[name] ?: solverTy
+            }
         } else structuralBindings[name] ?: run {
             // A.2 — the compiler does not know this binding's type, and says
             // so by minting a fresh variable. That is indistinguishable from

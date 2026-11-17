@@ -3,7 +3,6 @@ package com.mezze.interpreter.typing
 import com.mezze.interpreter.MezzeTestHelper
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 
 /**
@@ -70,8 +69,12 @@ class GenericImplInferredConstraintTest {
         assertEquals("w(w(int)) W", MezzeTestHelper.run(code))
     }
 
+    /**
+     * BUG 58: here `inner` is bound by a PATTERN, and it took the separately-solved
+     * impl body's own variable rather than the signature's `'a`, so a
+     * specialization had no dictionary for it. Failed with the constraint WRITTEN.
+     */
     @Test
-    @Disabled("BUG 58 — a pattern-bound variant payload loses its dictionary, written constraint or not")
     fun `a nested generic impl over a VARIANT dispatches each level too`() {
         val code = """
             type Box 'a = | Bx { inner: 'a } |
@@ -85,5 +88,22 @@ class GenericImplInferredConstraintTest {
             render {}
         """.trimIndent()
         assertEquals("b(b(int))", MezzeTestHelper.run(code))
+    }
+    @Test
+    fun `a two-constructor generic variant dispatches its payload per level`() {
+        val code = """
+            type Opt 'a = | Som { v: 'a }, Non {}, |
+            ability Desc for 'a where { desc: { it: 'a } -> Str }
+            impl Desc for Int where { desc = { it } -> "int" }
+            impl Desc for Opt 'a where { desc = { it } -> match it is
+              Som { v } -> "s(${'$'}(v.desc {}))"
+              Non {} -> "n" }
+            let render: {} -> Str = {} -> do
+              let a: Opt (Opt Int) = Som { v = Som { v = 1 } }
+              let b: Opt (Opt Int) = Som { v = Non {} }
+              "${'$'}(a.desc {}) ${'$'}(b.desc {})"
+            render {}
+        """.trimIndent()
+        assertEquals("s(s(int)) s(n)", MezzeTestHelper.run(code))
     }
 }
