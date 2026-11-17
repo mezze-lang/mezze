@@ -738,9 +738,12 @@ sealed interface SinkIR {
      * independent (a body can perform some handled effects AND return a function
      * carrying others). The push/pop happens either way, so this is additive.
      */
-    val capturesIntoResult: Boolean = false
+    val capturesIntoResult: Boolean = false,
+    /** `body` is a call of a `{} -> …` thunk (a `cont`-capable handler is
+     *  present): the boundary drives the thunk root's suspensions. */
+    val bodyIsThunk: Boolean = false,
 ) : NodeIR
-@Serializable data class HandlerBindIR(val handlerHash: Hash, val effectHash: Hash, val performerName: String, val params: NodeIR?, val isScoped: Boolean = false)
+@Serializable data class HandlerBindIR(val handlerHash: Hash, val effectHash: Hash, val performerName: String, val params: NodeIR?, val isScoped: Boolean = false, val contCapable: Boolean = false)
 /** Effect operation call — runtime dispatch via handler stack.
  *  Can't be CallDirect because the performer isn't known at compile time
  *  (different perform blocks can use different performers).

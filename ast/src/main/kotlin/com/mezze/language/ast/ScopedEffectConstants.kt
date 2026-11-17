@@ -35,6 +35,15 @@ object ScopedEffectConstants {
      */
     const val RESUME = "resume"
 
+    /**
+     * Runtime-bound name available inside op handler bodies (continuations
+     * design): `cont.park { on, set }` suspends the task until the condition
+     * holds and evaluates to a `ParkOutcome`; `cont.abort { val }` ends the
+     * perform. Userland never holds a continuation — the runtime does.
+     */
+    const val CONT = "cont"
+    const val CONT_PARK = "park"
+    const val CONT_ABORT = "abort"
     /** Field name carried by `abort` and `resume` records. */
     const val VAL_FIELD = "val"
 
@@ -57,7 +66,8 @@ object ScopedEffectConstants {
 enum class EffectBindingKind {
     RESUME,
     ABORT,
-    SCOPE;
+    SCOPE,
+    CONT;
 
     /**
      * The user-visible name (matches `ScopedEffectConstants.RESUME` etc.).
@@ -67,6 +77,7 @@ enum class EffectBindingKind {
         RESUME -> ScopedEffectConstants.RESUME
         ABORT -> ScopedEffectConstants.ABORT
         SCOPE -> ScopedEffectConstants.SCOPE
+        CONT -> ScopedEffectConstants.CONT
     }
 
     companion object {
@@ -88,6 +99,7 @@ enum class EffectBindingKind {
             ScopedEffectConstants.RESUME -> RESUME
             ScopedEffectConstants.ABORT -> ABORT
             ScopedEffectConstants.SCOPE -> SCOPE
+            ScopedEffectConstants.CONT -> CONT
             else -> null
         }
     }

@@ -612,7 +612,47 @@ So C1 is one flag per call node, set from the solved effect row, carried on the
 node. Until it exists, C2's check would have to be emitted at EVERY call site,
 which is the version whose cost nobody has measured.
 
-**C2 — propagate the suspension at those call sites. PROVEN.**
+**C2 + C3 + the first `cont.park` — LANDED 2026-11-17 as one vertical slice, in
+real compiled Mezze.** `ContParkPropagationTest`: a performer op body calls
+`cont.park`, the op body's root suspends, `PerformD` yields the task's
+continuation, `inner = {} -> Wait.wait {} + 1` and `outer = {} -> inner {} + 100`
+both suspend and both tails run — 108 — and two parks in one body resume in
+order. Pieces, each where the design said:
+
+- `cont` is a runtime-bound name in performer op bodies, like `scope`
+  (`EffectBindingKind.CONT`, bound by `EffectHandlerBindings.extendWithCont`;
+  V0702 anywhere else — checked). Its types `ParkOn`, `WaitSet`, `ParkOutcome`
+  and the three `newtype` ids live in `std::effects::async`, referenced by
+  identity so any module's performer sees them.
+- `cont.park` returns a `ParkRequest`; the lowering treats it as a suspension.
+  Its call site is flagged by a KEYWORD rule (`cont.park` suspends by
+  definition) — the open row bound on its type did not survive into the typed
+  AST the compiler reads, which is a loose end worth closing, not a blocker.
+- Propagation: `emitWithSuspendPropagation` wraps every `maySuspend` non-tail
+  call and every perform op in `local = call; if IsSuspension(local) then
+  Yield(local) else local`. One trap, measured: the inliner splices the SAME
+  node object into other roots, so a mark that outlived one wrap made the second
+  emission skip it and a continuation reached `+ 1` as a value.
+- The boundary: a perform over a `cont`-capable performer (syntactic check of
+  its op bodies, `TypedHandlerRef.contCapable`) compiles its body as its OWN
+  root — a BDSL yield suspends a root, and the boundary must be the frame that
+  catches it — called under `DriveParked`, the stack driver from the prototype,
+  INSIDE the handler pushes so a resumed op body dispatches against this
+  perform's chain. A performer that never says `cont` pays nothing (asserted).
+- Policy is absent on purpose: `DriveParked` answers every park at once with
+  `ParkReady { which = 0 }`. The scheduler (`drive`, wait sets, the task machine
+  in the CONTEXT per risk 1) replaces that one line.
+- The typechecker side is a spec, `ContBindingSpecTest`: `cont` is V0702 outside
+  a performer op body (an ability impl included); `cont.park` is a `ParkOutcome`
+  whose match must cover `ParkCancelled` (V0601); `cont.abort`'s payload is
+  checked against the perform's type exactly like the plain `abort`. Writing it
+  found **BUG 64**: `cont.park { on = … }` with `set` omitted type-checked,
+  because a performer op body dropped every solver failure that mentioned a type
+  variable — `let x: Int = c.f { nope = 1 }` compiled inside any performer. Fixed
+  and specced (`PerformerBodySolveErrorsSpecTest`); the stdlib's 957 impl ops
+  all still check under the honest rule.
+
+What C2 said before it landed, kept for the reasoning:
 `BdslSuspendPropagationTest`: with the caller yielding the callee's
 `ContinuationResult` onward, `outer(x) = inner(x) + 100` over
 `inner(x) = (yield "op") + 1` resumes to **142 — both tails run.** Built from

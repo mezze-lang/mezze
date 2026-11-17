@@ -1224,13 +1224,14 @@ class TypedASTCompiler(
                 // at EMIT (TypedAstBuilder) and carried on the node, so the
                 // compiler no longer inspects the value-carried effect row.
                 HandleIR(
-                    compileExpr(expr.body),
+                    compilePerformBody(expr, src),
                     expr.handlers.map { h ->
-                        HandlerBindIR(h.performerHash, h.effectHash, h.performerName, h.params?.let { compileExpr(it) }, h.isScoped)
+                        HandlerBindIR(h.performerHash, h.effectHash, h.performerName, h.params?.let { compileExpr(it) }, h.isScoped, contCapable = h.contCapable)
                     },
                     src,
                     staticallyFullyDischarges = expr.fullyDischarges,
-                    capturesIntoResult = expr.capturesIntoResult
+                    capturesIntoResult = expr.capturesIntoResult,
+                    bodyIsThunk = expr.bodyIsThunk,
                 )
             }
             is TypedPerformOp -> {
@@ -1562,7 +1563,7 @@ class TypedASTCompiler(
 
     private fun compileCall(expr: TypedCall, src: SourceInfo): NodeIR {
         val fn = expr.function
-        val calleeMaySuspend = rowMaySuspend(fn.type)   // C1: one verdict for every node this call becomes
+        val calleeMaySuspend = calleeMaySuspend(fn)   // C1: one verdict for every node this call becomes
         val argIR = compileArgWithDictWrapping(expr.arg, src)
 
         // Check for method call: receiver.method { args }

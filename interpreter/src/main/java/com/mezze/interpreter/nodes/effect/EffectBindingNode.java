@@ -54,6 +54,8 @@ public final class EffectBindingNode extends MezzeNode {
                 return lookupOnFiber(kind);
             case SCOPE:
                 return lookupOnContext(kind.displayName());
+            case CONT:
+                return com.mezze.interpreter.nodes.continuation.ContBinding.contRecord();
         }
         CompilerDirectives.transferToInterpreterAndInvalidate();
         throw new RuntimeException("Unreachable: unknown EffectBindingKind " + kind);

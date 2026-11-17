@@ -1582,7 +1582,9 @@ class TypedAstBuilder(
                         h != null && h in handledHashes
                     }
                 }
-                TypedPerform(handlers, body, performType, loc, fullyDischarges, capturesIntoResult)
+                val cont = handlers.any { it.contCapable }   // ContCapable.kt
+                TypedPerform(handlers, if (cont) performBodyAsThunk(body, loc) else body, performType, loc,
+                    fullyDischarges, capturesIntoResult, bodyIsThunk = cont)
             }
             is ParsedEffectCall -> {
                 val opName = expr.operation.localName
@@ -1789,7 +1791,7 @@ class TypedAstBuilder(
         return false
     }
 
-    private fun collectCaptures(body: TypedExpr, paramNames: Set<String>): List<TypedCapture> {
+    internal fun collectCaptures(body: TypedExpr, paramNames: Set<String>): List<TypedCapture> {
         val captures = mutableListOf<TypedCapture>()
         val seen = mutableSetOf<String>()
         walkForCaptures(body, paramNames, captures, seen)
@@ -2017,13 +2019,20 @@ class TypedAstBuilder(
             it.name == com.mezze.language.ast.ScopedEffectConstants.INITIALIZE_SCOPE
         } ?: false
 
+        // Continuations: a performer whose op bodies mention `cont` may park. The
+        // check is SYNTACTIC on purpose — it is the capability tax's whole trigger,
+        // and a handler that never says `cont` pays nothing (design: "the tax is
+        // only paid by a block whose handler mentions `cont`").
+        val contCapable = resolvedDecl?.operations?.any { op -> mentionsCont(op.implementation) } ?: false
+
         return TypedHandlerRef(
             performerHash = performerHash,
             effectHash = effectHash,
             performerName = performerName,
             params = paramsExpr,
             loc = loc,
-            isScoped = isScoped
+            isScoped = isScoped,
+            contCapable = contCapable,
         )
     }
 

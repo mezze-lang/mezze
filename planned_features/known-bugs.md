@@ -8183,3 +8183,40 @@ Fix: the excuse is conditioned on `expressionGenerator.isStdlibModule`, the same
 flag #109's gate reads. Tests: `NativeGateInImplBodiesTest` (three impl kinds
 plus "the refusal names the native"; all 4 fail without the fix). The stdlib's
 own impls are checked by `compileStdlib`, which is in the interpreter gate.
+
+## BUG 63 — OPEN: an import used only through its CONSTRUCTORS is reported unused
+
+```mezze
+use std::effects::async::{ CancelReason }
+let r = CancelCustom { tag = "t", detail = "d" }     ## warning[W0102]: 'CancelReason' is never referenced
+```
+
+Pre-existing (reproduced on the 2026-11-01 nightly and on main). The linter
+collects referenced NAMES; a variant type imported so its constructors resolve is
+referenced by every constructor use and by no spelling of its own name. Same
+family as 49b (an import that is load-bearing through something other than its
+name). Found while writing the first `cont.park` program, whose three imports
+(`ParkOn`, `WaitSet`, `ParkOutcome`) are all used this way. Fix: the typechecker
+knows each imported variant's constructor names; hand the linter
+type → constructors as it already hands ability → operations.
+
+## BUG 64 — FIXED 2026-11-17: a performer op body dropped every solver failure that mentioned a type variable
+
+```mezze
+impl Wait for P where {
+  wait = {} -> do
+    let c = mk {}                        ## c.f : { val: 'v } -> 'v
+    let x: Int = c.f { nope = 1 }        ## ACCEPTED — ran as a record with no `val`
+    x,
+}
+```
+
+`ImplValidator`'s performer `onSolveFailure` reported a failure only when it was
+"settled": a T0201 whose two types held no type variable and no effectful arrow.
+Everything else was swallowed as "pinned at the use site" — including shapes no
+instantiation can rescue (field-name mismatch, arrow vs variant, V0704, T0205).
+The ability impl path reported every failure, so the same body was refused
+there. Found through `cont.park { on = … }` (no `set`) type-checking. Fix: report
+the first failure with its own code; the single provisional shape is BUG 54's —
+an `AbilityRequired` whose type ARGUMENT is still open. Spec:
+`PerformerBodySolveErrorsSpecTest`, `ContBindingSpecTest`.

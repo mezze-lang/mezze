@@ -261,6 +261,8 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     public volatile Object abortFn;
     /** Same reason: OpCallNode's chain-dispatch `resume` function. */
     public volatile Object chainResumeFn;
+    /** The `cont` record (`{ park, abort }`) bound in performer op bodies. */
+    public volatile Object contRecord;
     private final java.util.concurrent.atomic.AtomicLong bdslHits = new java.util.concurrent.atomic.AtomicLong();
     private final java.util.concurrent.atomic.AtomicLong bdslMisses = new java.util.concurrent.atomic.AtomicLong();
 

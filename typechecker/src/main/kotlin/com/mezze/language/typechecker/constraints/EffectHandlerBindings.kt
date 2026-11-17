@@ -1,5 +1,6 @@
 package com.mezze.language.typechecker.constraints
 
+import com.mezze.language.ast.RowVar
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.TypeVar
 import com.mezze.language.typechecker.context.TypingContext
@@ -22,6 +23,39 @@ object EffectHandlerBindings {
             .extendMono(ScopedEffectConstants.RESUME, resumeType(opReturnType, performReturn))
             .extendMono(ScopedEffectConstants.ABORT, abortType(performReturn))
     }
+
+    /**
+     * `cont` — the runtime-owned continuation handle a performer op body may use:
+     *
+     *     cont.park  { on: ParkOn, set: WaitSet } -> ParkOutcome <...>
+     *     cont.abort { val: performReturn } -> 'never
+     *
+     * `park` carries an OPEN row on purpose: it is the one call in a handler that
+     * suspends, and the lowering propagates a suspension only through calls whose
+     * row says they can (C1's `maySuspend`). The three types are the stdlib's,
+     * referenced by identity so a performer in ANY module sees them; when the
+     * stdlib is absent (bare-typechecker tests), `cont` is simply not bound and
+     * stays V0702 as before.
+     */
+    fun extendWithCont(context: TypingContext, performReturn: MezzeType): TypingContext {
+        val parkOn = stdlibType("ParkOn") ?: return context
+        val waitSet = stdlibType("WaitSet") ?: return context
+        val outcome = stdlibType("ParkOutcome") ?: return context
+        val parkType = MezzeType.FunctionType(
+            MezzeType.RecordType(mapOf("on" to parkOn, "set" to waitSet)),
+            outcome,
+            effects = MezzeType.EffectRow(effects = emptySet(), rowVar = RowVar.userOpen()),
+        )
+        val contType = MezzeType.RecordType(mapOf(
+            ScopedEffectConstants.CONT_PARK to parkType,
+            ScopedEffectConstants.CONT_ABORT to abortType(performReturn),
+        ))
+        return context.extendMono(ScopedEffectConstants.CONT, contType)
+    }
+
+    private fun stdlibType(name: String): MezzeType? =
+        com.mezze.language.typechecker.util.WellKnownTypeApp.resolveHash(name)
+            ?.let { com.mezze.language.typechecker.util.WellKnownTypeApp.of(name, emptyList(), it) }
 
     /**
      * `{ val: opReturn } -> opReturn` — resume is IDENTITY.

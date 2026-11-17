@@ -313,6 +313,9 @@ data class TypedPerform(
      * effect hashes.
      */
     val capturesIntoResult: Boolean = false,
+    /** The body was wrapped in a `{} -> body` thunk because a handler is
+     *  `cont`-capable; the compiler calls it under the boundary driver. */
+    val bodyIsThunk: Boolean = false
 ) : TypedExpr
 
 @Serializable
@@ -322,7 +325,10 @@ data class TypedHandlerRef(
     val performerName: String,   // For runtime lookup (registered by EffectImplStorageNode)
     val params: TypedExpr?,
     val loc: Loc,
-    val isScoped: Boolean = false
+    val isScoped: Boolean = false,
+    /** The performer's op bodies mention `cont`: a perform over it may park, so
+     *  its body is compiled as its own root and driven at the boundary. */
+    val contCapable: Boolean = false
 )
 
 // TypedAbilityCall REMOVED — ability calls become TypedCall with BindingRef.ByHash.

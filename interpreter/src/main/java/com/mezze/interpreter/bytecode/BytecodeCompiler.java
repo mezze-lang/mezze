@@ -2075,6 +2075,25 @@ public final class BytecodeCompiler {
 
     private void emitNode(NodeIR node, MezzeBytecodeRootNodeGen.Builder b,
                           int argCount, BytecodeLocal[] localMap) {
+        // Continuations, C2: a call whose callee MAY suspend (C1's flag) yields the
+        // suspension onward, so this frame suspends too and resumes with the
+        // callee's final value — the composition the single-root yield lacked. A
+        // TAIL call needs none: the callee's continuation IS this frame's. The
+        // perform op itself is wrapped the same way (a parking handler returns a
+        // park request through it).
+        if (!suspendWrapped.contains(node) && needsSuspendPropagation(node)) {
+            // The mark lives only while THIS wrap emits: the inliner splices the
+            // same node object into other roots, and a mark left behind made the
+            // second emission skip its wrapper — the continuation then reached
+            // `+ 1` as a value (measured: "cannot add an internal value and an Int").
+            suspendWrapped.add(node);
+            try {
+                emitWithSuspendPropagation(() -> emitNode(node, b, argCount, localMap), b);
+            } finally {
+                suspendWrapped.remove(node);
+            }
+            return;
+        }
         if (node instanceof LongLitIR lit) {
             b.emitLoadLongConstant(lit.getValue());
             return;
@@ -8795,17 +8814,56 @@ public final class BytecodeCompiler {
      * wrapping in reverse: emit the innermost B first as {@code body},
      * then A wraps that.
      */
+    /** The node whose propagation wrapper is being emitted RIGHT NOW (identity),
+     *  so the recursive emit inside the wrapper does not wrap it again. */
+    private final java.util.Set<NodeIR> suspendWrapped =
+        java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+
+    private static boolean needsSuspendPropagation(NodeIR node) {
+        if (node instanceof CallDirectIR c) return c.getMaySuspend() && !c.isTailCall();
+        if (node instanceof CallIndirectIR ci) return ci.getMaySuspend() && !ci.isTailCall();
+        if (node instanceof com.mezze.language.truffleir.CallIndirectScalarIR cs) return cs.getMaySuspend() && !cs.isTailCall();
+        if (node instanceof CallLocalIR cl) return cl.getMaySuspend() && !cl.isTailCall();
+        if (node instanceof DictMethodCallIR dm) return dm.getMaySuspend();
+        if (node instanceof PerformOpIR) return true;
+        return false;
+    }
+
+    /**
+     * {@code local = <call>; if IsSuspension(local) then Yield(local) else local}.
+     * The Yield's own value — what the driver hands back with {@code continueWith}
+     * — is the callee's FINAL result, so the expression around the call sees
+     * exactly what it would have seen had nothing suspended.
+     */
+    private void emitWithSuspendPropagation(Runnable emitCall, MezzeBytecodeRootNodeGen.Builder b) {
+        b.beginBlock();
+        BytecodeLocal slot = b.createLocal();
+        b.beginStoreLocal(slot);
+        emitCall.run();
+        b.endStoreLocal();
+        b.beginConditional();
+        b.beginIsSuspension();
+        b.emitLoadLocal(slot);
+        b.endIsSuspension();
+        b.beginYield();
+        b.emitLoadLocal(slot);
+        b.endYield();
+        b.emitLoadLocal(slot);
+        b.endConditional();
+        b.endBlock();
+    }
+
     private void emitHandle(HandleIR h, MezzeBytecodeRootNodeGen.Builder b,
                             int argCount, BytecodeLocal[] localMap) {
         emitHandleNested(h.getHandlers(), 0, h.getBody(), b, argCount, localMap,
-                         h.getCapturesIntoResult());
+                         h.getCapturesIntoResult(), h.getBodyIsThunk());
     }
 
     private void emitHandleNested(java.util.List<HandlerBindIR> handlers, int idx,
                                   NodeIR body,
                                   MezzeBytecodeRootNodeGen.Builder b,
                                   int argCount, BytecodeLocal[] localMap,
-                                  boolean capturesIntoResult) {
+                                  boolean capturesIntoResult, boolean bodyIsThunk) {
         if (idx >= handlers.size()) {
             // S-20: the body evaluates TO a function still carrying one of the
             // handled effects — `perform Console in my_func` produces `my_func`
@@ -8818,6 +8876,13 @@ public final class BytecodeCompiler {
                 b.beginBindHandlerChainIntoResult();
                 emitNode(body, b, argCount, localMap);
                 b.endBindHandlerChainIntoResult();
+            } else if (bodyIsThunk) {
+                // Continuations: the body is its own root; this is the frame that
+                // catches its suspension, INSIDE the handler pushes, so the chain a
+                // resumed op body dispatches against is still this perform's.
+                b.beginDriveParked();
+                emitNode(body, b, argCount, localMap);
+                b.endDriveParked();
             } else {
                 emitNode(body, b, argCount, localMap);
             }
@@ -8866,10 +8931,10 @@ public final class BytecodeCompiler {
         b.beginStoreLocal(resultSlot);
         if (isOutermost) {
             b.beginAutoForceIfSuspended();
-            emitHandleNested(handlers, idx + 1, body, b, argCount, localMap, capturesIntoResult);
+            emitHandleNested(handlers, idx + 1, body, b, argCount, localMap, capturesIntoResult, bodyIsThunk);
             b.endAutoForceIfSuspended();
         } else {
-            emitHandleNested(handlers, idx + 1, body, b, argCount, localMap, capturesIntoResult);
+            emitHandleNested(handlers, idx + 1, body, b, argCount, localMap, capturesIntoResult, bodyIsThunk);
         }
         b.endStoreLocal();
         b.endBlock();

@@ -284,7 +284,9 @@ class EmitFileSizeRatchetTest {
             // 5057 -> 5060: C1 of continuations — every call site threads its callee's
             // `maySuspend` verdict (computed in SuspendSites.kt) into the node it emits.
             // The threading has to sit at the emit sites; the rule lives in its own file.
-            C + "TypedASTCompiler.kt" to 5060,   // was 5,580 before the split
+            // 5060 -> 5061: C2 — `HandleIR` now carries `bodyIsThunk`; the perform-body
+            // compile itself went to SuspendSites.kt, this one line is the field.
+            C + "TypedASTCompiler.kt" to 5061,   // was 5,580 before the split
             // +42 for `contextRowWithBodyAssocTypes`: an INLINE lambda was stamped
             // with the row from the pushed CONTEXT, so a callback's associated
             // type was the CALLEE's variable rather than what the body threw, and
@@ -316,7 +318,10 @@ class EmitFileSizeRatchetTest {
             // 2414 -> 2419: BUG 56. A deferred inherent pick whose receiver nothing
             // solved fell back to the FIRST candidate — a silent mis-dispatch. The
             // refusal belongs at that fallback, which lives here.
-            E + "TypedAstBuilder.kt" to 2419,    // was 3,107
+            // 2419 -> 2428: BUG 48 (phantom `with` constraints are not anchors) and BUG 56
+            // (an unsolved inherent receiver is refused, not guessed) — both are the
+            // builder's own resolution rules. The continuation code went to ContCapable.kt.
+            E + "TypedAstBuilder.kt" to 2428,    // was 3,107
         )
 
         val SPLIT_OUT = listOf(

@@ -285,6 +285,31 @@ pub type CancelOutcome = |
   CancelNotCancellable,
 |
 
+## What a parked task waits on (continuations design). `cont.park { on, set }`
+## in a performer op body suspends the task until the condition holds.
+## Registered waits (promises) wake in O(1); predicates are polled.
+pub type ParkOn = |
+  OnPromises { ids: [PromiseId] },
+  OnPredicates { fs: [{} -> Bool <...>] },
+|
+
+## Which wait set a park joins. Named sets give a scheduler per-primitive
+## wakeup order (a fair mutex, a LIFO channel).
+pub type WaitSet = |
+  WaitDefault,
+  WaitNamed { id: WaitSetId },
+|
+
+## What `cont.park` evaluates to once the task runs again.
+pub type ParkOutcome = |
+  ParkReady { which: Int },
+  ParkCancelled { reason: CancelReason },
+|
+
+pub newtype PromiseId = Int
+pub newtype TaskId = Int
+pub newtype WaitSetId = Int
+
 ## How `scoped_with` decides when to stop waiting for its children.
 ##
 ## - `OnFailure`    — wait for everyone; bail early on the first failure

@@ -1243,8 +1243,10 @@ internal class ImplValidator(
                         // produced. See `drainAbortPayloadVars`.
                         val payloadVar = MezzeType.VarType(TypeVar.fresh())
                         abortPayloadVars[impl.performerName] = payloadVar
-                        EffectHandlerBindings
-                            .extendWithAbortAndResume(ctx, expectedReturnType, payloadVar)
+                        EffectHandlerBindings.extendWithCont(
+                            EffectHandlerBindings.extendWithAbortAndResume(ctx, expectedReturnType, payloadVar),
+                            payloadVar,
+                        )
                     },
                     // Whatever variables SURVIVE the `having` substitution are the
                     // site's — EXCEPT the ones the effect declared as associated
@@ -1359,84 +1361,41 @@ internal class ImplValidator(
                                 }
                             }
 
-                            // Report a mismatch whose meaning is already SETTLED here.
-                            // A performer impl body is solved in isolation, so an error
-                            // that still mentions an unresolved type variable is not
-                            // settled — those vars are pinned at the use site, and
-                            // reporting them here rejects programs that are fine.
-                            // Effect mismatches belong to validateImplOpEffectContract,
-                            // which runs separately, so an arrow carrying effects is
-                            // likewise not this check's business.
+                            // BUG 64: every failure the solver reports is reported here,
+                            // with ONE exception. This block used to report a T0201 only
+                            // when neither side held a type variable or an effectful
+                            // arrow ("not settled — pinned at the use site"), and nothing
+                            // with any other code. Measured consequences, all accepted
+                            // and all wrong at run time:
                             //
-                            // This used to ask the MESSAGE the same three questions: a
-                            // `'[a-z]` regex for type vars, `<` and `>` for effects, and
-                            // the substrings "List"/"Seq"/"["/"Set"/"Map" for
-                            // collections. A user type merely NAMED `Mapping` matched the
-                            // last one and suppressed a real error, and rewording any
-                            // diagnostic changed which programs compiled. The collections
-                            // test is gone: what it was groping for is "the types are not
-                            // pinned yet", which holdsTypeVar answers directly.
-                            // The two types this failure is really about. Anything whose
-                            // shape we do not recognise stays unreported (empty list).
-                            val mismatched: List<MezzeType> = when (constraint) {
-                                is Constraint.Equality -> listOf(constraint.left, constraint.right)
-                                is Constraint.HasField -> listOf(constraint.recordType, constraint.fieldType)
-                                is Constraint.Subsumes -> listOf(constraint.general, constraint.specific)
-                                else -> emptyList()
-                            }
-                            // A KIND violation is settled the moment it is raised, so
-                            // it skips the "are the types pinned yet" test entirely. The
-                            // #22 foreign-handle gate rejects binding a polyglot handle
-                            // to a structural type, and no later pinning of the
-                            // surrounding vars can make that legal — where an ordinary
-                            // T0201 between two not-yet-pinned types genuinely may
-                            // resolve at the use site.
+                            //     let x: Int = c.f { nope = 1 }     // c.f : { val: 'v } -> 'v
+                            //     match f { a = 1 } is Ready … Gone  // f : { a, b } -> Out <E>
+                            //     cont.abort { nope = 1 }
                             //
-                            // S-18: without this, S-1b's declared-return-type equality
-                            // put exactly that rejection into this solve, the body type
-                            // was still a bare var (`'u651` vs
-                            // `Result XForeign InteropError`), `holdsTypeVar()` called it
-                            // provisional, and the gate's error was dropped — so a
-                            // provider op declared `-> Result XForeign` laundered
-                            // `eval_raw`'s bare foreign and crashed a caller's
-                            // `match … is Ok/Err` with "no variant tag matched".
-                            val isKindViolation =
-                                firstError.code == ErrorCode.T0217_FOREIGN_HANDLE_NOT_STRUCTURAL
-                            val settled = isKindViolation || (
-                                firstError.code == ErrorCode.T0201_TYPE_MISMATCH &&
-                                    mismatched.isNotEmpty() &&
-                                    mismatched.none { it.holdsTypeVar() } &&
-                                    mismatched.none { (it as? MezzeType.FunctionType)?.effects != null })
-
-                            if (settled) {
-                                throw TypeCheckError(
-                                    "Type error in impl '${impl.performerName}' operation '${implOp.name}': ${firstError.message}",
-                                    firstError.constraint.loc ?: implOp.implementation.loc,
-                                    code = ErrorCode.T0201_TYPE_MISMATCH,
-                                )
-                            }
-                            // BUG 54: an unsatisfied ability obligation is settled the
-                            // same way — once nothing in it can still be pinned at a use
-                            // site. Only T0201 was ever reported here, so `{ m } -> m + 1`
-                            // with `m: Str` (`NumAdd Str Int`, a V0402) was dropped as
-                            // provisional and died at run time adding a Str to an Int.
-                            // Ability and inherent bodies already report it; a performer
-                            // body was the one place it fell through.
-                            // The DEFERRED re-check carries a placeholder constraint —
-                            // it validates the accumulated set against the finished
-                            // substitution — so only a direct AbilityRequired can still
-                            // be provisional, and only while a type argument is open.
-                            val unsatisfied = solveResult.errors.firstOrNull { e ->
-                                e.code == ErrorCode.V0402_ABILITY_NOT_SATISFIED &&
+                            // No instantiation of `'v` makes `{ nope }` equal `{ val }`,
+                            // and no row makes an arrow a variant: a unification failure
+                            // is a failure whatever variables it mentions. The same shapes
+                            // were refused in an ability impl body all along, because that
+                            // path reports every failure. "Fresh var means anything" is
+                            // the fallacy the sweep keeps meeting.
+                            //
+                            // The exception (BUG 54's rule, kept): an ability obligation
+                            // whose type ARGUMENT is still open — `NumAdd 'a Int` — is the
+                            // one thing a use site can still satisfy. Everything else
+                            // carries its own code out, so a constructor on a non-variant
+                            // stays V0704 and a missing field stays T0205 rather than all
+                            // of them flattening to T0201.
+                            val reportable = solveResult.errors.firstOrNull { e ->
+                                !(e.code == ErrorCode.V0402_ABILITY_NOT_SATISFIED &&
                                     (e.constraint as? Constraint.AbilityRequired)
-                                        ?.typeArgs?.any { it.holdsTypeVar() } != true
+                                        ?.typeArgs?.any { it.holdsTypeVar() } == true)
                             }
-                            if (unsatisfied != null) {
+                            if (reportable != null) {
                                 throw TypeCheckError(
-                                    "Type error in impl '${impl.performerName}' operation '${implOp.name}': ${unsatisfied.message}",
-                                    unsatisfied.constraint.loc ?: implOp.implementation.loc,
-                                    code = ErrorCode.V0402_ABILITY_NOT_SATISFIED,
-                                    hints = unsatisfied.hints,
+                                    "Type error in impl '${impl.performerName}' operation '${implOp.name}': ${reportable.message}",
+                                    reportable.constraint.loc ?: implOp.implementation.loc,
+                                    code = reportable.code ?: ErrorCode.T0201_TYPE_MISMATCH,
+                                    hints = reportable.hints,
                                 )
                             }
                         }
