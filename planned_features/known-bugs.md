@@ -7628,3 +7628,67 @@ plumbing dropped it.
 
 Claim: `AbilityEffectSpecClaimsTest.Declaration`, `@Disabled("BUG 48")` until
 fixed — the house pattern for an unmet spec claim.
+
+## BUG 49 — OPEN: an impl that exists in another module is reported as missing
+
+Found 2026-11-17 by the ability/effect spec sweep, cross-module axis. Two halves
+that together form a trap: you are told to write an impl that already exists, and
+if you import it instead you are told the import is pointless.
+
+### Setup
+
+    ## src/abil.mz
+    ability Bump for 'a where { bump: { it: 'a } -> Int }
+
+    ## src/boxmod.mz  — the impl is legal here: Box is local
+    use abil::{ Bump }
+    pub type Box = { v: Int }
+    impl Bump for Box where { bump = { it } -> it.v + 100 }
+
+    ## src/app.mz
+    use abil::{ Bump }
+    pub let main = {} -> perform Console in do
+      let r = Bump.bump { it = { v = 1 } }
+      println { msg = "got $(r.to_str {})" }
+
+### 49a — V0402 tells you to write an impl that already exists
+
+    error[V0402]: { v: Int } does not implement 'Bump'. To enable this,
+    implement: impl Bump for { v: Int } where { ... }
+
+No hint, and the advice is wrong: `boxmod` already has `impl Bump for Box`, and
+following the suggestion would be a coherence violation (V0407) or an orphan
+(V0406) depending on where you put it. The fix the user needs is
+`use boxmod::{ Box }`.
+
+A hint for this shape already exists for BLANKET impls
+([[project_unimported_blanket_impl_hint]]) — it was never extended to concrete
+ones.
+
+### 49b — and the import that fixes it is reported as unused
+
+Adding the import works (`got 101`), but:
+
+    warning[W0102]: Unused import: 'Box' is never referenced in this module.
+    Remove it from the `use` clause.
+
+The import is LOAD-BEARING: delete it and the program is V0402 again. It is
+referenced by DISPATCH rather than by name — the receiver is a bare record
+`{ v = 1 }` that adopts to `Box` without ever naming it — so "never referenced"
+is false. Following the warning breaks the program.
+
+### Why it was missed
+
+Both are diagnostic-quality defects, and the only diagnostic-quality gate in the
+tree is `ParserErrorQualityTest`. Nothing asks of the typechecker's
+ability/effect diagnostics whether the advice is correct, only whether an error
+fires.
+
+### Related, and a smaller finding alongside
+
+**The entry-point checks emit UNCODED diagnostics.** Both
+`Error: Entry 'main' must return `{}`, got: Int` and `Error: Entry 'main'
+performs Tick, but nothing discharges it` arrive with no `V####`, so a spec
+suite cannot assert on them and `--explain` has nothing to look up. The spec
+harness's own doctrine covers this: "Where a site has no code to carry, the fix
+is to give it one, not to stop asking."
