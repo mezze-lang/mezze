@@ -422,6 +422,61 @@ class EventLoopSchedulerTest {
         """)),
     )
 
+    /** Phase B: a task dispatches against the handlers in effect WHERE IT WAS SPAWNED,
+     *  not where it happens to be driven. Before Phase B this printed "A" — the task
+     *  spawned under `perform B` was driven by the outer boundary under A. */
+    @Test
+    fun `a task keeps the handlers it was spawned under`() = assertEquals(
+        listOf("B", "A"),
+        lines(program(imports, """
+            effect Tag where { tag: {} -> Str <Tag>, }
+            impl Tag for A where {
+              initialize_scope = {} -> {},
+              finalize_scope = {} -> {},
+              tag = {} -> "A",
+            }
+            impl Tag for B where {
+              initialize_scope = {} -> {},
+              finalize_scope = {} -> {},
+              tag = {} -> "B",
+            }
+            perform Console, SystemTime, EventLoop, A in do
+              let t = perform B in Async.spawn { f = {} -> do
+                yield_now {}
+                Tag.tag {} }
+              println { msg = result::get_or { result = await { p = t }, def = "?" } }
+              println { msg = Tag.tag {} }
+        """)),
+    )
+
+    @Test
+    fun `two tasks under different inner performers each see their own`() = assertEquals(
+        listOf("x=X", "y=Y"),
+        lines(program(imports, """
+            effect Tag where { tag: {} -> Str <Tag>, }
+            impl Tag for X where {
+              initialize_scope = {} -> {},
+              finalize_scope = {} -> {},
+              tag = {} -> "X",
+            }
+            impl Tag for Y where {
+              initialize_scope = {} -> {},
+              finalize_scope = {} -> {},
+              tag = {} -> "Y",
+            }
+            perform Console, SystemTime, EventLoop in do
+              let x = perform X in Async.spawn { f = {} -> do
+                yield_now {}
+                yield_now {}
+                "x=${'$'}(Tag.tag {})" }
+              let y = perform Y in Async.spawn { f = {} -> do
+                yield_now {}
+                "y=${'$'}(Tag.tag {})" }
+              println { msg = result::get_or { result = await { p = x }, def = "?" } }
+              println { msg = result::get_or { result = await { p = y }, def = "?" } }
+        """)),
+    )
+
     @Test
     fun `nothing runnable and nothing that can wake is a deadlock, named`() {
         val e = assertThrows(Exception::class.java) {

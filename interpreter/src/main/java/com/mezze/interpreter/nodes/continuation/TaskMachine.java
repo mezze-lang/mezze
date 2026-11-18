@@ -69,6 +69,7 @@ public final class TaskMachine {
         final MezzePromise promise;                // null for a boundary body
         Object result;
         Boundary owner;                            // the boundary that drives this task
+        HandlerChainEntry[] chain;                 // Phase B: the handlers in effect where it was spawned
 
         Task(long id, MezzeFunction thunk, MezzePromise promise) {
             this.id = id; this.thunk = thunk; this.promise = promise;
@@ -159,6 +160,7 @@ public final class TaskMachine {
         ownPromises.put(p, Boolean.TRUE);
         Task t = new Task(nextTaskId++, f, p);
         t.owner = b;
+        t.chain = HandlerChainRegistry.snapshotHandlerChainEntries();
         b.ready.addLast(t);
         // `Async.cancel` on the task's promise: a PARKED task is woken with
         // `ParkCancelled { reason }` so its performer's arm decides what cancellation
@@ -205,14 +207,20 @@ public final class TaskMachine {
         try {
             Task body = new Task(nextTaskId++, null, null);
             body.owner = b;
-            Object first;
+            body.chain = HandlerChainRegistry.snapshotHandlerChainEntries();
+            Object[] prevChain = HandlerChainRegistry.installTaskChain(body.chain);
             try {
-                first = callWith(bodyThunk, MezzeRecord.empty());
-            } catch (Throwable e) {
-                checkNoneSwallowed(body, e);   // the body's own first run can drop a park too
-                throw e;
+                Object first;
+                try {
+                    first = callWith(bodyThunk, MezzeRecord.empty());
+                } catch (Throwable e) {
+                    checkNoneSwallowed(body, e);   // the body's own first run can drop a park too
+                    throw e;
+                }
+                absorb(b, body, first);
+            } finally {
+                HandlerChainRegistry.restoreTaskChain(prevChain);
             }
-            absorb(b, body, first);
             checkNoneSwallowed(body);
             while (body.state != DONE) {
                 if (b.ready.isEmpty()) {
@@ -278,6 +286,15 @@ public final class TaskMachine {
     }
 
     private void run(Boundary b, Task t) {
+        Object[] prevChain = HandlerChainRegistry.installTaskChain(t.chain);   // Phase B
+        try {
+            runUnderChain(b, t);
+        } finally {
+            HandlerChainRegistry.restoreTaskChain(prevChain);
+        }
+    }
+
+    private void runUnderChain(Boundary b, Task t) {
         t.state = RUNNING;
         Object cur;
         try {
@@ -360,7 +377,7 @@ public final class TaskMachine {
         boolean any = false;
         for (int i = 0; i < b.parked.size(); ) {
             Task t = b.parked.get(i);
-            int which = readyIndex(t.parkedOn);
+            int which = readyIndexUnderChain(t);
             if (which >= 0) {
                 b.parked.remove(i);
                 t.deliver = parkReady(which);
@@ -392,6 +409,11 @@ public final class TaskMachine {
             if (r instanceof Boolean b && b) return i;
         }
         return -1;
+    }
+
+    private int readyIndexUnderChain(Task t) {
+        Object[] prev = HandlerChainRegistry.installTaskChain(t.chain);
+        try { return readyIndex(t.parkedOn); } finally { HandlerChainRegistry.restoreTaskChain(prev); }
     }
 
     /** Nothing runnable, nothing woke. A promise settling on another thread can still

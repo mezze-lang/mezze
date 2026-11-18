@@ -608,6 +608,23 @@ established and what it measured decide the shape:
   the first performer that needs Phase B to be correct, and the measurement of
   "BDSL cont is the core, Loom is an impl on top".
 
+**Steps (1) and (2) LANDED 2026-11-18.** Verified the break first: a task spawned under
+`perform B in …` and driven after that perform exited answered `A` — the driving
+boundary's innermost handler — not `B` (`[A, A]`). Now `Task.chain` is the snapshot at
+spawn (the body task's at boundary entry) and the machine installs it as the thread's
+CURRENT TASK CHAIN around every run, resume and predicate evaluation
+(`HandlerChainRegistry.installTaskChain` / `restoreTaskChain`). Resolution
+(`peekHandlerForEffect`) walks the entries pushed SINCE the task chain was installed —
+a `perform` inside the task body — and then the task's chain; snapshots compose the
+same way, so a task spawned from inside a task inherits the effective chain. The memo
+keys on the task chain's identity. Installing a task chain drops the single-threaded
+assumption once — the same event as a second thread acquiring handlers — so the cached
+dispatch tier falls to the guarded `doCachedShared`, which re-resolves through the task
+chain; a program without tasks never installs one and keeps `doCachedSingleThreaded`
+untouched — measured on `effectsurface`, two interleaved rounds: control 218/220 → 225/232 ps, one perform op 898/818 → 896/851 ps; noise. Asserted:
+`[B, A]`; two tasks under different inner performers interleave and each sees its own.
+Step (3) is these tests; step (4), the Loom-on-top performer, is next.
+
 What the design said before the plan, kept:
 
 

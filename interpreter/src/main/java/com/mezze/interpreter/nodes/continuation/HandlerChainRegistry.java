@@ -132,6 +132,12 @@ public final class HandlerChainRegistry {
         MezzeRecord memoHandler;
         int memoDepth = -1;
         long memoGeneration = -1;
+        /** Phase B: the chain of the TASK running on this thread, captured where it
+         *  was spawned. Resolution looks at entries pushed since it was installed
+         *  (a `perform` inside the task body), then at this. Null = no task. */
+        HandlerChainEntry[] taskChain;
+        int taskChainBaseDepth;
+        HandlerChainEntry[] memoTaskChain;
 
         // Consecutive hits on the memo above. A hit proves depth and
         // generation have not moved, so a RUN of them is proof the chain has
@@ -743,22 +749,31 @@ public final class HandlerChainRegistry {
         // String.equals. See EffectState.memoHash for the key's soundness.
         if (effectHash == s.memoHash
                 && s.depth == s.memoDepth
-                && s.generation == s.memoGeneration) {
+                && s.generation == s.memoGeneration
+                && s.taskChain == s.memoTaskChain) {
             if (++s.memoHits == RECOVERY_HITS) noteStableRun(effectHash);
             return s.memoHandler;
         }
         MezzeRecord found = null;
-        // Walk from top of stack (innermost handler) outward.
-        for (int i = s.depth - 1; i >= 0; i--) {
+        // Walk from top of stack (innermost handler) outward — down to where the
+        // running task's chain was installed (Phase B), then through that chain.
+        int floor = s.taskChain != null ? s.taskChainBaseDepth : 0;
+        for (int i = s.depth - 1; i >= floor; i--) {
             com.mezze.language.typedast.Hash eh = s.effectHashes[i];
             if (eh != null && eh.equals(effectHash)) {
                 found = s.handlers[i];
                 break;
             }
         }
+        if (found == null && s.taskChain != null) {
+            for (HandlerChainEntry e : s.taskChain) {          // innermost first
+                if (e.effectHash() != null && e.effectHash().equals(effectHash)) { found = e.handler(); break; }
+            }
+        }
         s.memoHash = effectHash;
         s.memoDepth = s.depth;
         s.memoGeneration = s.generation;
+        s.memoTaskChain = s.taskChain;
         s.memoHandler = found;
         s.memoHits = 0;
         return found;
@@ -790,15 +805,22 @@ public final class HandlerChainRegistry {
     @TruffleBoundary
     public static HandlerChainEntry[] snapshotHandlerChainEntries() {
         EffectState s = STATE.get();
+        if (s.taskChain != null) {
+            // Phase B: the EFFECTIVE chain — what this task pushed since it started,
+            // innermost first, then the chain it was spawned under.
+            int above = s.depth - s.taskChainBaseDepth;
+            HandlerChainEntry[] snapshot = new HandlerChainEntry[above + s.taskChain.length];
+            for (int i = 0; i < above; i++) {
+                snapshot[i] = new HandlerChainEntry(s.handlers[s.depth - 1 - i], s.effectHashes[s.depth - 1 - i]);
+            }
+            System.arraycopy(s.taskChain, 0, snapshot, above, s.taskChain.length);
+            return snapshot;
+        }
         int size = s.depth;
         if (size == 0) return EMPTY_ENTRY_CHAIN;
-        // Reuse cached snapshot when the chain hasn't changed since last snapshot.
         if (s.cachedSnapshot != null && s.cachedSnapshotDepth == size && s.cachedSnapshotGen == s.generation) {
             return s.cachedSnapshot;
         }
-        // Snapshot in innermost-first order (matches old ArrayDeque
-        // convention): snapshot[0] = innermost (top of stack),
-        // snapshot[size-1] = outermost (bottom of stack).
         HandlerChainEntry[] snapshot = new HandlerChainEntry[size];
         for (int i = 0; i < size; i++) {
             snapshot[i] = new HandlerChainEntry(
@@ -808,6 +830,31 @@ public final class HandlerChainRegistry {
         s.cachedSnapshotDepth = size;
         s.cachedSnapshotGen = s.generation;
         return snapshot;
+    }
+
+    /**
+     * Phase B: make {@code chain} the running TASK's chain on this thread; returns what
+     * to hand to {@link #restoreTaskChain}. Dispatch caches that assumed one thread and
+     * no acquired chains fall back to re-resolving (the guarded tier) the first time any
+     * task chain is installed — a program without tasks never pays this.
+     */
+    @TruffleBoundary
+    public static Object[] installTaskChain(HandlerChainEntry[] chain) {
+        EffectState s = STATE.get();
+        Object[] prev = new Object[]{s.taskChain, s.taskChainBaseDepth};
+        s.taskChain = chain;
+        s.taskChainBaseDepth = s.depth;
+        s.generation++;
+        if (SINGLE_THREADED_EFFECTS.isValid()) SINGLE_THREADED_EFFECTS.invalidate();
+        return prev;
+    }
+
+    @TruffleBoundary
+    public static void restoreTaskChain(Object[] prev) {
+        EffectState s = STATE.get();
+        s.taskChain = (HandlerChainEntry[]) prev[0];
+        s.taskChainBaseDepth = (Integer) prev[1];
+        s.generation++;
     }
 
     @TruffleBoundary
