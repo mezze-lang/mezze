@@ -36,4 +36,16 @@ object ResumableNatives {
         "__native_iter_map", "__native_iter_filter", "__native_iter_take_while", "__native_iter_drop_while",
         "__native_iter_flat_map", "__native_iter_unfold",
     )
+
+    /**
+     * Natives that DEFER their callback — it runs later, as a task or on settlement,
+     * never during the call — so a parking callback handed to them is fine. Used
+     * where a callee's type carries no row to say so (an inherent op resolved to a
+     * hash is row-less).
+     */
+    val DEFERRING: Set<String> = setOf(
+        "__native_task_spawn",
+        "__native_async_spawn", "__native_async_spawn_tracked", "__native_async_spawn_tracked_os",
+        "__native_async_scope_spawn",
+    )
 }

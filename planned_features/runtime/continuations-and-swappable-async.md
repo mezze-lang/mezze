@@ -883,12 +883,15 @@ therefore still refused by V0513 / diagnosed at run time: the key/comparator nat
 `last_index_of`) and the concurrency natives. `ResumableNatives.NAMES` lists what is in.
 Asserted: awaits inside every ported native under `EventLoop`, one program.
 
-Two findings on the way: BUG 67 (OPEN, unrelated) — `to_dbg` on a sorted seq of
-promises is an internal compiler error (#394 family); and `seq::min_by`'s `with Ord`
-dictionary plumbing hides its native from V0513's "lowered body is a CallNativeIR"
-test, so a parking key function handed to `min_by` is caught only at run time — the
-same conservative gap as cross-module calls, to be closed by seeing through the
-dictionary wrapper.
+Two findings on the way. BUG 67 (OPEN, unrelated) — `to_dbg` on a sorted seq of
+promises is an internal compiler error (#394 family). And V0513's wrapper test looked
+one hop deep: `seq::min_by` is `min_by` → `min_by_with_cmp` → native, and the method
+spelling `xs.sort_by { … }` is inherent op → `seq::sort_by` → native. **Closed the same
+day:** the test follows direct-call hops (three is as deep as the stdlib goes), and a
+row-less callee — an inherent op resolved to its hash carries no row — is decided from
+registration instead of its type: the chain's native runs its callbacks unless it is
+one of the DEFERRING natives (`ResumableNatives.DEFERRING`, the spawn family). Both
+spellings are now V0513 at build; the runtime diagnosis keeps the function-value route.
 
 **C4 — callback-taking natives hold loop state on the HEAP. PROVEN.**
 `ResumableNativeHofTest`: a `map` keeping `(xs, out, i)` in a record parks on

@@ -103,6 +103,40 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
         )
     }
 
+    /** The wrapper test follows direct-call hops: `min_by` → `min_by_with_cmp` → native. */
+    @Test
+    fun `a two-hop wrapper is seen through - min_by`() {
+        rejects(
+            """
+            $imports
+            pub let main = {} -> perform SystemTime, EventLoop in do
+              let m = seq::min_by { xs = [1, 2], f = { x } -> do
+                yield_now {}
+                x }
+              {}
+            """,
+            "V0513",
+            "`min_by` reaches `__native_seq_min_by` through `min_by_with_cmp`; a parking key function would be swallowed",
+        )
+    }
+
+    /** The method spelling: `xs.sort_by { … }` → inherent op → `seq::sort_by` → native. */
+    @Test
+    fun `the method-chain spelling is seen through - sort_by`() {
+        rejects(
+            """
+            $imports
+            pub let main = {} -> perform SystemTime, EventLoop in do
+              let m = [1, 2].sort_by { cmp = { a, b } -> do
+                yield_now {}
+                True }
+              {}
+            """,
+            "V0513",
+            "the inherent op is one more hop to the same native",
+        )
+    }
+
     @Test
     fun `a callback that only reaches a non-parking op is fine - spawn in a map`() {
         accepts(

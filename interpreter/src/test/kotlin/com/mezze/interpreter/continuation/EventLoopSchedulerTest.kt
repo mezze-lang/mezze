@@ -334,7 +334,7 @@ class EventLoopSchedulerTest {
 
     /** `sort_by` (a comparator native) is not resumable: the park reaches the Java
      *  frame and the machine says so (the diagnosis, not the symptom), here through a
-     *  method chain V0513 cannot see. */
+     *  function VALUE, which the static rule cannot see. */
     @Test
     fun `a host exception after a dropped park is reported as the dropped park`() {
         val e = assertThrows(Exception::class.java) {
@@ -342,7 +342,9 @@ class EventLoopSchedulerTest {
                 use std::collections::seq
                 perform Console, SystemTime, EventLoop in do
                   let ps = [1, 2].map { f = { x } -> Async.spawn { f = {} -> x * 10 } }
-                  let rs = ps.sort_by { cmp = { a, b } -> result::is_ok { result = await { p = a } } }
+                  let sorter = { xs, cmp } -> seq::sort_by { xs = xs, cmp = cmp }
+                  let via = { g } -> g { xs = ps, cmp = { a, b } -> result::is_ok { result = await { p = a } } }
+                  let rs = via { g = sorter }
                   println { msg = (seq::size { xs = rs }).to_str {} }
             """))
         }
