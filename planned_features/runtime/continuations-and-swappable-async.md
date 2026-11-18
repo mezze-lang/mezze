@@ -571,6 +571,46 @@ No runtime work, no continuation, reversible, independent of B and C.
 
 ### Phase B — handler evidence travels with the call.
 
+**PLAN, written 2026-11-18 after D1–D4 and C4, before any code.** What the runtime
+established and what it measured decide the shape:
+
+- A task today runs under the chain of the boundary that DRIVES it (`TaskMachine`,
+  stated limitation). Correct when the task was spawned in that boundary's body under
+  the same handlers — every test so far — and wrong the moment a task spawned under a
+  nested non-cont `perform` is driven after that perform exited, or when a Loom-on-top
+  performer resumes a task on another carrier.
+- Swapping the thread's chain per task switch is NOT the fix. Measured facts:
+  `installHandlerChainEntries` deliberately does not invalidate the per-effect
+  assumptions (an inherited chain is not a registration) and relies on
+  `noteEffectStateThread()` dropping `singleThreaded`, so `PerformD` falls to
+  `doCachedShared` and re-resolves per call. On ONE carrier a per-switch swap would
+  leave `doCachedSingleThreaded`'s cached handler stale — a silently wrong handler —
+  unless every switch invalidates, which is the PIC churn ("churnedTier") the design
+  warned of in risk 5.
+- Therefore: the evidence has to be a VALUE a task carries, and dispatch caches have to
+  key on it. The precedent is already in the tree: `HandlerBoundFunction` (S-20) binds
+  a chain into a function value and re-installs it per call. Phase B generalises that
+  to the task: `Task.chain` captured at spawn (`snapshotHandlerChainEntries`), the
+  machine makes it the CURRENT chain for the duration of a run — but as a per-context
+  "current task chain" pointer that `PerformD` reads through its node, with a cache
+  keyed on chain identity (one `Assumption` per chain object, invalidated only when
+  that chain itself is pushed to / popped), not on the thread's EffectState.
+- Cost model to hold: a pure program with no tasks keeps `doCachedSingleThreaded`
+  exactly as today (the pointer is null, the path is untouched); a program with tasks
+  pays one field read per perform op on the task path. Measure on `effectsurface`
+  kernel 3 before and after; the number that must not move is kernel 1.
+- Order: (1) `Task.chain` + machine installs it as the current-task chain around
+  `run` and `resume`; (2) `PerformD` resolves through the current-task chain when one
+  is set, assumption per chain; (3) tests: a task spawned under a nested `perform` and
+  driven after it exits dispatches against its spawn-time handler; two tasks under
+  different inner performers interleave and each sees its own; (4) the Loom-on-top
+  performer: `spawn` hands a machine task to a virtual-thread carrier, `await` parks —
+  the first performer that needs Phase B to be correct, and the measurement of
+  "BDSL cont is the core, Loom is an impl on top".
+
+What the design said before the plan, kept:
+
+
 Pass `resume`/`abort` through the handler call instead of a `@TruffleBoundary`
 ThreadLocal. ~41 -> ~16 ns, and it kills the silent cross-thread wrong-handler
 read (a wrong VALUE, never an exception).
