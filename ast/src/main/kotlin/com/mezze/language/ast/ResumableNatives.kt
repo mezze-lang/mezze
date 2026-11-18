@@ -19,7 +19,13 @@ object ResumableNatives {
         "__native_seq_filter",
         "__native_seq_any",
         "__native_seq_all",
-        "__native_seq_find",
+        "__native_seq_find", "__native_seq_none", "__native_seq_find_index", "__native_seq_try_map",
+        "__native_seq_reduce", "__native_seq_count", "__native_seq_partition", "__native_seq_take_while",
+        "__native_seq_drop_while", "__native_seq_flat_map", "__native_seq_scan", "__native_seq_group_by",
+        // list: the cons walks stay for pure callbacks; a callback that may park folds/scans over the array.
+        "__native_list_map", "__native_list_filter", "__native_list_fold_left", "__native_list_fold_right",
+        "__native_list_reduce", "__native_list_find", "__native_list_find_index", "__native_list_any",
+        "__native_list_all", "__native_list_partition", "__native_list_for_each", "__native_list_flat_map",
         // iter: the consumers pull through resumable cursors when any callback in the
         // chain or the consumer's own may suspend; the stage constructors below only
         // build the descriptor, so a parking callback handed to them is fine.

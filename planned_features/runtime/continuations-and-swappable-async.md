@@ -867,6 +867,29 @@ flat_map stages under fold/to_seq/count/find; two tasks yielding inside
 `iter::for_each` interleave `a1 b1 a2 b2`. After routing: pure 457–508 ps unchanged,
 effectful auto-routed at 11.7–22.6k.
 
+**C4 for the rest of `seq` and for `list` — LANDED 2026-11-18 on one shared driver.**
+`ResumableLoops.run(start, n, body)`: an indexed native loop whose state is a small
+`Body` object built once per call; a suspension at element `i` becomes a
+`NativeSuspension` whose resume delivers the callback's value to `accept(i, v)` and
+continues at `i + 1`. seq in place: `find_index`, `try_map`, `reduce`, `count`,
+`partition`, `take_while`, `drop_while`, `flat_map`, `scan`, `group_by`, `none`. list:
+the array-based loops (`map`, `filter`, `partition`, `for_each`, `flat_map`) in place;
+the CONS WALKS (`fold_left`/`fold_right`/`reduce`, `find`/`find_index`/`any`/`all`) stay
+as they are for pure callbacks and fold over the array only when
+`SuspendFacts.mayFunctionSuspend(fn)` — the list walk is the measured cost
+(`project_list_walk_is_the_cost`), so it is not paid twice. Still outside C4, and
+therefore still refused by V0513 / diagnosed at run time: the key/comparator natives
+(`sort_by`, `sort_by_ord`, `min_by`, `max_by`, `dedup`, `unique`, `group_by_with_evidence`,
+`last_index_of`) and the concurrency natives. `ResumableNatives.NAMES` lists what is in.
+Asserted: awaits inside every ported native under `EventLoop`, one program.
+
+Two findings on the way: BUG 67 (OPEN, unrelated) — `to_dbg` on a sorted seq of
+promises is an internal compiler error (#394 family); and `seq::min_by`'s `with Ord`
+dictionary plumbing hides its native from V0513's "lowered body is a CallNativeIR"
+test, so a parking key function handed to `min_by` is caught only at run time — the
+same conservative gap as cross-module calls, to be closed by seeing through the
+dictionary wrapper.
+
 **C4 — callback-taking natives hold loop state on the HEAP. PROVEN.**
 `ResumableNativeHofTest`: a `map` keeping `(xs, out, i)` in a record parks on
 every one of three elements and still produces `[11, 21, 31]` in order, re-entering

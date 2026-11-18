@@ -8254,3 +8254,18 @@ surfaced by printing the cause under `MEZZE_DEBUG`). main's worktree: 50/50 clea
 so the branch had made concurrent lazy lambda compiles common for the first time.
 Fix: `BytecodeCompiler.compile` is `synchronized` — one compile at a time per
 compiler, compile time only, reentrant for its own nested pre-compiles.
+
+## BUG 67 — OPEN: `to_dbg` on a sorted seq of promises is an internal compiler error
+
+```mezze
+let ps = [1, 2].map { f = { x } -> Async.spawn { f = {} -> x } }
+let rs = ps.sort_by { cmp = { a, b } -> True }
+println { msg = rs.to_dbg {} }
+## TypeCheckError: Internal compiler error while lowering to IR … NotAConcreteValueType:
+## PrintType: cannot render a value of non-concrete type TypeApplication(__NativePromise) —
+## the receiver's static type was not resolved before lowering (#394)
+```
+
+Found 2026-11-18 writing a C4 test; unrelated to continuations (the receiver is an
+opaque native newtype through a method chain). An internal error reaching a user is
+a compiler bug by the project's own rule. Not yet checked on main.

@@ -26,13 +26,13 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
             """
             $imports
             pub let main = {} -> perform SystemTime, EventLoop in do
-              let ys = seq::flat_map { xs = [1, 2], f = { x } -> do
+              let m = seq::sort_by { xs = [1, 2], cmp = { a, b } -> do
                 yield_now {}
-                [x] }
+                True }
               {}
             """,
             "V0513",
-            "`flat_map` is not resumable (C4 covers fold/map/for_each/filter/any/all/find); the native would swallow the park",
+            "`sort_by` (a comparator native) is not resumable; the native would swallow the park",
         )
     }
 
@@ -42,9 +42,9 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
             """
             $imports
             pub let main = {} -> perform LoomAsync in do
-              let ys = seq::flat_map { xs = [1, 2], f = { x } -> do
+              let m = seq::sort_by { xs = [1, 2], cmp = { a, b } -> do
                 yield_now {}
-                [x] }
+                True }
               {}
             """,
             "LoomAsync never parks: its yield_now is a thread yield inside the native",
@@ -125,7 +125,7 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
             use std::result
             pub let main = {} -> perform SystemTime, EventLoop in do
               let ps = seq::map { xs = [1, 2], f = { x } -> Async.spawn { f = {} -> x * 10 } }
-              let rs = seq::flat_map { xs = ps, f = { x } -> [result::get_or { result = await { p = x }, def = -1 }] }
+              let m = seq::sort_by { xs = ps, cmp = { a, b } -> result::is_ok { result = await { p = a } } }
               {}
             """,
             "V0513",

@@ -243,12 +243,12 @@ class EventLoopSchedulerTest {
         val e = assertThrows(Exception::class.java) {
             lines(program(imports, """
                 use std::collections::seq
-                let each = { xs, f } -> seq::flat_map { xs = xs, f = f }
-                let via = { g } -> g { xs = [1, 2], f = { x } -> do
+                let each = { xs, f } -> seq::sort_by { xs = xs, cmp = f }
+                let via = { g } -> g { xs = [1, 2], f = { a, b } -> do
                   println { msg = "before" }
                   yield_now {}
                   println { msg = "after" }
-                  [x] }
+                  True }
                 perform Console, SystemTime, EventLoop in do
                   via { g = each }
                   println { msg = "done" }
@@ -332,9 +332,9 @@ class EventLoopSchedulerTest {
         """)),
     )
 
-    /** `flat_map` is not resumable yet: the park reaches the Java frame and the machine
-     *  says so (the diagnosis, not the symptom), here through a method chain V0513
-     *  cannot see. */
+    /** `sort_by` (a comparator native) is not resumable: the park reaches the Java
+     *  frame and the machine says so (the diagnosis, not the symptom), here through a
+     *  method chain V0513 cannot see. */
     @Test
     fun `a host exception after a dropped park is reported as the dropped park`() {
         val e = assertThrows(Exception::class.java) {
@@ -342,8 +342,8 @@ class EventLoopSchedulerTest {
                 use std::collections::seq
                 perform Console, SystemTime, EventLoop in do
                   let ps = [1, 2].map { f = { x } -> Async.spawn { f = {} -> x * 10 } }
-                  let rs = ps.flat_map { f = { x } -> [result::get_or { result = await { p = x }, def = -1 }] }
-                  println { msg = rs.to_dbg {} }
+                  let rs = ps.sort_by { cmp = { a, b } -> result::is_ok { result = await { p = a } } }
+                  println { msg = (seq::size { xs = rs }).to_str {} }
             """))
         }
         val msg = e.message ?: ""
@@ -387,6 +387,36 @@ class EventLoopSchedulerTest {
               let _ = await { p = a }
               let _ = await { p = b }
               println { msg = "end" }
+        """)),
+    )
+
+    /** C4 for the rest of seq and for list, on one shared indexed driver. */
+    @Test
+    fun `the remaining seq natives and the list natives resume after an await`() = assertEquals(
+        listOf("fi=Some { val = 1 }", "red=Some { val = 60 }", "cnt=2",
+               "part=[20, 30]/[10]", "tw=[10]", "dw=[20, 30]", "fm=[10, 20, 30]",
+               "scan=[0, 10, 30, 60]", "lmap=[11, 21, 31]", "lfold=60", "lfind=Some { val = 20 }", "lany=True"),
+        lines(program(imports, """
+            use std::collections::list
+            let settled = { p } -> result::get_or { result = await { p = p }, def = -1 }
+            perform Console, SystemTime, EventLoop in do
+              let ps = seq::map { xs = [10, 20, 30], f = { x } -> Async.spawn { f = {} -> do
+                yield_now {}
+                x } }
+              println { msg = "fi=${'$'}((seq::find_index { xs = ps, p = { x } -> settled { p = x } == 20 }).to_dbg {})" }
+              println { msg = "red=${'$'}((seq::reduce { xs = ps.map { f = { x } -> settled { p = x } }, f = { acc, x } -> acc + x }).to_dbg {})" }
+              println { msg = "cnt=${'$'}((seq::count { xs = ps, p = { x } -> settled { p = x } > 15 }).to_str {})" }
+              let part = seq::partition { xs = ps, p = { x } -> settled { p = x } > 15 }
+              println { msg = "part=${'$'}((part.pass.map { f = { x } -> settled { p = x } }).to_dbg {})/${'$'}((part.fail.map { f = { x } -> settled { p = x } }).to_dbg {})" }
+              println { msg = "tw=${'$'}((seq::take_while { xs = ps, p = { x } -> settled { p = x } < 15 }).map { f = { x } -> settled { p = x } }.to_dbg {})" }
+              println { msg = "dw=${'$'}((seq::drop_while { xs = ps, p = { x } -> settled { p = x } < 15 }).map { f = { x } -> settled { p = x } }.to_dbg {})" }
+              println { msg = "fm=${'$'}((seq::flat_map { xs = ps, f = { x } -> [settled { p = x }] }).to_dbg {})" }
+              println { msg = "scan=${'$'}((seq::scan { xs = ps, init = 0, f = { acc, x } -> acc + settled { p = x } }).to_dbg {})" }
+              let l = list::from_seq { xs = ps }
+              println { msg = "lmap=${'$'}((list::to_seq { xs = list::map { xs = l, f = { x } -> settled { p = x } + 1 } }).to_dbg {})" }
+              println { msg = "lfold=${'$'}((list::fold_left { xs = l, init = 0, f = { acc, x } -> acc + settled { p = x } }).to_str {})" }
+              println { msg = "lfind=${'$'}((list::find { xs = l, p = { x } -> settled { p = x } == 20 }).map { f = { val } -> settled { p = val } }.to_dbg {})" }
+              println { msg = "lany=${'$'}((list::any { xs = l, p = { x } -> settled { p = x } == 30 }).to_dbg {})" }
         """)),
     )
 
