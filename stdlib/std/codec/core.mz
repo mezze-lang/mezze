@@ -1,24 +1,12 @@
-## Codec core — 4-tier ability system for serialization / deserialization.
-##
-## Users touch Tier 4 (per-format sugar, `x.json{}` / `Type.from_json{}`) which
-## lives in each format module. Everything below is the machinery:
-##
-##   Tier 1 — `Format`                     : config → output-type link
-##   Tier 2 — `Encode<Shape>` / `Decode<Shape>` : per-shape primitives (6 + 6)
-##   Tier 3 — `Encode 'config for 'a`      : one-shot encode/decode ability
-##            `Decode 'config 'a for 'in`   the compiler auto-derives per pair
-##
-## Format authors write Tier 1 + Tier 2 impls for their config type. The
-## compiler synthesizes Tier 3 by walking value shape and composing Tier 2.
-## Tier 4 in the format module wraps Tier 3 with a blanket impl per format.
-##
-## See `docs/codec/redesign-2026-09.md` for the full design.
+## Codec core: the format, per-shape and one-shot encode/decode abilities behind each format module.
+## Format authors implement `Format` plus the per-shape abilities; the compiler derives `Encode`/`Decode`.
 use std::str
 use std::int
 use std::collections::seq
 use std::collections::bytes
+# Full design: `docs/codec/redesign-2026-09.md`.
 
-## Field-name transformation strategies applied uniformly at emit time.
+## Field-name transformation applied uniformly at emit time.
 pub type FieldTransform = |
   Identity,
   SnakeCase,
@@ -27,21 +15,15 @@ pub type FieldTransform = |
   ScreamingSnakeCase,
 |
 
-## Cross-format shared config. Every format's config type embeds this as a
-## `shared` field so HTTP / FileSystem integration can pass field-transform
-## preferences uniformly.
+## Cross-format config every format embeds as its `shared` field.
 pub type SharedConfig = { field_transform: FieldTransform }
 
-## Context threaded through encode / decode walks. `path` accumulates
-## record / list positions for error reporting; `shared` carries the
-## cross-format knobs. Records are structural in Mezze, so encode and
-## decode share the single type — direction-specific knobs will need
-## nominal wrappers (newtype) or extra discriminating fields when they
-## are added.
+# Records are structural, so encode and decode share one type; direction-specific
+# knobs will need newtype wrappers or discriminating fields.
+## Context threaded through an encode/decode walk: error `path` plus shared config.
 pub type CodecCtx = { path: [Str], shared: SharedConfig }
 
-## Structured decode error. `path` locates the field / index, `message`
-## is human-readable, `expected` / `found` describe the mismatch.
+## Structured decode error: `path` locates the field, `expected`/`found` describe the mismatch.
 pub type DecodeError = {
   path: [Str],
   message: Str,
@@ -52,18 +34,13 @@ pub type DecodeError = {
 ## Default shared config — no field-name transform.
 pub let default_shared: SharedConfig = { field_transform = Identity }
 
-## Tier 1 — Format identity
-##
-## Associates a config type with the output type its encoders produce.
-## One tiny impl per (config, output) pair — the sole point where format
-## identity is declared to the codec system.
+## Links a config type to the output type its encoders produce.
 ability Format for 'config having 'out where {
 }
 
-## Tier 2 — Per-shape encode (6 abilities)
+# Tier 2 — Per-shape encode
 
-## Encode primitive scalars. Every format must implement these to encode
-## anything; missing means "format can't produce output at all".
+## Encode primitive scalars; every format must implement this.
 ability EncodeScalar for 'config having 'out where {
   encode_int:   { it: 'config, val: Int,   ctx: CodecCtx } -> 'out,
   encode_float: { it: 'config, val: Float, ctx: CodecCtx } -> 'out,
@@ -75,8 +52,7 @@ ability EncodeScalar for 'config having 'out where {
   encode_nat:   { it: 'config, val: Nat,   ctx: CodecCtx } -> 'out,
 }
 
-## Encode a record shape given per-field key/value pairs already encoded
-## to `'out` by the walker.
+## Encode a record from its already-encoded key/value pairs.
 ability EncodeRecord for 'config having 'out where {
   encode_record: { it: 'config, fields: [{ key: Str, value: 'out }], ctx: CodecCtx } -> 'out,
 }
@@ -86,8 +62,7 @@ ability EncodeVariant for 'config having 'out where {
   encode_variant: { it: 'config, tag: Str, payload: Option 'out, ctx: CodecCtx } -> 'out,
 }
 
-## Encode a list / sequence given per-element output already encoded.
-## Sets flow through this after `set::to_seq`.
+## Encode a sequence from already-encoded elements; sets come through `set::to_seq`.
 ability EncodeSequence for 'config having 'out where {
   encode_sequence: { it: 'config, elems: ['out], ctx: CodecCtx } -> 'out,
 }
@@ -97,13 +72,12 @@ ability EncodeMapping for 'config having 'out where {
   encode_mapping: { it: 'config, entries: [{ key: 'out, value: 'out }], ctx: CodecCtx } -> 'out,
 }
 
-## Encode an option — `Some` wraps its inner encoded value, `None`
-## renders however the format prefers (JSON null, absent field, etc.).
+## Encode an option; how `None` renders is up to the format.
 ability EncodeOption for 'config having 'out where {
   encode_option: { it: 'config, val: Option 'out, ctx: CodecCtx } -> 'out,
 }
 
-## Tier 2 — Per-shape decode (6 abilities)
+# Tier 2 — Per-shape decode
 
 ## Decode primitive scalars from the format's input representation.
 ability DecodeScalar for 'config having 'in where {
@@ -117,8 +91,7 @@ ability DecodeScalar for 'config having 'in where {
   decode_nat:   { it: 'config, val: 'in, ctx: CodecCtx } -> Result Nat   DecodeError,
 }
 
-## Decode a single record field by key from the input, leaving the walker
-## to further descend into the returned sub-value.
+## Decode one record field by key; the walker descends into the result.
 ability DecodeRecord for 'config having 'in where {
   decode_record_field: { it: 'config, val: 'in, key: Str, ctx: CodecCtx } -> Result 'in DecodeError,
 }
@@ -143,17 +116,8 @@ ability DecodeOption for 'config having 'in where {
   decode_option: { it: 'config, val: 'in, ctx: CodecCtx } -> Result (Option 'in) DecodeError,
 }
 
-## Tier 2 — OPTIONAL bulk scalar-sequence fast path
-##
-## A `[Int]`/`[Float]`/`[Str]`/`[Bool]` is a Sequence of Scalars. The generic
-## `Sequence` + per-element `Scalar` walk is correct for every format, but for a
-## format whose input/output is a FOREIGN handle (the polyglot codecs) it pays one
-## guest-boundary crossing PER ELEMENT. These optional abilities fuse container +
-## scalar so the whole array crosses in ONE go. A format implements them ONLY if it
-## can beat the generic walk (polyglot → the bulk `to_<t>_seq`/`box_<t>_seq` ops);
-## JSON/URL etc. simply don't, and the auto-derivation falls back to the generic
-## `Sequence` path (which still errors by name if `Sequence` itself is missing).
-## `Sequence` remains the REQUIRED base — this is purely an additive speed-up.
+## Optional fast path encoding a whole scalar array (`[Int]` etc.) in one step.
+## Implement only if it beats the generic `Sequence` walk; `Sequence` stays required.
 ability EncodeScalarSequence for 'config having 'out where {
   encode_int_seq:   { it: 'config, vals: [Int],   ctx: CodecCtx } -> 'out,
   encode_float_seq: { it: 'config, vals: [Float], ctx: CodecCtx } -> 'out,
@@ -161,8 +125,7 @@ ability EncodeScalarSequence for 'config having 'out where {
   encode_bool_seq:  { it: 'config, vals: [Bool],  ctx: CodecCtx } -> 'out,
 }
 
-## Decode mirror of [EncodeScalarSequence] — a whole scalar array from the format's
-## input representation in ONE step.
+## Decode mirror of `EncodeScalarSequence`: a whole scalar array in one step.
 ability DecodeScalarSequence for 'config having 'in where {
   decode_int_seq:   { it: 'config, val: 'in, ctx: CodecCtx } -> Result [Int]   DecodeError,
   decode_float_seq: { it: 'config, val: 'in, ctx: CodecCtx } -> Result [Float] DecodeError,
@@ -170,13 +133,8 @@ ability DecodeScalarSequence for 'config having 'in where {
   decode_bool_seq:  { it: 'config, val: 'in, ctx: CodecCtx } -> Result [Bool]  DecodeError,
 }
 
-## Tier 3 — Encode / Decode primitives
-##
-## The compiler auto-derives `impl Encode 'config for 'a having 'out`
-## per (config, value-type) pair by walking the shape and composing Tier
-## 2 impls. User-facing API is the Tier-4 sugar in each format module
-## (`x.json{}` etc.); direct `.encode { config = ... }` works but is the
-## escape hatch, not the default.
+# Tier 3 — the compiler derives `Encode`/`Decode` per (config, type) from Tier 2;
+# users normally go through each format module's sugar (`x.json{}`).
 
 ## One-shot encode of a value to a format's output type.
 #{ missing: "Ensure the data type is serializable." }
@@ -184,16 +142,13 @@ ability Encode 'config for 'a having 'out where {
   encode: { it: 'a, config: 'config } -> 'out,
 }
 
-## One-shot decode of a format's input to a target value type.
-## `'a` appears only in the return position; dispatch is target-driven,
-## typically via LHS type annotation or inherent method syntax
-## (`Type.decode { ... }`).
+## One-shot decode of a format's input to a target type, chosen by the expected type.
 #{ missing: "Ensure the data type is serializable." }
 ability Decode 'config 'a for 'in where {
   decode: { it: 'in, config: 'config } -> Result 'a DecodeError,
 }
 
-## Path helpers
+# Path helpers
 
 ## Empty path for top-level encoding/decoding.
 pub let empty_path: [Str] = []
@@ -209,7 +164,7 @@ pub let append_index = { path: [Str], index: Int } ->
 pub let format_path = { path: [Str] } ->
   if seq::is_empty { xs = path } then "<root>" else str::join { strings = path, separator = "." }
 
-## Constructs a `DecodeError` Result — helper for Tier-2 impl bodies.
+## Build a `DecodeError` result, for Tier-2 impl bodies.
 pub let decode_error
   : { path: [Str], message: Str, expected: Str, found: Option Str }
   -> Result 'a DecodeError
@@ -220,7 +175,7 @@ pub let decode_error
       found = found,
     } }
 
-## Field-name transforms
+# Field-name transforms
 
 ## Encode-side transform: source name → wire name.
 pub let transform_field_name = { name: Str, transform: FieldTransform } -> match transform is
@@ -230,8 +185,7 @@ pub let transform_field_name = { name: Str, transform: FieldTransform } -> match
   KebabCase -> str::to_kebab_case { s = name }
   ScreamingSnakeCase -> str::to_screaming_snake_case { s = name }
 
-## Decode-side transform: wire name → source name. `SnakeCase` inverts
-## to camel; the rest normalise onto camel identifiers.
+## Decode-side transform: wire name → source name.
 pub let inverse_transform_field_name = { name: Str, transform: FieldTransform } -> match transform is
   Identity -> name
   SnakeCase -> str::to_camel_case { s = name }
@@ -239,7 +193,6 @@ pub let inverse_transform_field_name = { name: Str, transform: FieldTransform } 
   KebabCase -> str::to_camel_case { s = name }
   ScreamingSnakeCase -> str::to_camel_case { s = name }
 
-## Convenience for the compiler-emitted encode walker: apply the
-## configured field transform against the shared config alone.
+## Apply the shared config's field transform to `name`.
 pub let apply_field_transform = { name: Str, shared: SharedConfig } ->
   transform_field_name { name = name, transform = shared.field_transform }

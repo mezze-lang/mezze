@@ -1,4 +1,4 @@
-## Provides a default value for a type (e.g. 0 for Int, "" for Str).
+## A default value for a type (e.g. 0 for Int, "" for Str).
 ability Default for 'a where {
   ## Construct the default value.
   default: {} -> 'a

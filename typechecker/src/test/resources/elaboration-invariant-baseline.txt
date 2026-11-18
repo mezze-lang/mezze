@@ -95,4 +95,249 @@
 #                     something the compiler cannot name. These reach the
 #                     runtime as a dispatch with nothing to dispatch on.
 #
-# Counts: 0 rows over 964 declarations.
+# Counts (prelude-reachable set, before 2026-11-17): 0 rows over 964 declarations.
+#
+# ---------------------------------------------------------------------------
+# 2026-11-17 — the gate's COVERAGE tripled; these rows were not new that day.
+#
+# Until then the precompiled stdlib was the ~20 modules the prelude reaches, and
+# `stdlibTypedModules` (what this gate walks) was that set. The whole stdlib is
+# lowered into the snapshot now, so the gate walks all 79 modules and sees, for
+# the first time, gaps that were always in the other ~59: `http_client`'s Client
+# and MockRule, `codebase`'s Matched and DeclQuery, the codec configs (QueryC,
+# JsonC, UrlC, JvmC, RowC), datetime's Duration/Instant. Every one of them was
+# there when those modules were lowered inside user programs; nothing downstream
+# changed. They are listed so the ratchet holds from here — each is a place to
+# fix, and the number can only go down.
+#
+# Counts: 225 rows (131 UNTYPED_PARAM, 68 UNBOUND_TYPE_VAR, 21 SURVIVING_PLACEHOLDER, 5 VARTYPE_RECEIVER).
+SURVIVING_PLACEHOLDER	impl Client.delete
+SURVIVING_PLACEHOLDER	impl Client.get
+SURVIVING_PLACEHOLDER	impl Client.head
+SURVIVING_PLACEHOLDER	impl Client.options
+SURVIVING_PLACEHOLDER	impl Client.patch
+SURVIVING_PLACEHOLDER	impl Client.post
+SURVIVING_PLACEHOLDER	impl Client.put
+SURVIVING_PLACEHOLDER	impl Client.request
+SURVIVING_PLACEHOLDER	impl DeclQuery.performing
+SURVIVING_PLACEHOLDER	impl DeclQuery.requiring
+SURVIVING_PLACEHOLDER	impl DeclQuery.using
+SURVIVING_PLACEHOLDER	impl DeclQuery.using_kind
+SURVIVING_PLACEHOLDER	impl Matched.ok
+SURVIVING_PLACEHOLDER	impl Matched.query
+SURVIVING_PLACEHOLDER	impl Matched.query_all
+SURVIVING_PLACEHOLDER	impl Matched.query_or
+SURVIVING_PLACEHOLDER	impl Matched.reply
+SURVIVING_PLACEHOLDER	impl MockRule.times_out
+SURVIVING_PLACEHOLDER	impl MockRule.unreachable
+SURVIVING_PLACEHOLDER	impl QueryC.decode_mapping
+SURVIVING_PLACEHOLDER	impl RowC.decode_sequence
+UNBOUND_TYPE_VAR	impl Client.delete
+UNBOUND_TYPE_VAR	impl Client.get
+UNBOUND_TYPE_VAR	impl Client.head
+UNBOUND_TYPE_VAR	impl Client.options
+UNBOUND_TYPE_VAR	impl Client.patch
+UNBOUND_TYPE_VAR	impl Client.post
+UNBOUND_TYPE_VAR	impl Client.put
+UNBOUND_TYPE_VAR	impl Client.request
+UNBOUND_TYPE_VAR	impl DeclQuery.performing
+UNBOUND_TYPE_VAR	impl DeclQuery.requiring
+UNBOUND_TYPE_VAR	impl DeclQuery.using
+UNBOUND_TYPE_VAR	impl DeclQuery.using_kind
+UNBOUND_TYPE_VAR	impl Duration.ge
+UNBOUND_TYPE_VAR	impl Duration.gt
+UNBOUND_TYPE_VAR	impl Duration.le
+UNBOUND_TYPE_VAR	impl Duration.lt
+UNBOUND_TYPE_VAR	impl Instant.ge
+UNBOUND_TYPE_VAR	impl Instant.gt
+UNBOUND_TYPE_VAR	impl Instant.le
+UNBOUND_TYPE_VAR	impl Instant.lt
+UNBOUND_TYPE_VAR	impl JvmC.decode_mapping
+UNBOUND_TYPE_VAR	impl JvmC.decode_sequence
+UNBOUND_TYPE_VAR	impl Matched.ok
+UNBOUND_TYPE_VAR	impl Matched.param
+UNBOUND_TYPE_VAR	impl Matched.param_as
+UNBOUND_TYPE_VAR	impl Matched.param_or
+UNBOUND_TYPE_VAR	impl Matched.query
+UNBOUND_TYPE_VAR	impl Matched.query_all
+UNBOUND_TYPE_VAR	impl Matched.query_as
+UNBOUND_TYPE_VAR	impl Matched.query_or
+UNBOUND_TYPE_VAR	impl Matched.reply
+UNBOUND_TYPE_VAR	impl MockRule.times_out
+UNBOUND_TYPE_VAR	impl MockRule.unreachable
+UNBOUND_TYPE_VAR	impl QueryC.decode_mapping
+UNBOUND_TYPE_VAR	impl QueryC.decode_option
+UNBOUND_TYPE_VAR	impl QueryC.decode_sequence
+UNBOUND_TYPE_VAR	impl QueryC.encode_mapping
+UNBOUND_TYPE_VAR	impl QueryC.encode_option
+UNBOUND_TYPE_VAR	impl Result.from_json
+UNBOUND_TYPE_VAR	impl RowC.decode_record_field
+UNBOUND_TYPE_VAR	impl RowC.decode_sequence
+UNBOUND_TYPE_VAR	let:body_json
+UNBOUND_TYPE_VAR	let:children
+UNBOUND_TYPE_VAR	let:chunk_map
+UNBOUND_TYPE_VAR	let:flatten
+UNBOUND_TYPE_VAR	let:for_each_concurrent
+UNBOUND_TYPE_VAR	let:map_concurrent
+UNBOUND_TYPE_VAR	let:map_concurrent_lazy
+UNBOUND_TYPE_VAR	let:peek_tbqueue
+UNBOUND_TYPE_VAR	let:peek_tqueue
+UNBOUND_TYPE_VAR	let:query_params
+UNBOUND_TYPE_VAR	let:read_tbqueue
+UNBOUND_TYPE_VAR	let:read_tmvar
+UNBOUND_TYPE_VAR	let:read_tqueue
+UNBOUND_TYPE_VAR	let:return_err
+UNBOUND_TYPE_VAR	let:return_none
+UNBOUND_TYPE_VAR	let:router
+UNBOUND_TYPE_VAR	let:scoped_with
+UNBOUND_TYPE_VAR	let:start_socket
+UNBOUND_TYPE_VAR	let:take_tmvar
+UNBOUND_TYPE_VAR	let:tmvar
+UNBOUND_TYPE_VAR	let:to_immut
+UNBOUND_TYPE_VAR	let:to_mut
+UNBOUND_TYPE_VAR	let:try_par_filter
+UNBOUND_TYPE_VAR	let:try_read_tbqueue
+UNBOUND_TYPE_VAR	let:try_read_tqueue
+UNBOUND_TYPE_VAR	let:unwrap
+UNBOUND_TYPE_VAR	let:watch_events
+UNTYPED_PARAM	impl 0c4d55bb.from_jvm
+UNTYPED_PARAM	impl 0c4d55bb.from_jvm_with
+UNTYPED_PARAM	impl 12e3170b.to_json
+UNTYPED_PARAM	impl 12e3170b.to_json_str
+UNTYPED_PARAM	impl 12e3170b.to_json_str_with
+UNTYPED_PARAM	impl 12e3170b.to_json_with
+UNTYPED_PARAM	impl 1c8147e5.query_string
+UNTYPED_PARAM	impl 1c8147e5.to_query
+UNTYPED_PARAM	impl 1c8147e5.to_query_with
+UNTYPED_PARAM	impl 633f45f2.url
+UNTYPED_PARAM	impl 633f45f2.url_with
+UNTYPED_PARAM	impl 6b1038fd.to_jvm
+UNTYPED_PARAM	impl 6b1038fd.to_jvm_with
+UNTYPED_PARAM	impl 6c5dd35c.from_json
+UNTYPED_PARAM	impl 6c5dd35c.from_json_with
+UNTYPED_PARAM	impl 6eec3ff9.from_query
+UNTYPED_PARAM	impl 6eec3ff9.from_query_with
+UNTYPED_PARAM	impl 8a7f0850.from_url
+UNTYPED_PARAM	impl 8a7f0850.from_url_with
+UNTYPED_PARAM	impl CancellationToken.on_cancellation
+UNTYPED_PARAM	impl Client.delete
+UNTYPED_PARAM	impl Client.get
+UNTYPED_PARAM	impl Client.head
+UNTYPED_PARAM	impl Client.options
+UNTYPED_PARAM	impl Client.patch
+UNTYPED_PARAM	impl Client.post
+UNTYPED_PARAM	impl Client.put
+UNTYPED_PARAM	impl Client.request
+UNTYPED_PARAM	impl Client.with_auth
+UNTYPED_PARAM	impl Client.with_base_url
+UNTYPED_PARAM	impl Client.with_default_header
+UNTYPED_PARAM	impl Client.with_default_headers
+UNTYPED_PARAM	impl Client.with_default_timeout
+UNTYPED_PARAM	impl DeclQuery.in_module
+UNTYPED_PARAM	impl DeclQuery.mentioning
+UNTYPED_PARAM	impl DeclQuery.performing
+UNTYPED_PARAM	impl DeclQuery.requiring
+UNTYPED_PARAM	impl DeclQuery.take
+UNTYPED_PARAM	impl DeclQuery.using
+UNTYPED_PARAM	impl DeclQuery.using_kind
+UNTYPED_PARAM	impl DeclQuery.with_kind
+UNTYPED_PARAM	impl DeclQuery.with_name
+UNTYPED_PARAM	impl DeclQuery.with_name_prefix
+UNTYPED_PARAM	impl DeclQuery.with_shape
+UNTYPED_PARAM	impl DeclQuery.with_tag
+UNTYPED_PARAM	impl DeclQuery.with_text
+UNTYPED_PARAM	impl JsonC.decode_bool
+UNTYPED_PARAM	impl JsonC.decode_bytes
+UNTYPED_PARAM	impl JsonC.decode_char
+UNTYPED_PARAM	impl JsonC.decode_float
+UNTYPED_PARAM	impl JsonC.decode_frac
+UNTYPED_PARAM	impl JsonC.decode_int
+UNTYPED_PARAM	impl JsonC.decode_mapping
+UNTYPED_PARAM	impl JsonC.decode_nat
+UNTYPED_PARAM	impl JsonC.decode_option
+UNTYPED_PARAM	impl JsonC.decode_record_field
+UNTYPED_PARAM	impl JsonC.decode_sequence
+UNTYPED_PARAM	impl JsonC.decode_str
+UNTYPED_PARAM	impl JsonC.decode_variant
+UNTYPED_PARAM	impl JvmC.decode_bool
+UNTYPED_PARAM	impl JvmC.decode_bool_seq
+UNTYPED_PARAM	impl JvmC.decode_bytes
+UNTYPED_PARAM	impl JvmC.decode_char
+UNTYPED_PARAM	impl JvmC.decode_float
+UNTYPED_PARAM	impl JvmC.decode_float_seq
+UNTYPED_PARAM	impl JvmC.decode_frac
+UNTYPED_PARAM	impl JvmC.decode_int
+UNTYPED_PARAM	impl JvmC.decode_int_seq
+UNTYPED_PARAM	impl JvmC.decode_mapping
+UNTYPED_PARAM	impl JvmC.decode_nat
+UNTYPED_PARAM	impl JvmC.decode_option
+UNTYPED_PARAM	impl JvmC.decode_record_field
+UNTYPED_PARAM	impl JvmC.decode_sequence
+UNTYPED_PARAM	impl JvmC.decode_str
+UNTYPED_PARAM	impl JvmC.decode_str_seq
+UNTYPED_PARAM	impl JvmC.decode_variant
+UNTYPED_PARAM	impl JvmForeign.key
+UNTYPED_PARAM	impl JvmForeign.set_key
+UNTYPED_PARAM	impl Matched.ok
+UNTYPED_PARAM	impl Matched.param
+UNTYPED_PARAM	impl Matched.param_as
+UNTYPED_PARAM	impl Matched.param_or
+UNTYPED_PARAM	impl Matched.query
+UNTYPED_PARAM	impl Matched.query_all
+UNTYPED_PARAM	impl Matched.query_or
+UNTYPED_PARAM	impl Matched.reply
+UNTYPED_PARAM	impl QueryC.decode_bool
+UNTYPED_PARAM	impl QueryC.decode_bytes
+UNTYPED_PARAM	impl QueryC.decode_char
+UNTYPED_PARAM	impl QueryC.decode_float
+UNTYPED_PARAM	impl QueryC.decode_frac
+UNTYPED_PARAM	impl QueryC.decode_int
+UNTYPED_PARAM	impl QueryC.decode_mapping
+UNTYPED_PARAM	impl QueryC.decode_nat
+UNTYPED_PARAM	impl QueryC.decode_option
+UNTYPED_PARAM	impl QueryC.decode_record_field
+UNTYPED_PARAM	impl QueryC.decode_sequence
+UNTYPED_PARAM	impl QueryC.decode_str
+UNTYPED_PARAM	impl QueryC.decode_variant
+UNTYPED_PARAM	impl Request.with_query
+UNTYPED_PARAM	impl Request.with_url
+UNTYPED_PARAM	impl RowC.decode_bool
+UNTYPED_PARAM	impl RowC.decode_bytes
+UNTYPED_PARAM	impl RowC.decode_char
+UNTYPED_PARAM	impl RowC.decode_float
+UNTYPED_PARAM	impl RowC.decode_frac
+UNTYPED_PARAM	impl RowC.decode_int
+UNTYPED_PARAM	impl RowC.decode_nat
+UNTYPED_PARAM	impl RowC.decode_option
+UNTYPED_PARAM	impl RowC.decode_record_field
+UNTYPED_PARAM	impl RowC.decode_sequence
+UNTYPED_PARAM	impl RowC.decode_str
+UNTYPED_PARAM	impl UrlC.decode_bool
+UNTYPED_PARAM	impl UrlC.decode_bytes
+UNTYPED_PARAM	impl UrlC.decode_char
+UNTYPED_PARAM	impl UrlC.decode_float
+UNTYPED_PARAM	impl UrlC.decode_frac
+UNTYPED_PARAM	impl UrlC.decode_int
+UNTYPED_PARAM	impl UrlC.decode_nat
+UNTYPED_PARAM	impl UrlC.decode_option
+UNTYPED_PARAM	impl UrlC.decode_str
+UNTYPED_PARAM	impl UrlC.decode_variant
+UNTYPED_PARAM	impl a3b17862.to_json_utf8
+UNTYPED_PARAM	impl a3b17862.to_json_utf8_with
+UNTYPED_PARAM	impl 6edfbb38.from_query
+UNTYPED_PARAM	impl 6edfbb38.from_query_with
+UNTYPED_PARAM	impl fc70cccc.from_json
+UNTYPED_PARAM	impl fc70cccc.from_json_with
+VARTYPE_RECEIVER	impl Matched.ok
+VARTYPE_RECEIVER	impl Matched.query
+VARTYPE_RECEIVER	impl Matched.query_all
+VARTYPE_RECEIVER	impl Matched.query_or
+VARTYPE_RECEIVER	impl Matched.reply
+#
+# 2026-11-17, later — `std::effects::workflow` is CHECKED for the first time: a
+# type-erroring stdlib module used to be dropped from the snapshot silently, and
+# this one had been (`run_local` lacked its `<*>`). Fixed, it now reaches the gate.
+# `with_timeout` is the sketch's stub (`timeout_ms` unused, never `None`); its
+# open rows are what the sketch wrote, not a solver gap. Fix with the module.
+SURVIVING_PLACEHOLDER	let:with_timeout
+UNBOUND_TYPE_VAR	let:with_timeout

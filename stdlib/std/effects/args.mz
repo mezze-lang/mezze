@@ -1,9 +1,7 @@
-# Command-line arguments effect.
-# Mirrors Rust's std::env::args / Go's os.Args / Node's process.argv.
-## Access to the process's argv as it was passed by the shell.
+# Command-line arguments effect, like Rust's std::env::args.
+## Access to the process's argv as passed by the shell.
 effect Args where {
-  ## The arguments verbatim. Includes `--`, `-`, `--flag=value` etc as separate tokens —
-  ## interpretation belongs to an arg-parser library, not this effect.
+  ## The arguments verbatim, unparsed (`--`, `-`, `--flag=value` are plain tokens).
   argv: {} -> [Str] <Args>
 }
 

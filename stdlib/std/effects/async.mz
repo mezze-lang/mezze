@@ -20,10 +20,8 @@ pub let promise_eq: { l: Promise 'a, r: Promise 'a } -> Bool = { l, r } ->
 pub let promise_neq: { l: Promise 'a, r: Promise 'a } -> Bool = { l, r } ->
   __native_ref_neq { l = l, r = r }
 
-## Structural hash, paired with the `Eq` below.
-## `Eq` and `Hash` are written together or not at all: a hash container
-## buckets by one and compares by the other, so a value whose hash
-## disagrees with its equality is silently kept twice.
+# `Eq` and `Hash` go together: a hash container buckets by one and compares by the other.
+## Structural hash, paired with `Eq`.
 impl Hash for Promise 'a where {
   hash: { it: Promise 'a } -> Int = { it } -> structural_hash { it = it }
 }
@@ -39,10 +37,8 @@ pub let scope_eq: { l: Scope 'a, r: Scope 'a } -> Bool = { l, r } ->
 pub let scope_neq: { l: Scope 'a, r: Scope 'a } -> Bool = { l, r } ->
   __native_ref_neq { l = l, r = r }
 
-## Structural hash, paired with the `Eq` below.
-## `Eq` and `Hash` are written together or not at all: a hash container
-## buckets by one and compares by the other, so a value whose hash
-## disagrees with its equality is silently kept twice.
+# `Eq` and `Hash` go together: a hash container buckets by one and compares by the other.
+## Structural hash, paired with `Eq`.
 impl Hash for Scope 'a where {
   hash: { it: Scope 'a } -> Int = { it } -> structural_hash { it = it }
 }
@@ -80,45 +76,28 @@ pub let is_cancelled: { p: Promise 'a } -> Bool = { p } -> match __native_promis
   _ -> False
 
 
-## Request cancellation. `reason` is mandatory — every cancel names why.
-##
-## The reason is propagated into the cancelled Promise's error state as
-## `AsyncCancelled { reason }`, visible to awaiters and `inspect`
-## observers. If you don't have a natural category, pass
-## `CancelCustom { tag = "...", detail = "..." }`.
+## Request cancellation; awaiters then see `AsyncCancelled { reason }`.
+## Cooperative: the task stops at its next blocking point (await, sleep, park, lock/channel wait).
+## A pure CPU-bound loop is not interrupted.
 pub let cancel: { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async> = { p, reason } ->
   __native_promise_cancel { p = p, reason = reason }
 
-## Construct a Promise via a `setup` callback that receives a
-## `{ complete, fail, on_cancel }` capability record. Whichever resolve
-## capability `setup` invokes atomically transitions the promise; later
-## transitions are no-ops. If `setup` raises, the promise is auto-failed so it
-## never leaks in PromisePending.
-##
-## `setup` may invoke:
-##   - `complete { val = ... }` — resolve successfully.
-##   - `fail { err = ... }` — resolve with an AsyncError.
-##   - `on_cancel { hook = { reason } -> ... }` — register a cancel hook, fired
-##     with the CancelReason on cancellation. Last-writer-wins; omit if the
-##     backend has no cancel channel.
-##
-## `setup` may call neither — the async case, where a background task fulfills
-## the promise later. That is how a third-party backend (Kotlin coroutines,
-## CompletableFuture, Vert.x, …) plugs in: build the promise, launch work on the
-## foreign scheduler, and route cancel back through `on_cancel`.
+## Build a Promise from a `setup` callback given `{ complete, fail, on_cancel }`.
+## The first `complete`/`fail` wins; later ones are no-ops. If `setup` raises, the promise fails.
+## `setup` may resolve later from another task; `on_cancel` hooks are last-writer-wins.
 pub let promise_from
   : { setup: { complete: { val: 'a } -> {}, fail: { err: AsyncError } -> {}, on_cancel: { hook: { reason: CancelReason } -> {} <...> } -> {} <...> } -> {} <...> }
   -> Promise 'a
   = { setup } -> __native_promise_from { setup = setup }
 
-## A Promise already resolved with `val`. Sugar over promise_from.
+## A Promise already resolved with `val`.
 pub let promise_of: { val: 'a } -> Promise 'a = { val } -> __native_promise_succeed { val = val }
 
-## A Promise already failed with `err`. Sugar over promise_from.
+## A Promise already failed with `err`.
 pub let promise_failed: { err: AsyncError } -> Promise 'a = { err } ->
   __native_promise_fail { err = err }
 
-## Sleep for the given milliseconds. Delegates to Time.sleep.
+## Sleep for `ms` milliseconds (via `Time.sleep`).
 pub let sleep: { ms: Int } -> {} <Time> = { ms } ->
   Time.sleep { d = duration_millis { n = ms } }
 
@@ -129,18 +108,10 @@ pub let yield_now: {} -> {} <Async> = {} -> __native_async_yield_now {}
 pub let park: { predicate: {} -> Bool <...> } -> {} <Async, ...> = { predicate } ->
   __native_async_park_until { predicate = predicate }
 
-## Suspend until `predicate` returns True, or until `ms` milliseconds pass.
-## True means the predicate won; False means the deadline did. `ms = 0` is a
-## poll: check once and report.
-##
-## The deadline is measured by the thread that WAITS, which is what makes a
-## timeout built on this predictable. The alternative — spawn a task that
-## sleeps, then park until either it or the target is done — makes the answer
-## depend on a second promise being scheduled, and on it SUCCEEDING: `is_done`
-## holds for a failed promise too, so a sleeper that died reported a deadline
-## that had not elapsed. Worse, `sleep` performs `Time`, and the effect row of a
-## spawned callback is absorbed at the spawn, so a caller with no `Time`
-## performer installed hit that case with nothing in the types to warn them.
+# The WAITING thread measures the deadline: a sleeper task made the answer depend on a
+# second promise being scheduled and succeeding, and hid a `Time` requirement.
+## Suspend until `predicate` returns True (answers True) or `ms` milliseconds pass (False).
+## `ms = 0` polls once. Needs no `Time` performer.
 pub let park_until: { predicate: {} -> Bool <...>, ms: Int } -> Bool <Async, ...> =
   { predicate, ms } -> __native_async_park_until_deadline { predicate = predicate, ms = ms }
 
@@ -148,12 +119,8 @@ pub let park_until: { predicate: {} -> Bool <...>, ms: Int } -> Bool <Async, ...
 pub let scoped: { f: { sc: Scope 'a } -> 'b <...> } -> 'b <Async, ...> = { f } ->
   __native_async_scoped { f = f }
 
-## Chain another async step. Runs f only if p succeeded; on upstream Err
-## the new Promise fails with AsyncFailed (the specific AsyncError variant
-## from p is flattened — use `await` + match on `inspect` if you need
-## error fidelity).
-## Equivalent to Java's CompletableFuture.thenCompose / Rust's and_then.
-## (named `and_then` because `then` is a reserved keyword.)
+## Chain another async step: run `f` on `p`'s value once it succeeds.
+## On upstream failure the new Promise fails with `AsyncFailed`, losing the original variant.
 pub let and_then
   : { p: Promise 'a, f: { val: 'a } -> Promise 'b <Async, ...> }
   -> Promise 'b <Async, ...>
@@ -161,14 +128,12 @@ pub let and_then
     let v = unwrap { result = await { p = p } }
     unwrap { result = await { p = f { val = v } } } }
 
-## Apply a pure transform to the success value. On upstream Err, the new
-## Promise fails with AsyncFailed (lossy on error variant).
-## Equivalent to Java's CompletableFuture.thenApply / Rust's map_ok.
+## Transform the success value.
+## On upstream failure the new Promise fails with `AsyncFailed`, losing the original variant.
 pub let map_ok: { p: Promise 'a, f: { val: 'a } -> 'b <...> } -> Promise 'b <Async, ...> = { p, f } ->
   Async.spawn { f = {} -> f { val = unwrap { result = await { p = p } } } }
 
-## Recover from failure. f runs only on Err; Ok values pass through.
-## Equivalent to Java's CompletableFuture.exceptionally / Scala's recover.
+## Recover from failure: `f` runs only on Err; Ok values pass through.
 pub let recover
   : { p: Promise 'a, f: { err: AsyncError } -> 'a <...> }
   -> Promise 'a <Async, ...>
@@ -177,9 +142,7 @@ pub let recover
     Err { error = e } -> f { err = e }
  }
 
-## Side-effecting observer that sees both branches. Returns a Promise
-## resolving to the same value as p (or failing the same way), after f
-## has run. Equivalent to Java's CompletableFuture.whenComplete.
+## Run `f` on `p`'s Result, then settle the same way `p` did.
 pub let on_complete
   : { p: Promise 'a, f: { result: Result 'a AsyncError } -> {} <...> }
   -> Promise 'a <Async, ...>
@@ -209,12 +172,8 @@ impl Promise 'a where {
   try_await = { it } -> try_await { p = it },
 }
 
-## Method surface for a seq of promises. Mirrors the top-level
-## combinators so user code can write `ps.race {}`, `ps.all {}`, etc.
-## instead of the prefix form `race { ps }`. Lives here because Promise
-## is declared in this module — the impl-locality rule allows an
-## inherent impl on a parametric container as long as some nominal type
-## in the receiver tree is local.
+# Lives here: impl locality allows it because `Promise` is local to this module.
+## Method forms of the seq-of-promise combinators, e.g. `ps.race {}`.
 impl [Promise 'a] where {
   race = { it } -> race { ps = it },
   await_all = { it } -> all { ps = it },
@@ -222,29 +181,9 @@ impl [Promise 'a] where {
   try_all = { it } -> try_all { ps = it },
 }
 
-## Why a cancellation happened. Every cancel path names a category —
-## there is no "no reason" case. Consumers pattern-match on the variant.
-##
-## - `CancelUserRequested`   — direct caller cancel with a human message.
-## - `CancelTimeout`   — a deadline elapsed (with_timeout, scope_join_until).
-## - `CancelScopeTeardown`   — implicit propagation from a closing scope
-##                       (scope_cancel_all, exit-on-failure paths).
-## - `CancelSiblingFailed`   — a peer under a join policy failed and dragged
-##                       this task down. `at` is the failed peer's index
-##                       in the input order.
-## - `CancelLostRace`  — a peer settled first under `race` / `OnSuccess`
-##                       / `OnFirst` and the losers are being torn down.
-##                       The winner's index is not tracked to keep the
-##                       combinator's inner loop cheap; if you need it,
-##                       reconstruct via `inspect` on all siblings.
-## - `CancelExternalInterrupt` — the underlying thread was interrupted by a
-##                       source Mezze doesn't own (Ctrl-C, JVM shutdown,
-##                       native code Thread.interrupt).
-## - `CancelCustom`          — escape hatch for application-defined reasons
-##                       that don't fit the above. Both `tag` and
-##                       `detail` are load-bearing — pick a stable tag
-##                       for programmatic matching, put the specifics in
-##                       detail.
+## Why a cancellation happened; every cancel names one (there is no "no reason" case).
+## `CancelSiblingFailed.at` is the failed peer's index; `CancelLostRace` doesn't record the winner.
+## `CancelCustom`: a stable `tag` for matching, specifics in `detail`.
 pub type CancelReason = |
   CancelUserRequested { msg: Str },
   CancelTimeout { deadline_ms: Int },
@@ -255,29 +194,21 @@ pub type CancelReason = |
   CancelCustom { tag: Str, detail: Str },
 |
 
-## Error type for async operations.
-##
-## `AsyncCancelled.reason` is mandatory — every cancel path names why.
-## No `Option` here: if you don't have a category to pass, use
-## `CancelCustom { tag = "…", detail = "…" }`. Awaiters and `inspect` observers
-## see the reason via `AsyncCancelled { reason }`.
+## Error type for async operations; `AsyncCancelled` always carries its `CancelReason`.
 pub type AsyncError = |
   AsyncFailed { msg: Str },
   AsyncCancelled { reason: CancelReason },
   AsyncTimedOut { ms: Int },
 |
 
-## Snapshot of a Promise's state at one moment in time.
-## Returned by `Promise.inspect {}` — never blocks, never raises.
+## Snapshot of a Promise's state, from `inspect`; never blocks.
 pub type PromiseState 'a = |
   PromisePending,
   PromiseCompleted { val: 'a },
   PromiseFailed { err: AsyncError },
 |
 
-## What happened when you tried to cancel a Promise.
-## Returned by `Promise.cancel {}` — never loses information about
-## whether the cancellation actually took effect.
+## What `cancel` did: whether the cancellation took effect, and if not, why.
 pub type CancelOutcome = |
   CancelDone,
   CancelAlreadyCompleted,
@@ -286,15 +217,11 @@ pub type CancelOutcome = |
 |
 
 ## How `scoped_with` decides when to stop waiting for its children.
-##
-## - `OnFailure`    — wait for everyone; bail early on the first failure
-## - `OnSuccess`    — first success wins; cancel the rest
-## - `OnAllSettled` — wait for everyone; return per-item Results
-## - `OnFirst`      — first to settle (success or failure) wins; cancel the rest
+## OnFailure: bail on first failure; OnSuccess: first success wins; OnAllSettled: wait for all;
+## OnFirst: first to settle wins. Losers are cancelled.
 pub type JoinPolicy = | OnFailure, OnSuccess, OnAllSettled, OnFirst |
 
-## Per-policy outcome of `scoped_with`. Pattern-match exhaustiveness
-## guarantees you handle every case the chosen policy can produce.
+## Per-policy outcome of `scoped_with`.
 pub type JoinOutcome 'a = |
   OnFailureOutcome { results: ['a] },
   OnFailureCaught { failed_at: Int, err: AsyncError, partial: [Option 'a] },
@@ -304,49 +231,22 @@ pub type JoinOutcome 'a = |
   OnFirstOutcome { result: Result 'a AsyncError, settled_at: Int, cancelled: Int },
 |
 
-## Unified async effect for spawning, awaiting, and structured concurrency.
-##
-## The effect carries only the primitives that a handler must implement.
-## The Async effect declares a single primitive: `spawn`. Every other
-## async operation (`await`, `cancel`, `sleep`, `yield_now`, `park`,
-## `scoped`) lives as a stdlib free function above, either delegating
-## to a native or riding on another effect (Time). Derived operations
-## (race, all, any, settle, join, join3, par_map, par_for_each,
-## par_filter, with_timeout, try_*) live as free functions below —
-## each expressible in terms of `spawn` + the primitives.
-##
-## This keeps the ability surface minimal: implementers pick a
-## scheduler (Loom vs OS threads), everything else composes on top.
-##
-## Cancellation observation is Promise-side (`p.is_cancelled {}`);
-## delivery inside a task rides on the JDK's blocking-primitive
-## interrupt (sleep, await, park, mutex/channel/latch waits are all
-## cancellation points). Pure CPU-bound tasks are not interruptible
-## by design — sprinkle a natural yield point (await, sleep, or the
-## like) if you need cooperative cancel.
+# The effect declares only `spawn`; everything else is a free function over natives and
+# `spawn`, so a handler only picks a scheduler. Cancellation rides the JDK's interrupt.
+
+## Spawn tasks and await them. Handle with `LoomAsync` (virtual threads) or `OSThreadAsync` (a thread pool).
 #{ unhandled: "Wrap it in `perform LoomAsync in …` (virtual threads), or `OSThreadAsync` for a thread pool." }
 effect Async where {
-  ## Spawn a computation, returning a Promise immediately.
-  ##
-  ## The callback's own effects reach the spawn site through the `<...>` on its
-  ## arrow — `{} -> 'a <...>` — so a caller is still answerable for them:
-  ## `spawn { f = {} -> sleep { ms } }` inside a function annotated `<Async>`
-  ## alone is a T0210, naming `<Time>`. Writing `<Async, ...>` on the result
-  ## instead was tried and changes nothing observable; the row already travels.
-  ##
-  ## Where it does NOT travel is a bare top-level expression, which has neither
-  ## an annotation nor the entry check to answer to. A spawned task's unhandled
-  ## effect is then dropped at runtime unless somebody awaits — see
-  ## `planned_features/runtime/concurrency-and-context-bugs.md` C1, and the
-  ## report `AsyncNatives.SuspendedOps` prints when a context closes holding one.
+  # The callback's effects reach the spawn site via `<...>`, so callers answer for them; at
+  # bare top level an unhandled effect in a spawned task is dropped at runtime unless awaited
+  # (concurrency-and-context-bugs.md C1).
+  ## Spawn a computation, returning a `Promise` immediately; `await` it for the result.
   spawn: { f: {} -> 'a <...> } -> Promise 'a <Async>
 }
 
+# initialize_scope / finalize_scope: impl-only runtime plumbing the effect driver calls
+# to bracket the structured-concurrency scope.
 ## Default handler using Project Loom virtual threads.
-##
-## initialize_scope / finalize_scope are runtime plumbing — not declared
-## in the ability but expected by the effect driver to bracket the
-## structured concurrency scope. Kept as impl-only fields.
 impl Async for LoomAsync where {
   initialize_scope = {} -> __native_async_init_scope {},
   finalize_scope = {} -> __native_async_finalize_scope { tracker = scope },
@@ -380,8 +280,7 @@ impl Async for OSThreadAsyncWith { pool_size: Int } where {
     __native_async_spawn_tracked_os { f = f, pool_size = pool_size, tracker = scope },
 }
 
-## Spawn and immediately await (synchronous helper).
-## Returns the Result from `await` — callers decide how to handle failure.
+## Spawn `f` and immediately await its Result.
 pub let run: { f: {} -> 'a <...> } -> Result 'a AsyncError <Async, ...> = { f } ->
   do
     let p = Async.spawn { f = f }
@@ -392,16 +291,8 @@ pub let go: { f: {} -> 'a <...> } -> {} <Async, ...> = { f } -> do
   let _ = Async.spawn { f = f }
   {}
 
-## Park-based helpers — derived from spawn + park + await primitives.
-## These are equivalent to the Async.* ops of the same name and exist
-## as plain functions so the Async effect can eventually shrink to
-## just the primitives. For now both paths coexist.
-## Wait for any of a list of promises to settle, returning the first
-## non-cancelled outcome as `Result 'a AsyncError`. Losing siblings are
-## auto-cancelled when the winner commits.
-##
-## Built on `park` (suspend until predicate True) + `inspect` (pure
-## non-blocking state read) + `cancel`.
+# Park-based helpers, derived from spawn + park + inspect + cancel.
+## Wait for the first promise to settle and return its outcome; the losers are cancelled.
 pub let race: { ps: [Promise 'a] } -> Result 'a AsyncError <Async, ...> = { ps } ->
   do
     park { predicate = {} -> seq::any { xs = ps, p = { x } -> is_done { p = x } } }
@@ -424,8 +315,7 @@ pub let race: { ps: [Promise 'a] } -> Result 'a AsyncError <Async, ...> = { ps }
           }
 
 
-## Wait for all promises; return each one's Result in input order. Never
-## raises; the per-promise Result carries success/failure information.
+## Wait for all promises; return each one's Result in input order.
 pub let all: { ps: [Promise 'a] } -> [Result 'a AsyncError] <Async> = { ps } ->
   seq::map { xs = ps, f = { x } -> await { p = x } }
 
@@ -452,55 +342,27 @@ pub let join3
       c = await { p = pc },
     }
 
-## Identical to `all` — kept under the `settle` name for callers that
-## think of "wait for everyone, see each result" as settle semantics.
+## Same as `all`: wait for every promise, returning each Result in input order.
 pub let settle: { ps: [Promise 'a] } -> [Result 'a AsyncError] <Async, ...> = { ps } ->
   all { ps = ps }
 
-## Map over a sequence concurrently; each result wrapped in
-## `Result 'b AsyncError` so per-element failure is visible. Use
-## `try_par_map` if you want fail-fast + unwrap semantics.
+## Map over a sequence concurrently; each element's Result is returned (no fail-fast).
 pub let par_map: { xs: ['a], f: { x: 'a } -> 'b <...> } -> [Result 'b AsyncError] <Async, ...> = { xs, f } ->
   do
     let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> f { x = x } } }
     all { ps = ps }
 
-##
-## `par_map` takes a Seq, so the whole input has to exist before any work
-## starts. These take an `Iter` and never materialise it: the source is walked
-## ONCE, at most `max_in_flight` tasks are alive at a time, and a window of
-## that many promises is the only thing held.
-##
-## That is the case `par_map` and `chunk_fold` cannot serve — a source you
-## cannot materialise. Walk a directory tree and read every file sixteen at a
-## time without first building a list of two million paths; drain a paginated
-## cursor whose page N+1 needs page N; follow a log. Measured for the finite
-## case in `bench/cases/concurrent_map_compare`: `chunk_fold` with `min_chunk`
-## lowered is the fastest option when the input fits in memory, so reach for
-## these when it does NOT, or when the source is effectful and must be walked
-## exactly once.
-##
-## Bounded means bounded: the window fills, the oldest promise is awaited, and
-## only then is another task spawned. Nothing here lets the in-flight count
-## drift above `max_in_flight`, which is what makes it safe to point at a
-## directory of unknown size.
-##
-## `map_concurrent_lazy` below answers a lazy `Iter 'b`, built on
-## `iter::cursor`. The two eager forms stay because they are the common case
-## and cheaper: a fold over the push walk fuses, while the lazy form pays for a
-## cursor frame per stage and a window record per element.
+# Iter-based forms: walk the source ONCE without materialising it, never more than
+# `max_in_flight` tasks alive. For sources that don't fit in memory (chunk_fold wins when
+# they do); the eager forms stay because their fold fuses, unlike the lazy cursor form.
 
-## Walk `it`, running `f` on each element with at most `max_in_flight`
-## concurrent tasks, for side effects.
-##
-## Results are discarded, so a task that fails fails silently — use
-## `map_concurrent` when you need to see per-element outcomes. Pair with
-## `iter::take` to bound an endless source.
+## Run `f` on each element of `it` for side effects, at most `max_in_flight` at a time.
+## Results are discarded, so a failing task fails silently.
 pub let for_each_concurrent
   : { it: Iter 'a, f: { x: 'a } -> 'b <...>, max_in_flight: Int } -> {} <Async, ...>
   = { it, f, max_in_flight } -> do
-    ## The fold threads the WINDOW as its accumulator: a Seq of in-flight
-    ## promises, oldest first. One walk, no materialised input.
+    # The fold threads the WINDOW as its accumulator: a Seq of in-flight
+    # promises, oldest first. One walk, no materialised input.
     let leftover = iter::fold {
       it = it,
       init = [],
@@ -509,35 +371,25 @@ pub let for_each_concurrent
         if seq::size { xs = w } < max_in_flight then w
         else match seq::first { xs = w } is
           Some { val = oldest } -> do
-            ## Await the OLDEST before spawning the next, which is what keeps
-            ## the count at the limit rather than merely near it.
+            # Await the OLDEST before spawning the next, so the count stays at the limit.
             let _ = await { p = oldest }
             seq::tail { xs = w }
           None -> w
     }
-    ## Drain what the window still holds when the source ran out.
+    # Drain what the window still holds when the source ran out.
     seq::for_each { xs = leftover, f = { x } -> do
       let _ = await { p = x }
       {}
     }
 
 
-## Walk `it`, running `f` on each element with at most `max_in_flight`
-## concurrent tasks, and collect the results IN SOURCE ORDER.
-##
-## Ordered, not completion-ordered: a slow element holds up the ones behind it
-## in the output, exactly as `par_map` does. Unordered yielding would be a
-## different combinator — it needs to return results as they settle, which
-## means it cannot also be a fold.
-##
-## The INPUT is never materialised; the output is a Seq, so it is bounded by
-## the number of elements. For an endless source, bound it with `iter::take`.
-## Per-element failures are visible as `Err`, like `par_map`.
+## Map `f` over `it` with at most `max_in_flight` tasks; Results in SOURCE order.
+## The input is never materialised but the output Seq is: bound an endless source with `iter::take`.
 pub let map_concurrent
   : { it: Iter 'a, f: { x: 'a } -> 'b <...>, max_in_flight: Int }
   -> [Result 'b AsyncError] <Async, ...>
   = { it, f, max_in_flight } -> do
-    ## `window` is the in-flight promises, `done` the settled results so far.
+    # `window` is the in-flight promises, `done` the settled results so far.
     let final = iter::fold {
       it = it,
       init = { window = [], done = [] },
@@ -551,41 +403,22 @@ pub let map_concurrent
           }
           None -> { window = w, done = acc.done }
     }
-    ## `all` awaits the remaining window in order, so the tail keeps its place.
+    # `all` awaits the remaining window in order, so the tail keeps its place.
     seq::concat { xs = final.done, ys = all { ps = final.window } }
 
 
-## Map concurrently and yield LAZILY — bounded in flight, bounded in memory,
-## and finite output is never required.
-##
-## The difference from `map_concurrent` is which side is lazy. That one
-## consumes an `Iter` lazily and answers a Seq, so the output has to fit in
-## memory and the whole source is drained before the caller sees anything.
-## This one answers an `Iter`, so a consumer can `take` from it, stop early,
-## and never pay for the rest — which is what makes it usable against an
-## endless source on both sides.
-##
-## How it works: the source is opened as a CURSOR, because a push walk owns
-## its loop and cannot hand an element out and be resumed. Each step tops the
-## in-flight window up to `max_in_flight` by pulling from the cursor and
-## spawning, then awaits the OLDEST promise and yields its result. When the
-## cursor is exhausted the window drains; when both are empty it is `Done`.
-##
-## Source order, like the eager forms. `Skip` is never needed: every step
-## either yields a settled result or finishes, because a step that has a
-## non-empty window always has something to await.
-##
-## The cost is real — a cursor frame per stage and a window record per element,
-## against a fused fold for the eager forms. Reach for this when the output
-## must stream, and for `map_concurrent` when it need not.
+# A CURSOR, because a push walk can't hand out an element and resume. Each step tops the
+# window up, then awaits and yields the OLDEST; `Skip` is never needed.
+## Like `map_concurrent` but answers a lazy `Iter`, in source order; works on endless sources.
+## Costlier than `map_concurrent`; use it only when the output must stream.
 pub let map_concurrent_lazy
   : { it: Iter 'a, f: { x: 'a } -> 'b <...>, max_in_flight: Int }
   -> Iter (Result 'b AsyncError) <Async, ...>
   = { it, f, max_in_flight } -> iter::unfold {
     state = { c = iter::cursor { it = it }, window = [], drained = False },
     step = { s } -> do
-      ## Top the window up first, so the limit is what is in flight rather
-      ## than what has been asked for.
+      # Top the window up first, so the limit is what is in flight rather
+      # than what has been asked for.
       let filled = fill_window { c = s.c, window = s.window, drained = s.drained, f = f, want = max_in_flight }
       match seq::first { xs = filled.window } is
         None -> Done
@@ -596,9 +429,9 @@ pub let map_concurrent_lazy
   }
 
 
+# Separate because `unfold`'s step is one expression and this needs to loop.
 ## Pull from the cursor until the window holds `want` promises or the source
-## runs out. Separate because `unfold`'s step is one expression and this needs
-## to loop.
+## runs out.
 let fill_window
   : { c: IterCursor 'a, window: [Promise 'b], drained: Bool, f: { x: 'a } -> 'b <...>, want: Int }
   -> { window: [Promise 'b], drained: Bool } <Async, ...>
@@ -616,17 +449,13 @@ let fill_window
       }
 
 
-## Run f over each element concurrently for side effects; per-element
-## Results returned (any failures visible to the caller). Use
-## `try_par_for_each` if you want fail-fast unit-returning semantics.
+## Run `f` over each element concurrently; each element's Result is returned (no fail-fast).
 pub let par_for_each
   : { xs: ['a], f: { x: 'a } -> 'b <...> }
   -> [Result 'b AsyncError] <Async, ...>
   = { xs, f } -> par_map { xs = xs, f = f }
 
-## Filter a sequence with concurrent predicate evaluation; each retained
-## element wrapped in `Result 'a AsyncError` so per-element predicate
-## failures are visible. Use `try_par_filter` if you want fail-fast unwrap.
+## Filter with predicates evaluated concurrently; a failed predicate is kept as its `Err`.
 pub let par_filter
   : { xs: ['a], f: { x: 'a } -> Bool <...> }
   -> [Result 'a AsyncError] <Async, ...>
@@ -643,22 +472,10 @@ pub let par_filter
 ,
     }
 
-## Wait for p up to ms milliseconds; None if it didn't finish in time.
-##
-## One `park_until` and nothing else: the deadline belongs to the thread that is
-## waiting. There is no sleeper task, so no second promise has to be scheduled
-## for a timeout to be right, and `with_timeout` performs no `Time` — see
-## `park_until` for what the sleeper version got wrong.
-##
-## A `Result`, not an `Option`, because there are two ways not to get a value and
-## a caller usually has to tell them apart: `AsyncTimedOut { ms }` when the
-## deadline won, and the promise's own error when it failed or was cancelled.
-## `Option` collapsed both into `None` and sent the caller back to `inspect` —
-## a second observation of a promise that had already answered. The variant for
-## this was in `AsyncError` from the start.
-##
-## This is the same shape `await` returns, so the two compose: `with_timeout` is
-## `await` with a deadline.
+# One `park_until`, no sleeper task (see `park_until`). A Result, not an Option, so a
+# timeout and a failure stay distinguishable without re-inspecting.
+## `await` with a deadline of `ms` milliseconds; on expiry `p` is cancelled.
+## Errs with `AsyncTimedOut { ms }` on timeout, else `p`'s own error. Performs no `Time`.
 pub let with_timeout: { ms: Int, p: Promise 'a } -> Result 'a AsyncError <Async, ...> = { ms, p } ->
   match park_until { predicate = {} -> is_done { p = p }, ms = ms } is
     True -> match inspect { p = p } is
@@ -670,10 +487,8 @@ pub let with_timeout: { ms: Int, p: Promise 'a } -> Result 'a AsyncError <Async,
       Err { error = AsyncTimedOut { ms = ms } }
 
 
-## try_* — fail-fast variants: on the first Err, cancel the rest and return it;
-## on all-success, return the unwrapped values (Rust `try_join_all` semantics).
-## Wait for all promises; if any fails, return the first error, otherwise the
-## unwrapped values in input order.
+# try_* — fail-fast variants returning the first Err or all unwrapped values.
+## Wait for all promises; answer the first error, or every value in input order.
 pub let try_all: { ps: [Promise 'a] } -> Result ['a] AsyncError <Async, ...> = { ps } ->
   do
     let results = seq::map { xs = ps, f = { x } -> await { p = x } }
@@ -689,8 +504,7 @@ pub let try_all: { ps: [Promise 'a] } -> Result ['a] AsyncError <Async, ...> = {
       }
 
 
-## Run two thunks concurrently. On the first Err, cancel the surviving
-## sibling and return that error. Otherwise return both unwrapped values.
+## Run two thunks concurrently; on the first Err cancel the other and return it.
 pub let try_join
   : { l: {} -> 'a <...>, r: {} -> 'b <...> }
   -> Result { l: 'a, r: 'b } AsyncError <Async, ...>
@@ -707,7 +521,7 @@ pub let try_join
         Ok { val = vr } -> Ok { val = { l = vl, r = vr } }
 
 
-## Run three thunks concurrently with fail-fast + auto-cancel semantics.
+## Run three thunks concurrently; on the first Err cancel the rest and return it.
 pub let try_join3
   : { a: {} -> 'a <...>, b: {} -> 'b <...>, c: {} -> 'c <...> }
   -> Result { a: 'a, b: 'b, c: 'c } AsyncError <Async, ...>
@@ -732,9 +546,7 @@ pub let try_join3
           Ok { val = vc } -> Ok { val = { a = va, b = vb, c = vc } }
 
 
-## Map over a sequence concurrently. On first failure, cancel siblings
-## and return that error. Otherwise return the unwrapped output values
-## in input order.
+## Map over a sequence concurrently; answer the first error, or all values in input order.
 pub let try_par_map
   : { xs: ['a], f: { x: 'a } -> 'b <...> }
   -> Result ['b] AsyncError <Async, ...>
@@ -742,8 +554,7 @@ pub let try_par_map
     let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> f { x = x } } }
     try_all { ps = ps }
 
-## Run f over each element concurrently; short-circuit on first error,
-## cancel siblings, return the error. On all-Ok, returns {}.
+## Run `f` over each element concurrently; answer the first error, or `{}`.
 pub let try_par_for_each
   : { xs: ['a], f: { x: 'a } -> 'b <...> }
   -> Result {} AsyncError <Async, ...>
@@ -752,8 +563,7 @@ pub let try_par_for_each
     Err { error = e } -> Err { error = e }
 
 
-## Filter a sequence with concurrent predicate evaluation; fail-fast
-## on first predicate error.
+## Filter with predicates evaluated concurrently; answer the first predicate error.
 pub let try_par_filter
   : { xs: ['a], f: { x: 'a } -> Bool <...> }
   -> Result ['a] AsyncError <Async, ...>
@@ -769,10 +579,8 @@ pub let try_par_filter
       }
 
 
-## Wait for the first successful promise. If every one fails, returns
-## the first error seen. Built on `try_all` semantics — but since `any`
-## wants first-success-wins, we await sequentially: as soon as one is
-## Ok, return its value (cancelling the rest).
+## Answer the first successful promise in input order; if all fail, the first error.
+## Awaits every promise; an empty input is an `AsyncFailed`.
 pub let try_any: { ps: [Promise 'a] } -> Result 'a AsyncError <Async, ...> = { ps } ->
   do
     let results = seq::map { xs = ps, f = { x } -> await { p = x } }
@@ -803,10 +611,8 @@ pub let scope_get_token: { sc: Scope 'a } -> CancellationToken <Async, ...> = { 
 pub let scope_is_cancelled: { sc: Scope 'a } -> Bool <Async, ...> = { sc } ->
   __native_async_scope_is_cancelled { sc = sc }
 
-## Wait for every Promise in `ps` to settle, or `ms` milliseconds to elapse —
-## Single-call deadline join over a Scope's spawned children: wait for all, or
-## the deadline. Returns True if all settled in time; False if the deadline
-## fired (and the scope is cancelled so remaining children unwind).
+## Wait up to `ms` for every promise in `ps` to settle; True if all did.
+## On False the whole scope is cancelled.
 pub let scope_join_until
   : { sc: Scope 'a, ps: [Promise 'b], ms: Int }
   -> Bool <Async, ...>
@@ -821,9 +627,7 @@ pub let scope_join_until
         False
 
 
-## Method surface for Scope. Mirrors the `scope_*` free functions so
-## user code can write `sc.spawn { f }` / `sc.cancel_all {}` / etc.
-## instead of the prefixed forms.
+## Method forms of the `scope_*` functions, e.g. `sc.spawn { f }`.
 impl Scope 'a where {
   spawn = { it, f } -> scope_spawn { sc = it, f = f },
   cancel_all = { it } -> scope_cancel_all { sc = it },
@@ -831,8 +635,7 @@ impl Scope 'a where {
   get_token = { it } -> scope_get_token { sc = it },
   join_until = { it, ps, ms } -> scope_join_until { sc = it, ps = ps, ms = ms },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
+  # dot-chain parity: every receiver-taking free function as a method.
   scope_spawn = { it, f } -> scope_spawn { sc = it, f = f },
   scope_cancel_all = { it } -> scope_cancel_all { sc = it },
   scope_get_token = { it } -> scope_get_token { sc = it },
@@ -843,14 +646,8 @@ impl Scope 'a where {
   join_on_first = { it, ps } -> join_on_first { sc = it, ps = ps },
 }
 
-## Structured concurrency over `scoped`: the body spawns children into `sc` and
-## returns their `[Promise 'a]`; `scoped_with` parks on them per `policy`,
-## cancels the losers, and returns the matching `JoinOutcome`.
-##
-##   - OnAllSettled — wait for all, return per-item Results.
-##   - OnFailure    — on first failure cancel the rest; else the unwrapped values.
-##   - OnSuccess    — first success wins, cancel the rest; else all-failed.
-##   - OnFirst      — first to settle (any way) wins, cancel the rest.
+## Run `body` in a scope, then join the promises it returns per `policy`.
+## Losers are cancelled; the answer is the policy's `JoinOutcome`.
 pub let scoped_with
   : { policy: JoinPolicy, body: { sc: Scope 'a } -> [Promise 'a] <Async, ...> }
   -> JoinOutcome 'a <Async, ...>
@@ -863,10 +660,8 @@ pub let scoped_with
       OnFirst -> join_on_first { sc = sc, ps = ps }
  }
 
-## OnSuccess: park until at least one promise succeeds OR all fail. On first
-## success: cancel everyone else, return OnSuccessOutcome with the winner +
-## the count of cancelled siblings. If everyone failed, return
-## OnSuccessAllFailed with the per-task errors in input order.
+## Wait for the first success, cancel the scope, and report the winner and cancelled count.
+## If every promise fails: `OnSuccessAllFailed` with the errors in input order.
 pub let join_on_success
   : { sc: Scope 'a, ps: [Promise 'b] }
   -> JoinOutcome 'b <Async, ...>
@@ -900,9 +695,7 @@ pub let join_on_success
       }
 
 
-## OnFailure: wait for every promise; if any fail, cancel rest and return
-## OnFailureCaught with partial successes; otherwise return OnFailureOutcome
-## with the unwrapped values in input order.
+## Wait for every promise; on any failure cancel the scope and answer `OnFailureCaught`.
 pub let join_on_failure
   : { sc: Scope 'a, ps: [Promise 'b] }
   -> JoinOutcome 'b <Async, ...>
@@ -936,9 +729,7 @@ pub let join_on_failure
         }
 
 
-## OnFirst: first to settle (success or failure) wins. Cancel rest, return
-## OnFirstOutcome carrying the winner's Result, its input index, and the
-## count of cancelled siblings.
+## The first promise to settle wins; cancel the scope and report its Result and index.
 pub let join_on_first: { sc: Scope 'a, ps: [Promise 'b] } -> JoinOutcome 'b <Async, ...> = { sc, ps } ->
   do
     park { predicate = {} -> seq::any { xs = ps, p = { x } -> is_done { p = x } } }
@@ -977,13 +768,11 @@ pub let join_on_first: { sc: Scope 'a, ps: [Promise 'b] } -> JoinOutcome 'b <Asy
           cancelled = cancelled,
         }
   
-## A cooperative cancellation token (supports hierarchical cancellation): a flag
-## tasks check with `is_token_cancelled` and bail out at safe points. Cancelling
-## only signals — it does not kill running code; watchers must respect it. Like
-## Go's context, .NET's CancellationTokenSource, Kotlin's Job.cancel.
+## A cooperative, hierarchical cancellation flag tasks check at safe points.
+## Cancelling only signals; it does not stop running code.
 pub newtype CancellationToken = __NativeCancellationToken
 
-## Structural hash, paired with the `Eq` below.
+## Structural hash, paired with `Eq`.
 impl Hash for CancellationToken where {
   hash: { it: CancellationToken } -> Int = { it } -> structural_hash { it = it }
 }
@@ -1004,8 +793,7 @@ impl CancellationToken where {
   create_child = { it } -> create_child { token = it },
   with_cancellation = { it, f } -> with_cancellation { token = it, f = f },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
+  # dot-chain parity: every receiver-taking free function as a method.
   throw_if_cancelled = { it } -> throw_if_cancelled { token = it },
   on_cancellation = { it, callback } -> on_cancellation { token = it, callback = callback },
 }
@@ -1063,15 +851,8 @@ pub let with_cancellation
   -> Option 'a <...>
   = { token, f } -> if is_token_cancelled { token = token } then None else Some { val = f {} }
 
-## Park until any predicate is True; return the index of the first to fire.
-## Returns None if the predicates list is empty (otherwise would deadlock).
-##
-## Predicates MUST be idempotent — they're polled twice on a successful
-## wake (once by the park, once to identify the index). Reading atoms,
-## promise.is_done, and try_send {} are all safe. Consuming reads like
-## channel try_recv {} are NOT safe to use directly — wrap the consume
-## in the corresponding branch's `run` and use a non-consuming check
-## (e.g. spawn a recv promise and use is_done) in the `when`.
+## Park until any predicate is True; return the first one's index (None if the list is empty).
+## Predicates must be idempotent: they are polled twice on wake, so never consume (e.g. try_recv).
 pub let park_any: { predicates: [{} -> Bool <...>] } -> Option Int <Async, ...> = { predicates } ->
   match seq::is_empty { xs = predicates } is
     True -> None
@@ -1080,11 +861,10 @@ pub let park_any: { predicates: [{} -> Bool <...>] } -> Option Int <Async, ...> 
       seq::find_index { xs = predicates, p = { x } -> x {} }
 
 
-## A select branch: predicate + action. (`then` is reserved; use `run`.)
+## A select branch: a `when` predicate and the `run` action.
 pub type SelectBranch 'a = { when: {} -> Bool <...>, run: {} -> 'a <...> }
 
-## Wait on multiple sources; run the action for whichever fires first.
-## Returns None if branches is empty (otherwise would deadlock).
+## Run the action of the first branch whose `when` fires; None if `branches` is empty.
 pub let select: { branches: [SelectBranch 'a] } -> Option 'a <Async, ...> = { branches } ->
   do
     let preds = seq::map { xs = branches, f = { x } -> x.when }

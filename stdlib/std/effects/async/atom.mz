@@ -1,30 +1,19 @@
 use std::abilities::compare::{ Eq, Hash, structural_hash }
 use std::effects::async::{ Async }
 
-## Error returned by a `ValidatedAtom` mutation when the validator rejects
-## the proposed new value. Carries the rejected value so callers can inspect
-## what was refused. The atom is left unchanged on rejection.
+## Error from a `ValidatedAtom` mutation whose validator rejected `val`; the atom is unchanged.
 pub type AtomError 'a = |
   AtomRejected { val: 'a },
 |
 
-## Lock-free atomic reference for shared mutable state.
-##
-## `Atom` is UNVALIDATED and TOTAL: its mutations (`swap`, `reset`,
-## `swap_with`, `get_and_swap`) return values directly and never fail.
+## Lock-free atomic reference for shared mutable state; its mutations never fail.
 pub newtype Atom 'a = __NativeAtomicRef
 
 ## Lock-free atomic reference guarded by a validator.
-##
-## `ValidatedAtom` mutations run the validator on the proposed value and
-## return a `Result`: `Ok` with the installed value on success, or
-## `Err { error = AtomRejected { val } }` when rejected (atom unchanged).
+## Mutations return `Result`: `Err { error = AtomRejected { val } }` leaves the atom unchanged.
 pub newtype ValidatedAtom 'a = __NativeAtomicRef
 
-## Structural hash, paired with the `Eq` below.
-## `Eq` and `Hash` are written together or not at all: a hash container
-## buckets by one and compares by the other, so a value whose hash
-## disagrees with its equality is silently kept twice.
+# `Eq` and `Hash` go together or not at all: a hash/equality mismatch silently keeps duplicates.
 impl Hash for Atom 'a where {
   hash: { it: Atom 'a } -> Int = { it } -> structural_hash { it = it }
 }
@@ -34,10 +23,7 @@ impl Eq for Atom 'a where {
   neq = { it, r } -> __native_ref_neq { l = it, r = r },
 }
 
-## Structural hash, paired with the `Eq` below.
-## `Eq` and `Hash` are written together or not at all: a hash container
-## buckets by one and compares by the other, so a value whose hash
-## disagrees with its equality is silently kept twice.
+# `Eq` and `Hash` go together or not at all: a hash/equality mismatch silently keeps duplicates.
 impl Hash for ValidatedAtom 'a where {
   hash: { it: ValidatedAtom 'a } -> Int = { it } -> structural_hash { it = it }
 }
@@ -70,8 +56,7 @@ impl ValidatedAtom 'a where {
   add_watch = { it, key, f } -> add_watch_validated { atom = it, key = key, f = f },
   remove_watch = { it, key } -> remove_watch_validated { atom = it, key = key },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
+  # dot-chain parity: every receiver-taking free function is also a method.
   deref_validated = { it } -> deref_validated { atom = it },
   reset_validated = { it, val } -> reset_validated { atom = it, val = val },
   swap_validated = { it, f } -> swap_validated { atom = it, f = f },
@@ -88,7 +73,7 @@ pub let atom: { val: 'a } -> Atom 'a <Async> = { val } -> __native_atom_new { va
 ## Read the current value of an atom (non-blocking).
 pub let deref: { atom: Atom 'a } -> 'a <Async> = { atom } -> __native_atom_deref { atom = atom }
 
-## Set the atom to a new value directly (not atomic with reads -- use swap for CAS).
+## Set the atom to a new value (not atomic with a prior read; use `swap` for that).
 pub let reset: { atom: Atom 'a, val: 'a } -> 'a <Async> = { atom, val } ->
   __native_atom_reset { atom = atom, val = val }
 
@@ -122,11 +107,8 @@ pub let add_watch
 pub let remove_watch: { atom: Atom 'a, key: Str } -> {} <Async> = { atom, key } ->
   __native_atom_remove_watch { atom = atom, key = key }
 
-## Create a validated atom whose mutations must pass `validator`.
-## The initial value must pass too, so construction returns a `Result`:
-## `Ok { val }` with the atom when the initial value passes, or
-## `Err { error = AtomRejected { val } }` when the initial value is
-## rejected (no atom is created). Mutations also return a `Result`.
+## Create a validated atom whose values must pass `validator`.
+## Returns `Err { error = AtomRejected { val } }` if the initial value is rejected.
 pub let atom_validated
   : { val: 'a, validator: { val: 'a } -> Bool }
   -> Result (ValidatedAtom 'a) (AtomError 'a) <Async>
@@ -136,8 +118,7 @@ pub let atom_validated
 pub let deref_validated: { atom: ValidatedAtom 'a } -> 'a <Async> = { atom } ->
   __native_atom_deref { atom = atom }
 
-## Set a validated atom directly. Returns `Ok { val }` on success or
-## `Err { error = AtomRejected { val } }` if the validator rejects.
+## Set a validated atom; `Err { error = AtomRejected { val } }` if the validator rejects.
 pub let reset_validated
   : { atom: ValidatedAtom 'a, val: 'a }
   -> Result 'a (AtomError 'a) <Async>

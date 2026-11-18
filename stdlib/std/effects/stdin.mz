@@ -1,25 +1,22 @@
-# Standard input effect.
-# All operations block until input or EOF. Wrap in <Async> for non-blocking reads.
+# All operations block until input or EOF; wrap in <Async> for non-blocking reads.
 ## Read operations on the process's stdin.
 effect Stdin where {
   ## Trailing newline is stripped. None on EOF.
   read_line: {} -> Option Str <Stdin>,
   ## None on EOF.
   read_char: {} -> Option Char <Stdin>,
-  ## Returns up to `max` bytes; may return fewer if EOF reached mid-read. Empty Bytes signals EOF.
+  ## Returns up to `max` bytes (fewer at EOF); empty Bytes signals EOF.
   read_bytes: { max: Int } -> Bytes <Stdin>,
   ## True if stdin is connected to a terminal (vs. piped or redirected from a file).
   is_tty: {} -> Bool <Stdin>,
-  ## Disables terminal echo for the duration of the read. None on EOF or when stdin isn't a terminal.
+  ## Read a line with echo disabled; None on EOF or when stdin isn't a terminal.
   read_password: {} -> Option Str <Stdin>,
-  ## Current terminal dimensions, refreshed live on SIGWINCH. Both fields are 0 when stdin isn't a terminal.
+  ## Current terminal dimensions (live on SIGWINCH); both 0 when stdin isn't a terminal.
   term_size: {} -> { rows: Int, cols: Int } <Stdin>,
-  ## Switch the terminal into raw mode: disable canonical line-buffering and echo so
-  ## read_char returns each keypress as it arrives (including arrow keys, Ctrl, etc).
+  ## Raw mode: no line-buffering or echo, so read_char returns each keypress as it arrives.
   ## No-op when stdin isn't a terminal. Always pair with unset_raw_mode.
   set_raw_mode: {} -> {} <Stdin>,
-  ## Restore the terminal to cooked (line-buffered, echo on) mode. Safe to call
-  ## even if set_raw_mode wasn't called first.
+  ## Restore cooked (line-buffered, echo on) mode; safe without a prior set_raw_mode.
   unset_raw_mode: {} -> {} <Stdin>
 }
 

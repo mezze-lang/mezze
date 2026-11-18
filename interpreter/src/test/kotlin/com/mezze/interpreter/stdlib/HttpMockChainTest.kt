@@ -38,7 +38,7 @@ class HttpMockChainTest {
     }
 
     private val head = """
-        use std::effects::http::{ HttpClient, MockHttpClient, MockRule, Method, Response, request, with_method, format_error, body_str, text_or, mock, mock_get, mock_post, mock_json, mock_status, HttpError }
+        use std::effects::http::{ Method, Response, request, with_method, format_error, body_str, text_or, HttpClient, MockHttpClient, MockRule, MockRules, mock_http_rules, mocks, mock_otherwise, mock_get, mock_post, mock_json, mock_status }
         use std::codec::json
         use std::collections::{ bytes, map, seq }
         use std::int
@@ -53,12 +53,12 @@ class HttpMockChainTest {
     // ==================== the basics ====================
 
     @Test
-    fun `a bare mock answers an empty 200 for any method`() {
+    fun `a bare route answers an empty 200 for any method`() {
         assertEquals(
             200L,
             run(
                 """
-                perform MockHttpClient { rules = [ mock { url = "**" } ] } in
+                perform MockHttpClient { rules = mock_http_rules {}.any { url = "**" } } in
                   match request { url = "http://x/y" }.send {} is
                     Ok { val } -> val.status
                     Err { error = _ } -> 0 - 1
@@ -73,7 +73,7 @@ class HttpMockChainTest {
             "pong",
             run(
                 """
-                perform MockHttpClient { rules = [ mock { url = "**" }.get {}.text { body = "pong" } ] } in
+                perform MockHttpClient { rules = mock_http_rules {}.get { url = "**" }.text { body = "pong" } } in
                   request { url = "http://x/ping" }.send {}.text_or { def = "nope" }
                 """.trimIndent(),
             ),
@@ -87,7 +87,7 @@ class HttpMockChainTest {
             "unmatched",
             run(
                 """
-                perform MockHttpClient { rules = [ mock { url = "**" }.get {}.text { body = "pong" } ] } in
+                perform MockHttpClient { rules = mock_http_rules {}.get { url = "**" }.text { body = "pong" } } in
                   match request { url = "http://x/ping" }.with_method { val = Post }.send {} is
                     Ok { val } -> text_of { resp = val }
                     Err { error = _ } -> "unmatched"
@@ -97,13 +97,10 @@ class HttpMockChainTest {
     }
 
     /**
-     * `.get {}.post {}` means POST — the last selector wins.
-     *
-     * Sends a GET and expects NO match, which is the only thing that
-     * distinguishes replace from accumulate. Asserting that a POST works
-     * passes under BOTH designs — `[Post]` and `[Get, Post]` both match a
-     * POST — and the first version of this test did exactly that, so
-     * accumulating methods failed nothing. Verified by breaking it.
+     * `.methods` REPLACES the route's method rather than adding to it: a GET
+     * route narrowed to `[Post]` no longer answers a GET. Sending a GET and
+     * expecting NO match is the only thing that tells replace from accumulate —
+     * a POST would match under both.
      */
     @Test
     fun `method selection replaces rather than accumulating`() {
@@ -111,9 +108,8 @@ class HttpMockChainTest {
             "unmatched",
             run(
                 """
-                perform MockHttpClient { rules = [
-                  mock { url = "**" }.get {}.post {}.text { body = "posted" },
-                ] } in
+                perform MockHttpClient { rules = mock_http_rules {}
+                  .get { url = "**" }.methods { methods = [Post] }.text { body = "posted" } } in
                   match request { url = "http://x/y" }.send {} is
                     Ok { val } -> text_of { resp = val }
                     Err { error = _ } -> "unmatched"
@@ -128,9 +124,7 @@ class HttpMockChainTest {
             "either",
             run(
                 """
-                perform MockHttpClient { rules = [
-                  mock { url = "**" }.for_methods { methods = [Get, Put] }.text { body = "either" },
-                ] } in
+                perform MockHttpClient { rules = mock_http_rules {}.any { url = "**" }.methods { methods = [Get, Put] }.text { body = "either" } } in
                   match request { url = "http://x/y" }.with_method { val = Put }.send {} is
                     Ok { val } -> text_of { resp = val }
                     Err { error = _ } -> "unmatched"
@@ -153,9 +147,7 @@ class HttpMockChainTest {
             "201|created",
             run(
                 """
-                perform MockHttpClient { rules = [
-                  mock { url = "**" }.status { code = 201 }.text { body = "created" },
-                ] } in
+                perform MockHttpClient { rules = mock_http_rules {}.any { url = "**" }.status { code = 201 }.text { body = "created" } } in
                   match request { url = "http://x/y" }.send {} is
                     Ok { val } -> "$(int::to_str { n = val.status })|$(text_of { resp = val })"
                     Err { error = _ } -> "unmatched"
@@ -170,9 +162,7 @@ class HttpMockChainTest {
             "202|accepted",
             run(
                 """
-                perform MockHttpClient { rules = [
-                  mock { url = "**" }.text { body = "accepted" }.status { code = 202 },
-                ] } in
+                perform MockHttpClient { rules = mock_http_rules {}.any { url = "**" }.text { body = "accepted" }.status { code = 202 } } in
                   match request { url = "http://x/y" }.send {} is
                     Ok { val } -> "$(int::to_str { n = val.status })|$(text_of { resp = val })"
                     Err { error = _ } -> "unmatched"
@@ -190,9 +180,7 @@ class HttpMockChainTest {
             "text/csv",
             run(
                 """
-                perform MockHttpClient { rules = [
-                  mock { url = "**" }.header { k = "Content-Type", v = "text/csv" }.text { body = "a,b" },
-                ] } in
+                perform MockHttpClient { rules = mock_http_rules {}.any { url = "**" }.header { k = "Content-Type", v = "text/csv" }.text { body = "a,b" } } in
                   match request { url = "http://x/y" }.send {} is
                     Ok { val } -> match val.header { name = "content-type" } is
                       Some { val = v } -> v
@@ -214,7 +202,7 @@ class HttpMockChainTest {
             "timeout-30",
             run(
                 """
-                perform MockHttpClient { rules = [ mock { url = "**" }.times_out { ms = 30 } ] } in
+                perform MockHttpClient { rules = mock_http_rules {}.any { url = "**" }.times_out { ms = 30 } } in
                   match request { url = "http://x/y" }.send {} is
                     Ok { val = _ } -> "unexpectedly-ok"
                     Err { error = HttpTimeout { url = _, ms } } -> "timeout-$(int::to_str { n = ms })"
@@ -230,9 +218,7 @@ class HttpMockChainTest {
             "reset by peer",
             run(
                 """
-                perform MockHttpClient { rules = [
-                  mock { url = "**" }.unreachable { reason = "reset by peer" },
-                ] } in
+                perform MockHttpClient { rules = mock_http_rules {}.any { url = "**" }.unreachable { reason = "reset by peer" } } in
                   match request { url = "http://x/y" }.send {} is
                     Ok { val = _ } -> "unexpectedly-ok"
                     Err { error = HttpConnectionFailed { url = _, reason } } -> reason
@@ -248,11 +234,9 @@ class HttpMockChainTest {
             "500",
             run(
                 """
-                perform MockHttpClient { rules = [
-                  mock { url = "**" }.fails {
+                perform MockHttpClient { rules = mock_http_rules {}.any { url = "**" }.fails {
                     error = HttpRequestFailed { url = "http://x/y", status = 500, body = "boom" },
-                  },
-                ] } in
+                  } } in
                   match request { url = "http://x/y" }.send {} is
                     Ok { val = _ } -> "unexpectedly-ok"
                     Err { error = HttpRequestFailed { url = _, status, body = _ } } -> int::to_str { n = status }
@@ -269,9 +253,7 @@ class HttpMockChainTest {
             "application/json",
             run(
                 """
-                perform MockHttpClient { rules = [
-                  mock { url = "**" }.post {}.json { body = json::JString { val = "hi" } },
-                ] } in
+                perform MockHttpClient { rules = mock_http_rules {}.post { url = "**" }.json { body = json::JString { val = "hi" } } } in
                   match request { url = "http://x/y" }.with_method { val = Post }.send {} is
                     Ok { val } -> match val.header { name = "content-type" } is
                       Some { val = v } -> v
@@ -288,9 +270,7 @@ class HttpMockChainTest {
             "xy",
             run(
                 """
-                perform MockHttpClient { rules = [
-                  mock { url = "**" }.raw { body = bytes::from_str { s = "xy" } },
-                ] } in
+                perform MockHttpClient { rules = mock_http_rules {}.any { url = "**" }.raw { body = bytes::from_str { s = "xy" } } } in
                   request { url = "http://x/y" }.send {}.text_or { def = "nope" }
                 """.trimIndent(),
             ),
@@ -305,7 +285,7 @@ class HttpMockChainTest {
             "200|pong",
             run(
                 """
-                perform MockHttpClient { rules = [ mock_get { url = "**", body = "pong" } ] } in
+                perform MockHttpClient { rules = mock_get { url = "**", body = "pong" } } in
                   match request { url = "http://x/y" }.send {} is
                     Ok { val } -> "$(int::to_str { n = val.status })|$(text_of { resp = val })"
                     Err { error = _ } -> "unmatched"
@@ -321,7 +301,7 @@ class HttpMockChainTest {
             "201|made",
             run(
                 """
-                perform MockHttpClient { rules = [ mock_post { url = "**", body = "made" } ] } in
+                perform MockHttpClient { rules = mock_post { url = "**", body = "made" } } in
                   match request { url = "http://x/y" }.with_method { val = Post }.send {} is
                     Ok { val } -> "$(int::to_str { n = val.status })|$(text_of { resp = val })"
                     Err { error = _ } -> "unmatched"
@@ -336,9 +316,7 @@ class HttpMockChainTest {
             "application/json",
             run(
                 """
-                perform MockHttpClient { rules = [
-                  mock_json { url = "**", body = json::JString { val = "hi" } },
-                ] } in
+                perform MockHttpClient { rules = mock_json { url = "**", body = json::JString { val = "hi" } } } in
                   match request { url = "http://x/y" }.send {} is
                     Ok { val } -> match val.header { name = "content-type" } is
                       Some { val = v } -> v
@@ -355,12 +333,162 @@ class HttpMockChainTest {
             "404|gone",
             run(
                 """
-                perform MockHttpClient { rules = [
-                  mock_status { url = "**", methods = [Delete], code = 404, body = "gone" },
-                ] } in
+                perform MockHttpClient { rules = mock_status { url = "**", methods = [Delete], code = 404, body = "gone" } } in
                   match request { url = "http://x/y" }.with_method { val = Delete }.send {} is
                     Ok { val } -> "$(int::to_str { n = val.status })|$(text_of { resp = val })"
                     Err { error = _ } -> "unmatched"
+                """.trimIndent(),
+            ),
+        )
+    }
+
+    // ==================== mock_http_rules: many routes, built like a router ====================
+
+    /** Three routes on one mock; each request finds its own. */
+    @Test
+    fun `routes answer by method and url`() {
+        assertEquals(
+            "users|201|fallback",
+            run(
+                """
+                let rules = mock_http_rules {}
+                  .get  { url = "/users" }.text { body = "users" }
+                  .post { url = "/users" }.status { code = 201 }
+                  .otherwise { status = 200, body = "fallback" }
+                perform MockHttpClient { rules = rules } in do
+                  let a = request { url = "http://x/users" }.send {}.text_or { def = "?" }
+                  let b = match request { url = "http://x/users" }.with_method { val = Post }.send {} is
+                    Ok { val } -> int::to_str { n = val.status }
+                    Err { error = _ } -> "unmatched"
+                  let c = request { url = "http://x/other" }.send {}.text_or { def = "?" }
+                  "$(a)|$(b)|$(c)"
+                """.trimIndent(),
+            ),
+        )
+    }
+
+    /** Routes are tried in the order added: a catch-all added FIRST shadows what follows. */
+    @Test
+    fun `the first added route wins`() {
+        assertEquals(
+            "first",
+            run(
+                """
+                let rules = mock_http_rules {}
+                  .any { url = "**" }.text { body = "first" }
+                  .get { url = "/a" }.text { body = "second" }
+                  .otherwise { status = 404, body = "none" }
+                perform MockHttpClient { rules = rules } in
+                  request { url = "http://x/a" }.send {}.text_or { def = "?" }
+                """.trimIndent(),
+            ),
+        )
+    }
+
+    /** A shaper refines the route added LAST, never an earlier one. */
+    @Test
+    fun `shapers apply to the last route only`() {
+        assertEquals(
+            "200:a|204:",
+            run(
+                """
+                let rules = mock_http_rules {}
+                  .get { url = "/a" }.text { body = "a" }
+                  .get { url = "/b" }.status { code = 204 }
+                  .otherwise { status = 404, body = "none" }
+                perform MockHttpClient { rules = rules } in do
+                  let show = { url } -> match request { url = url }.send {} is
+                    Ok { val } -> "$(int::to_str { n = val.status }):$(text_of { resp = val })"
+                    Err { error = _ } -> "unmatched"
+                  "$(show { url = "http://x/a" })|$(show { url = "http://x/b" })"
+                """.trimIndent(),
+            ),
+        )
+    }
+
+    /** `.otherwise` answers whatever no route matched, with the status it was given. */
+    @Test
+    fun `otherwise answers unmatched requests with its status`() {
+        assertEquals(
+            "404:nope",
+            run(
+                """
+                let rules = mock_http_rules {}.get { url = "/a" }.otherwise { status = 404, body = "nope" }
+                perform MockHttpClient { rules = rules } in
+                  match request { url = "http://x/zzz" }.send {} is
+                    Ok { val } -> "$(int::to_str { n = val.status }):$(text_of { resp = val })"
+                    Err { error = _ } -> "unmatched"
+                """.trimIndent(),
+            ),
+        )
+    }
+
+    /** `.methods` narrows the last route to a set. */
+    @Test
+    fun `methods narrows the last route`() {
+        assertEquals(
+            "put|unmatched",
+            run(
+                """
+                let rules = mock_http_rules {}
+                  .any { url = "**" }.methods { methods = [Get, Put] }.text { body = "put" }
+                  .otherwise { status = 404, body = "unmatched" }
+                perform MockHttpClient { rules = rules } in do
+                  let a = request { url = "http://x/y" }.with_method { val = Put }.send {}.text_or { def = "unmatched" }
+                  let b = request { url = "http://x/y" }.with_method { val = Post }.send {}.text_or { def = "unmatched" }
+                  "$(a)|$(b)"
+                """.trimIndent(),
+            ),
+        )
+    }
+
+    /** A shaper before any selector shapes a catch-all route. */
+    @Test
+    fun `a shaper before any selector shapes a catch-all`() {
+        assertEquals(
+            "x",
+            run(
+                """
+                perform MockHttpClient { rules = mock_http_rules {}.text { body = "x" }.otherwise { status = 404, body = "none" } } in
+                  request { url = "http://anywhere/at/all" }.send {}.text_or { def = "?" }
+                """.trimIndent(),
+            ),
+        )
+    }
+
+    /** The list form's catch-all: last in the list, it answers whatever nothing before it matched. */
+    @Test
+    fun `mock_otherwise ends a list as the catch-all`() {
+        assertEquals(
+            "users|404:nope",
+            run(
+                """
+                let rules = mocks { of = [mock_get { url = "/users", body = "users" }, mock_otherwise { status = 404, body = "nope" }] }
+                perform MockHttpClient { rules = rules } in do
+                  let a = request { url = "http://x/users" }.send {}.text_or { def = "?" }
+                  let b = match request { url = "http://x/zzz" }.send {} is
+                    Ok { val } -> "$(int::to_str { n = val.status }):$(text_of { resp = val })"
+                    Err { error = _ } -> "unmatched"
+                  "$(a)|$(b)"
+                """.trimIndent(),
+            ),
+        )
+    }
+
+    /** `` ends the chain without a catch-all: an unmatched request is the `Err` a list gives it. */
+    @Test
+    fun `rules ends a chain without a catch-all`() {
+        assertEquals(
+            "a|unmatched",
+            run(
+                """
+                let rules = mock_http_rules {}.get { url = "/a" }.text { body = "a" }
+                perform MockHttpClient { rules = rules } in do
+                  let a = request { url = "http://x/a" }.send {}.text_or { def = "?" }
+                  let b = match request { url = "http://x/zzz" }.send {} is
+                    Ok { val = _ } -> "answered"
+                    Err { error = _ } -> "unmatched"
+                  "$(a)|$(b)"
                 """.trimIndent(),
             ),
         )

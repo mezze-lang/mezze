@@ -1,36 +1,14 @@
-# Polyglot interop — shared kernel.
-#
-# Bridges Mezze values to guest-language objects via the Truffle InteropLibrary,
-# in two layers:
-#   1. `Polyglot` (this module) — the raw, language-agnostic capability whose
-#      sole handler `Runtime` is the only thing that calls a `__native_*`. It is
-#      gated: an op is reachable only where `Runtime` is performed. First-party.
-#   2. A per-language effect (`Jvm`, out-of-tree `Py`/`Js`/…) — the typed surface
-#      a user calls; its handler delegates down via
-#      `perform Runtime in Polyglot.<op>`, so a language layer writes no natives.
-#
-# This lets a third party add any GraalVM language in pure Mezze (a
-# `<Lang>Foreign` newtype + a small effect); only this repo writes `__native_*`.
+# Polyglot kernel: `Polyglot` is the raw interop capability; its sole handler `Runtime` alone calls `__native_*`.
+# Per-language effects (`Jvm`, out-of-tree `Py`/`Js`) delegate via `perform Runtime in Polyglot.<op>`,
+# so a third party adds a GraalVM language in pure Mezze.
 use std::result
 use std::collections::bytes
 
-## The opaque guest-object handle every language's foreign wraps. This is the
-## PUBLIC face of the runtime's native foreign primitive — the one name a provider
-## may newtype over (`pub newtype PyForeign = Foreign`), so the internal
-## `__NativeForeign` primitive stays sealed inside this module exactly like the
-## `__native_*` calls do. All `<Lang>Foreign` newtypes share this representation,
-## so per-language tagging is a compile-time distinction with zero runtime cost.
+# Public face of the sealed `__NativeForeign` primitive.
+## Opaque guest-object handle; per-language foreigns newtype over it (`pub newtype PyForeign = Foreign`).
 pub type Foreign = __NativeForeign
 
-## Errors returned by every fallible interop operation.
-##
-## - NotFound       — the requested member / binding does not exist.
-## - TypeError      — the guest value did not accept the requested op.
-## - InteropGuestError     — the guest language raised an exception; message
-##                    and stack are propagated verbatim.
-## - InteropArityMismatch  — execute/invoke arg count mismatched the target.
-## - InteropUnsupportedMessage — the underlying Truffle message is not
-##                    supported by the receiver.
+## Errors from fallible interop ops; `InteropGuestError` carries the guest's message and stack.
 pub type InteropError = |
   InteropNotFound { name: Str },
   InteropTypeError { message: Str },
@@ -39,24 +17,11 @@ pub type InteropError = |
   InteropUnsupportedMessage,
 |
 
-## The low-level polyglot capability effect. For polyglot LIBRARY implementers
-## only — end users go through a per-language effect (`Jvm`, `Py`, `Js`, …) whose
-## handler delegates here. The foreign type is the associated type `'f` (like
-## `Exception having 'error`), so a per-language newtype (`JvmForeign`,
-## `PyForeign`, …) threads through unchanged and stays type-safe. Only `Runtime`
-## (below) calls the natives — nothing else in the system does.
-##
-## The error-carrying-foreign model. A foreign `'f` is a "try": either a live guest
-## handle or a carried `InteropError`. Ops split by WHAT THEY YIELD:
-##   - a FOREIGN → return `'f` directly (no `Result`). An errored `'f` short-circuits
-##     the op untouched, and a guest throw is caught INTO an errored `'f`. So a chain
-##     `a.get{}.method{}` never allocates a `Result` between steps.
-##   - a MEZZE VALUE (a coercion, `is_null`, `type_name`, `size`, `to_seq`, `read_bytes`,
-##     `has_member`) → return `Result … InteropError`. This is the ONE crossing where a
-##     carried error finally becomes a Mezze `Result`.
-## Producers (`eval_raw`, `eval_bytes`, `box_*`) also yield a foreign → `'f`.
+## Low-level polyglot effect for library implementers; end users go through a per-language effect.
+## Ops yielding a foreign return an error-carrying `'f` (errors short-circuit, guest throws are caught);
+## ops yielding a Mezze value return `Result … InteropError`. Handler: `Runtime`.
 effect Polyglot having 'f where {
-  ## Value ops: yield a foreign (error-carrying, no Result).
+  # Value ops: yield a foreign (error-carrying, no Result).
   read_member:   { on: 'f, name: Str }              -> 'f <Polyglot>,
   write_member:  { on: 'f, name: Str, val: 'f }     -> 'f <Polyglot>,
   invoke_member: { on: 'f, name: Str, args: ['f] }  -> 'f <Polyglot>,
@@ -64,21 +29,16 @@ effect Polyglot having 'f where {
   instantiate:   { on: 'f, args: ['f] }             -> 'f <Polyglot>,
   read_array:    { on: 'f, index: Int }             -> 'f <Polyglot>,
   write_array:   { on: 'f, index: Int, val: 'f }    -> 'f <Polyglot>,
-  # hash `key` is a per-op free var `'k`, not `'f` — a mapping key may be a Foreign
-  # OR a bare Mezze value (a codec passes a Str field name); the native unwraps a
-  # Foreign and passes a bare value through unchanged.
+  # `key` is a free `'k`: a Foreign or a bare Mezze value (a codec passes a Str); the native unwraps Foreigns.
   read_hash:     { on: 'f, key: 'k }                -> 'f <Polyglot>,
   write_hash:    { on: 'f, key: 'k, val: 'f }       -> 'f <Polyglot>,
   hash_entries:  { on: 'f }                         -> 'f <Polyglot>,
 
-  ## Crossings: yield a Mezze value as a Result (error surfaces here).
+  # Crossings: yield a Mezze value as a Result (error surfaces here).
   has_member:    { on: 'f, name: Str }              -> Result Bool InteropError <Polyglot>,
   size:          { on: 'f }                         -> Result Int InteropError <Polyglot>,
   to_seq:        { on: 'f }                         -> Result ['f] InteropError <Polyglot>,
-  ## Bulk drain + coerce: a whole guest numeric array/iterable → `[Int]` / `[Float]`
-  ## in ONE crossing — the element loop AND the scalar coercion stay host-side, so N
-  ## numbers cost one boundary hit, not N. THE bulk path for numeric data; prefer it
-  ## over element-by-element `read_array` + `as_int`/`as_float`.
+  ## Drain a guest numeric array/iterable to `[Int]` in one crossing; prefer over per-element `read_array`.
   to_int_seq:    { on: 'f }                         -> Result [Int] InteropError <Polyglot>,
   to_float_seq:  { on: 'f }                         -> Result [Float] InteropError <Polyglot>,
   to_str_seq:    { on: 'f }                         -> Result [Str] InteropError <Polyglot>,
@@ -90,20 +50,14 @@ effect Polyglot having 'f where {
   is_null:       { on: 'f }                         -> Result Bool InteropError <Polyglot>,
   type_name:     { on: 'f }                         -> Result Str InteropError <Polyglot>,
   read_bytes:    { on: 'f, offset: Int, length: Int } -> Result Bytes InteropError <Polyglot>,
-  ## Surface an errored foreign WITHOUT extracting a value — `Ok {}` if live, `Err`
-  ## if it carries an error. Backs `.ok{}` (the fire-and-forget check) and a codec's
-  ## presence probe (missing field / absent payload vs a real one).
+  ## `Ok {}` if the foreign is live, `Err` if it carries an error; extracts no value.
   check:         { on: 'f }                         -> Result {} InteropError <Polyglot>,
 
-  ## Producers: mint a foreign in language `lang` (error-carrying).
-  ## ENTRY ONLY. `eval_raw` gets your FIRST foreign — import a module or fetch a
-  ## function, ONCE. It is NOT the working API and must never sit in a hot loop: it
-  ## re-runs (and rebuilds) the whole source every call. Once you hold a foreign, use
-  ## the object API (read_member / invoke_member / execute) to call it, and the CODEC
-  ## (`to_<lang>` / `from_<lang>`) to move DATA across in one crossing — never eval a
-  ## data string, never cross element-by-element.
+  # Producers: mint a foreign in language `lang` (error-carrying).
+  ## Entry only: evaluate source to get a first foreign. Re-runs the whole source per call; never in a loop.
+  ## Then use the object API and the codec (`to_<lang>`/`from_<lang>`) instead.
   eval_raw:      { lang: Str, source: Str }         -> 'f <Polyglot>,
-  ## Binary module eval (wasm, …) — a source string cannot express a wasm module.
+  ## Evaluate a binary module (wasm, …) that a source string cannot express.
   eval_bytes:    { lang: Str, bytes: Bytes, name: Str } -> 'f <Polyglot>,
   ## Bulk write into a guest byte-buffer; fluent — yields the receiver foreign.
   write_bytes:   { on: 'f, offset: Int, bytes: Bytes } -> 'f <Polyglot>,
@@ -116,37 +70,24 @@ effect Polyglot having 'f where {
   box_null:      { lang: Str }                      -> 'f <Polyglot>,
   box_list:      { elems: ['f], lang: Str }         -> 'f <Polyglot>,
   box_dict:      { keys: ['f], vals: ['f], lang: Str } -> 'f <Polyglot>,
-  ## Bulk numeric WRITE: a whole `[Int]`/`[Float]` → a guest array in ONE crossing
-  ## (counterpart of `to_int_seq`/`to_float_seq`). Skips the N per-element `box_int`/
-  ## `box_float` crossings a `box_list` of wrapped foreigns would cost.
+  ## Write a whole `[Int]` to a guest array in one crossing (counterpart of `to_int_seq`).
   box_int_seq:   { vals: [Int], lang: Str }         -> 'f <Polyglot>,
   box_float_seq: { vals: [Float], lang: Str }       -> 'f <Polyglot>,
   box_str_seq:   { vals: [Str], lang: Str }         -> 'f <Polyglot>,
   box_bool_seq:  { vals: [Bool], lang: Str }        -> 'f <Polyglot>,
 
-  ## Sandboxed inner contexts.
-  # Open a configured INNER context (isolated globals + access restricted BELOW the
-  # permissive parent). Yields a foreign HANDLE (error-carrying). `config` is a
-  # structural record of the Context.Builder sandbox knobs — a `GraalXWith` handler
-  # builds it from its own defaults. `eval_in` evaluates in the context and yields a
-  # LIVE foreign over the result (error-carrying), tagged with the context so the
-  # object API keeps working on it (`.int{}`, `.property{}`, …) — stay guest-side,
-  # cross once at the end. `close_context` tears it down at scope end; a foreign from
-  # a closed context short-circuits to an error on its next op.
+  # Sandboxed inner contexts.
+  # `open_context` opens a sandboxed inner context; `eval_in` yields live context-tagged foreigns;
+  # a foreign from a closed context errors on its next op.
   open_context:  { lang: Str, config: { allow_io: Bool, allow_native: Bool, allow_create_thread: Bool, allow_create_process: Bool, allow_host_class_loading: Bool, allow_host_lookup: Bool, allow_polyglot_access: Bool } } -> 'f <Polyglot>,
   eval_in:       { ctx: 'f, source: Str }           -> 'f <Polyglot>,
-  ## Binary `eval_in` — compile a guest module from raw BYTES in the inner context
-  ## (a wasm binary; a source string cannot express one). Yields a live foreign over
-  ## the result, tagged with the context, same as `eval_in`.
+  ## Compile a binary guest module (e.g. wasm) in the inner context; yields a live foreign like `eval_in`.
   eval_bytes_in: { ctx: 'f, bytes: Bytes, name: Str } -> 'f <Polyglot>,
   close_context: { ctx: 'f }                         -> Result {} InteropError <Polyglot>,
 }
 
-## The sole handler of `Polyglot`, and the sole caller of `__native_*`. Binds the
-## associated foreign type to a fresh var — generic over any foreign, exactly as
-## `impl Exception for … having 'error = 'e`. A language provider never writes any
-## of these lines; it performs the ops above through this handler. The handler
-## type is introduced by the impl itself — no separate `type` declaration.
+# Sole caller of the polyglot natives; generic over the foreign (`having 'f = 'g`).
+## The sole handler of `Polyglot`, generic over any foreign type.
 impl Polyglot for Runtime having 'f = 'g where {
   read_member   = { on, name }       -> __native_polyglot_read_member   { val = on, name = name },
   write_member  = { on, name, val }  -> __native_polyglot_write_member  { val = on, name = name, new_val = val },
@@ -200,13 +141,8 @@ impl Polyglot for Runtime having 'f = 'g where {
   close_context = { ctx }         -> __native_polyglot_close_context { val = ctx },
 }
 
-## Lift an error-carrying PRODUCER foreign into a Mezze `Result`: `Ok { val }` for a
-## live handle, `Err { error }` for one that carries an interop error. This is the
-## ONE place a producer's foreign (`eval_raw` / `eval_bytes` / an `execute` result)
-## becomes a `Result` — a typed language entry point (`Js.eval`, `Python.import`, …)
-## calls it ONCE at entry, then the object API keeps chaining on the bare foreign.
-## Without it, an entry point returning `eval_raw`'s bare foreign under a `Result`
-## signature hands callers a non-variant that `match … is Ok/Err` cannot destructure.
+## Lift a producer foreign into `Result`: `Ok { val }` if live, `Err { error }` if it carries an error.
+## Call once at a typed entry point (`Js.eval`, …); a bare errored foreign cannot be matched as Ok/Err.
 pub let lift: { on: 'f } -> Result 'f InteropError <Polyglot> = { on } ->
   match Polyglot.check { on = on } is
     Ok  { val = _ }   -> Ok { val = on }

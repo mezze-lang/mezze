@@ -28,9 +28,7 @@ import kotlin.test.assertEquals
 class HttpStreamedResponseTest {
 
     private val head = """
-        use std::effects::http::{ Request, Response, Method, HttpClient, SimpleHttpClient, request, format_error, body_str, response_stream }
-        use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig }
-        use std::effects::http_server::{ route, otherwise, Matched }
+        use std::effects::http::{ Request, Response, Method, request, format_error, body_str, response_stream, HttpClient, SimpleHttpClient, HttpServer, HelidonHttpServerWith, ServerConfig, route, otherwise, Matched }
         use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text, WriteMode }
         use std::collections::{ bytes, iter, map, seq }
         use std::int
@@ -42,7 +40,7 @@ class HttpStreamedResponseTest {
         let text_of: { resp: Response } -> Str = { resp } -> match body_str { resp = resp } is
           Ok { val } -> val
           Err { error = _ } -> "could not decode"
-        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_logs = False }
+        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_print_log = Off }
     """.trimIndent()
 
     private val fetch = """

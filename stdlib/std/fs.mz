@@ -1,8 +1,5 @@
-## Pure path manipulation. No effect row, no disk access.
-##
-## Paths are Str throughout — the "/"-separated form. This module
-## does string surgery only; nothing here reaches the filesystem.
-## Effect-carrying operations live in std::effects::filesystem.
+## Pure "/"-separated path manipulation on Str; never touches the disk.
+## Filesystem operations live in std::effects::filesystem.
 use std::str::{ split, join }
 use std::collections::seq
 use std::int

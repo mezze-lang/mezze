@@ -90,7 +90,21 @@ class DeepPropagationCostTest {
 
     @Test
     @Timeout(value = 900, unit = TimeUnit.SECONDS)
-    void parkCostByDepth() {
+    void parkCostByDepth() throws Throwable {
+        // 1000 nested effectful frames recurse on the Java stack — several JVM
+        // frames per Mezze level — which overflows a default test-thread stack
+        // before a single park is timed. Run on a thread sized for the depth this
+        // test exists to measure.
+        Throwable[] failure = new Throwable[1];
+        Thread deep = new Thread(null, () -> {
+            try { measureParkCostByDepth(); } catch (Throwable t) { failure[0] = t; }
+        }, "deep-propagation", 512L * 1024 * 1024);
+        deep.start();
+        deep.join();
+        if (failure[0] != null) throw failure[0];
+    }
+
+    private static void measureParkCostByDepth() {
         try (Context context = Context.newBuilder("mezze")
                 .allowExperimentalOptions(true).allowAllAccess(true).build()) {
             context.enter();

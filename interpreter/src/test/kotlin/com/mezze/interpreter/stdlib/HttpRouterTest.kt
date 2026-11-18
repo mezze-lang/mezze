@@ -14,9 +14,7 @@ import kotlin.test.assertEquals
 class HttpRouterTest {
 
     private val head = """
-        use std::effects::http::{ Request, Response, Method }
-        use std::effects::http_server::{ incoming, get_request }
-        use std::effects::http_server::{ Matched, Routes, route, or_else, otherwise, match_path, segments }
+        use std::effects::http::{ Request, Response, Method, incoming, get_request, Matched, Routes, route, or_else, otherwise, match_path, segments }
         use std::collections::map
         use std::collections::bytes
 
@@ -179,7 +177,7 @@ class HttpRouterTest {
     fun `path_of drops a query string`() {
         val r = MezzeTestHelper.run("""
             $head
-            use std::effects::http_server::{ path_of, query_of }
+            use std::effects::http::{ path_of, query_of }
             path_of { url = "/users/7?page=2&sort=name" }
         """.trimIndent())
         assertEquals("/users/7", r)
@@ -189,7 +187,7 @@ class HttpRouterTest {
     fun `path_of drops a scheme and authority`() {
         val r = MezzeTestHelper.run("""
             $head
-            use std::effects::http_server::{ path_of, query_of }
+            use std::effects::http::{ path_of, query_of }
             path_of { url = "https://api.example.com/users/7?page=2" }
         """.trimIndent())
         assertEquals("/users/7", r, "an absolute client url and a server target must agree on the path")
@@ -199,7 +197,7 @@ class HttpRouterTest {
     fun `path_of calls a url with no path at all the root`() {
         val r = MezzeTestHelper.run("""
             $head
-            use std::effects::http_server::{ path_of, query_of }
+            use std::effects::http::{ path_of, query_of }
             path_of { url = "https://api.example.com" }
         """.trimIndent())
         assertEquals("/", r)
@@ -209,7 +207,7 @@ class HttpRouterTest {
     fun `path_of leaves a plain path alone`() {
         val r = MezzeTestHelper.run("""
             $head
-            use std::effects::http_server::{ path_of, query_of }
+            use std::effects::http::{ path_of, query_of }
             path_of { url = "/users/7" }
         """.trimIndent())
         assertEquals("/users/7", r)
@@ -219,7 +217,7 @@ class HttpRouterTest {
     fun `query_of gives the raw query, or an empty string`() {
         val r = MezzeTestHelper.run("""
             $head
-            use std::effects::http_server::{ path_of, query_of }
+            use std::effects::http::{ path_of, query_of }
             use std::str
             str::concat {
               l = query_of { url = "/users/7?page=2&sort=name" },
@@ -256,7 +254,7 @@ class HttpRouterTest {
     fun `a query parameter is read by name`() {
         val r = MezzeTestHelper.run("""
             $head
-            use std::effects::http_server::{ query_param }
+            use std::effects::http::{ query_param }
             match query_param { url = "/users/7?page=2&sort=name", name = "sort" } is
               Some { val } -> val
               None -> "absent"
@@ -268,7 +266,7 @@ class HttpRouterTest {
     fun `a parameter nobody sent is None`() {
         val r = MezzeTestHelper.run("""
             $head
-            use std::effects::http_server::{ query_param }
+            use std::effects::http::{ query_param }
             match query_param { url = "/users/7?page=2", name = "sort" } is
               Some { val } -> val
               None -> "absent"
@@ -280,7 +278,7 @@ class HttpRouterTest {
     fun `a repeated key collects every value, in order`() {
         val r = MezzeTestHelper.run("""
             $head
-            use std::effects::http_server::{ query_all }
+            use std::effects::http::{ query_all }
             use std::str
             str::join { strings = query_all { url = "/x?tags=a&tags=b&tags=c", name = "tags" }, separator = "-" }
         """.trimIndent())
@@ -291,7 +289,7 @@ class HttpRouterTest {
     fun `query_param gives the FIRST of a repeated key`() {
         val r = MezzeTestHelper.run("""
             $head
-            use std::effects::http_server::{ query_param }
+            use std::effects::http::{ query_param }
             match query_param { url = "/x?tags=a&tags=b", name = "tags" } is
               Some { val } -> val
               None -> "absent"
@@ -303,7 +301,7 @@ class HttpRouterTest {
     fun `percent escapes and plus are decoded in keys and values`() {
         val r = MezzeTestHelper.run("""
             $head
-            use std::effects::http_server::{ query_param }
+            use std::effects::http::{ query_param }
             match query_param { url = "/x?full%20name=ada+lovelace", name = "full name" } is
               Some { val } -> val
               None -> "absent"
@@ -315,7 +313,7 @@ class HttpRouterTest {
     fun `a flag with no equals is a key with an empty value`() {
         val r = MezzeTestHelper.run("""
             $head
-            use std::effects::http_server::{ query_param }
+            use std::effects::http::{ query_param }
             match query_param { url = "/x?debug", name = "debug" } is
               Some { val } -> "empty"
               None -> "absent"
@@ -327,7 +325,7 @@ class HttpRouterTest {
     fun `no query at all gives no parameters`() {
         val r = MezzeTestHelper.run("""
             $head
-            use std::effects::http_server::{ query_params }
+            use std::effects::http::{ query_params }
             use std::collections::map
             map::size { m = query_params { url = "/users/7" } }
         """.trimIndent())
@@ -342,7 +340,7 @@ class HttpRouterTest {
         // at all, because the router's `pub use` carries the instance.
         val r = MezzeTestHelper.run("""
             $head
-            use std::effects::http_server::{ BadInput }
+            use std::effects::http::{ BadInput }
             use std::int
             let app = otherwise {
               routes = route { method = Get, path = "/search", handler = { m } -> do
@@ -361,7 +359,7 @@ class HttpRouterTest {
     fun `a query that does not fit the asked-for type is a 400, not a crash`() {
         val r = MezzeTestHelper.run("""
             $head
-            use std::effects::http_server::{ BadInput }
+            use std::effects::http::{ BadInput }
             let app = otherwise {
               routes = route { method = Get, path = "/search", handler = { m } -> do
                 let q: Result { page: Int } BadInput = m.query_as {}

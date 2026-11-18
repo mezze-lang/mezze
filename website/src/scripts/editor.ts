@@ -483,7 +483,7 @@ export function mountEditor(root: HTMLElement): EditorHandle {
    *
    * Warnings are shown but do not block: an unused import is worth saying and
    * is not worth refusing to run over. Treating every diagnostic as fatal made
-   * `use std::effects::http::{ Http, … }` — where only the operations are
+   * `use std::effects::http::{ HttpClient, … }` — where only the operations are
    * named — print an error instead of the program's output.
    */
   const report = (res: any): boolean => {

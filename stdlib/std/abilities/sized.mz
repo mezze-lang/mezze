@@ -1,4 +1,4 @@
-## Container size. Implemented by all collection types.
+## Container size; implemented by all collection types.
 ability Sized for 'c where {
   ## Number of elements in the container.
   size: { it: 'c } -> Int,

@@ -75,4 +75,55 @@ class CheckReplayTest {
         val (third, out3) = mez("check")
         assertNotEquals(0, third, "a changed module is checked, not replayed: $out3")
     }
+
+    /**
+     * The record travels with `.mez`. It used to list the files it read by
+     * ABSOLUTE path, so a copy of the project re-verified the ORIGINAL's files —
+     * which still matched themselves — and replayed the original's "Check passed"
+     * over sources that no longer passed. MEASURED on a copied scratch project:
+     * `src/app.mz` had gained a V0406 error and `mez check` kept passing until
+     * `.mez` was deleted.
+     */
+    @Test
+    fun `a copied project is checked against its own files, not the original's`() {
+        write("Mezze.toml", """
+            [package]
+            name = "replay"
+            version = "0.1.0"
+
+            [[app]]
+            name = "replay"
+            path = "src/app.mz"
+            entry = "main"
+        """)
+        write("src/lib.mz", """
+            pub let double = { n: Int } -> n * 2
+        """)
+        write("src/app.mz", """
+            use lib::{ double }
+
+            let four = double { n = 2 }
+
+            let main = {} -> {}
+        """)
+        val (first, out1) = mez("check")
+        assertEquals(0, first, out1)
+
+        // Copy the whole project, `.mez` included, then break a source IN THE COPY.
+        // The original is untouched, so a record keyed by absolute paths still
+        // verifies — against the wrong directory.
+        val copy = project.resolveSibling(project.fileName.toString() + "-copy")
+        project.toFile().copyRecursively(copy.toFile(), overwrite = true)
+        copy.resolve("src/lib.mz").writeText("pub let double = { n: Int } -> n * \"two\"\n")
+
+        val java = Path.of(System.getProperty("java.home"), "bin", "java").toString()
+        val process = ProcessBuilder(listOf(java, "-cp", System.getProperty("java.class.path"), "com.mezze.language.cli.MainKt", "check"))
+            .directory(copy.toFile())
+            .redirectErrorStream(true)
+            .also { it.environment()["MEZZE_HOME"] = copy.resolve(".home").toString() }
+            .start()
+        val out = process.inputStream.bufferedReader().readText()
+        check(process.waitFor(5, TimeUnit.MINUTES)) { "mez did not finish" }
+        assertNotEquals(0, process.exitValue(), "the copy's own broken source must fail its check, not replay the original's pass: $out")
+    }
 }

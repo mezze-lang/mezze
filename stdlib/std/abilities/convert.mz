@@ -4,8 +4,8 @@ ability Into 'b for 'a where {
   into: { it: 'a } -> 'b
 }
 
-## Fallible conversion from 'a into 'b, returning Result 'b 'err.
+## Fallible conversion from 'a into 'b.
 ability TryInto 'b 'err for 'a where {
-  ## Attempt conversion, returning Ok on success or Err on failure.
+  ## Attempt the conversion; `Err` on failure.
   try_into: { it: 'a } -> Result 'b 'err
 }

@@ -36,9 +36,10 @@ class ElaborationInvariantGateTest {
             .toSet()
 
     private fun currentFindings(): List<ElaborationInvariants.Finding> {
-        // PrecompiledStdlib is an object whose init loads the snapshot, so
-        // reading the map is what triggers the load.
-        val modules = PrecompiledStdlib.stdlibTypedModules.values
+        // The WHOLE stdlib, not only what the prelude reaches: a test JVM compiles
+        // just the reachable set, and the gate must see every module the snapshot
+        // ships (79, not 27 — the 2026-11-17 section of the baseline).
+        val modules = PrecompiledStdlib.everyStdlibTypedModule()
         assertTrue(
             modules.isNotEmpty(),
             "no typed stdlib modules loaded — the gate would vacuously pass and hide every finding",

@@ -56,9 +56,7 @@ class HttpStreamedBodyFailureTest {
     private val block = "0123456789abcdefghij".repeat(1000)
 
     private val head = """
-        use std::effects::http::{ Request, Response, Method, HttpClient, SimpleHttpClient, HttpDownload, SimpleHttpDownload, request, format_error, response_stream, with_download, default_http_config }
-        use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig }
-        use std::effects::http_server::{ route, otherwise, Matched }
+        use std::effects::http::{ Request, Response, Method, request, format_error, response_stream, HttpClient, SimpleHttpClient, HttpDownload, SimpleHttpDownload, with_download, default_http_config, HttpServer, HelidonHttpServerWith, ServerConfig, route, otherwise, Matched }
         use std::effects::exception::{ throw }
         use std::collections::{ bytes, iter, map, seq }
         use std::str
@@ -68,7 +66,7 @@ class HttpStreamedBodyFailureTest {
           status = 404, headers = map::empty {}, body = bytes::from_str { s = "nope" },
           url = req.url, chunks = None,
         }
-        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_logs = False }
+        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_print_log = Off }
     """.trimIndent()
 
     /**

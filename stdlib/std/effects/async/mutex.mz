@@ -4,10 +4,8 @@ use std::effects::async::{ Async, park }
 ## Reentrant mutual exclusion lock.
 pub newtype Mutex = __NativeLock
 
-## Structural hash, paired with the `Eq` below.
-## `Eq` and `Hash` are written together or not at all: a hash container
-## buckets by one and compares by the other, so a value whose hash
-## disagrees with its equality is silently kept twice.
+# `Eq` and `Hash` are written together or not at all: a hash that disagrees
+# with equality makes a hash container keep a value twice.
 impl Hash for Mutex where {
   hash: { it: Mutex } -> Int = { it } -> structural_hash { it = it }
 }
@@ -24,8 +22,7 @@ impl Mutex where {
   try_lock = { it } -> try_lock { mutex = it },
   is_held_by_current_thread = { it } -> is_held_by_current_thread { mutex = it },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
+  # dot-chain parity: so `x.op {}` works for every receiver-taking free function.
   lock_async = { it } -> lock_async { mutex = it },
 }
 

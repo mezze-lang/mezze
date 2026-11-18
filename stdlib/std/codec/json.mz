@@ -1,16 +1,5 @@
-## JSON codec — variant-tree output (`JsonC`) and byte-string output (`JsonUtf8C`).
-##
-## Users touch Tier 4 sugar:
-##
-##   user.to_json {}                                # default config, variant tree
-##   user.to_json_with { config = json_pretty }     # explicit preset
-##   user.to_json_utf8 {}                            # bytes directly
-##   User.from_json { it = raw }                  # decode
-##
-## Format authors: everything below is boilerplate. The moving parts are the
-## `impl EncodeScalar`/`impl DecodeScalar` bodies — they define the wire shape.
-##
-## See `docs/codec/redesign-2026-09.md`, "Format author's job — JSON example".
+## JSON codec: `Json` tree output (`JsonC`) and UTF-8 byte output (`JsonUtf8C`).
+## Use `x.to_json {}`, `x.to_json_with { config }`, `x.to_json_utf8 {}` and `Type.from_json { it }`.
 use std::collections::seq
 use std::collections::list
 use std::collections::set
@@ -31,8 +20,9 @@ use std::codec::core::{
   apply_field_transform,
   transform_field_name, inverse_transform_field_name
 }
+# See `docs/codec/redesign-2026-09.md`, "Format author's job — JSON example".
 
-## Intermediate representation
+# Intermediate representation
 
 ## JSON value — the intermediate representation produced by `JsonC`.
 pub type Json = |
@@ -45,13 +35,12 @@ pub type Json = |
   JObject { fields: [{ key: Str, value: Json }] },
 |
 
-## Config types
+# Config types
 
 ## How to render `Option None` at emit time.
 pub type NullHandling = | OmitNull, IncludeNull |
 
-## JSON config — variant-tree path. The output type this config picks is
-## `Json` (see `impl Format for JsonC having 'out = Json`).
+## JSON config producing a `Json` tree.
 pub type JsonC = {
   shared: SharedConfig,
   pretty: Bool,
@@ -60,11 +49,7 @@ pub type JsonC = {
   sort_keys: Bool,
 }
 
-## JSON config — direct-to-bytes path. Same knobs, different output shape
-## (`Bytes` at the entry point — see `impl ToJsonUtf8`). Carries
-## a distinct `emits_bytes: Bool` marker field: Mezze records are structural,
-## so JsonC and JsonUtf8C would otherwise be the same type — that would
-## break format-dispatch on `'config`.
+## JSON config producing `Bytes`; its `emits_bytes` marker keeps it a distinct type from `JsonC`.
 pub type JsonUtf8C = {
   shared: SharedConfig,
   pretty: Bool,
@@ -74,7 +59,7 @@ pub type JsonUtf8C = {
   emits_bytes: Bool,
 }
 
-## Preset configs
+# Preset configs
 
 pub let json_default: JsonC = {
   shared = { field_transform = Identity },
@@ -118,7 +103,7 @@ pub let json_utf8_camel: JsonUtf8C = {
   emits_bytes = True,
 }
 
-## Format links
+# Format links
 
 impl Format for JsonC having 'out = Json where {
 }
@@ -126,9 +111,10 @@ impl Format for JsonC having 'out = Json where {
 impl Format for JsonUtf8C having 'out = Json where {
 }
 
-## Native primitives (format-neutral)
+# Native primitives (format-neutral)
 
-## Parse UTF-8 bytes to a `Json` tree. Backed by the JSON parser native.
+# Backed by the JSON parser native.
+## Parse UTF-8 bytes to a `Json` tree.
 pub let parse
   : { bytes: Bytes }
   -> Result Json { path: [Str], reason: Str, input_ref: Option Str }
@@ -140,13 +126,8 @@ pub let parse_str
   -> Result Json { path: [Str], reason: Str, input_ref: Option Str }
   = { s } -> __native_json_parse { s = s }
 
-## Serialize a `Json` tree back to a string.
-## Serialize a `Json` tree to text.
-##
-## No `Result`: a well-formed `Json` tree is always serializable — the writer is
-## an in-memory buffer, so there is nothing to fail. This used to answer `""` on
-## an error it could not report, which turned a bad encode into a 200 with an
-## EMPTY BODY and no word of explanation.
+# Used to answer `""` on error, turning a bad encode into a 200 with an empty body.
+## Serialize a `Json` tree to text; cannot fail.
 pub let to_str: { json: Json } -> Str = { json } ->
   __native_json_serialize { json = json, pretty = False }
 
@@ -158,7 +139,7 @@ pub let serialize_to_str: { json: Json, config: JsonC } -> Str = { json, config 
 pub let to_bytes: { json: Json } -> Bytes = { json } ->
   __native_json_serialize_bytes { json = json, pretty = False }
 
-## Internal helpers
+# Internal helpers
 
 let json_type_name: { json: Json } -> Str = { json } -> match json is
   JNull -> "null"
@@ -185,7 +166,7 @@ let missing_field_error = { path: [Str], key: Str } -> Err {
   },
 }
 
-## Tier 2: JsonC — variant-tree encode
+# Tier 2: JsonC — variant-tree encode
 
 impl EncodeScalar for JsonC having 'out = Json where {
   encode_int   = { it, val, ctx } -> JInt   { val = val },
@@ -236,7 +217,7 @@ impl EncodeOption for JsonC having 'out = Json where {
     Some { val = v } -> v,
 }
 
-## Tier 2: JsonC — decode
+# Tier 2: JsonC — decode
 
 impl DecodeScalar for JsonC having 'in = Json where {
   decode_int = { it, val, ctx } -> match val is
@@ -380,8 +361,7 @@ impl DecodeSequence for JsonC having 'in = Json where {
     } },
 }
 
-## One encoded map entry — the `{ "key": …, "value": … }` object `encode_mapping`
-## writes — pulled back apart. None when the item is not that shape.
+## Split one encoded map entry `{ "key", "value" }` back apart; None if malformed.
 let map_entry_of: { j: Json } -> Option { key: Json, value: Json } = { j } -> match j is
   JObject { fields } -> match find_field_value { fields = fields, key = "key", idx = 0 } is
     Some { val = k } -> match find_field_value { fields = fields, key = "value", idx = 0 } is
@@ -390,8 +370,7 @@ let map_entry_of: { j: Json } -> Option { key: Json, value: Json } = { j } -> ma
     None -> None
   _ -> None
 
-## Every entry, or None if any one of them is malformed — a half-read map is
-## worse than a reported failure.
+## Every map entry, or None if any one is malformed.
 let read_map_entries:
   { items: [Json], idx: Int, acc: [{ key: Json, value: Json }] }
   -> Option [{ key: Json, value: Json }] =
@@ -405,15 +384,9 @@ let read_map_entries:
       None -> None
 
 impl DecodeMapping for JsonC having 'in = Json where {
-  ## Reads back exactly what `encode_mapping` writes: a JArray whose items are
-  ## `{ "key": …, "value": … }` objects.
-  ##
-  ## This used to expect a JObject and rebuild each key as
-  ## `JString { val = <field name> }` — the inverse of nothing, since the encoder
-  ## has always emitted an array of pairs. A map therefore never round-tripped
-  ## through JSON, and nothing caught it because no test decoded one.
-  ## The array form is also the only one that survives a NON-string key, which a
-  ## JSON object cannot represent at all.
+  # Used to expect a JObject, so a map never round-tripped through JSON.
+  ## Reads back what `encode_mapping` writes: a JArray of `{ "key", "value" }` objects.
+  ## The array form is what lets non-string keys survive.
   decode_mapping = { it, val, ctx } -> match val is
     JArray { items } -> match read_map_entries { items = items, idx = 0, acc = [] } is
       Some { val = entries } -> Ok { val = entries }
@@ -437,33 +410,9 @@ impl DecodeOption for JsonC having 'in = Json where {
     _ -> Ok { val = Some { val = val } },
 }
 
-## Tier 2: JsonUtf8C — the tree, then one serialize
-##
-## Same `'out = Json` as `JsonC`: build the tree, and serialize ONCE at the
-## entry point. `JsonUtf8C` differs from `JsonC` in what it HANDS BACK (bytes,
-## not text), not in how it gets there.
-##
-## Only `EncodeScalar` used to exist here, so `record.to_json_utf8 {}` did not
-## compile — "format lacks EncodeRecord" — and nothing but a scalar could be
-## encoded to UTF-8 at all. These six impls close that.
-##
-## <h2>Why not stream straight to bytes</h2>
-##
-## Skipping the tree is the obvious idea and it is SLOWER. Both shapes were built
-## and measured on the same 949-byte payload, 20 records, at saturation:
-##
-##   tree + one native serialize     235.8k req/s    26.1k per core
-##   bytes concatenated per node     199.6k req/s    21.1k per core
-##   a writer closure per node       149.2k req/s    15.5k per core
-##
-## The tree wins because the expensive part is not the intermediate — it is
-## per-node work in GUEST code. A tree hands one finished structure to a single
-## tight native walk; every streaming shape pays guest dispatch per node instead,
-## and pays it to avoid an allocation the JIT was already handling. The writer
-## shape was worst of all: `'out` as a function allocates a closure per node and
-## every child is an indirect call, which also took p99 from 7.4ms to 44.8ms.
-##
-## So: one internal representation, serialized once.
+# Tier 2: JsonUtf8C — build the `Json` tree, then serialize once at the entry point.
+# Streaming straight to bytes was measured slower (199.6k vs 235.8k req/s;
+# closures 149.2k): per-node guest dispatch costs more than the tree.
 
 impl EncodeScalar for JsonUtf8C having 'out = Json where {
   encode_int   = { it, val, ctx } -> JInt    { val = val },
@@ -514,7 +463,7 @@ impl EncodeOption for JsonUtf8C having 'out = Json where {
     Some { val = v } -> v,
 }
 
-## Tier 4: sugar abilities + blankets
+# Tier 4: sugar abilities + blankets
 
 ## Encode any value to a `Json` tree via `.json{}` / `.json_with{}`.
 ability ToJson for 'a where {
@@ -542,19 +491,13 @@ impl ToJsonUtf8 for 'a where {
   to_json_utf8_with: { it: 'a, config: JsonUtf8C } with Encode JsonUtf8C 'a -> Bytes = { it, config } -> to_bytes { json = it.encode { config = config } },
 }
 
-## Decode a value from a `Json` tree via `Type.from_json{}` inherent syntax.
-## `'a` appears only on the return side; dispatch is driven by the target
-## type at the call site.
+## Decode a value from a `Json` tree via `Type.from_json{}`; the target type drives dispatch.
 ability FromJson 'a for 'in where {
   from_json:      { it: 'in }                  -> Result 'a DecodeError,
   from_json_with: { it: 'in, config: JsonC }   -> Result 'a DecodeError,
 }
 
-## Decode straight from JSON text: parse, then decode, one step. The parse
-## error is mapped into DecodeError so the whole journey is a single Result:
-##
-##   "{\"code\":\"1\"}".from_json {}         # Result { code: Str } DecodeError
-##
+## Decode straight from JSON text; parse errors become a `DecodeError`.
 impl FromJson 'a for Str where {
   from_json: { it: Str } with Decode JsonC 'a Json -> Result 'a DecodeError = { it } ->
     match parse_str { s = it } is

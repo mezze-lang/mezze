@@ -165,7 +165,16 @@ data class TypedAbilityOp(
     val operationIndex: Int,
     val paramType: MezzeType,
     val returnType: MezzeType,
-    val loc: Loc
+    val loc: Loc,
+    /**
+     * The op's DECLARED effect row (`send: { it: 'a } -> … <HttpClient>`), or
+     * null for a pure op. The declaration is the authority on an ability op's
+     * effects — the row is exact, and a call site's solved method type may
+     * reach a tool with the row still unbound — so it travels with the op
+     * instead of being re-derived. Defaults to null so snapshots written before
+     * it existed still decode.
+     */
+    val effects: MezzeType.EffectRow? = null,
 )
 
 @Serializable

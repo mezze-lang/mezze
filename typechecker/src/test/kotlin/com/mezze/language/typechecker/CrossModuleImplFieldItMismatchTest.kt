@@ -319,18 +319,18 @@ class CrossModuleImplFieldItMismatchTest {
     @Test
     fun `stdlib http chain - api dot get dot send`(@TempDir tempDir: Path) {
         val userSource = """
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, client}
+            use std::effects::http::{ Response, Method, HttpClient, MockHttpClient, MockRule, UrlPattern, client, mock_rules }
             use std::collections::map
             use std::collections::bytes
 
             let run : {} -> Int <*> = {} ->
-              perform MockHttpClient { rules = [
+              perform MockHttpClient { rules = mock_rules { of = [
                 { methods = [Get], url = Glob { pattern = "**" },
                   response = Ok { val = {
                     status = 200, headers = map::empty {}, body = bytes::from_str { s = "ok" }, url = "",
                     chunks = None,
                   } } }
-              ] } in do
+              ] } } in do
                 let api = client { base_url = "https://api.acme.com" }
                 let resp = api.get { path = "/users/42" }.send {}
                 match resp is

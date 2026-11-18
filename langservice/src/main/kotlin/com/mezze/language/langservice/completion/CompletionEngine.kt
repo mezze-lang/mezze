@@ -376,11 +376,16 @@ object CompletionEngine {
         // an item overwrites `std::se`, not the whole line.
         val replaceStartCol = character - typed.length
 
+        // No cap. The list is every importable module — a few dozen for the
+        // stdlib plus the project's own — and the editor filters it as the user
+        // types. A `take(50)` here, applied AFTER sorting, silently dropped every
+        // module past the 50th name: once the whole stdlib (79 modules) was
+        // listed, `std::effects::http` was never offered after `use `, while
+        // `std::effects::http` had been — only because `e` sorts early.
         val items = modules.asSequence()
             .filter { it.isNotBlank() && it.startsWith(typed) }
             .distinct()
             .sorted()
-            .take(50)
             .map { path ->
                 candidate(path) {
                     kind = CompletionKind.Module

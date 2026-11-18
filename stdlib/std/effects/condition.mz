@@ -1,45 +1,20 @@
-## Resumable conditions — signal a recoverable problem and let the HANDLER
-## decide whether the computation carries on.
-##
-## The difference from `Exception` is that a condition handler may `resume`, so
-## the signalling computation CONTINUES. That is what lets one run collect every
-## problem instead of stopping at the first, which neither exceptions nor a
-## plain `Result` can do: after a throw the frames in between are gone, and a
-## `Result` needs an explicit branch at every call site.
-##
-## `fallback` comes from the CALL SITE, not the handler. That is what makes the
-## operation polymorphic in the recovery value — each signal site offers a value
-## of its own type, and one body may signal at several types:
-##
-##     let name = if ok then "alice" else signal { ctx = "bad name", fallback = "?" }
-##     let age  = if ok then 30      else signal { ctx = "bad age",  fallback = 0 }
-##
-## It is also what keeps the handler honest. The operation returns `'a`, chosen
-## by the site, so a handler may not invent a value of its own — it either
-## carries on with what the site offered or gives up (V0503/T0210).
+# Unlike `Exception`, a handler may resume, so one run can collect every problem. `fallback` comes
+# from the call site so the op is polymorphic in it and a handler cannot invent a value (V0503/T0210).
+## Resumable conditions: signal a recoverable problem; the handler decides whether to carry on.
+## Each site offers its own fallback, e.g. `signal { ctx = "bad age", fallback = 0 }`.
 effect Condition having 'ctx where {
   ## Signal `ctx`, offering `fallback` as the value to carry on with.
   signal: { ctx: 'ctx, fallback: 'a } -> 'a <Condition>
 }
 
-## Carry on at every signal, using the offered fallback.
-##
-## The computation runs to completion and every signal is tolerated, so the
-## result reflects ALL the recoveries rather than the first failure.
-##
-## Spelled as a bare value rather than `resume { val = fallback }`: the two are
-## the same operation ("falling off the op body normally is treated as
-## `resume {val = <last expr>}`") and the bare form is measured ~2.4x cheaper,
-## because referencing `resume` crosses a @TruffleBoundary. See the note in
-## `std/comptime.mz`.
+# A bare value instead of `resume { val = fallback }`: same op, ~2.4x cheaper (no @TruffleBoundary).
+## Carry on at every signal with the offered fallback, so the run reflects ALL recoveries.
 impl Condition for UseFallback having 'ctx = 'c where {
   signal = { ctx, fallback } -> fallback
 }
 
 ## Give up at the first signal, with the context as the error.
-##
-## The `perform` block's result is a `Result`, so the body's own tail must
-## produce one too — `perform FirstErr in do … Ok { val = … }`.
+## The body's tail must be a `Result` too: `perform FirstErr in do … Ok { val = … }`.
 impl Condition for FirstErr having 'ctx = 'c where {
   signal = { ctx, fallback } -> abort { val = Err { error = ctx } }
 }

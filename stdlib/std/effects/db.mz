@@ -1,33 +1,8 @@
-## The DATABASE effect: three operations, and a query that is a plain value.
-##
-## Shaped after `std::effects::http_server`, which came out well for the same
-## reason: the effect stays small and everything expressive is a VALUE.
-## `HttpServer` has exactly ONE operation and routing is not part of it — a route
-## table folds into one handler — so the effect never grew an operation per
-## routing feature. A query here is the same: `Query` is built by pure code and
-## only `run`/`apply` touch the effect, so adding joins, pagination or a typed
-## builder later adds no operations.
-##
-## THREE operations, and what each is for:
-##
-##   run    — a read. Answers `Rows`.
-##   apply  — a write. Answers how many rows changed.
-##   tx     — scopes a body so its writes commit together or not at all.
-##
-## PARAMETERS ARE VALUES, NEVER TEXT. `Query` carries `[DbValue]` and the driver
-## binds them, so a query cannot be assembled out of user input: there is no
-## string concatenation to get wrong. That is why `DbValue` exists rather than
-## letting callers interpolate.
-##
-## FAILURE IS A VALUE. Every operation answers `Result _ DbError`. The
-## alternative is what `json::to_bytes` used to do — swallow the error and
-## answer empty — which made a handler reply 200 with a zero-byte body and say
-## nothing.
-##
-## THE TEST SEAM IS A PLAIN VALUE. A `Query` can be built and inspected with no
-## database at all, and `MockDb` answers from a table, so a route's data path is
-## testable without a driver, a file or a server. That mirrors a handler being
-## callable with no socket.
+## The database effect: `run` (read), `apply` (write) and `tx` (commit together or not at all).
+## Parameters are bound values (`DbValue`), never spliced text; every operation answers `Result _ DbError`.
+
+# Shaped after `std::effects::http`: the effect stays small and a `Query` is a pure value,
+# so new query features add no operations. Failure is a value so errors are never swallowed.
 
 use std::codec::core::{
   Format,
@@ -41,60 +16,39 @@ use std::int
 use std::float
 use std::nat
 
-## A single bound parameter or column value.
-##
-## A closed variant rather than `Str`: the driver binds each one at its own type,
-## so `DbInt { val = 7 }` reaches the database as an integer and a string
-## containing `'); drop table users; --` reaches it as a string.
+## A single bound parameter or column value; the driver binds each at its own type.
 pub type DbValue = | DbNull, DbInt { val: Int }, DbStr { val: Str }, DbFloat { val: Float }, DbBool { val: Bool }, DbBytes { val: Bytes } |
 
-## A query: the text, and the values to bind to its placeholders.
-##
-## Pure data. Build it, pass it around, inspect it in a test; nothing happens
-## until an operation runs it.
+## A query: SQL text plus the values bound to its placeholders. Pure data until run.
 pub type Query = {
   sql: Str,
   params: [DbValue],
 }
 
-## A result set: the column names ONCE, and each row's values positionally.
-##
-## Not a map per row. A result set is rectangular, so the names belong to the set
-## rather than to every row, and a decoder resolves a field to a column index one
-## time instead of hashing a string per row per field. This is also the WIRE
-## SHAPE the row codec will key on (W-D2).
+# Also the wire shape the row codec keys on (W-D2); names once so decoders resolve a column once.
+## A result set: the column names once, and each row's values positionally.
 pub type Rows = {
   cols: [Str],
   rows: [[DbValue]],
 }
 
-## What went wrong, as data.
-##
-## Separated by what a caller can DO about it: `DbUnavailable` and `DbTimeout` are
-## worth retrying, `Rejected` means the query is wrong and never will not be,
-## `DbConflict` means retry the transaction, `DbDecodeError` means the rows did not fit
-## the shape asked for.
+## A database failure, split by remedy: `DbUnavailable`/`DbTimeout` retry, `DbConflict` retry the tx,
+## `DbRejected` means the query is wrong, `DbDecodeError` means rows did not fit the shape.
 pub type DbError = | DbUnavailable { msg: Str }, DbRejected { sql: Str, msg: Str }, DbConflict { msg: Str }, DbTimeout { ms: Int }, DbDecodeError { msg: Str } |
 
-## Run queries. `tx`'s body row is `<...>`, so a transaction body may perform
-## whatever the surrounding program installed (`Log`, `Time`, another `Db`) and
-## those effects escape through `tx` rather than being swallowed.
+## Runs queries. A `tx` body may perform any surrounding effect; those escape through `tx`.
 effect Db where {
   run:   { q: Query } -> Result Rows DbError <Db>,
   apply: { q: Query } -> Result { changed: Int } DbError <Db>,
   tx:    { body: {} -> Result 'a DbError <...> } -> Result 'a DbError <Db>,
 }
 
-## ── Building a query ────────────────────────────────────────────────────────
+# ── Building a query ────────────────────────────────────────────────────────
 
 ## A query with no parameters.
 pub let sql: { text: Str } -> Query = { text } -> { sql = text, params = [] }
 
-## Append one bound parameter. Dot-chains:
-##
-##   sql { text = "select * from users where id = ? and active = ?" }
-##     .bind { v = DbInt { val = 7 } }
-##     .bind { v = DbBool { val = True } }
+## Appends one bound parameter: `sql { text = "… where id = ?" }.bind { v = DbInt { val = 7 } }`.
 pub let bind: { q: Query, v: DbValue } -> Query = { q, v } ->
   { sql = q.sql, params = seq::push { xs = q.params, x = v } }
 
@@ -102,7 +56,7 @@ pub let bind: { q: Query, v: DbValue } -> Query = { q, v } ->
 pub let bind_all: { q: Query, vs: [DbValue] } -> Query = { q, vs } ->
   { sql = q.sql, params = seq::concat { xs = q.params, ys = vs } }
 
-## ── Reading a result set ────────────────────────────────────────────────────
+# ── Reading a result set ────────────────────────────────────────────────────
 
 ## How many rows came back.
 pub let row_count: { rows: Rows } -> Int = { rows } -> seq::size { xs = rows.rows }
@@ -110,10 +64,7 @@ pub let row_count: { rows: Rows } -> Int = { rows } -> seq::size { xs = rows.row
 ## True when nothing came back — the common "not found" check.
 pub let is_empty: { rows: Rows } -> Bool = { rows } -> row_count { rows = rows } == 0
 
-## The index of a column, by name. `None` when the result set has no such column.
-##
-## Resolve this ONCE and index rows with it; that is the whole reason `Rows`
-## keeps its column names separately.
+## The index of a column by name, or `None`. Resolve it once and index rows with it.
 pub let col_index: { rows: Rows, name: Str } -> Option Int = { rows, name } ->
   seq::find_index { xs = rows.cols, p = { x } -> x == name }
 
@@ -123,16 +74,12 @@ pub let value_at: { rows: Rows, row: Int, col: Int } -> Option DbValue = { rows,
     None -> None
     Some { val = r } -> seq::get { xs = r, i = col }
 
-## An empty result set with no columns — what a write answers with, and what a
-## mock with nothing to say returns.
+## An empty result set with no columns.
 pub let no_rows: {} -> Rows = {} -> { cols = [], rows = [] }
 
-## ── Dot-chain parity ───────────────────────────────────────────────────────
+# ── Dot-chain parity ───────────────────────────────────────────────────────
 
-## Inherent methods so every receiver-taking free function above also reads as
-## `q.bind {…}`, the way `Request` does for `req.with_header {…}`. Each one
-## delegates to the free function; the block is ergonomics, not a second
-## implementation.
+## Dot-chain methods for `Query`, delegating to the free functions.
 impl Query where {
   bind = { it: 'it, v: DbValue } -> bind { q = it, v = v },
   bind_all = { it: 'it, vs: [DbValue] } -> bind_all { q = it, vs = vs },
@@ -145,28 +92,17 @@ impl Rows where {
   value_at = { it: 'it, row: Int, col: Int } -> value_at { rows = it, row = row, col = col },
 }
 
-## ── A database that is not a database ──────────────────────────────────────
+# ── A database that is not a database ──────────────────────────────────────
 
-## Answers every query with no rows, and accepts every write.
-##
-## For a test that exercises a route's SHAPE rather than its data: the handler
-## runs, the query is built and passed, and nothing needs a driver. `tx` runs its
-## body, so a transactional path is still exercised.
+## Test `Db`: answers every query with no rows and accepts every write; `tx` runs its body.
 impl Db for MockDb where {
   run   = { q } -> Ok { val = no_rows {} },
   apply = { q } -> Ok { val = { changed = 0 } },
   tx    = { body } -> body {},
 }
 
-## `MockDb` with answers, matched on the query text.
-##
-## The first entry whose `sql` is a substring of the query's text answers it; a
-## query matching nothing gets no rows. Substring rather than equality so a test
-## can key on the distinguishing fragment (`"from users"`) instead of restating
-## the whole statement and breaking when a column is added.
-##
-## Matching on TEXT is right here and nowhere else: this is test data keyed by
-## what the test wrote, not a dispatch decision about a type.
+## `MockDb` with canned answers: the first entry whose `sql` is a SUBSTRING of the query answers it.
+## A query matching nothing gets no rows.
 impl Db for MockDbWith { answers: [{ sql: Str, rows: Rows }] } where {
   run = { q } -> match seq::find { xs = answers, p = { x } -> str::contains { s = q.sql, substring = x.sql } } is
     Some { val = hit } -> Ok { val = hit.rows }
@@ -175,35 +111,18 @@ impl Db for MockDbWith { answers: [{ sql: Str, rows: Rows }] } where {
   tx    = { body } -> body {},
 }
 
-## A database that refuses, for the path nobody tests.
-##
-## An error path is as much a behaviour as a success path, and it is the one that
-## is usually only discovered in production. This makes it a one-line performer
-## swap.
+## Test `Db` whose every operation fails with `error`.
 impl Db for FailingDb { error: DbError } where {
   run   = { q } -> Err { error = error },
   apply = { q } -> Err { error = error },
   tx    = { body } -> Err { error = error },
 }
 
-## ── Rows ⇄ records, through the codec ──────────────────────────────────────
-##
-## A row is a WIRE SHAPE, so reading records out of a result set is the codec's
-## job and not a second bespoke mapper. `RowC` is a `Format` with Tier-2 impls,
-## exactly as `JsonC` and `QueryC` are, which means `Encode`/`Decode` derivation,
-## field-name transforms and nested shapes all come for free.
-##
-## `'in = Rows` AT EVERY LEVEL, the way `QueryC` uses `[{ k, v }]` for all of
-## them. One type covers the three things a decoder descends through:
-##
-##   the whole result set   N rows, N columns
-##   one row                1 row,  N columns
-##   one cell               1 row,  1 column
-##
-## So descending is projection, never conversion: `decode_sequence` splits the
-## set into single-row sets, `decode_record_field` narrows to one column, and the
-## scalar decoders read the single remaining cell.
+# ── Rows ⇄ records, through the codec ──
+# `RowC` is a `Format` like `JsonC`; `'in = Rows` at every level (set, row, cell), so
+# descending is projection: sequence splits rows, record field narrows columns, scalars read the cell.
 
+## The codec `Format` for reading records out of a result set (`Rows`).
 pub type RowC = {
   shared: SharedConfig,
 }
@@ -249,8 +168,7 @@ impl DecodeScalar for RowC having 'in = Rows where {
     None -> Err { error = no_cell { ctx = ctx, expected = "Int" } },
   decode_float = { it, val, ctx } -> match only_cell { rows = val } is
     Some { val = DbFloat { val = f } } -> Ok { val = f }
-    ## An integer column read as a Float is a widening, not a mismatch — a
-    ## database is free to hand back `1` for a value the schema calls numeric.
+    # An integer read as a Float is a widening, not a mismatch.
     Some { val = DbInt { val = n } } -> Ok { val = float::from_int { n = n } }
     Some { val = v } -> Err { error = decode_err { ctx = ctx, expected = "Float", got = kind_of { v = v } } }
     None -> Err { error = no_cell { ctx = ctx, expected = "Float" } },
@@ -260,8 +178,7 @@ impl DecodeScalar for RowC having 'in = Rows where {
     None -> Err { error = no_cell { ctx = ctx, expected = "Str" } },
   decode_bool = { it, val, ctx } -> match only_cell { rows = val } is
     Some { val = DbBool { val = b } } -> Ok { val = b }
-    ## SQLite has no boolean type and answers 0/1, which is the common case
-    ## rather than an exotic one.
+    # SQLite has no boolean type and answers 0/1.
     Some { val = DbInt { val = n } } -> Ok { val = n != 0 }
     Some { val = v } -> Err { error = decode_err { ctx = ctx, expected = "Bool", got = kind_of { v = v } } }
     None -> Err { error = no_cell { ctx = ctx, expected = "Bool" } },
@@ -287,10 +204,8 @@ impl DecodeScalar for RowC having 'in = Rows where {
 }
 
 impl DecodeRecord for RowC having 'in = Rows where {
-  ## Narrow the view to one column, by name. A column the result set does not
-  ## have yields the EMPTY view, which `decode_option` reads as `None` and every
-  ## other decoder reports as "no column here" — the same convention `QueryC`
-  ## uses for a parameter the query never mentioned.
+  ## Narrows the view to one column by name; a missing column yields the empty view.
+  ## `decode_option` reads that as `None`; other decoders report "no column here".
   decode_record_field = { it, val, key, ctx } -> match col_index { rows = val, name = key } is
     None -> Ok { val = no_rows {} }
     Some { val = c } -> Ok { val = {
@@ -303,8 +218,7 @@ impl DecodeRecord for RowC having 'in = Rows where {
 }
 
 impl DecodeSequence for RowC having 'in = Rows where {
-  ## One element per row, each still carrying the column names so a record
-  ## decoder inside can find its fields by name.
+  ## One element per row, each keeping the column names so fields resolve by name.
   decode_sequence = { it, val, ctx } -> Ok { val = seq::map {
     xs = val.rows,
     f = { x } -> { cols = val.cols, rows = [x] },
@@ -312,73 +226,28 @@ impl DecodeSequence for RowC having 'in = Rows where {
 }
 
 impl DecodeOption for RowC having 'in = Rows where {
-  ## Absent and NULL are the same answer to "is there a value here". A column
-  ## the query did not select is as much a `None` as one that selected NULL.
+  ## A missing column and a NULL both decode as `None`.
   decode_option = { it, val, ctx } -> match only_cell { rows = val } is
     None -> Ok { val = None }
     Some { val = DbNull } -> Ok { val = None }
     Some { val = _ } -> Ok { val = Some { val = val } },
 }
 
-## ── Reading records out of a result set ────────────────────────────────────
+# ── Reading records out of a result set ────────────────────────────────────
 
-## The first row as a record, or `None` when nothing came back.
-##
-##   match rows.first_as {} is
-##     Some { val = Ok { val = user } } -> …    ## a User
-##     Some { val = Err { error = e } } -> …    ## the row did not fit
-##     None -> …                                ## no rows
+## The first row as a one-row `Rows`, or `None` when nothing came back.
 pub let first_row: { rows: Rows } -> Option Rows = { rows } ->
   if is_empty { rows = rows } then None
   else match seq::get { xs = rows.rows, i = 0 } is
     Some { val = r } -> Some { val = { cols = rows.cols, rows = [r] } }
     None -> None
 
-## ── SQLite, the first real driver ───────────────────────────────────────────
-##
-## SQLite because it needs no server: the whole surface above becomes provable
-## against a real database in a unit test, with `:memory:` and no fixture. The
-## natives underneath speak JDBC, so the second driver is a connection string
-## rather than a rewrite.
-##
-## THE CONNECTION IS NOT A VALUE. `initialize_scope` opens it and
-## `finalize_scope` closes it, and in between it lives in the runtime, keyed by
-## the context. A guest that could hold the handle could use it after its scope
-## ended with no way to know it had; here the only reachable connection is the
-## open one. It is also why the natives below take no `db` argument.
-##
-## ONE CONNECTION PER SCOPE, shared by every thread inside it, because that is
-## what the scope means. A connection per thread was the first design and it is
-## wrong for the case that matters: a server handler runs on a thread the server
-## owns, and `:memory:` is per connection, so a handler opening its own would
-## query a different, empty database and answer no rows with no error at all.
-##
-## So operations in a scope SERIALIZE, and a `tx` holds the connection from
-## begin to commit — without that a concurrent query would read rows that may
-## yet be rolled back. Waiting is normal and is not a failure; waiting forever
-## is, so a wait that runs out answers `DbTimeout` rather than pinning the caller.
-## The fix for the serializing is a POOL of connections (W-D4), not a connection
-## per thread.
-##
-## A thread that never entered a scope — a handler — uses the one open scope.
-## If SEVERAL are open it is told so rather than given one of them: there is no
-## database that operation could mean, and picking the first would make a route
-## read from whichever happened to be opened earliest.
-
-## Open the database at `path` for the scope of the `perform`.
-##
-##   perform SqliteDb { path = ":memory:" } in do
-##     Db.apply { q = sql { text = "create table t (a int)" } }
-##
-## `":memory:"` is a fresh private database per scope — what a test wants.
-## A path that cannot be opened makes every operation in the scope answer
-## `DbUnavailable`: `initialize_scope` has nowhere to put a failure, so rather
-## than crash the program at `perform` it leaves no connection open, and the
-## first operation says so. That is the one place this design pays for the
-## connection not being a value.
-##
-## Nesting two `SqliteDb` scopes is allowed and they are separate databases —
-## the inner one answers inside it, and the outer is still open afterwards.
+# ── SQLite, the first real driver (JDBC underneath) ──
+# The connection is not a value: it lives in the runtime per scope, so it cannot outlive it.
+# One connection per scope, shared by its threads (`:memory:` is per connection); pooling is W-D4.
+## Opens the database at `path` for the `perform`'s scope; `":memory:"` is a fresh private database.
+## An unopenable path makes every operation answer `DbUnavailable`; a wait that runs out, `DbTimeout`.
+## One connection per scope, so operations serialize; nested `SqliteDb` scopes are separate databases.
 impl Db for SqliteDb { path: Str } where {
   initialize_scope = {} -> do
     __native_db_sqlite_scope_open { path = path }
@@ -388,17 +257,9 @@ impl Db for SqliteDb { path: Str } where {
   run   = { q } -> __native_db_query { sql = q.sql, params = q.params },
   apply = { q } -> __native_db_exec { sql = q.sql, params = q.params },
 
-  ## Begin, run, then commit or roll back.
-  ##
-  ## A nested `tx` JOINS the enclosing one instead of opening a savepoint: the
-  ## promise is that a body commits together or not at all, and an inner
-  ## transaction that could roll back on its own would leave the outer one half
-  ## applied. So the inner `tx` neither commits nor rolls back — `began.nested`
-  ## says it did not begin anything — and the outer one decides for both.
-  ##
-  ## A body that fails rolls back and the body's error is what comes out. A
-  ## rollback that itself fails is not reported, because it would replace the
-  ## reason the transaction was abandoned with a fact about the abandoning.
+  # `began.nested` says whether this `tx` began anything; a nested one did not.
+  ## Begins, runs the body, then commits, or rolls back and returns the body's error.
+  ## A nested `tx` joins the enclosing one (no savepoint); a failed rollback is not reported.
   tx = { body } -> match __native_db_begin {} is
     Err { error = e } -> Err { error = e }
     Ok { val = began } -> match body {} is

@@ -222,6 +222,16 @@ class HoverMatchAndAliasTest {
         // Free-fn `println` keeps `<Log>`; the inherent-method hover drops the row.
         val h = hoverAt(httpProg, ".send", 1) // cursor on the `send` token
         assertTrue(h.contains("send")) { "sanity: hover should be about send, got: $h" }
+        // …and on WHAT: `.send` is a method of Request, so the hover names its
+        // receiver rather than an already-applied `{}`.
+        assertTrue(h.contains("{ it: Request }")) {
+            "the .send hover must name its receiver `{ it: Request }`, got: $h"
+        }
+        // …and on WHAT: `.send` works on a Request, so the receiver is shown,
+        // not the call site's already-applied `{}`.
+        assertTrue(h.contains("{ it: Request }")) {
+            "the .send hover must name its receiver `{ it: Request }`, got: $h"
+        }
         assertTrue(h.contains("<Http")) {
             "the .send method call performs Http — its hover must carry the <Http> effect row " +
                 "(not merely the HttpError return type), got: $h"

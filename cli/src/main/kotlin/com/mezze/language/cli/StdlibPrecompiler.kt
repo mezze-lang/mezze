@@ -132,67 +132,18 @@ fun main(args: Array<String>) {
         .buildDependencyGraph(functions.values)
 
     val initTime = (System.nanoTime() - startTime) / 1_000_000
+    if (precompiled.phaseTimings.isNotEmpty()) {
+        println("Stdlib phases: " + precompiled.phaseTimings.entries.joinToString(", ") { "${it.key}=${it.value}ms" })
+    }
     println("Stdlib compiled: ${functions.size} functions, ${performers.size} performers, " +
         "${dependencyGraph.size} nodes in dep graph (${initTime}ms)")
 
-    // Eagerly typecheck every stdlib `.mz` file so its decls — especially
-    // `effect` and `performer` declarations — show up in stdlib.sqlite's
-    // `decls` table. Without this, the V0505 "did you mean to import this
-    // effect?" code action can't surface stdlib effects (Log, FileSystem,
-    // etc.) because they were never typechecked during prelude init.
-    // The cost is small (~5-10s); the alternative is lazy typecheck at
-    // import time, which means stdlib effects are invisible to the
-    // import-hints query until someone happens to use them.
-    //
-    // We go through `ModuleLoader.loadModuleWithDependencies` and feed each
-    // result into `ModuleTypeChecker.typeCheckModule()` — the same call the
-    // typechecker uses when user code imports a module. That populates
-    // ModuleTypeChecker.globalCache, which the StorePopulator loop below
-    // reads from to write the `decls` rows.
-    val stdlibEagerStart = System.nanoTime()
-    val resolver = ModuleResolver.create()
-    val stdlibRoot = File(projectRoot, "stdlib/std")
-    if (stdlibRoot.isDirectory) {
-        val loader = com.mezze.language.typechecker.module.ModuleLoader(resolver)
-        val typeChecker = com.mezze.language.typechecker.module.ModuleTypeChecker(
-            moduleResolver = resolver
-        )
-        var eagerCount = 0
-        stdlibRoot.walkTopDown().filter { it.isFile && it.extension == "mz" }.forEach { mzFile ->
-            // Convert filesystem path "stdlib/std/effects/log.mz" → module path
-            // "std::effects::log".
-            val rel = mzFile.toRelativeString(stdlibRoot.parentFile)
-            val modPath = rel.removeSuffix(".mz").replace(File.separatorChar, ':').replace(":", "::")
-                .replace("::::", "::")
-            try {
-                val loadResult = loader.loadModuleWithDependencies(modPath)
-                if (loadResult is com.mezze.language.typechecker.module.ModuleLoadResult.Success) {
-                    typeChecker.typeCheckModule(loadResult.module)
-                    eagerCount++
-                } else if (loadResult is com.mezze.language.typechecker.module.ModuleLoadResult.Failure) {
-                    // A parse or module-load failure inside stdlib is never
-                    // "best-effort" — the file WILL be re-parsed at user-code
-                    // typecheck time (transitively through imports) and will
-                    // fail there anyway, or worse: it produces a malformed
-                    // AST that silently corrupts ability resolution for user
-                    // code (see #512). Fail loud at compile time. Individual
-                    // "work-in-progress" files should be excluded via the
-                    // manifest, not by silently swallowing errors here.
-                    val msg = loadResult.errors.joinToString("; ") { it.message ?: it.javaClass.simpleName }
-                    System.err.println("[StdlibPrecompiler] $modPath failed to load: $msg")
-                    throw RuntimeException("Stdlib module '$modPath' failed to load: $msg")
-                }
-            } catch (e: Throwable) {
-                // Surface (don't swallow). A parse error at this stage means
-                // downstream compilation will use a broken AST — see #512 where
-                // a stdlib `!` slipped past this silent catch and cascaded.
-                System.err.println("[StdlibPrecompiler] $modPath eager-typecheck failed: ${e.javaClass.simpleName}: ${e.message}")
-                throw e
-            }
-        }
-        println("Eagerly typechecked $eagerCount stdlib modules " +
-            "in ${(System.nanoTime() - stdlibEagerStart) / 1_000_000}ms")
-    }
+    // Every stdlib module is already typechecked AND lowered by PrecompiledStdlib's
+    // from-source path (it reads `std/MANIFEST.txt` before lowering), so
+    // ModuleTypeChecker.globalCache — which the StorePopulator loop below reads
+    // for the `decls` rows — holds all of them. This used to re-walk the stdlib
+    // directory here, after lowering, to typecheck the modules the prelude did
+    // not reach; that left those modules typechecked but never lowered.
 
     // Write to SQLite
     val outputFile = File(outputPath)
@@ -312,7 +263,8 @@ fun main(args: Array<String>) {
         }
 
         val fileSize = outputFile.length() / 1024
-        println("Wrote ${outputFile.name} (${fileSize}KB) with prelude context")
+        println("Wrote ${outputFile.name} (${fileSize}KB) with prelude context " +
+            "[${(System.nanoTime() - startTime) / 1_000_000}ms since start]")
     } finally {
         store.close()
     }
@@ -340,7 +292,12 @@ fun main(args: Array<String>) {
     if (tooLarge.isNotEmpty()) {
         println("Not preloaded (typed form over ${MAX_SHIPPED_MODULE_BYTES / 1_000_000} MB): ${tooLarge.map { it.modulePath }.sorted()}")
     }
-    val shippedTyped = precompiled.stdlibTypedModules + checked.associate { it.typedModule!!.hash to it.typedModule!! }
+    // `stdlibTypedModules` is now the WHOLE stdlib (it is the lowered set), so it
+    // carries `std::syntax` and `std::codebase` too — the size filter above has
+    // to apply to it as well, or the snapshot grows by their 227 MB.
+    val tooLargeHashes = tooLarge.mapNotNull { it.typedModule?.hash }.toSet()
+    val shippedTyped = precompiled.stdlibTypedModules.filterKeys { it !in tooLargeHashes } +
+        checked.associate { it.typedModule!!.hash to it.typedModule!! }
     // The WASM image bakes the whole snapshot into the heap, and the typed
     // modules are ~22 MB of that — a mono fast-path the browser does not need
     // (it type-checks user code against the stamped + lowered stdlib either way).
@@ -379,7 +336,8 @@ fun main(args: Array<String>) {
     // written down as data for it to read back. See NativeSignatures.export.
     snapshotFile.resolveSibling("native-signatures.tsv")
         .writeText(com.mezze.language.truffleir.NativeSignatures.export())
-    println("Wrote ${snapshotFile.name} (${snapshotFile.length() / 1024}KB) + fingerprint — SQLite-free snapshot")
+    println("Wrote ${snapshotFile.name} (${snapshotFile.length() / 1024}KB) + fingerprint — SQLite-free snapshot " +
+        "[${(System.nanoTime() - startTime) / 1_000_000}ms since start]")
     println("Wrote native-signatures.tsv (${com.mezze.language.truffleir.NativeSignatures.size()} natives)")
 }
 

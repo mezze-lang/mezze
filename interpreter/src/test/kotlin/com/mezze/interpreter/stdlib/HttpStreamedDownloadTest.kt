@@ -38,9 +38,7 @@ class HttpStreamedDownloadTest {
     private val block = "0123456789abcdefghij".repeat(1000)
 
     private val head = """
-        use std::effects::http::{ Request, Response, Method, HttpClient, SimpleHttpClient, HttpDownload, SimpleHttpDownload, request, format_error, body_str, response_stream, with_download, default_http_config }
-        use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig }
-        use std::effects::http_server::{ route, otherwise, Matched }
+        use std::effects::http::{ Request, Response, Method, request, format_error, body_str, response_stream, HttpClient, SimpleHttpClient, HttpDownload, SimpleHttpDownload, with_download, default_http_config, HttpServer, HelidonHttpServerWith, ServerConfig, route, otherwise, Matched }
         use std::collections::{ bytes, iter, map, seq }
         use std::int
 
@@ -48,7 +46,7 @@ class HttpStreamedDownloadTest {
           status = 404, headers = map::empty {}, body = bytes::from_str { s = "nope" },
           url = req.url, chunks = None,
         }
-        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_logs = False }
+        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_print_log = Off }
 
         ## A 200 KB body as ten 20 KB chunks, from a seq so the element type is
         ## Bytes throughout — `iter::map` from a range of Int into Bytes hits a

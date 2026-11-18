@@ -8,9 +8,7 @@
 # Run:  mez build --native && ./.build/server_smoke-native
 
 use std::effects::log::{ println, Console }
-use std::effects::http::{ HttpClient, SimpleHttpClient, Request, Response, request, format_error, body_str, with_query, ToQuery, Method }
-use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig }
-use std::effects::http_server::{ route, otherwise, Matched, FromQuery, BadInput }
+use std::effects::http::{ Request, Response, request, format_error, body_str, with_query, ToQuery, Method, HttpClient, SimpleHttpClient, HttpServer, HelidonHttpServerWith, ServerConfig, route, otherwise, Matched, FromQuery, BadInput }
 use std::collections::map
 use std::collections::bytes
 use std::int
@@ -48,7 +46,7 @@ let fetch: { url: Str } -> Str <HttpClient> = { url } ->
             Err { error = e } -> format_error { err = e }
         Err { error = e } -> format_error { err = e }
 
-let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2, stream_bodies = False, helidon_logs = False }
+let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2, stream_bodies = False, helidon_print_log = Off }
 
 let main = {} -> perform Console in
     perform HelidonHttpServerWith { config = any_port } in

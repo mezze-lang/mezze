@@ -421,6 +421,14 @@ private fun compileModule(
     val stdlibFns = PrecompiledStdlib.preloweredFunctions +
         PrecompiledDeps.preloweredFunctions   // #46: serve cached dep IR, don't re-lower
     val stdlibDictMethods = PrecompiledStdlib.preloweredDictMethods
+    // Non-lambda stdlib lets (`pub let toggle_bool = toggle`) are prelowered as
+    // thunks; the compiler must know them to keep their call sites off
+    // CallDirect — see `TypedASTCompiler.preloweredThunkHashes`.
+    val stdlibThunkHashes = PrecompiledStdlib.stdlibTypedModules.values.asSequence()
+        .flatMap { it.decls.asSequence() }
+        .filterIsInstance<TypedLetDecl>()
+        .filter { it.value !is TypedLambda }
+        .mapTo(HashSet()) { it.hash }
     val compiler = TypedASTCompiler(
         abilityImpls = allAbilityImpls,
         stdlibHashes = preludeHashes,
@@ -428,6 +436,7 @@ private fun compileModule(
         monoStripBySiteLoc = monoResult.stripBySiteLoc,
         preloweredFunctions = stdlibFns,
         preloweredDictMethods = stdlibDictMethods,
+        preloweredThunkHashes = stdlibThunkHashes,
         substitution = substitution,
         callSiteArrows = resolvedCallSiteArrows,
         decodeOpBySite = decodeOpBySite,

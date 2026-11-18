@@ -1,14 +1,5 @@
-## URL codec — query-parameter encoding to `Str`.
-##
-## `UrlC` is a partial-capability format: only scalars and no-payload
-## variants render as a single URL query value. Records, lists, maps,
-## and payloaded variants aren't representable — the format author omits
-## the corresponding Tier-2 impls, and any containing type gets a compile
-## error at the offending field path (see `docs/codec/redesign-2026-09.md`
-## §"Partial-capability formats").
-##
-## The `Url` type + `parse` / `render` sit above the ability layer — they
-## are format-neutral native primitives, unchanged by the codec redesign.
+## URL codec: encodes scalars and no-payload variants as a single query-parameter `Str`.
+## Records, lists, maps and payloaded variants are a compile error at the offending field path.
 use std::codec::core::{
   Format,
   EncodeScalar, EncodeVariant, EncodeOption,
@@ -23,14 +14,13 @@ use std::nat
 use std::char
 use std::str
 
-## Structured URL (native-backed)
+# Partial capability: the Tier-2 impls for structured shapes are deliberately omitted.
 
-## Structured URL. Produced by `parse`, consumed by `render`. Absent
-## components (no scheme, no userinfo, no port, etc.) are `None`. `path`
-## is `""` when the URI has no path component (RFC 3986 §3.3 allows this).
-##
-## The record shape is fixed by `interpreter/.../io/UrlNatives.java` and
-## must not drift from it.
+# Structured URL (native-backed)
+
+# Shape is fixed by `UrlNatives.java`; must not drift from it.
+## Structured URL produced by `parse`; absent components are `None`.
+## `path` is `""` when the URI has no path.
 pub type Url = {
   scheme: Option Str,
   user_info: Option Str,
@@ -41,35 +31,27 @@ pub type Url = {
   fragment: Option Str,
 }
 
-## Percent-encode a single URL component (path segment or query value).
-## Matches JS `encodeURIComponent` / RFC 3986 unreserved set.
+## Percent-encode one URL component (path segment or query value), like JS `encodeURIComponent`.
 pub let url_encode_component: { s: Str } -> Str = { s } ->
   __native_url_encode_component { s = s }
 
-## Inverse of `url_encode_component`. Decodes %xx sequences and `+`
-## (form-encoded space) back to their UTF-8 source.
+## Decode `%xx` sequences and `+` (as space) in a URL component.
 pub let url_decode_component: { s: Str } -> Str = { s } ->
   __native_url_decode_component { s = s }
 
-## Parse a URL string into a `Url` record. Backed by `java.net.URI` which
-## follows RFC 2396 with the RFC 3986 clarifications the JDK adds.
+## Parse a URL string into a `Url` record (via `java.net.URI`).
 pub let parse
   : { s: Str }
   -> Result Url { path: [Str], reason: Str, input_ref: Option Str }
   = { s } -> __native_url_parse { s = s }
 
-## Render a `Url` record back to a string. Inverse of `parse` for
-## well-formed inputs — normalises escaping / case but preserves scheme,
-## host, port, path, query, and fragment identity.
+## Render a `Url` record back to a string; inverse of `parse` up to escaping/case normalisation.
 pub let render: { url: Url } -> Str = { url } -> __native_url_render { url = url }
 
-## Config type
+# Config type
 
-## URL query-parameter config. The output type is `Str` — a single URL
-## parameter value. Values are NOT percent-encoded here; encoding happens
-## at the consumer (e.g. `with_query` in http.mz) so the same value can
-## also be embedded in path segments or other contexts that handle escaping
-## differently.
+## URL query-parameter codec config; output is one parameter value as `Str`.
+## Values are NOT percent-encoded here; the consumer (e.g. `with_query`) escapes them.
 pub type UrlC = {
   shared: SharedConfig,
 }
@@ -78,12 +60,12 @@ pub let url_default: UrlC = {
   shared = { field_transform = Identity },
 }
 
-## Format link
+# Format link
 
 impl Format for UrlC having 'out = Str where {
 }
 
-## Tier 2: encode
+# Tier 2: encode
 
 impl EncodeScalar for UrlC having 'out = Str where {
   encode_int   = { it, val, ctx } -> int::to_str { n = val },
@@ -108,11 +90,9 @@ impl EncodeOption for UrlC having 'out = Str where {
     None -> "",
 }
 
-## No `EncodeRecord`, `EncodeSequence`, `EncodeMapping` for `UrlC` — a single URL
-## parameter value can't carry structure. Types containing those shapes
-## will fail auto-derivation at the offending field path.
+# No record/sequence/mapping encoders: a single parameter value can't carry structure.
 
-## Tier 2: decode
+# Tier 2: decode
 
 impl DecodeScalar for UrlC having 'in = Str where {
   decode_int = { it, val, ctx } -> match int::from_str { s = val } is
@@ -185,7 +165,7 @@ impl DecodeOption for UrlC having 'in = Str where {
     else Ok { val = Some { val = val } },
 }
 
-## Tier 4: sugar abilities + blankets
+# Tier 4: sugar abilities + blankets
 
 ## Encode any scalar-shaped value to a URL query-parameter string.
 ability ToUrl for 'a where {
@@ -198,8 +178,7 @@ impl ToUrl for 'a where {
   url_with: { it: 'a, config: UrlC } with Encode UrlC 'a -> Str = { it, config } -> it.encode { config = config },
 }
 
-## Decode a value from a URL query-parameter string via inherent method
-## syntax (`Type.from_url { it = raw }`).
+## Decode a value from a URL query-parameter string: `Type.from_url { it = raw }`.
 ability FromUrl 'a for 'in where {
   from_url:      { it: 'in }               -> Result 'a DecodeError,
   from_url_with: { it: 'in, config: UrlC } -> Result 'a DecodeError,

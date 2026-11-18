@@ -2,10 +2,8 @@ use std::abilities::compare::{ Eq, Ord, Hash, structural_hash }
 use std::abilities::convert::{ Into, TryInto }
 use std::int
 
-## Structural hash, paired with the `Eq` below.
-## `Eq` and `Hash` are written together or not at all: a hash container
-## buckets by one and compares by the other, so a value whose hash
-## disagrees with its equality is silently kept twice.
+# `Eq` and `Hash` are written together or not at all: a hash that disagrees
+# with equality makes a hash container keep a value twice.
 
 
 impl Ord for Char where {
@@ -81,7 +79,7 @@ pub let is_lower: { c: Char } -> Bool = { c } -> __native_char_is_lower { c = c 
 ## True if two characters are equal.
 pub let eq: { a: Char, b: Char } -> Bool = { a, b } -> __native_char_eq { a = a, b = b }
 
-## Convert a digit char to its numeric value in the given radix. Returns None if invalid.
+## Numeric value of a digit char in `radix`; None if not a valid digit.
 pub let digit_to_int: { c: Char, radix: Int } -> Option Int = { c, radix } ->
   __native_char_digit_to_int { c = c, radix = radix }
 
@@ -96,8 +94,7 @@ impl Char where {
   is_upper = { it } -> __native_char_is_upper { c = it },
   is_lower = { it } -> __native_char_is_lower { c = it },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
+  # dot-chain parity: so `x.op {}` works for every receiver-taking free function.
   is_alpha_numeric = { it } -> is_alpha_numeric { c = it },
   digit_to_int = { it, radix } -> digit_to_int { c = it, radix = radix },
 }

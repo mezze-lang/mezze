@@ -15,7 +15,8 @@ impl Mut for LocalMut where {
   loop = { cond, body } -> __native_mutation_loop { cond = cond, body = body },
 }
 
-## Debug handler that logs mutation operations via content-hash addressing.
+# Logging is via content-hash addressing.
+## Debug handler that logs mutation operations.
 impl Mut for DebugLocalMut where {
   mutate = { act } -> __native_debug_mutation_mutate { act = act },
   loop = { cond, body } -> __native_debug_mutation_loop { cond = cond, body = body },
@@ -574,11 +575,9 @@ pub let for_range1
 pub let seq_with_capacity: { capacity: Int } -> MutSeq 'a <Mut> = { capacity } ->
   Mut.mutate { act = {} -> __native_mut_seq_with_capacity { capacity = capacity } }
 
-## `.size {}` and `.is_empty {}` on the mutable containers, under `Mut`.
-##
-## Inherent methods rather than an ability: the pure `Sized` already declares
-## `size` and `is_empty`, and one operation name means one ability in a scope.
-## A mutable container cannot implement `Sized` — reading its size performs `Mut`.
+# Inherent methods rather than an ability: the pure `Sized` already declares
+# `size` and `is_empty`, and one operation name means one ability in a scope.
+## `.size {}` and `.is_empty {}` on a MutSeq, performing `Mut` (so not via `Sized`).
 impl MutSeq 'a where {
   size = { it } -> size { seq = it },
   is_empty = { it } -> size { seq = it } == 0,

@@ -1,81 +1,26 @@
 use std::collections::seq
 use std::int
 
-## Data parallelism: one runtime primitive, everything else derived.
-##
-## Runtime primitive:
-##   Parallel.join { l, r } — run l and r in parallel, return both.
-##
-## Every derived combinator (map, reduce, filter, find, ...) is a
-## recursive binary split over the input. When the sub-batch drops
-## to `min_chunk` (default 1024, tunable via the `With` variants)
-## the leaf runs sequentially via the corresponding seq:: combinator.
-##
-## ## `min_chunk` IS TUNED FOR COMPUTE, AND WILL SERIALISE YOUR I/O
-##
-## The 1024 default is right for CPU-bound work — splitting below it costs
-## more than it saves. It also means **any workload of fewer than 1024 items
-## is ONE chunk and never forks at all**, which for I/O-bound work is the
-## difference between waiting in parallel and waiting in series.
-##
-## Measured (`bench/cases/concurrent_map_compare`, 160 items each parked 2ms):
-##
-##     sequential                               336ms
-##     chunk_fold, default min_chunk = 1024     331ms   <- no parallelism
-##     async par_map, max_concurrent = 16        21ms
-##     chunk_fold, min_chunk = 1                  6ms   <- fastest
-##
-## Fifty-five times, from one field. So: `LoomParallelWith { max_concurrent =
-## 16, min_chunk = 1 }` for work that WAITS, and the plain `LoomParallel` for
-## work that computes. The same benchmark's CPU half is the other direction —
-## 20,000 items of 400 ops: chunk_fold 63ms, sequential 174ms, and
-## fork-per-element 241ms, i.e. SLOWER than not forking.
-##
-## There is deliberately no single default that serves both, because the right
-## threshold is a property of the body, which this module cannot see.
-##
-## Backends (mirror the Async handler naming — pick your substrate):
-##   - LoomParallel      — one Loom virtual thread per fork. Default;
-##     cheap forks, and the right substrate for I/O-bound work — but only
-##     with `min_chunk` lowered, per the warning above. On the default
-##     threshold an I/O workload under 1024 items runs sequentially.
-##   - OSThreadParallel  — one platform Truffle thread per fork.
-##     Best for CPU-bound work where Loom carrier mounting overhead
-##     would show up. More expensive per spawn (~50µs vs Loom's ~14µs)
-##     but avoids virtual-thread scheduler churn.
-##
-## Both backends bracket per-scope state via the impl-only
-## initialize_scope / finalize_scope convention.
+# Measured (160 items parked 2ms): min_chunk=1024 331ms (no forks), min_chunk=1 6ms; but for CPU
+# work fork-per-element is slower than sequential. The threshold depends on the body, so no one default.
+# Backends bracket per-scope state via initialize_scope / finalize_scope.
+## Data parallelism over one primitive, `join`; combinators split in half down to `min_chunk` (default 1024).
+## Inputs under `min_chunk` never fork; for I/O use `LoomParallelWith { max_concurrent = 16, min_chunk = 1 }`.
 effect Parallel where {
-  ## Fork two computations. The runtime decides scheduling; the caller
-  ## just declares "these two are independent."
+  ## Runs `l` and `r` in parallel and returns both results.
   join: { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: 'a, r: 'b } <Parallel>
 }
 
-## LoomParallel — one Loom virtual thread per fork. Default.
-## Every Parallel.join spawns a fresh Loom virtual thread for the
-## right side (left runs inline on caller). Virtual threads are cheap
-## (~14µs spawn on Loom), scheduled M:N onto the JDK's default
-## ForkJoinPool carriers. Great for I/O-bound work and general use.
-##
-## Mirrors LoomAsync from std::effects::async.
+## Default backend: each `join` runs `r` on a fresh Loom virtual thread and `l` inline.
+## `min_chunk` is 1024, so I/O-bound work under 1024 items runs sequentially.
 impl Parallel for LoomParallel where {
   initialize_scope = {} -> __native_loom_parallel_init { max_concurrent = 0, min_chunk = 1024 },
   finalize_scope = {} -> __native_loom_parallel_finalize {},
   join = { l, r } -> __native_loom_parallel_join { l = l, r = r },
 }
 
-## Backpressure cap + minimum-chunk-size hint. At most `max_concurrent`
-## join sub-tasks run at once (semaphore-based) — useful when you'd
-## otherwise spawn thousands of vthreads and starve I/O. Set
-## `max_concurrent = 0` for unbounded (same as LoomParallel).
-## `min_chunk`: derived combinators (map, filter, fold, ...) stop
-## splitting at sub-batches of size ≤ `min_chunk` and run the leaf
-## inline via the corresponding `seq::` combinator instead of forking.
-## Rayon's `with_min_len` in spirit. Set to 1 to fork down to
-## singletons.
-##
-## Example: `perform LoomParallelWith { max_concurrent = 8, min_chunk = 64 } in ...`
+## `LoomParallel` with at most `max_concurrent` join sub-tasks at once (0 = unbounded).
+## Combinators stop splitting at `min_chunk` items and run the leaf sequentially; 1 forks to singletons.
 impl Parallel for LoomParallelWith { max_concurrent: Int, min_chunk: Int } where {
   initialize_scope = {} ->
     __native_loom_parallel_init { max_concurrent = max_concurrent, min_chunk = min_chunk },
@@ -83,27 +28,17 @@ impl Parallel for LoomParallelWith { max_concurrent: Int, min_chunk: Int } where
   join = { l, r } -> __native_loom_parallel_join { l = l, r = r },
 }
 
-## OSThreadParallel — one platform Truffle thread per fork.
-##
-## Every Parallel.join spawns a fresh polyglot-attached platform OS
-## thread (via `env.newTruffleThreadBuilder(...).virtual(false)`),
-## one thread per fork, no Loom carrier mounting. More expensive per
-## spawn (~50µs vs Loom's ~14µs) but avoids virtual-thread scheduler
-## churn. Best for coarse-grained CPU-bound joins where forks are
-## long-lived.
-##
-## Mirrors OSThreadAsync from std::effects::async.
-## Mirrors OSThreadAsync from std::effects::async.
+# Spawns via `env.newTruffleThreadBuilder(...).virtual(false)`.
+## Backend with one platform OS thread per fork, for coarse CPU-bound joins.
+## Spawning costs more than Loom (~50µs vs ~14µs) but avoids virtual-thread scheduler churn.
 impl Parallel for OSThreadParallel where {
   initialize_scope = {} -> __native_osthread_parallel_init { pool_size = 0, min_chunk = 1024 },
   finalize_scope = {} -> __native_osthread_parallel_finalize {},
   join = { l, r } -> __native_osthread_parallel_join { l = l, r = r },
 }
 
-## `pool_size`: worker count. 0 or negative → Runtime.availableProcessors.
-## `min_chunk`: see LoomParallelWith. Set to 1 to fork down to singletons.
-##
-## Example: `perform OSThreadParallelWith { pool_size = 8, min_chunk = 64 } in ...`
+## `OSThreadParallel` with `pool_size` workers (0 or negative = available processors).
+## `min_chunk` as in `LoomParallelWith`; 1 forks down to singletons.
 impl Parallel for OSThreadParallelWith { pool_size: Int, min_chunk: Int } where {
   initialize_scope = {} ->
     __native_osthread_parallel_init { pool_size = pool_size, min_chunk = min_chunk },
@@ -111,16 +46,7 @@ impl Parallel for OSThreadParallelWith { pool_size: Int, min_chunk: Int } where 
   join = { l, r } -> __native_osthread_parallel_join { l = l, r = r },
 }
 
-## DeterministicSequential — no concurrency at all. Runs l then r
-## inline on the current thread. Same effect signature as the
-## concurrent impls so caller code is portable, but zero scheduling
-## and zero nondeterminism. Useful in tests to opt out of race-flake
-## sources without changing production code.
-## Sequential-only impl of Parallel. Runs {l} then {r} inline.
-## Result values are identical to the concurrent impls; only wall-clock
-## and observed interleavings differ. Useful for tests that want to
-## verify combinator correctness (order-independent reduces, associativity,
-## etc.) without any actual concurrency in the mix.
+## No-concurrency backend for tests: runs `l` then `r` inline; results match the concurrent backends.
 impl Parallel for DeterministicSequential where {
   join = { l, r } -> do
     let lv = l {}
@@ -128,26 +54,8 @@ impl Parallel for DeterministicSequential where {
     { l = lv, r = rv }
 }
 
-## Derived combinators.
-##
-## All follow the same recursive binary split. Base cases:
-##   n == 0 → identity for the operation
-##   n == 1 → apply f to the single element, no join
-##   n >= 2 → split in half, Parallel.join, combine
-##
-## The n==1 base case matters: without it every leaf would still
-## call Parallel.join once with two empty halves, which is wasted
-## work. With it, single-element leaves are pure computation.
-##
-## Chunk-size hint: when the current scope was entered via
-## LoomParallelWith / OSThreadParallelWith with a `min_chunk`
-## value > 1, combinators additionally short-circuit to a sequential
-## seq::-family call when `n <= min_chunk`. This prevents fork
-## overhead from dominating on small sub-batches. The default for
-## the no-arg LoomParallel / OSThreadParallel handlers is
-## min_chunk = 1024, matching Rayon's work-splitting floor.
-## Read the current scope's min_chunk hint. Returns 1 when no hint
-## is set (matches pre-#65 default behavior).
+# ── Derived combinators: binary split; empty → identity, n <= min_chunk → sequential seq:: call ──
+## The current scope's `min_chunk` hint, or 1 when none is set.
 let min_chunk: {} -> Int = {} -> __native_parallel_min_chunk_hint {}
 
 ## Apply f to each element in parallel, results in input order.
@@ -197,10 +105,8 @@ pub let partition
       fail = seq::concat { xs = both.l.fail, ys = both.r.fail },
     }
 
-## group_by is sequential at the leaf — merging groups by key across
-## halves is O(N * K) worst case which defeats the point of parallelism
-## unless the reduction is careful. Wraps seq::group_by; parallelism
-## for group_by can be added later with a proper hash-merge helper.
+# Merging groups across halves is O(N * K); parallel group_by needs a hash-merge helper first.
+## Groups elements by key. Runs sequentially (wraps `seq::group_by`); it does not fork.
 pub let group_by: { xs: ['a], f: { x: 'a } -> 'k <...> } with Eq 'k, Hash 'k -> [{ key: 'k, values: ['a] }] <Parallel, ...> = { xs, f } ->
   seq::group_by { xs = xs, f = f }
 
@@ -280,7 +186,7 @@ pub let all: { xs: ['a], f: { x: 'a } -> Bool <...> } -> Bool <Parallel, ...> = 
       all { xs = right, f = f } }
     both.l && both.r
 
-## Derived both/both3 — direct wrappers on join.
+## Runs `l` and `r` in parallel; a direct wrapper on `Parallel.join`.
 pub let both: { l: {} -> 'a <...>, r: {} -> 'b <...> } -> { l: 'a, r: 'b } <Parallel, ...> = { l, r } ->
   Parallel.join { l = l, r = r }
 
@@ -291,12 +197,9 @@ pub let both3
     let ab_and_c = Parallel.join { l = {} -> Parallel.join { l = a, r = b }, r = c }
     { a = ab_and_c.l.l, b = ab_and_c.l.r, c = ab_and_c.r }
 
-## Numeric / convenience helpers.
-## Parallel sum of a Seq of Ints. Chunks the underlying long[] across
-## the pool's parallelism level, sums each chunk on one FJP worker via
-## SIMD, and combines. One flat join level instead of log₂(N) — much
-## faster than delegating to `reduce`. Falls back to a scalar loop
-## when the seq isn't a native LongSeqStorage.
+# ── Numeric / convenience helpers ──
+# Chunks the long[] across the pool, SIMD-sums each chunk, combines; scalar loop if not LongSeqStorage.
+## Parallel sum of a Seq of Ints, in one flat level of chunks (much faster than `reduce`).
 pub let sum: { xs: [Int] } -> Int <Parallel> = { xs } -> __native_parallel_sum_long { xs = xs }
 
 ## Parallel product of a Seq of Ints. Same shape as `sum`.
@@ -324,35 +227,10 @@ pub let flat_map
   -> ['b] <Parallel, ...>
   = { xs, f } -> flatten { xs = map { xs = xs, f = f } }
 
-## Fused chunk-parallel combinators.
-##
-## The element-wise combinators above (map, filter, reduce, fold) each
-## perform one operation per parallel pass. Chaining them materializes
-## a full intermediate Seq between each stage:
-##
-##   parallel::filter { xs = parallel::map { xs = data, f = ... }, f = ... }
-##   ─────── 2 full parallel passes, 1 intermediate Seq allocation ──────
-##
-## The chunk combinators below avoid this: they split the input into
-## parallel sub-batches and hand each batch to a user-supplied function
-## that can apply an entire pipeline in one go — typically via Iter
-## (which FLP-fuses into a single tight loop per chunk):
-##
-##   parallel::chunk_fold {
-##     xs = data,
-##     zero = 0,
-##     f = { xs } -> xs.to_iter{}.map { f = double }.filter { p = is_even }.sum{},
-##     combine = { l, r } -> l + r,
-##   }
-##   ─── 1 parallel pass, 0 intermediate allocations per chunk ───
-##
-## The splitting uses the same binary-split + min_chunk strategy as
-## the element-wise combinators above.
+# ── Fused chunk combinators: one parallel pass, a whole Iter pipeline per chunk, no intermediate Seq ──
 
-## Parallel chunk fold: split into parallel sub-batches, apply `f` to
-## each batch, combine results with an associative `combine`.
-## Within each chunk, `f` can use the full Iter pipeline (FLP-fused)
-## for zero-allocation multi-stage processing.
+## Splits into parallel sub-batches, applies `f` to each, and merges with an associative `combine`.
+## Inside `f`, an Iter pipeline fuses into one loop: `f = { xs } -> xs.to_iter{}.map { f = g }.sum{}`.
 pub let chunk_fold
   : { xs: ['a], zero: 'b, f: { xs: ['a] } -> 'b <...>, combine: { l: 'b, r: 'b } -> 'b <...> }
   -> 'b <Parallel, ...>
@@ -370,14 +248,7 @@ pub let chunk_fold
       }
       combine { l = both.l, r = both.r }
 
-## Parallel chunk map: apply a per-chunk transform, collect results to Seq.
-## The per-chunk function receives a sub-batch as `['a]` and returns `['b]`.
-## Typical usage builds an Iter pipeline inside:
-##
-##   parallel::chunk_map {
-##     xs = data,
-##     f = { xs } -> xs.to_iter{}.map { f = transform }.filter { p = keep }.to_seq{},
-##   }
+## Applies a per-chunk transform `['a] -> ['b]` in parallel and concatenates the results in order.
 pub let chunk_map
   : { xs: ['a], f: { xs: ['a] } -> ['b] <...> }
   -> ['b] <Parallel, ...>

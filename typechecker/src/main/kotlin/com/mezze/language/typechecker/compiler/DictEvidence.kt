@@ -670,6 +670,71 @@ internal fun TypedASTCompiler.entryOpDictIsHeld(
     methodName in decodeEntryOpNames &&
         enclosingDictSlot(methodName, (receiverType as? VarType)?.variable?.name, abilityHash) != null
 
+/**
+ * Does an ability call on a TYPED receiver go through the dictionary the enclosing
+ * function already holds for [methodName]?
+ *
+ * For an ordinary ability the receiver chooses the impl, and a dictionary held for
+ * some other type variable must not hijack the call. For a RETURN-DRIVEN one — a
+ * decode-flavored codec ability, `Decode 'config 'a for 'in` — the impl is chosen
+ * by the TARGET type, which no receiver can tell (every derived decoder has
+ * receiver `Json`); when the frame holds that method's dictionary, the dictionary
+ * IS the choice, and the call goes through it even though the receiver is typed.
+ *
+ * "Return-driven" is decided from the op's ABILITY, read off the declarations
+ * ([TypedASTCompiler.abilityOpNames]) — never from whether a derived decoder
+ * happens to sit in `abilityOpIndex`. Derived decoders exist only in a compile
+ * that also decodes into a concrete target, so that witness is absent while
+ * compiling the stdlib, a dependency on its own, or a library module with no call
+ * site. MEASURED, with every stdlib module in the snapshot: `from_query` for `Str`
+ * was lowered with `__dict_decode` delivered and a body that never read it —
+ * `.decode` fell to the field-access path as `ReadField(<pairs>, "decode")`, and
+ * the first use died with `Expected record for field 'decode', got: MezzeSeq`.
+ * The node's `abilityHash` is null when only one ability declares the name, so
+ * the declaration index is consulted for that single ability; two abilities
+ * declaring it means the node carries which one. The derived-decoder witness
+ * stays as a disjunct, and a decode ENTRY op (`from_json`, which
+ * `decodeImplByOpHash` excludes) is [entryOpDictIsHeld]'s.
+ */
+internal fun TypedASTCompiler.heldDictRoutesConcreteReceiver(
+    methodName: String,
+    receiverType: MezzeType,
+    nodeAbility: Hash?,
+): Boolean {
+    if (receiverType is VarType) return false
+    val opAbility = nodeAbility
+        ?: abilityOpNames.entries.singleOrNull { methodName in it.value }?.key
+    val opIsReturnDriven =
+        com.mezze.language.typechecker.WellKnownHashConstants.isDecodeFlavoredCodec(opAbility)
+    val held = enclosingDictSlot(methodName, null) != null &&
+        (opIsReturnDriven ||
+            abilityOpIndex[methodName]?.any { decodeImplByOpHash.containsKey(it.opHash) } == true)
+    return held || entryOpDictIsHeld(methodName, receiverType, nodeAbility?.hex)
+}
+
+/**
+ * Would the wrapper `refToDictedOp` builds for [opHash] carry EVERY dictionary
+ * the op itself needs, resolving against [types] at this site? False when some
+ * needed slot has no answer here — typically because the op's own obligation is
+ * on a type variable this site leaves generic (a decode TARGET inside a generic
+ * wrapper).
+ *
+ * `injectDictFields` uses it to prefer FORWARDING the caller's held slot over a
+ * freshly built, incomplete wrapper. MEASURED, with every stdlib module in the
+ * snapshot: http's inherent `from_json` on `Result Response HttpError` — a
+ * generic wrapper over `from_json_result`, holding `__dict_from_json` — resolved
+ * the callee's `from_json` concretely from the constraint's `Str`, wrapped
+ * `impl FromJson for Str`'s op, could not plan its `decode` slot (the target is
+ * `'a` here) and passed that wrapper on. The dictionary it HELD was complete; the
+ * one it BUILT was not, and `.send {}.from_json {}` died with "no dictionary was
+ * supplied for ability operation `decode`".
+ */
+internal fun TypedASTCompiler.dictedRefIsComplete(opHash: Hash, types: List<MezzeType>): Boolean {
+    val needed = dictMethodsForHash[opHash].orEmpty()
+    if (needed.isEmpty()) return true
+    return planWrappedDictSlots(opHash, needed, elementFirst(types), types).size == needed.size
+}
+
 /** Bind an op's impl type variables from the instance head: the impl whose op
  *  is [opHash] has target `T 'a 'e…`; unify it against each of [types] (the
  *  receiver / arg types at the site) and collect `'a → …`. Empty when the op

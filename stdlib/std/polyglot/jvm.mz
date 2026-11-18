@@ -1,19 +1,6 @@
-# JVM host-language access.
-#
-# `JvmForeign` wraps a Java host object and is a "try": a live handle or a
-# carried `InteropError`. Value verbs return a `JvmForeign` and short-circuit an
-# errored one, so a chain flows with no `Result` between steps —
-#
-#     jvm::class { name = "java.util.ArrayList" }
-#       .new { args = [] }
-#       .method { name = "add", args = [from_int { val = 7 }] }
-#       .len {}        # a crossing: JvmForeign -> Result Int, where an error surfaces
-#
-# A `Result` appears only when a value is pulled back into Mezze (the coercions,
-# `is_null`, `type_name`, `len`, `to_seq`, `has`). This is the in-tree reference
-# for the two-layer design: verbs delegate down via `perform Runtime in
-# Polyglot.<op>`, so no verb calls a native. Requires the Context to allow host
-# class lookup (`allowAllAccess(true)` in test/dev).
+# JVM host-language access. A `JvmForeign` is a live handle or a carried error; value
+# verbs short-circuit an errored one, and a `Result` appears only when crossing back.
+# Verbs delegate via `perform Runtime in Polyglot.<op>`; needs host class lookup allowed.
 use std::polyglot::core::{ InteropError, Polyglot, Runtime, Foreign }
 use std::codec::core::{
   Format,
@@ -31,35 +18,26 @@ use std::int
 use std::char
 use std::nat
 
-## Opaque handle to a JVM host object (or a carried error). Wraps the public
-## `Foreign` handle (never the internal `__NativeForeign` primitive); the newtype
-## gives Mezze-level type safety against mixing JVM and non-JVM Foreigns.
+# Wraps the public `Foreign` handle, never the internal `__NativeForeign`.
+## Opaque handle to a JVM host object, or a carried error.
 pub newtype JvmForeign = Foreign
 
-## JVM host effect. `class` performs a fully-qualified host class lookup — the
-## returned Foreign is a Java `Class` interop object, instantiable (`.new{}`) and
-## member-invocable (`.method{}`). This is the JVM's entry point (the analogue of
-## `eval` for a guest language): it mints the first `JvmForeign`. A miss (class not
-## found / lookup disallowed) yields an ERRORED `JvmForeign`, which the next verb
-## short-circuits and a coercion surfaces as `Err`.
+## JVM host effect; `class` looks up a fully-qualified host class, minting the first `JvmForeign`.
+## A miss yields an errored `JvmForeign`, surfaced as `Err` at the next coercion.
 effect Jvm where {
   class: { name: Str } -> JvmForeign <Jvm>
 }
 
-## Default JVM host — delegates to whatever host class lookup the surrounding
-## polyglot Context permits. Host class lookup is JVM-specific, so it calls the one
-## JVM native directly rather than a generic `Polyglot` op. The handler type is
-## introduced by the impl itself (the stdlib idiom); no separate `type` is needed.
+# Calls the JVM class-lookup native directly; the impl introduces the handler type.
+## Default JVM host, using whatever host class lookup the polyglot Context permits.
 impl Jvm for JvmHost where {
   class = { name } -> __native_jvm_class { name = name }
 }
 
-## The complete verb set on a JvmForeign. Value verbs bury their own
-## `perform Runtime` and return a `JvmForeign` (chains flow with no `Result`);
-## crossings return a `Result`. An errored receiver short-circuits every value verb
-## untouched, and a guest throw is caught into an errored `JvmForeign`.
+## The verb set on a JvmForeign: value verbs chain without `Result`, crossings return one.
+## An errored receiver short-circuits every value verb; a guest throw becomes an errored handle.
 impl JvmForeign where {
-  ## object protocol (yield a JvmForeign)
+  # object protocol (yield a JvmForeign)
 
   ## Read a member (Java field, static, enum constant, `INSTANCE` singleton).
   get    = { it, name } ->
@@ -77,11 +55,9 @@ impl JvmForeign where {
   new    = { it, args } ->
     perform Runtime in Polyglot.instantiate { on = it, args = args },
 
-  ## containers
+  # containers
 
-  ## Read an array element by index (yields a JvmForeign). For BULK numeric data
-  ## prefer `to_ints`/`to_floats` (or `to_seq` / `read_bytes`): a per-element `at{}`
-  ## loop costs one boundary crossing per element, the bulk verbs cost ONE total.
+  ## Read an array element by index; for bulk data prefer `to_ints`/`to_floats`/`to_seq`.
   at      = { it, index } ->
     perform Runtime in Polyglot.read_array { on = it, index = index },
   ## Write an array element by index; fluent.
@@ -93,16 +69,13 @@ impl JvmForeign where {
   ## Write a mapping entry; fluent.
   set_key = { it, of, val } ->
     perform Runtime in Polyglot.write_hash { on = it, key = of, val = val },
-  ## Every mapping entry as a Foreign holding a seq of two-element `[key, value]`
-  ## Foreigns — the shape a codec's `decode_mapping` walks. Yields a JvmForeign.
+  ## Every mapping entry as a Foreign seq of two-element `[key, value]` Foreigns.
   entries = { it } ->
     perform Runtime in Polyglot.hash_entries { on = it },
 
-  ## crossings: pull a value back into Mezze → Result
+  # crossings: pull a value back into Mezze → Result
 
-  ## Surface a carried error without extracting a value: `Ok {}` if live, `Err` if
-  ## this foreign errored. Use it to check a fire-and-forget call, or to probe
-  ## presence (`.key{}.ok{}` tells a missing entry from a real one).
+  ## `Ok {}` if live, `Err` if this foreign carries an error; `.key{}.ok{}` probes presence.
   ok     = { it } ->
     perform Runtime in Polyglot.check { on = it },
   ## True iff a member of this name is readable — `hasattr`, without a read.
@@ -114,10 +87,7 @@ impl JvmForeign where {
   ## Drain any iterable into a Mezze seq of Foreigns in ONE crossing.
   to_seq  = { it } ->
     perform Runtime in Polyglot.to_seq { on = it },
-  ## Bulk-drain a NUMERIC array/iterable to a Mezze `[Int]` / `[Float]` in ONE
-  ## crossing (the element loop AND coercion stay host-side). THE bulk path for
-  ## numeric data — prefer over a per-element `at{}` + `int{}` chain, which costs
-  ## one boundary hit per element.
+  ## Bulk-drain a numeric array/iterable to `[Int]`/`[Float]` in one crossing.
   to_ints   = { it } -> perform Runtime in Polyglot.to_int_seq   { on = it },
   to_floats = { it } -> perform Runtime in Polyglot.to_float_seq { on = it },
   ## Bulk-drain a STRING / BOOLEAN array to a Mezze `[Str]` / `[Bool]` in ONE crossing.
@@ -131,19 +101,15 @@ impl JvmForeign where {
   str       = { it } -> perform Runtime in Polyglot.as_str    { on = it },
   ## Coerce a boolean Foreign to Bool.
   bool      = { it } -> perform Runtime in Polyglot.as_bool   { on = it },
-  ## True iff this Foreign is the guest-language null (`Ok True`); `Err` if the
-  ## foreign is itself a carried error.
+  ## True iff this Foreign is the guest null; `Err` if it is a carried error.
   is_null   = { it } -> perform Runtime in Polyglot.is_null   { on = it },
   ## Meta name of the underlying guest type (`type(x).__name__`).
   type_name = { it } -> perform Runtime in Polyglot.type_name { on = it },
 }
 
-## Constructors — lift a Mezze primitive into a JvmForeign so it can be passed as
-## an argument to `.method{}` / `.new{}` / `.call{}`. These box a pure Mezze value —
-## no guest interaction — so they call the box native directly (JVM is first-party
-## stdlib) and stay PURE, usable at module top level. A caller writes
-## `from_int { val = 5 }`, never a `lang` string. For containers and records,
-## prefer the codec (`x.to_jvm {}`).
+# These call the box native directly (JVM is first-party stdlib).
+## Lift a Mezze primitive into a JvmForeign to pass as an argument; pure, no guest interaction.
+## For containers and records, prefer the codec (`x.to_jvm {}`).
 pub let from_int:   { val: Int   } -> JvmForeign = { val } ->
   __native_polyglot_box_int   { val = val, lang = "jvm" }
 pub let from_float: { val: Float } -> JvmForeign = { val } ->
@@ -155,14 +121,11 @@ pub let from_bool:  { val: Bool  } -> JvmForeign = { val } ->
 pub let null_val:   {}            -> JvmForeign = {} ->
   __native_polyglot_box_null  { lang = "jvm" }
 
-## Build a Java-visible list from already-wrapped Foreign elements — an interop
-## view over the elements, not a copy. Backs a codec's `encode_sequence`.
+## Build a Java-visible list view over already-wrapped Foreign elements, without copying.
 pub let jvm_list: { elems: [JvmForeign] } -> JvmForeign = { elems } ->
   __native_polyglot_box_list { elems = elems, lang = "jvm" }
 
-## Bulk numeric WRITE: box a whole `[Int]` / `[Float]` into a Java-visible array in
-## ONE crossing — no per-element `from_int`. Companion to `jvm_list` for numeric
-## data; the raw scalars cross directly.
+## Box a whole `[Int]`/`[Float]` into a Java-visible array in one crossing.
 pub let jvm_ints:   { vals: [Int] }   -> JvmForeign = { vals } ->
   __native_polyglot_box_int_seq   { vals = vals, lang = "jvm" }
 pub let jvm_floats: { vals: [Float] } -> JvmForeign = { vals } ->
@@ -172,26 +135,18 @@ pub let jvm_strs:   { vals: [Str] }   -> JvmForeign = { vals } ->
 pub let jvm_bools:  { vals: [Bool] }  -> JvmForeign = { vals } ->
   __native_polyglot_box_bool_seq  { vals = vals, lang = "jvm" }
 
-## Build a Java-visible mapping from parallel key and value sequences. Companion
-## to `jvm_list`, backing a codec's `encode_mapping` / `encode_record`. Keys keep the
-## order they were given in.
+## Build a Java-visible mapping from parallel key and value sequences, keeping key order.
 pub let jvm_dict: { keys: [JvmForeign], vals: [JvmForeign] } -> JvmForeign = { keys, vals } ->
   __native_polyglot_box_dict { keys = keys, vals = vals, lang = "jvm" }
 
-## Convenience: look up a host class outside a `perform Jvm` scope — uses the
-## enclosing Env's host-lookup permissions directly. Yields an errored JvmForeign
-## on a miss, like `Jvm.class`.
+## Look up a host class outside a `perform Jvm` scope; an errored JvmForeign on a miss.
 pub let class: { name: Str } -> JvmForeign = { name } ->
   __native_jvm_class { name = name }
 
-## ─────────────────────────────────────────────────────────────────────
-## JVM codec — encode any Mezze value to a JvmForeign and back (`x.to_jvm {}`,
-## `Type.from_jvm {}`). Lives here so all JVM interop is one import.
-## ─────────────────────────────────────────────────────────────────────
+# ── JVM codec: `x.to_jvm {}` / `Type.from_jvm {}`, here so JVM interop is one import ──
 
-## Config for the JVM codec. Empty knobs — every JVM Foreign has one
-## natural representation. Kept as a record for future extension
-## (name-transform, wrap-primitives-as-boxed, etc.).
+# Kept as a record for future knobs.
+## Config for the JVM codec; no knobs yet.
 pub type JvmC = {
   shared: SharedConfig,
 }
@@ -199,12 +154,12 @@ pub type JvmC = {
 ## Default JVM codec — identity field-name transform.
 pub let jvm_default: JvmC = { shared = default_shared }
 
-## Format link
+# Format link
 
 impl Format for JvmC having 'out = JvmForeign where {
 }
 
-## Tier 2: encode
+# Tier 2: encode
 
 impl EncodeScalar for JvmC having 'out = JvmForeign where {
   encode_int   = { it, val, ctx } -> from_int   { val = val },
@@ -223,20 +178,13 @@ impl EncodeOption for JvmC having 'out = JvmForeign where {
     None -> null_val {},
 }
 
-## Tier 2: encode, container shapes
-##
-## `jvm_list` / `jvm_dict` build an interop VIEW over the already-encoded
-## elements, which the guest reads on demand — no Java container class is chosen
-## and nothing is copied until the guest asks (an O(1) crossing).
+# Tier 2: encode, container shapes — `jvm_list`/`jvm_dict` build O(1) interop views, no copy.
 
 impl EncodeSequence for JvmC having 'out = JvmForeign where {
   encode_sequence = { it, elems, ctx } -> jvm_list { elems = elems },
 }
 
-## BULK scalar-sequence fast path (optional Tier-2): box a whole `[Int]`/`[Float]`/
-## `[Str]`/`[Bool]` into a guest array in ONE crossing, instead of boxing each
-## element and building a list. The auto-derived `Encode JvmC [Int]` routes here
-## when this impl is present; other element types stay on `EncodeSequence`.
+## Bulk path boxing a whole `[Int]`/`[Float]`/`[Str]`/`[Bool]` into a guest array in one crossing.
 impl EncodeScalarSequence for JvmC having 'out = JvmForeign where {
   encode_int_seq   = { it, vals, ctx } -> jvm_ints   { vals = vals },
   encode_float_seq = { it, vals, ctx } -> jvm_floats { vals = vals },
@@ -251,8 +199,8 @@ impl EncodeMapping for JvmC having 'out = JvmForeign where {
   },
 }
 
-## A record becomes a dict keyed by FIELD NAME. The walker hands the keys over
-## as `Str` rather than as `'out`, so unlike the values they are encoded here.
+# The walker hands keys over as `Str`, not `'out`, so they are encoded here.
+## A record becomes a dict keyed by FIELD NAME.
 impl EncodeRecord for JvmC having 'out = JvmForeign where {
   encode_record = { it, fields, ctx } -> jvm_dict {
     keys = seq::map { xs = fields, f = { x } -> from_str { val = x.key } },
@@ -260,9 +208,7 @@ impl EncodeRecord for JvmC having 'out = JvmForeign where {
   },
 }
 
-## A variant becomes `{ tag }` or `{ tag, value }` — the same two-key shape the
-## JSON codec uses, so a value that crosses as JSON and a value that crosses as
-## a Foreign agree on where the tag lives.
+## A variant becomes `{ tag }` or `{ tag, value }`, the same shape the JSON codec uses.
 impl EncodeVariant for JvmC having 'out = JvmForeign where {
   encode_variant = { it, tag, payload, ctx } -> match payload is
     Some { val = p } -> jvm_dict {
@@ -275,11 +221,10 @@ impl EncodeVariant for JvmC having 'out = JvmForeign where {
     },
 }
 
-## Tier 2: decode
+# Tier 2: decode
 
-## The guest type name for an error message, or "foreign" if the value is itself
-## an errored foreign. `f` is concretely `JvmForeign`, so `type_name` dispatches
-## statically and the `match` avoids chaining on the `Result` crossing.
+# `match` avoids chaining on the `Result` crossing.
+## The guest type name for an error message, or "foreign" for an errored foreign.
 let type_name_or: { f: JvmForeign } -> Str = { f } -> match f.type_name {} is
   Ok  { val = n }   -> n
   Err { error = _ } -> "foreign"
@@ -365,25 +310,17 @@ impl DecodeScalar for JvmC having 'in = JvmForeign where {
 
 impl DecodeOption for JvmC having 'in = JvmForeign where {
   decode_option = { it, val, ctx } ->
-    # is_null is a crossing (Result Bool); an errored foreign reads as non-null so
-    # the carried error surfaces when the inner value is decoded. `match` avoids
-    # chaining `get_or` on the Result crossing.
+    # An errored foreign reads as non-null so its error surfaces when the inner value decodes.
     match val.is_null {} is
       Ok  { val = True }  -> Ok { val = None }
       Ok  { val = False } -> Ok { val = Some { val = val } }
       Err { error = _ }   -> Ok { val = Some { val = val } },
 }
 
-## Tier 2: decode, container shapes
-##
-## The mirror of the four encode impls above. Note the asymmetry in what they
-## read: a list is ARRAY-shaped and a dict is HASH-shaped, and interop models
-## those separately — a dict is not reachable through `get_member`, which is why
-## the record and map decoders go through `key` / `entries` rather than
-## the member vocabulary the rest of this file uses.
+# Tier 2: decode, container shapes — a dict is hash-shaped, not reachable via
+# `get_member`, so record and map decoders use `key`/`entries`.
 
-## One `[key, value]` pair Foreign, as the entry shape `decode_mapping` returns.
-## The pair itself is a two-element array, so it crosses in one read.
+## Split one two-element `[key, value]` pair Foreign into an entry.
 let pair_entry_of: { p: JvmForeign } -> Option { key: JvmForeign, value: JvmForeign } =
   { p } -> match p.to_seq {} is
     Ok { val = kv } -> match seq::get { xs = kv, i = 0 } is
@@ -393,8 +330,7 @@ let pair_entry_of: { p: JvmForeign } -> Option { key: JvmForeign, value: JvmFore
       None -> None
     Err { error = _ } -> None
 
-## Every pair, or None if any one is malformed — a half-read map is worse than a
-## reported failure.
+## Every pair, or None if any one is malformed.
 let read_pairs:
   { pairs: [JvmForeign], idx: Int, acc: [{ key: JvmForeign, value: JvmForeign }] }
   -> Option [{ key: JvmForeign, value: JvmForeign }] =
@@ -407,9 +343,8 @@ let read_pairs:
         None -> None
       None -> None
 
-## The whole array crosses in ONE call rather than one per element — see
-## `to_seq`. The old index walk cost a native call and a `Result` per
-## element while `jvm_list` sends a seq the other way in O(1).
+# The old index walk cost a native call and a `Result` per element.
+## The whole array crosses in one call rather than one per element.
 impl DecodeSequence for JvmC having 'in = JvmForeign where {
   decode_sequence = { it, val, ctx } -> match val.to_seq {} is
     Ok { val = es } -> Ok { val = es }
@@ -421,11 +356,7 @@ impl DecodeSequence for JvmC having 'in = JvmForeign where {
     },
 }
 
-## BULK scalar-sequence fast path (optional Tier-2): drain + coerce a whole numeric /
-## string / boolean guest array to a Mezze `[Int]`/`[Float]`/`[Str]`/`[Bool]` in ONE
-## crossing (the element loop + coercion stay host-side). The auto-derived
-## `Decode JvmC [Int]` routes here when present; other element types stay on
-## `DecodeSequence` + per-element `DecodeScalar`.
+## Bulk path draining a whole scalar guest array to `[Int]`/`[Float]`/`[Str]`/`[Bool]` in one crossing.
 impl DecodeScalarSequence for JvmC having 'in = JvmForeign where {
   decode_int_seq = { it, val, ctx } -> match val.to_ints {} is
     Ok { val = xs } -> Ok { val = xs }
@@ -454,8 +385,7 @@ impl DecodeScalarSequence for JvmC having 'in = JvmForeign where {
 }
 
 impl DecodeMapping for JvmC having 'in = JvmForeign where {
-  # `entries` yields a (list-shaped) FOREIGN; `to_seq` is the crossing that yields
-  # a Result — an errored `entries` (not hash-shaped) surfaces as Err here.
+  # `to_seq` is the crossing: an `entries` on a non-hash surfaces as Err here.
   decode_mapping = { it, val, ctx } -> match val.entries {}.to_seq {} is
     Ok { val = pairs } -> match read_pairs { pairs = pairs, idx = 0, acc = [] } is
       Some { val = es } -> Ok { val = es }
@@ -474,8 +404,7 @@ impl DecodeMapping for JvmC having 'in = JvmForeign where {
 }
 
 impl DecodeRecord for JvmC having 'in = JvmForeign where {
-  # `key` yields a FOREIGN (errored if the field is absent); `.ok{}` probes it so a
-  # missing field is a clean decode_error rather than surfacing later.
+  # `.ok{}` probes the key so a missing field is a clean decode_error.
   decode_record_field = { it, val, key, ctx } ->
     match val.key { of = key }.ok {} is
       Ok  { val = _ } -> Ok { val = val.key { of = key } }
@@ -487,12 +416,9 @@ impl DecodeRecord for JvmC having 'in = JvmForeign where {
       },
 }
 
-## Reads back the `{ tag }` / `{ tag, value }` shape `encode_variant` writes.
-## A missing `value` is a payload-free constructor, not an error — that is the
-## only reading available, since the two are encoded as exactly that difference.
+## Reads back the `{ tag }` / `{ tag, value }` shape; a missing `value` is a payload-free constructor.
 impl DecodeVariant for JvmC having 'in = JvmForeign where {
-  # `key` yields a FOREIGN. The tag is read then crossed with `.str{}`; the optional
-  # `value` entry's presence is probed with `.ok{}` (absent → payload-free ctor).
+  # The tag is crossed with `.str{}`; `value`'s presence is probed with `.ok{}`.
   decode_variant = { it, val, ctx } -> match val.key { of = "tag" }.str {} is
     Ok { val = tag } -> match val.key { of = "value" }.ok {} is
       Ok  { val = _ } -> Ok { val = { tag = tag, payload = Some { val = val.key { of = "value" } } } }
@@ -505,7 +431,7 @@ impl DecodeVariant for JvmC having 'in = JvmForeign where {
     },
 }
 
-## Tier 4: sugar abilities + blankets
+# Tier 4: sugar abilities + blankets
 
 ## Encode any scalar-shaped value to a `JvmForeign` via `.to_jvm{}`.
 ability ToJvm for 'a where {

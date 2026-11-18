@@ -37,10 +37,8 @@ import kotlin.test.assertTrue
  */
 class HttpCatchingAnyTest {
     private val head = """
-        use std::effects::http::{ Response, IntoResponse, IntoErrorResponse, response_status, response_ok_text }
+        use std::effects::http::{ Response, IntoResponse, IntoErrorResponse, response_status, response_ok_text, get_request, router, catching_any, BadInput }
         use std::effects::exception::{ throw }
-        use std::effects::http_server::{ get_request }
-        use std::effects::http_server::{ router, catching_any, BadInput }
         use std::collections::map
     """.trimIndent()
 

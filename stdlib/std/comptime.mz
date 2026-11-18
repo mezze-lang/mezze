@@ -2,129 +2,28 @@
 
 use std::abilities::embed::{ Embeddable }
 
-## Evaluate `eval` while the program is being compiled, and replace this call
-## site with the result.
-##
-##     use std::comptime::{ Comptime, ComptimeEval }
-##
-##     let table = {} -> Comptime.comptime { eval = {} -> build_lookup_table {} }
-##
-##     let main = {} -> perform ComptimeEval in ... table {} ...
-##
-## `table` costs nothing at run time: by the time the program runs, the call is
-## gone and the value is a literal in the compiled output.
-##
-## ## What may be returned
-##
-## Whatever `Embeddable` admits — data all the way down. The result has to
-## outlive the compiler process: it is serialized into the program's IR, stored,
-## and for `mez build --native` frozen into the image heap, then rebuilt
-## elsewhere. A function, a mutable cell, a `Promise`, a foreign object cannot
-## make that crossing. See `std::abilities::embed`.
-##
-## ## Effects
-##
-## Anything, as long as the thunk handles it itself:
-##
-##     let config = comptime { eval = {} ->
-##         perform RealFileSystem in read_file { path = "app.config" }
-##     }
-##
-## The handlers are the ordinary ones — there is no separate compile-time
-## handler set, because the evaluator *is* the interpreter. Which handler you
-## perform is part of this block's content hash, so choosing a deterministic one
-## is how you get a reproducible build, and choosing a real one is how you read
-## the actual filesystem. That is your decision, not the compiler's.
-##
-## `<*>` on the `eval` slot is the contract, stated rather than implied: every
-## effect the body performs is handled by the body. Nothing escapes a comptime
-## block, and nothing it did survives into the program's type — the effects
-## happened, during compilation, and are erased.
-##
-## ## When it runs
-##
-## During `mez build` / `build --native` / `dev` / `exec` — never during
-## `mez check` or in the editor. Type checking needs this block's *type*, which
-## inference reads off the thunk; it never needs the *value*. So an editor
-## never executes your code, and a comptime that loops forever cannot hang it.
-##
-## The cost is that `check` is weaker than `build`: a comptime that crashes
-## passes `check` and fails `build`. `Embeddable` is checked either way.
-##
-## ## Restrictions
-##
-## The thunk must be **closed** — it cannot capture anything from an enclosing
-## function, because those are run-time values that do not exist yet:
-##
-##     let scale = { n } ->
-##         comptime { eval = {} -> n * 2 }   # rejected: `n` is a run-time value
-##
-## Top-level functions and values are fine; they are reachable by hash.
-##
-## `comptime` must also be **called directly**. It is not a first-class value:
-## passing it around or partially applying it is rejected, because the whole
-## mechanism is that this call site gets replaced.
-##
-## ## The body below
-##
-## `eval {}` is a deliberate run-time fallback with the same meaning: if a
-## comptime call ever reaches run time — because the reduction pass was
-## disabled — the program still computes the right answer, just not for free.
-##
-## ## The `<*>` on the RESULT
-##
-## Not decoration: calling `eval` propagates its `performed` marker, so this is
-## the row the body actually has. Saying so is what makes compile-time work
-## visible to whoever imports you — `*` cannot be annotated away, so a library
-## that runs a `comptime` block carries the mark into its own signature and a
-## consumer can tell it apart from one that does not.
+# `eval {}` in the impl body is a run-time fallback with the same meaning, used if reduction is disabled.
+## Evaluate `eval` at compile time and replace this call site with the result.
+## The result must be `Embeddable`; the thunk must be closed, handle all its own effects, and be called directly.
+## Runs during `mez build`/`dev`/`exec`, never `mez check`: a crashing comptime passes `check`, fails `build`.
 effect Comptime where {
   comptime: { eval: {} -> 'a <*> } with Embeddable 'a -> 'a <Comptime>,
-  ## Ask the compiler about the codebase being compiled.
-  ##
-  ## Nobody calls this directly: `std::codebase`'s handlers do, so that asking
-  ## the codebase anything shows up as `<Comptime>` in the asker's row. `run`
-  ## reaches the compiler through natives that answer only while compiling; at
-  ## run time there is no codebase, and they fail rather than answer.
+  # `run` reaches the compiler through natives that answer only while compiling.
+  ## Ask the compiler about the codebase being compiled; fails at run time.
+  ## Called by `std::codebase`'s handlers, not directly.
   codebase: { run: {} -> 'a } -> 'a <Comptime>
 }
 
-## The handler, and the consent.
-##
-## `<Comptime>` propagates like any other effect, so a function that folds at
-## compile time says so in its signature, and so does everything that calls it,
-## all the way out to `main` — where this must be installed or the program does
-## not type-check. That is the disclosure: nobody's build-time code runs without
-## the person building having written the line that permits it.
-##
-## The body is the run-time fallback. It only fires for a site the reduction pass
-## left alone, and it computes the same value — just at run time instead of for
-## free.
-## A bare value IS an implicit resume ("falling off the op body normally is
-## treated as `resume {val = <last expr>}`" — ScopedEffectConstants), and it is
-## MEASURED CHEAPER: ~14 ns/op against ~34 ns for the explicit form, built-JAR,
-## consistent over four runs. Referencing `resume` goes through
-## `EffectBindingNode.lookupOnFiber`, which is @TruffleBoundary over a
-## ThreadLocal, so partial evaluation stops there. Same semantics, half the cost.
+# The body is the run-time fallback for sites the reduction pass left alone.
+# A bare value is an implicit resume, measured ~14 ns/op vs ~34 ns for explicit
+# `resume` (which hits a @TruffleBoundary ThreadLocal lookup).
+## Handler for `Comptime`; must be installed at `main` to allow build-time code to run.
 impl Comptime for ComptimeEval where {
   comptime = { eval } -> __native_comptime_eval { eval = eval },
   codebase = { run } -> run {}
 }
 
-## Fail the build, from inside a `comptime` block.
-##
-##     comptime { eval = {} -> match validate { config = cfg } is
-##         Ok {} -> cfg
-##         Err { error } -> compile_error { msg = "bad config: $(error)" }
-##     }
-##
-## Needed because in Mezze a failure is usually a VALUE: returning
-## `Err { … }` from a comptime block embeds the error and compiles fine,
-## which is the right default. This is how you say the other thing — that
-## this particular `Err` should stop the build — and the message is
-## reported at the `comptime` call site.
-##
-## Outside a comptime block it is an ordinary function that raises, so
-## there is no separate "compile-time only" rule to learn.
+## Fail the build with `msg`, reported at the `comptime` call site.
+## Outside a comptime block it is an ordinary function that raises.
 pub let compile_error: { msg: Str } -> 'a = { msg } ->
   __native_comptime_compile_error { msg = msg }

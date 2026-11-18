@@ -2932,11 +2932,7 @@ public final class NativeDispatch extends MezzeNode {
     private static void registerLogHandlers() {
         HANDLERS.put("__native_console_print", (r, c) -> LogNatives.consolePrint(r));
         HANDLERS.put("__native_console_println", (r, c) -> LogNatives.consolePrintln(r));
-        HANDLERS.put("__native_log_info", (r, c) -> LogNatives.logInfo(r));
-        HANDLERS.put("__native_log_warn", (r, c) -> LogNatives.logWarn(r));
-        HANDLERS.put("__native_log_error", (r, c) -> LogNatives.logError(r));
-        HANDLERS.put("__native_log_debug", (r, c) -> LogNatives.logDebug(r));
-        HANDLERS.put("__native_log_trace", (r, c) -> LogNatives.logTrace(r));
+        HANDLERS.put("__native_jvm_log", (r, c) -> LogNatives.jvmLog(r));
     }
 
     // ==================== Inspect ====================
@@ -3410,9 +3406,6 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_codec_decode_record", (r, c) -> nativeCodecDecodeRecord(r));
 
         // === HTTP Mock ===
-        HANDLERS.put("__native_http_mock_request", (r, c) -> IONatives.httpMockRequest(r));
-        HANDLERS.put("__native_http_mock_set_response", (r, c) -> IONatives.httpMockSetResponse(r));
-        HANDLERS.put("__native_http_mock_clear", (r, c) -> IONatives.httpMockClear(r));
 
         // === HTTP Client ===
         HANDLERS.put("__native_http_client_create", (r, c) -> IONatives.httpClientCreate(r));

@@ -32,20 +32,31 @@ internal object CheckReplay {
         for (line in lines.drop(3)) {
             val tab = line.indexOf('\t')
             if (tab < 0) return null
-            val file = File(line.substring(tab + 1))
+            val file = File(line.substring(tab + 1)).let { if (it.isAbsolute) it else File(root, it.path) }
             if (!file.isFile || sha256(Files.readString(file.toPath())) != line.substring(0, tab)) return null
         }
         return record.substring(split + OUTPUT.length + 2)
     }
 
-    /** Record a passing check: [files] are the sources it read, [output] what it printed. */
+    /** Record a passing check: [files] are the sources it read, [output] what it printed.
+     *
+     *  A project file is recorded RELATIVE to [root]. The record travels with
+     *  `.mez` — copy or move the project and it comes along — and an absolute path
+     *  would make the replay re-verify the ORIGINAL directory's files, which still
+     *  match themselves: a copied project then replayed the original's result for
+     *  sources that said something else. MEASURED: a copied project whose
+     *  `src/app.mz` had gained a V0406 error still printed "Check passed" until
+     *  `.mez` was deleted. A file outside the root (none today) keeps its
+     *  absolute path, since no relative form names it. */
     fun record(store: MezzeStore, root: File, app: String, quiet: Boolean, manifest: String, files: Collection<File>, output: String) {
+        val rootAbs = root.absoluteFile
         val text = buildString {
             appendLine(ProjectStore.binaryIdentity)
             appendLine(sha256(manifest))
             appendLine(listing(root))
             for (f in files.map { it.absoluteFile }.distinct().sortedBy { it.path }) {
-                appendLine("${sha256(Files.readString(f.toPath()))}\t${f.path}")
+                val recorded = if (f.startsWith(rootAbs)) f.relativeTo(rootAbs).path else f.path
+                appendLine("${sha256(Files.readString(f.toPath()))}\t$recorded")
             }
             append(OUTPUT).append('\n').append(output)
         }

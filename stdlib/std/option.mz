@@ -4,13 +4,7 @@ use std::abilities::tryable::{ Tryable }
 use std::effects::exception::{ Exception }
 use std::abilities::arbitrary::{ Arbitrary }
 
-## Tryable for Option — extract Some, throw `NoneOpt` on None.
-##
-## `Option` carries no error information, so the throw is a synthetic
-## variant `NoneOpt` that downstream code can match on. In a do-block
-## that mixes `Option` and `Result` `.try {}` calls, the `<Exception>` row's
-## `'error` parameter unifies to include both the `Result`s error types
-## and `NoneOpt` for the `Option`s.
+## Tryable for Option: extract Some, throw the synthetic variant `NoneOpt` on None.
 impl Tryable for Option 'a having 'inner = 'a where {
   try = { it } -> match it is
     Some { val } -> val
@@ -18,9 +12,9 @@ impl Tryable for Option 'a having 'inner = 'a where {
 
 }
 
-## Lexicographic ordering for options, requiring the element to be Ord.
-## `None < Some _`. The `with Ord 'a` preconditions prevent `Option T < Option T`
-## from type-checking for a T with no Ord and crashing in the element compare (#224).
+# The `with Ord 'a` preconditions prevent `Option T < Option T` from
+# type-checking for a T with no Ord and crashing in the element compare (#224).
+## Ordering for options with an Ord element; `None < Some _`.
 impl Ord for Option 'a where {
   lt: { it: Option 'a, r: Option 'a } with Ord 'a -> Bool = { it, r } -> match it is
     None -> match r is
@@ -188,16 +182,15 @@ impl Option 'a where {
   to_result = { it, error } -> to_result { opt = it, error = error },
   to_list = { it } -> to_list { opt = it },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
+  # dot-chain parity: so `x.op {}` works for every receiver-taking free function.
   if_some = { it, action } -> if_some { opt = it, action = action },
   if_none = { it, action } -> if_none { opt = it, action = action },
   zip = { it, b } -> zip { a = it, b = b },
   zip_with = { it, b, f } -> zip_with { a = it, b = b, f = f },
 }
 
-## Wrap any value in Some via method syntax: `x.some {}` → `Some { val = x }`.
-## Generic impl — covers every type. Cannot be specialized per-type.
+## Wrap any value in Some: `x.some {}` is `Some { val = x }`.
+## One generic impl covers every type; it cannot be specialized per type.
 ability Somable for 'a where {
   some: { it: 'a } -> Option 'a
 }

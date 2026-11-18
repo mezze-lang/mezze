@@ -262,7 +262,7 @@ class RestrictiveSpreadTest {
         // This tests that type aliases from imports work with spread
         // The HttpConfig type declaration should be auto-imported when importing default_http_config
         val code = """
-            use std::effects::http::{default_http_config}
+            use std::effects::http::{ default_http_config }
             let custom = { ...default_http_config, timeout_ms = 5000 }
         """.trimIndent()
 
@@ -273,7 +273,7 @@ class RestrictiveSpreadTest {
     @Test
     fun `should spread imported type alias with annotation`() {
         val code = """
-            use std::effects::http::{default_http_config, HttpConfig}
+            use std::effects::http::{ default_http_config, HttpConfig }
             let custom: HttpConfig = { ...default_http_config, timeout_ms = 5000 }
         """.trimIndent()
 

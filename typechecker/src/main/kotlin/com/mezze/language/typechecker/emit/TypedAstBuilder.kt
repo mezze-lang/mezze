@@ -683,9 +683,9 @@ class TypedAstBuilder(
         // which variables its ops share.
         typeVarCache.clear()
         val ops = decl.operations.mapIndexed { idx, op ->
-            val paramType = convertParsedTypeAnnotation(op.paramType)
-            val returnType = convertParsedTypeAnnotation(op.returnType)
-            TypedAbilityOp(op.name, idx, paramType, returnType, op.loc)
+            // One arrow, one converter: the effect row takes the same path as any annotation's.
+            val f = convertParsedTypeAnnotation(ParsedFunctionType(op.paramType, op.returnType, op.effects, op.abilityConstraints, op.loc)) as MezzeType.FunctionType
+            TypedAbilityOp(op.name, idx, f.paramType, f.returnType, op.loc, effects = f.effects)
         }
 
         decls.add(TypedAbilityDecl(

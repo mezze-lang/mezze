@@ -19,20 +19,20 @@ touching the function:
 
 ```mezze
 use std::effects::log::{ Console, println }
-use std::effects::http::{ HttpClient, MockHttpClient, mock_get, request }
+use std::effects::http::{ request, SimpleHttpClient, MockHttpClient, mock_http_rules }
 
-# weather says <Http> in its type. It never says which client answers,
+# weather says <HttpClient> in its type. It never says which client answers,
 # so the caller below picks that, not weather.
 let weather = { url } -> request { url }.send {}.text_or { def = "offline" }
 
 let main = {} -> perform Console in do
   let url = "https://wttr.in/Amsterdam?format=3"
 
-  # The real client — goes over the network.
-  perform HttpClient in println { msg = weather { url } }
+  # The real client. This one goes over the network.
+  perform SimpleHttpClient in println { msg = weather { url } }
 
   # Same function, same url, no network at all.
-  let rules = [mock_get { body = "Amsterdam: Always raining", url = "*" }]
+  let rules = mock_http_rules {}.get { url = "**" }.text { body = "Amsterdam: Always raining" }
   perform MockHttpClient { rules } in println { msg = weather { url } }
 ```
 

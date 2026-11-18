@@ -1,5 +1,5 @@
 ## Extensible log level type, open for user-defined levels.
-pub type LogLevel = | Error, Warn, Info, Debug, Trace, Print, ... |
+pub type LogLevel = | Error, Warn, Info, Debug, Trace, Print, Off, ... |
 
 ## Logging effect with a single operation dispatching on level.
 #{ unhandled: "Wrap it in `perform Console in …` to print to stdout." }
@@ -45,6 +45,29 @@ impl Log for ConsoleWith { formatter: { level: LogLevel, msg: Str } -> Str } whe
 ## Silent handler that discards all output, useful for testing.
 impl Log for QuietConsole where {
   log = { level, msg } -> {}
+}
+
+## Map a `LogLevel` to the JVM logger's level name; `Print` and unknown levels map to info.
+pub let jul_level_name: { level: LogLevel } -> Str = { level } ->
+  match level is
+    Error -> "error"
+    Warn -> "warn"
+    Info -> "info"
+    Debug -> "debug"
+    Trace -> "trace"
+    _ -> "info"
+
+## Handler that routes records to the JVM logger (JUL) under the name "mezze".
+## Host `logging.properties` then governs destination, rotation and format.
+impl Log for JvmLogger where {
+  log = { level, msg } ->
+    __native_jvm_log { logger = "mezze", level = jul_level_name { level = level }, msg = msg }
+}
+
+## JVM-logger handler under a chosen logger name, so host config can route it separately.
+impl Log for JvmLoggerWith { name: Str } where {
+  log = { level, msg } ->
+    __native_jvm_log { logger = name, level = jul_level_name { level = level }, msg = msg }
 }
 
 ## Log at Error level.

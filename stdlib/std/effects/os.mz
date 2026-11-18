@@ -1,11 +1,9 @@
-# Operating system information effect.
-# Read-only. Mirrors Rust's std::env::consts (which is compile-time, but Mezze
-# reads it at runtime — same conceptual surface).
+# Read-only OS information effect, like Rust's std::env::consts but read at runtime.
 ## Static facts about the host OS.
 effect Os where {
   ## Short name: "linux", "macos", "windows", etc.
   name: {} -> Str <Os>,
-  ## Version string. Format varies by OS — best-effort, prefer `name` for branching.
+  ## Version string; format varies by OS, so branch on `name` instead.
   version: {} -> Str <Os>,
   ## CPU architecture: "x86_64", "aarch64", etc.
   arch: {} -> Str <Os>

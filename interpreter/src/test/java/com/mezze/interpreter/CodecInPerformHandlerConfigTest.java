@@ -39,13 +39,11 @@ class CodecInPerformHandlerConfigTest {
     @Test
     void toJsonInMockBodyWithoutEffectImport() {
         Object r = MezzeTestHelper.run("""
-            use std::effects::http::{ MockHttpClient, mock_get, request, body_str }
+            use std::effects::http::{ request, body_str, MockHttpClient, mock_get }
             use std::codec::json::{ ToJson, to_str }
 
             let fetch = {} ->
-              perform MockHttpClient { rules = [
-                mock_get { url = "*", body = to_str { json = { code = "abc", name = "widget" }.to_json {} } }
-              ] } in do
+              perform MockHttpClient { rules = mock_get { url = "*", body = to_str { json = { code = "abc", name = "widget" }.to_json {} } } } in do
                 let resp = request { url = "http://x/y" }.send {}
                 match resp is
                   Ok { val } -> match body_str { resp = val } is
@@ -65,14 +63,12 @@ class CodecInPerformHandlerConfigTest {
     @Test
     void encodeInMockBodyWithoutEffectImport() {
         Object r = MezzeTestHelper.run("""
-            use std::effects::http::{ MockHttpClient, mock_get, request, body_str }
+            use std::effects::http::{ request, body_str, MockHttpClient, mock_get }
             use std::codec::json::{ json_default, to_str }
             use std::codec::core::{ Encode }
 
             let fetch = {} ->
-              perform MockHttpClient { rules = [
-                mock_get { url = "*", body = to_str { json = { code = "abc" }.encode { config = json_default } } }
-              ] } in do
+              perform MockHttpClient { rules = mock_get { url = "*", body = to_str { json = { code = "abc" }.encode { config = json_default } } } } in do
                 let resp = request { url = "http://x/y" }.send {}
                 match resp is
                   Ok { val } -> match body_str { resp = val } is
@@ -92,13 +88,11 @@ class CodecInPerformHandlerConfigTest {
     @Test
     void stillWorksWhenEffectIsImported() {
         Object r = MezzeTestHelper.run("""
-            use std::effects::http::{ HttpClient, MockHttpClient, mock_get, request, body_str }
+            use std::effects::http::{ request, body_str, HttpClient, MockHttpClient, mock_get }
             use std::codec::json::{ ToJson, to_str }
 
             let fetch = {} ->
-              perform MockHttpClient { rules = [
-                mock_get { url = "*", body = to_str { json = { code = "z" }.to_json {} } }
-              ] } in do
+              perform MockHttpClient { rules = mock_get { url = "*", body = to_str { json = { code = "z" }.to_json {} } } } in do
                 let resp = request { url = "http://x/y" }.send {}
                 match resp is
                   Ok { val } -> match body_str { resp = val } is

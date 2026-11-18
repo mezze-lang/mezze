@@ -27,9 +27,7 @@ import kotlin.test.assertEquals
  */
 class HttpHandlerNotShadowedTest {
     private val head = """
-        use std::effects::http::{ Request, Response, not_found, response_status, response_ok_text, Method }
-        use std::effects::http_server::{ get_request }
-        use std::effects::http_server::{ on_get, otherwise, route, Matched }
+        use std::effects::http::{ Request, Response, not_found, response_status, response_ok_text, Method, get_request, on_get, otherwise, route, Matched }
         use std::collections::bytes
         use std::int
     """.trimIndent()

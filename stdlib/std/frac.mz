@@ -20,10 +20,7 @@ impl NumDiv Frac for Frac having 'out = Frac where {
   div = { it, r } -> __native_frac_divide { l = it, r = r }
 }
 
-## Structural hash, paired with the `Eq` below.
-## `Eq` and `Hash` are written together or not at all: a hash container
-## buckets by one and compares by the other, so a value whose hash
-## disagrees with its equality is silently kept twice.
+# `Eq` and `Hash` go together or not at all: a hash/equality mismatch silently keeps duplicates.
 
 
 impl Ord for Frac where {
@@ -82,11 +79,9 @@ pub let greater_than: { l: Frac, r: Frac } -> Bool = { l, r } ->
 ## Convert a fraction to a Float.
 pub let to_float: { n: Frac } -> Float = { n } -> __native_frac_to_float { n = n }
 
-## Convert a Float to a reduced Frac — the inverse of `to_float`, using the
-## continued-fraction convergents so a `Frac -> Float -> Frac` round trip recovers
-## the original nice fraction. NOT total: NaN and ±infinity have no rational value,
-## so the result is `Option Frac` (`None` for a non-finite input) rather than a
-## `Frac` that hides the failure. The native only ever sees a finite value.
+# The native only ever sees a finite value.
+## Convert a Float to a reduced Frac (inverse of `to_float`, so round trips recover the fraction).
+## `None` for NaN or ±infinity.
 pub let from_float: { f: Float } -> Option Frac = { f } ->
   match float::is_finite { n = f } is
     True  -> Some { val = __native_float_to_frac { f = f } }
@@ -134,7 +129,6 @@ impl Frac where {
   reciprocal: { it: Frac } -> Frac = { it } ->
     __native_frac_divide { l = __native_int_to_frac { n = 1 }, r = it },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
+  # dot-chain parity: every receiver-taking free function is also a method.
   reduce = { it } -> reduce { n = it },
 }

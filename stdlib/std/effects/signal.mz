@@ -1,7 +1,5 @@
-# A shutdown signal, as an effect so the TRIGGER can be swapped — wait for Ctrl-C
-# in production, return at once in a test or a quick tour. This is the thunk you
-# hand to a server's `with_graceful_shutdown` (std::effects::http_server): the
-# mezze shape of awaiting `tokio::signal::ctrl_c()`.
+# An effect so the shutdown TRIGGER can be swapped: Ctrl-C in production, immediate in tests.
+# Its thunk is what a server's `with_graceful_shutdown` (std::effects::http) takes.
 
 ## A one-shot shutdown trigger.
 effect Signal where {
@@ -9,27 +7,19 @@ effect Signal where {
   interrupt: {} -> {} <Signal>
 }
 
-## Wait for an OS shutdown signal — SIGINT (Ctrl-C) or SIGTERM (what `kill`,
-## `docker stop`, and process managers send). Parks until one arrives.
-##
-## In a standalone run the process owns these signals and this returns when the
-## user hits Ctrl-C or something sends SIGTERM. Under `mez dev` the CLI owns
-## SIGINT and cancels the program instead, which also releases this — either way
-## a shutdown request stops the server.
+## Park until the OS sends SIGINT (Ctrl-C) or SIGTERM.
+## Under `mez dev` the CLI owns SIGINT and cancels the program, which also releases this.
 impl Signal for SystemSignal where {
   interrupt = {} -> __native_signal_await_interrupt {},
 }
 
-## Return immediately. A server guarded by this stops as soon as it is asked to,
-## which is what a test or a non-blocking tour wants — no socket is left parked.
+## Return immediately, so a guarded server stops at once (for tests).
 impl Signal for ImmediateSignal where {
   interrupt = {} -> {},
 }
 
-## Park until a shutdown signal (Ctrl-C under `SystemSignal`). Hand
-## `{ } -> ctrl_c {}` to `with_graceful_shutdown`.
+## Park until a shutdown signal; hand `{ } -> ctrl_c {}` to `with_graceful_shutdown`.
 pub let ctrl_c: {} -> {} <Signal> = {} -> Signal.interrupt {}
 
-## The same thing under a name that does not assume a keystroke, for a trigger
-## installed by something other than a terminal.
+## Same as `ctrl_c`, named for triggers that are not a keystroke.
 pub let await_shutdown: {} -> {} <Signal> = {} -> Signal.interrupt {}

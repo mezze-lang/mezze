@@ -33,7 +33,7 @@ class HttpChainTest {
     @Test
     fun `request builder chains and sends`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{ Response, Method, request, HttpClient, MockHttpClient, MockRule, UrlPattern, mock_rules }
             use std::collections::map
             use std::collections::bytes
 
@@ -44,9 +44,9 @@ class HttpChainTest {
                 url = "",
                 chunks = None,
               }
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
-            ]
+            ] }
 
             perform MockHttpClient { rules = rules } in do
               let resp = request { url = "http://test.com/api" }
@@ -63,7 +63,7 @@ class HttpChainTest {
     @Test
     fun `request with_json sets body and Content-Type`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{ Response, Method, request, HttpClient, MockHttpClient, MockRule, UrlPattern, mock_rules }
             use std::codec::json::{Json}
             use std::collections::map
             use std::collections::bytes
@@ -75,9 +75,9 @@ class HttpChainTest {
                 url = "",
                 chunks = None,
               }
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [Post], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
-            ]
+            ] }
 
             perform MockHttpClient { rules = rules } in do
               let payload: Json = JString { val = "hello" }
@@ -95,7 +95,7 @@ class HttpChainTest {
     @Test
     fun `request with_text sets body from string`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{ Response, Method, request, HttpClient, MockHttpClient, MockRule, UrlPattern, mock_rules }
             use std::collections::map
             use std::collections::bytes
 
@@ -104,9 +104,9 @@ class HttpChainTest {
                 url = "",
                 chunks = None,
               }
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
-            ]
+            ] }
 
             perform MockHttpClient { rules = rules } in do
               let resp = request { url = "http://test.com/echo" }
@@ -123,7 +123,7 @@ class HttpChainTest {
     @Test
     fun `request with_timeout and with_auth`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{ Response, Method, request, HttpClient, MockHttpClient, MockRule, UrlPattern, mock_rules }
             use std::collections::map
             use std::collections::bytes
 
@@ -132,9 +132,9 @@ class HttpChainTest {
                 url = "",
                 chunks = None,
               }
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
-            ]
+            ] }
 
             perform MockHttpClient { rules = rules } in do
               let resp = request { url = "http://test.com/protected" }
@@ -155,7 +155,7 @@ class HttpChainTest {
     @Test
     fun `response is_ok and is_success`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{ Response, Method, request, HttpClient, MockHttpClient, MockRule, UrlPattern, mock_rules }
             use std::collections::map
             use std::collections::bytes
 
@@ -164,9 +164,9 @@ class HttpChainTest {
                 url = "",
                 chunks = None,
               }
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
-            ]
+            ] }
 
             perform MockHttpClient { rules = rules } in do
               let resp = request { url = "http://test.com/" }.send {}
@@ -180,7 +180,7 @@ class HttpChainTest {
     @Test
     fun `response is_client_err and is_server_err`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{ Response, Method, request, HttpClient, MockHttpClient, MockRule, UrlPattern, mock_rules }
             use std::collections::map
             use std::collections::bytes
 
@@ -189,9 +189,9 @@ class HttpChainTest {
                 url = "",
                 chunks = None,
               }
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
-            ]
+            ] }
 
             perform MockHttpClient { rules = rules } in do
               let resp = request { url = "http://test.com/" }.send {}
@@ -205,7 +205,7 @@ class HttpChainTest {
     @Test
     fun `response text decodes body as UTF-8`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{ Response, Method, request, HttpClient, MockHttpClient, MockRule, UrlPattern, mock_rules }
             use std::collections::map
             use std::collections::bytes
 
@@ -214,9 +214,9 @@ class HttpChainTest {
                 url = "",
                 chunks = None,
               }
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
-            ]
+            ] }
 
             perform MockHttpClient { rules = rules } in do
               let resp = request { url = "http://test.com/" }.send {}
@@ -232,7 +232,7 @@ class HttpChainTest {
     @Test
     fun `response header lookup is case-insensitive`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{ Response, Method, request, HttpClient, MockHttpClient, MockRule, UrlPattern, mock_rules }
             use std::collections::map
             use std::collections::bytes
             use std::option
@@ -246,9 +246,9 @@ class HttpChainTest {
                 status = 200, headers = headers, body = bytes::from_str { s = "{}" },
                 url = "", chunks = None,
             }
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
-            ]
+            ] }
 
             perform MockHttpClient { rules = rules } in do
               let resp = request { url = "http://test.com/" }.send {}
@@ -266,7 +266,7 @@ class HttpChainTest {
     @Test
     fun `client get yields a pre-filled Request`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, client}
+            use std::effects::http::{ Response, Method, HttpClient, MockHttpClient, MockRule, UrlPattern, client, mock_rules }
             use std::collections::map
             use std::collections::bytes
 
@@ -275,9 +275,9 @@ class HttpChainTest {
                 url = "",
                 chunks = None,
               }
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
-            ]
+            ] }
 
             perform MockHttpClient { rules = rules } in do
               let api = client { base_url = "https://api.acme.com" }
@@ -294,7 +294,7 @@ class HttpChainTest {
         // No `.send` — this is a pure builder check. Inspect the
         // Authorization header directly on the constructed request.
         val result = eval("""
-            use std::effects::http::{ HttpClient, client, Auth }
+            use std::effects::http::{ Auth, HttpClient, client }
             use std::collections::map
 
             let api = client { base_url = "https://api.acme.com" }
@@ -311,7 +311,7 @@ class HttpChainTest {
     @Test
     fun `client post chained with with_json`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, client}
+            use std::effects::http::{ Response, Method, HttpClient, MockHttpClient, MockRule, UrlPattern, client, mock_rules }
             use std::codec::json::{Json}
             use std::collections::map
             use std::collections::bytes
@@ -321,9 +321,9 @@ class HttpChainTest {
                 url = "",
                 chunks = None,
               }
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [Post], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
-            ]
+            ] }
 
             perform MockHttpClient { rules = rules } in do
               let api = client { base_url = "https://api.acme.com" }
@@ -341,7 +341,7 @@ class HttpChainTest {
     fun `client base_url joins paths correctly`() {
         // No `.send` — pure URL-building check, no perform needed.
         val result = eval("""
-            use std::effects::http::{HttpClient, client}
+            use std::effects::http::{ HttpClient, client }
 
             let api = client { base_url = "https://api.acme.com" }
             let r = api.get { path = "/v1/users" }
@@ -354,7 +354,7 @@ class HttpChainTest {
     fun `client base_url empty falls back to absolute path`() {
         // No `.send` — pure URL-building check, no perform needed.
         val result = eval("""
-            use std::effects::http::{HttpClient, client}
+            use std::effects::http::{ HttpClient, client }
 
             let api = client { base_url = "" }
             let r = api.get { path = "https://other.com/foo" }
@@ -377,16 +377,16 @@ class HttpChainTest {
     @Test
     fun `from_json decodes the body into the type the use site asks for`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, HttpError, request, format_error}
+            use std::effects::http::{ Response, Method, HttpError, request, format_error, HttpClient, MockHttpClient, MockRule, UrlPattern, mock_rules }
             use std::collections::map
             use std::collections::bytes
 
-            perform MockHttpClient { rules = [
+            perform MockHttpClient { rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" },
                   response = Ok { val = { status = 200, headers = map::empty {},
                     body = bytes::from_str { s = "{\"name\":\"Ada\",\"age\":36}" }, url = "http://test.com/u",
                     chunks = None } } }
-            ] } in do
+            ] } } in do
               let u: Result { name: Str, age: Int } HttpError =
                 request { url = "http://test.com/u" }.send {}.from_json {}
               match u is
@@ -399,17 +399,17 @@ class HttpChainTest {
     @Test
     fun `from_json turns a body that is not JSON into a DecodeError naming the url`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, HttpError, request, format_error}
+            use std::effects::http::{ Response, Method, HttpError, request, format_error, HttpClient, MockHttpClient, MockRule, UrlPattern, mock_rules }
             use std::collections::map
             use std::collections::bytes
 
-            perform MockHttpClient { rules = [
+            perform MockHttpClient { rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" },
                   response = Ok { val = { status = 200, headers = map::empty {},
                     body = bytes::from_str { s = "not json at all" }, url = "http://test.com/u",
                     chunks = None,
                   } } }
-            ] } in do
+            ] } } in do
               let u: Result { name: Str } HttpError =
                 request { url = "http://test.com/u" }.send {}.from_json {}
               match u is
@@ -458,17 +458,17 @@ class HttpChainTest {
     @Test
     fun `inline effect-op chain on Result Response HttpError dispatches Result impl`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, Request, default_http_config, request}
+            use std::effects::http::{ Response, Method, Request, request, HttpClient, MockHttpClient, MockRule, UrlPattern, default_http_config, mock_rules }
             use std::collections::map
             use std::collections::bytes
 
-            perform MockHttpClient { rules = [
+            perform MockHttpClient { rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" },
                   response = Ok { val = { status = 200, headers = map::empty {},
                     body = bytes::from_str { s = "the-body" }, url = "",
                     chunks = None,
                   } } }
-            ] } in do
+            ] } } in do
               let req = request { url = "http://test.com/x" }
               # Inline chain: `HttpClient.request{...}` is a TypedPerformOp receiver
               # with declared return `Result Response HttpError`, and `.text{}`
@@ -499,14 +499,14 @@ class HttpChainTest {
         // passes the network failure through untouched — `impl Response.text`
         // needs a Response and has none to work with.
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, Request, default_http_config, request, format_error}
+            use std::effects::http::{ Response, Method, Request, request, format_error, HttpClient, MockHttpClient, MockRule, UrlPattern, default_http_config, mock_rules }
             use std::collections::map
             use std::collections::bytes
 
-            perform MockHttpClient { rules = [
+            perform MockHttpClient { rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" },
                   response = Err { error = HttpConnectionFailed { url = "http://test.com/x", reason = "refused" } } }
-            ] } in do
+            ] } } in do
               let req = request { url = "http://test.com/x" }
               let result_text = HttpClient.request { req = req, config = default_http_config }.text {}
               match result_text is

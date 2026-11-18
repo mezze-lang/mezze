@@ -1,11 +1,6 @@
-# Asking the compiler about the codebase being compiled.
-#
-# A question is an operation of `Codebase`, and the handler decides when it is
-# answered. Under a compile-time handler the `perform` itself is folded while
-# compiling — nothing goes around it — and it must be inside a function:
-#
+# Asking the compiler about the codebase: each question is a `Codebase` op; the handler decides when it is answered.
+# Under a compile-time handler the `perform` is folded while compiling and must sit inside a function:
 #   let names = {} -> perform ComptimeEvalCodebase in Codebase.decls { module = "app" }
-#   let names = {} -> perform ComptimeEval in perform EvalCodebase in Codebase.decls { module = "app" }
 
 use std::comptime::{ Comptime, ComptimeEval }
 use std::syntax::{ Span, DeclRef, DeclKind, TypeShape, FieldShape, ConstructorShape, RequiredAbility, EffectRef, SyntaxDecl, Facts, NodeInfo, all_exprs, node_info }
@@ -35,8 +30,7 @@ pub type ImplInfo = {
   module: Option Str,
 }
 
-## What a type, ability or effect declaration DEFINES. Members are in the order
-## they were written.
+## What a type, ability or effect declaration defines, members in written order.
 pub type Definition = |
   RecordDef { type_params: [Str], fields: [FieldShape], is_open: Bool },
   VariantDef { type_params: [Str], constructors: [ConstructorShape], is_open: Bool },
@@ -56,15 +50,14 @@ pub type AbilityInfo = { ability_decl: Option DeclRef, ability_hash: Str, impl_h
 
 pub type DeclOrder = | ByName, ByModule |
 
-## Where a node is written. `kind` is its tag in `std::syntax` (`"BinaryExpr"`),
-## `symbol` what it spells (`"=="`), and `facts` what the compiler made of it.
+## A written node: `kind` is its `std::syntax` tag, `symbol` what it spells (`"=="`), plus compiler facts.
 pub type Occurrence = { decl: DeclRef, kind: Str, symbol: Option Str, span: Span, facts: Option Facts }
 
 ## A kind of node to look for, and optionally what it spells.
 pub type NodeUse = { kind: Str, symbol: Option Str }
 
-## A search over declarations. Build one with `query {}` and the methods below;
-## every filter given must hold. Answers come back in `order`, at most `limit`.
+## A declaration search; build with `query {}` and its methods. All filters must hold.
+## Results come back in `order`, at most `limit`.
 pub type DeclQuery = {
   kind: Option DeclKind,
   name: Option Str,
@@ -125,12 +118,8 @@ impl DeclQuery where {
   take = { it, n } -> { ...it, limit = Some { val = n } },
 }
 
-## Questions about the codebase. Answered while compiling: by `EvalCodebase`
-## through `Comptime`, by `ComptimeEvalCodebase` there and then, or by a handler of
-## your own in a test.
-##
-## Every answer comes back in one fixed order, so the same question asked twice
-## gives the same answer twice.
+## Questions about the codebase, answered while compiling or by a test handler.
+## Answers come back in a fixed, deterministic order.
 effect Codebase where {
   ## The declaration `name` in `module`.
   resolve: { module: Str, name: Str } -> Option DeclRef <Codebase>,
@@ -170,19 +159,15 @@ effect Codebase where {
   ## Every ability that applies to the type `of` (its declaration), and how.
   abilities_of: { of: DeclRef } -> [AbilityInfo] <Codebase>,
   search: { q: DeclQuery } -> [DeclRef] <Codebase>,
-  ## A declaration as written, with what the compiler made of each node
-  ## (`std::syntax`).
+  ## A declaration as written, with compiler facts on each node (`std::syntax`).
   syntax: { decl: DeclRef } -> Option SyntaxDecl <Codebase>,
   ## Every declaration of a module as written, `use` lines included, in order.
   module_syntax: { module: Str } -> [SyntaxDecl] <Codebase>,
-  ## Every written node of `kind` (a `std::syntax` tag), spelling `symbol` if
-  ## given, across the codebase, with what the compiler made of each.
+  ## Every written node of `kind` (a `std::syntax` tag), spelling `symbol` if given, across the codebase.
   occurrences: { kind: Str, symbol: Option Str } -> [Occurrence] <Codebase>
 }
 
-## Answers from the compiler, and says so: each question becomes `<Comptime>`,
-## left outward so it composes with other compile-time work. One
-## `perform ComptimeEval in …` around it answers all of it while compiling.
+## Compiler-backed answers raised as `<Comptime>`; `perform ComptimeEval in …` answers them.
 impl Codebase for EvalCodebase where {
   resolve = { module, name } -> Comptime.codebase { run = {} -> __native_codebase_resolve { module = module, name = name } },
   info = { decl } -> Comptime.codebase { run = {} -> __native_codebase_info { hash = decl.hash } },
@@ -210,9 +195,7 @@ impl Codebase for EvalCodebase where {
   occurrences = { kind, symbol } -> Comptime.codebase { run = {} -> __native_codebase_occurrences { kind = kind, symbol = symbol } },
 }
 
-## The same answers, with the `Comptime` they raise handled here: it handles
-## `Codebase` and answers its own `Comptime`. So `perform ComptimeEvalCodebase in …`
-## needs nothing around it — the compiler folds that `perform` while compiling.
+## Compiler-backed answers that also handle their own `Comptime`; needs nothing around it.
 impl Codebase for ComptimeEvalCodebase where {
   resolve = { module, name } -> perform ComptimeEval in perform EvalCodebase in Codebase.resolve { module = module, name = name },
   info = { decl } -> perform ComptimeEval in perform EvalCodebase in Codebase.info { decl = decl },
@@ -240,10 +223,9 @@ impl Codebase for ComptimeEvalCodebase where {
   occurrences = { kind, symbol } -> perform ComptimeEval in perform EvalCodebase in Codebase.occurrences { kind = kind, symbol = symbol },
 }
 
-## Testing without a compiler
+# Testing without a compiler
 
-## What `FixtureCodebase` answers from. Start from `empty_fixture` and fill in
-## what a test needs: `{ ...empty_fixture, decls = [...] }`.
+## Data `FixtureCodebase` answers from; start from `{ ...empty_fixture, decls = [...] }`.
 pub type CodebaseFixture = {
   decls: [DeclInfo],
   signatures: [{ hash: Str, shape: TypeShape }],
@@ -265,11 +247,9 @@ pub let empty_fixture: CodebaseFixture = {
   requirements = [], performers = [], calls = [], references = [], usages = [], syntax = [], module_docs = [],
 }
 
-## The helpers below take only the lists they read, never the whole fixture.
+# The helpers below take only the lists they read, never the whole fixture.
 
-## The occurrences in one declaration of a fixture, as the compiler's index
-## would answer them: one per thing a node spells, or one for a node that spells
-## nothing.
+## A fixture declaration's occurrences, as the compiler index: one per spelled symbol, or one if none.
 let fixture_occurrences: { written: SyntaxDecl, kind: Str, symbol: Option Str } -> [Occurrence] = { written, kind, symbol } ->
   match written.ref is
     Some { val = decl } -> seq::flat_map { xs = all_exprs { decl = written }, f = { x } ->
@@ -326,7 +306,7 @@ let receiver_is: { impl_info: ImplInfo, type_hash: Str } -> Bool = { impl_info, 
     Some { val } -> val == type_hash
     None -> False
 
-## One filter each, so the predicate below is a flat list of calls.
+# One filter each, so the predicate below is a flat list of calls.
 let wants_eq: { want: Option Str, actual: Str } -> Bool = { want, actual } -> match want is
   Some { val } -> val == actual
   None -> True
@@ -390,10 +370,8 @@ let fixture_matches: {
       (if q.unused_only then seq::is_empty { xs = refs_to { edges = references, hash = d.hash } } else True) &&
       wants_use { want = q.uses, syntax = syntax, hash = d.hash }
 
-## Answers from data, for testing code that asks the codebase questions —
-## a preprocessor, a lint — with no compiler involved. `ref` answers `None`:
-## a fixture has no functions to recognise. `search` cannot answer `mentioning`
-## or `with_shape`, and says so rather than answering wrongly.
+## Answers from fixture data, for testing codebase-querying code with no compiler.
+## `ref` always answers `None`; `search` crashes on `mentioning` or `with_shape`.
 impl Codebase for FixtureCodebase { data: CodebaseFixture } where {
   resolve = { module, name } ->
     match seq::find { xs = data.decls, p = { x } -> x.decl.module == module && x.decl.name == name } is

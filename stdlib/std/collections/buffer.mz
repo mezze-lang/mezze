@@ -34,21 +34,9 @@ pub let is_empty: { buf: ByteBuffer } -> Bool = { buf } -> __native_buffer_is_em
 ## Clears the buffer, resetting it to empty. The buffer can be reused.
 pub let clear: { buf: ByteBuffer } -> ByteBuffer = { buf } -> __native_buffer_clear { buf = buf }
 
-## Inherent methods, so a buffer CHAINS.
-##
-## Every write returns the buffer, which is the whole point of a builder — and
-## `ByteBuffer` was the one collection type in the stdlib with no inherent impl
-## at all, so none of that was reachable with a dot. Building had to be written
-## inside out:
-##
-##     write_byte { buf = write_byte { buf = write_str { buf = b, s = "hi" }, b = 10 }, b = 13 }
-##
-## against
-##
-##     b.write_str { s = "hi" }.write_byte { b = 10 }.write_byte { b = 13 }
-##
-## Each method delegates to the plain function above it, which is how every
-## other collection in the stdlib ships both spellings.
+# Each method delegates to the plain function above, as every collection ships both spellings.
+## Chainable buffer methods; every write returns the buffer.
+## `b.write_str { s = "hi" }.write_byte { b = 10 }`
 impl ByteBuffer where {
   write = { it, bytes } -> write { buf = it, bytes = bytes },
   write_byte = { it, b } -> write_byte { buf = it, b = b },
@@ -57,9 +45,7 @@ impl ByteBuffer where {
   clear = { it } -> clear { buf = it },
 }
 
-## `size` and `is_empty` are NOT here: they come from `Sized` below, and an
-## inherent method of the same name is refused outright because it would
-## shadow the ability's and silently win.
+# `size`/`is_empty` come from `Sized`: a same-named inherent method is refused (it would shadow it).
 
 impl Sized for ByteBuffer where {
   size = { it } -> size { buf = it },

@@ -22,9 +22,7 @@ class HttpOneApiTest {
 
     /** The service, written once — exactly as a user would write it. */
     private val head = """
-        use std::effects::http::{ Request, Response, HttpClient, SimpleHttpClient, MockHttpClient, mock, client, not_found, created, body_str }
-        use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, get_request, post_request }
-        use std::effects::http_server::{ router, Matched }
+        use std::effects::http::{ Request, Response, not_found, created, body_str, HttpClient, SimpleHttpClient, MockHttpClient, mock_http_rules, client, HttpServer, HelidonHttpServerWith, get_request, post_request, router, Matched }
         use std::collections::bytes
         use std::str
         use std::int
@@ -115,10 +113,9 @@ class HttpOneApiTest {
     fun `a mocked client answers the same endpoints`() {
         val r = run(
             """
-            let fake = [
-              mock { url = "**/api/users/7" }.get {}.text { body = "user 7" },
-              mock { url = "**/api/health" }.get {}.text { body = "ok" },
-            ]
+            let fake = mock_http_rules {}
+              .get { url = "**/api/users/7" }.text { body = "user 7" }
+              .get { url = "**/api/health" }.text { body = "ok" }
             perform MockHttpClient { rules = fake } in do
               let c = client { base_url = "http://example.test" }
               str::concat {
@@ -142,7 +139,7 @@ class HttpOneApiTest {
     fun `the same table answers over a real socket`() {
         val r = run(
             """
-            perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_logs = False } } in
+            perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_print_log = Off } } in
               perform SimpleHttpClient in do
                 let h = match HttpServer.serve { handler = api } is
                   Ok { val = hh } -> hh

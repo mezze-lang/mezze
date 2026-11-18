@@ -1,23 +1,12 @@
-# Mezze code as written: the syntax tree, and what the compiler attached to it.
-#
-# Every node is what the parser read — operators as operators, a pipe and its
-# `@` as written, parentheses, record shorthand, comments, type annotations as
-# spelled. Where the compiler type-checked a node, `facts` says what it made of
-# it: the node's type, the declaration a name resolves to, what a call or an
-# operator dispatches to, and whether it runs while the program is built.
-#
-# `facts` is optional on every node: code that does not type-check still has a
-# syntax tree, and a node the compiler never saw (a comment, a type annotation)
-# has none.
-
+# Mezze code as written: the syntax tree, with optional compiler `facts` per node.
+# `facts` is None where the code does not type-check or the compiler never saw the node.
 use std::collections::seq
 use std::int
 
 ## Where something is written: 1-based lines and columns, the end column inclusive.
 pub type Span = { file: Option Str, start_line: Int, start_col: Int, end_line: Int, end_col: Int }
 
-## A declaration, by identity. `hash` IS the declaration: two declarations that
-## share a name never share a hash.
+## A declaration, by identity: `hash` is the identity; same-named declarations differ in hash.
 pub type DeclRef = { hash: Str, name: Str, module: Str, kind: DeclKind }
 
 pub type DeclKind = | LetDecl, TypeDecl, AbilityDecl, EffectDecl, ImplDecl, PerformerDecl |
@@ -46,9 +35,8 @@ pub type Facts = {
   ty: TypeShape,
   ## A name: the declaration it resolves to.
   refers_to: Option DeclRef,
-  ## A call, an operator or an effect operation: the declaration it reaches —
-  ## a function, or the impl an operator dispatched to. `None` for a built-in
-  ## operation (`>` on `Int`) and for one dispatched through a dictionary.
+  ## For a call, operator or effect op: the function or impl it reaches.
+  ## `None` for a built-in op (`>` on `Int`) or one dispatched through a dictionary.
   calls: Option DeclRef,
   ## Evaluated while the program is built.
   at_build: Bool,
@@ -87,11 +75,9 @@ pub type Expr = |
   ## `Effect.op { … }`.
   EffectCallExpr { op: Str, effect_name: Option Str, op_span: Span, arg: Expr, span: Span, facts: Option Facts },
   ParensExpr { inner: Expr, span: Span, facts: Option Facts },
-  ## `` `( … ) ``: code as a value. Splices in it are names spelled `~x`, or
-  ## `~(0)`, `~(1)` … for a spliced expression, which is `splices` at that index.
+  ## `` `( … ) ``: code as a value. Splices are `~x` names, or `~(i)` for `splices` at index i.
   QuoteExpr { quoted: Code, splices: [Expr], span: Span, facts: Option Facts },
-  ## `name!( … )`: `input` is the text between the parentheses, as written;
-  ## `expansion`, what the macro produced from it.
+  ## `name!( … )`: `input` is the raw text inside the parens; `expansion` is what the macro produced.
   MacroExpr { name: Str, module: Option Str, name_span: Span, input: Str, input_span: Span, expansion: Option Code, span: Span, facts: Option Facts },
 |
 
@@ -220,11 +206,10 @@ pub type EffectOpSyntax = { name: Str, param: TypeExpr, result: TypeExpr, effect
 pub type OpSyntax = { name: Str, param: Option TypeExpr, result: Option TypeExpr, body: Expr, effects: Option EffectRowExpr, requires: [Constraint], doc: Option Str, span: Span }
 pub type ImportItem = { name: Str, alias: Option Str, span: Span }
 
-## Walking
+# Walking
 
-## Every expression in a declaration — each, and everything inside it, outermost
-## first: what a linter looks through. A `let`'s value, and the operations of an
-## `impl` or a performer; a type, an ability, an effect or a `use` line has none.
+## Every expression in a declaration, outermost first (a `let` value, impl/performer op bodies).
+## Type, ability, effect and `use` declarations yield none.
 pub let all_exprs: { decl: SyntaxDecl } -> [Expr] = { decl } -> match decl.decl is
   LetSyntax { value, ... } -> with_inner { e = value }
   ImplSyntax { ops, ... } -> seq::flat_map { xs = ops, f = { x } -> with_inner { e = x.body } }
@@ -280,10 +265,8 @@ pub let children: { e: Expr } -> [Expr] = { e } -> match e is
     DeclsCode { ... } -> []
   MacroExpr { ... } -> []
 
-## What a node is, in the terms the occurrence index uses: its kind (its tag
-## here), each thing it spells, where it is, and its facts. Agrees with the
-## compiler's index (`syntaxKind`, `syntaxSymbols`); a test checks the two
-## against each other.
+# Must agree with the compiler's index (`syntaxKind`, `syntaxSymbols`); a test checks it.
+## A node in occurrence-index terms: its kind (tag), the symbols it spells, span and facts.
 pub type NodeInfo = { kind: Str, symbols: [Str], span: Span, facts: Option Facts }
 
 pub let node_info: { e: Expr } -> NodeInfo = { e } -> match e is

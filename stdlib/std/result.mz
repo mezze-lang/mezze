@@ -3,13 +3,8 @@ use std::abilities::tryable::{ Tryable }
 use std::effects::exception::{ Exception }
 use std::abilities::arbitrary::{ Arbitrary }
 
-## Tryable for Result — extract Ok, throw the raw error on Err.
-##
-## When this throw is caught by an enclosing `ExceptionToResult`, the
-## `Err` is reconstructed exactly as it was. Two `.try {}` calls on `Result`s
-## with different error types contribute their error types to `<Exception>`'s
-## `'error` row; standard `Exception` unification handles the union (variants
-## row-union, primitives must match).
+## `.try {}` on a Result: the Ok value, or `Exception.throw` of the raw error on Err.
+## Different error types union in `<Exception>`'s row (variants merge; primitives must match).
 impl Tryable for Result 'a 'e having 'inner = 'a where {
   try = { it } -> match it is
     Ok { val } -> val
@@ -159,16 +154,14 @@ impl Result 'a 'e where {
   flatten = { it } -> flatten { result = it },
   to_list = { it } -> to_list { result = it },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
+  # dot-chain parity: `x.op {}` for every receiver-taking free function not covered by an ability.
   if_ok = { it, action } -> if_ok { result = it, action = action },
   if_err = { it, action } -> if_err { result = it, action = action },
   zip = { it, b } -> zip { a = it, b = b },
 }
 
 ## Wrap any value in Ok via method syntax: `x.ok {}` → `Ok { val = x }`.
-## `'e` (error type) is an ability parameter — it stays polymorphic until
-## pinned by context (return-type annotation or downstream match arm).
+## The error type stays polymorphic until context (an annotation or match) pins it.
 ability Okable 'e for 'a where {
   ok: { it: 'a } -> Result 'a 'e
 }
@@ -178,8 +171,7 @@ impl Okable 'e for 'a where {
 }
 
 ## Wrap any value in Err via method syntax: `x.err {}` → `Err { error = x }`.
-## `'a` (success type) is an ability parameter — stays polymorphic until
-## pinned by context. Receiver is the error value.
+## The success type stays polymorphic until context pins it.
 ability Errable 'a for 'e where {
   err: { it: 'e } -> Result 'a 'e
 }

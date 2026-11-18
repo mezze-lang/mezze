@@ -21,8 +21,7 @@ import kotlin.test.assertTrue
 class HttpServerLifecycleTest {
 
     private val head = """
-        use std::effects::http::{ Request, Response }
-        use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig, get_request }
+        use std::effects::http::{ Request, Response, HttpServer, HelidonHttpServerWith, ServerConfig, get_request }
         use std::collections::map
         use std::collections::bytes
 
@@ -30,7 +29,7 @@ class HttpServerLifecycleTest {
           status = 200, headers = map::empty {}, body = bytes::from_str { s = "ok" }, url = req.url,
           chunks = None,
         }
-        let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2, stream_bodies = False, helidon_logs = False }
+        let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2, stream_bodies = False, helidon_print_log = Off }
     """.trimIndent()
 
     private fun serveAndWalkAway(): Int =
