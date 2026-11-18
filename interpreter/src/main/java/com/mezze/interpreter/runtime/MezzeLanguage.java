@@ -809,8 +809,12 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         // returning a dud stub would defer the "not found" error to a
         // confusing runtime IllegalStateException.
         if (!canResolveIR(hash)) return null;
-        return userStubCache.computeIfAbsent(hash, h ->
-            new com.mezze.interpreter.bytecode.LazyStubRootNode(this, h, name).getCallTarget());
+        return userStubCache.computeIfAbsent(hash, h -> {
+            var stub = new com.mezze.interpreter.bytecode.LazyStubRootNode(this, h, name);
+            com.mezze.language.truffleir.FunctionIR ir = lookupFunctionIR(h);
+            if (ir != null) stub.maySuspend = ir.getMaySuspend();   // C4 (BUG 71)
+            return stub.getCallTarget();
+        });
     }
 
     private boolean canResolveIR(Hash hash) {

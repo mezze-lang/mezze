@@ -220,6 +220,7 @@ public final class SeqNatives {
     private static Object searchFrom(MezzeSeq seq, MezzeFunction predicate,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode,
                                      int start, int mode) {
+        final boolean chk = com.mezze.interpreter.nodes.continuation.SuspendFacts.parkPossible();   // hoisted: no park possible → the exact pre-continuation loop
         Object[] closureValues = predicate.getClosureValues();
         int closureLen = closureValues.length;
         CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
@@ -231,7 +232,7 @@ public final class SeqNatives {
             Object elem = seq.get(i);
             args[closureLen] = innerTarget != null ? elem : MezzeRecord.wrapX(elem);
             Object result = callNode.call(target, args);
-            if (NativeSuspension.isSuspension(result)) {
+            if (chk && NativeSuspension.isSuspension(result)) {
                 final int at = i;
                 return new NativeSuspension(result, v -> {
                     Object decided = searchDecide(mode, elem, v);
@@ -277,6 +278,7 @@ public final class SeqNatives {
     private static Object mapFrom(MezzeSeq seq, MezzeFunction mapper,
                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode,
                                   Object[] result, int start) {
+        final boolean chk = com.mezze.interpreter.nodes.continuation.SuspendFacts.parkPossible();   // hoisted: no park possible → the exact pre-continuation loop
         Object[] closureValues = mapper.getClosureValues();
         int closureLen = closureValues.length;
         int size = seq.size();
@@ -288,7 +290,7 @@ public final class SeqNatives {
             Object elem = seq.get(i);
             args[closureLen] = innerTarget != null ? elem : MezzeRecord.wrapX(elem);
             Object r = callNode.call(target, args);
-            if (NativeSuspension.isSuspension(r)) {
+            if (chk && NativeSuspension.isSuspension(r)) {
                 final int at = i;
                 return new NativeSuspension(r, v -> { result[at] = v; return mapFrom(seq, mapper, callNode, result, at + 1); });
             }
@@ -308,6 +310,7 @@ public final class SeqNatives {
     private static Object filterFrom(MezzeSeq seq, MezzeFunction predicate,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode,
                                      Object[] buf, int count, int start) {
+        final boolean chk = com.mezze.interpreter.nodes.continuation.SuspendFacts.parkPossible();   // hoisted: no park possible → the exact pre-continuation loop
         int size = seq.size();
         Object[] closureValues = predicate.getClosureValues();
         int closureLen = closureValues.length;
@@ -319,7 +322,7 @@ public final class SeqNatives {
             Object elem = seq.get(i);
             args[closureLen] = innerTarget != null ? elem : MezzeRecord.wrapX(elem);
             Object result = callNode.call(target, args);
-            if (NativeSuspension.isSuspension(result)) {
+            if (chk && NativeSuspension.isSuspension(result)) {
                 final Object[] b = buf; final int c = count; final int at = i;
                 return new NativeSuspension(result, v -> {
                     Object[] nb = b; int nc = c;
@@ -1123,6 +1126,7 @@ public final class SeqNatives {
     /** C4-resumable. */
     private static Object forEachFrom(MezzeSeq seq, MezzeFunction fn,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode, int start) {
+        final boolean chk = com.mezze.interpreter.nodes.continuation.SuspendFacts.parkPossible();   // hoisted: no park possible → the exact pre-continuation loop
         Object[] closureValues = fn.getClosureValues();
         int closureLen = closureValues.length;
         CallTarget innerTarget = ScalarBypass.tryResolve(fn);
@@ -1133,7 +1137,7 @@ public final class SeqNatives {
             Object elem = seq.get(i);
             args[closureLen] = innerTarget != null ? elem : MezzeRecord.wrapX(elem);
             Object r = callNode.call(target, args);
-            if (NativeSuspension.isSuspension(r)) {
+            if (chk && NativeSuspension.isSuspension(r)) {
                 final int at = i;
                 return new NativeSuspension(r, v -> forEachFrom(seq, fn, callNode, at + 1));
             }
@@ -1535,6 +1539,7 @@ public final class SeqNatives {
     private static Object foldTwoArg(MezzeSeq seq, Object init, MezzeFunction folder,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode,
                                      int startIndex, Object[] scanOut) {
+        final boolean chk = com.mezze.interpreter.nodes.continuation.SuspendFacts.parkPossible();   // hoisted: no park possible → the exact pre-continuation loop
         Object[] closureValues = folder.getClosureValues();
         int closureLen = closureValues.length;
         int size = seq.size();
@@ -1552,7 +1557,7 @@ public final class SeqNatives {
                 args[accSlot] = acc;
                 args[elemSlot] = seq.get(i);
                 acc = callNode.call(innerTarget, args);
-                if (NativeSuspension.isSuspension(acc)) return suspendFold(seq, folder, callNode, i, scanOut, acc);
+                if (chk && NativeSuspension.isSuspension(acc)) return suspendFold(seq, folder, callNode, i, scanOut, acc);
                 if (scanOut != null) scanOut[i + 1] = acc;
             }
             return acc;
@@ -1564,7 +1569,7 @@ public final class SeqNatives {
         for (int i = startIndex; i < size; i++) {
             args[closureLen] = MezzeRecord.wrapAccX(acc, seq.get(i));
             acc = callNode.call(target, args);
-            if (NativeSuspension.isSuspension(acc)) return suspendFold(seq, folder, callNode, i, scanOut, acc);
+            if (chk && NativeSuspension.isSuspension(acc)) return suspendFold(seq, folder, callNode, i, scanOut, acc);
             if (scanOut != null) scanOut[i + 1] = acc;
         }
         return acc;

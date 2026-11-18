@@ -66,6 +66,8 @@ public final class TrampolineRootNode extends RootNode {
 
     @CompilerDirectives.CompilationFinal
     private RootCallTarget innerTarget;
+    /** C4 (BUG 71): see {@link LazyStubRootNode#maySuspend}; stamped where the trampoline is minted. */
+    public volatile boolean maySuspend = true;
     private final String name;
 
     /**

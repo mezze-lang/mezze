@@ -1,0 +1,12 @@
+[package]
+name = "contloop"
+version = "0.1.0"
+
+[[app]]
+name = "contloop"
+path = "src/app.mz"
+entry = "main"
+
+[dependencies]
+
+[dev-dependencies]

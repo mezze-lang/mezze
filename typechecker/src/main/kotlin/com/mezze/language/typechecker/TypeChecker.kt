@@ -1656,9 +1656,8 @@ class TypeChecker(
                     importedAbilities = result.importContext?.importedAbilities ?: emptyMap(),
                     importedEffects = result.importContext?.importedEffects ?: emptyMap(),
                     importedImpls = result.importContext?.importedImpls ?: emptyMap(),
-                    allEffects = result.importContext?.let { ic ->
-                        ic.importedEffects + ic.effectsByHash.values.associateBy { it.name }
-                    } ?: emptyMap(),
+                    allEffects = result.allEffectsInReach(),
+                    performerEffects = result.performerEffects?.byName ?: emptyMap(),
                     loweredFunctions = result.loweredFunctions ?: emptyList(),
                     typedModule = result.typedModule,
                     metadataByHash = result.metadataInReach(),

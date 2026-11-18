@@ -28,6 +28,10 @@ data class TypeCheckResult(
     // effect's op signatures even when only its performer was imported (e.g.
     // `use …::{ Console }` brings the performer but not the `Log` effect).
     val allEffects: Map<String, ParsedEffectDecl> = emptyMap(),
+    // Every performer in reach whose op bodies raise an effect, by performer name
+    // (`EventLoop` → {Time, Async}); the entry check names them when such an effect
+    // leaks, since the user never wrote it.
+    val performerEffects: Map<String, Set<String>> = emptyMap(),
     val loweredFunctions: List<FunctionIR> = emptyList(),
     val typedModule: TypedModule? = null,
     val performerRecords: List<Array<String>> = emptyList(),
@@ -105,7 +109,28 @@ fun TypeChecker.TypeCheckResult.Success.metadataInReach():
             decl.metadata?.let { put(h, it) }
         }
     }
+    // An effect can leak from an entry without this module ever naming it: a
+    // performer it installs performs the effect in its op bodies (`EventLoop`
+    // performs `Time`). That decl is two hops away, in a module only the
+    // performer's module imports — its headers are in reach, so its advice is.
+    for (decl in effectHeadersInReach()) {
+        val h = decl.contentHash ?: continue
+        if (h !in this) decl.metadata?.let { put(h, it) }
+    }
     resolvedParsedModule?.let { putAll(com.mezze.language.typechecker.validation.DeprecationLinter.localMetadata(it)) }
+}
+
+/** Every effect decl declared by a transitively loaded module, from headers alone. */
+fun TypeChecker.TypeCheckResult.Success.effectHeadersInReach(): List<com.mezze.language.parsedast.ParsedEffectDecl> =
+    loadedModules.values.flatMap { m -> m.declarationHeaders.filterIsInstance<com.mezze.language.parsedast.ParsedEffectDecl>() }
+
+/** [importContext]'s effects by name, widened to every loaded module's — see [effectHeadersInReach]. */
+fun TypeChecker.TypeCheckResult.Success.allEffectsInReach(): Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = buildMap {
+    for (d in effectHeadersInReach()) put(d.name, d)
+    importContext?.let { ic ->
+        putAll(ic.effectsByHash.values.associateBy { it.name })
+        putAll(ic.importedEffects)
+    }
 }
 
 fun TypeChecker.TypeCheckResult.toHoverResult(): TypeCheckResult = when (this) {
@@ -113,9 +138,8 @@ fun TypeChecker.TypeCheckResult.toHoverResult(): TypeCheckResult = when (this) {
         importedAbilities = importContext?.importedAbilities ?: emptyMap(),
         importedEffects = importContext?.importedEffects ?: emptyMap(),
         importedImpls = importContext?.importedImpls ?: emptyMap(),
-        allEffects = importContext?.let { ic ->
-            ic.importedEffects + ic.effectsByHash.values.associateBy { it.name }
-        } ?: emptyMap(),
+        allEffects = allEffectsInReach(),
+        performerEffects = performerEffects?.byName ?: emptyMap(),
         typedModule = typedModule,
         warnings = warnings.map { TypeCheckWarning(it.message, it.loc, it.code) },
         expectedTypeAt = expectedTypeAt,

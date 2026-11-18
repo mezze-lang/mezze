@@ -113,7 +113,7 @@ class TypedAstBuilder(
     // per lambda; the top frame is the innermost enclosing function. The frame
     // holds the whole row (not just names) so a rider can copy the arrow's
     // associated-type binding (`Exception having 'error = Str`) verbatim.
-    private val enclosingArrowEffects = ArrayDeque<MezzeType.EffectRow?>()
+    internal val enclosingArrowEffects = ArrayDeque<MezzeType.EffectRow?>()
 
     /**
      * One per lambda being built. A dictionary reaches a function from its caller,
@@ -127,10 +127,10 @@ class TypedAstBuilder(
         val visible = HashSet<Int>()
         fun allVisible(): Set<Int> = generateSequence(this) { it.parent }.flatMapTo(HashSet()) { it.visible }
     }
-    private var dictFrame: DictFrame? = null
+    internal var dictFrame: DictFrame? = null
 
     /** A dictionary this emit committed to needing: [abilityName] at [args]. */
-    private class DictDemand(
+    internal class DictDemand(
         val abilityName: String,
         val abilityHash: Hash?,
         val args: List<MezzeType>,
@@ -143,7 +143,7 @@ class TypedAstBuilder(
         /** The operation, when the demand is a receiver-less op call itself. */
         val opName: String?,
     )
-    private val dictDemands = mutableListOf<DictDemand>()
+    internal val dictDemands = mutableListOf<DictDemand>()
 
     /**
      * Record that the call at [loc] needs [abilityName] at [args]. Judged when the
@@ -216,7 +216,7 @@ class TypedAstBuilder(
      * slot reached `DictFallbackRootNode` at run time: "no dictionary was
      * supplied … This is a compiler defect".
      */
-    private fun judgeDictDemands() {
+    internal fun judgeDictDemands() {
         val demands = dictDemands.toList()
         dictDemands.clear()
         for (d in demands) {
@@ -1557,7 +1557,8 @@ class TypedAstBuilder(
                 val handlers = expr.handlers.map { h ->
                     buildHandlerRef(h, file, loc)
                 }
-                val body = buildExpr(expr.body, file, contextType)
+                val thunk = if (handlers.any { it.contCapable }) buildPerformBodyThunk(expr.body, file, contextType, loc) else null   // ContCapable.kt
+                val body = thunk?.body ?: buildExpr(expr.body, file, contextType)
                 val performType = callReturnTypes[expr.loc]?.let { substitution.apply(it) }
                     ?: body.type
                 // Effect-model migration (docs/effect-model.md): source
@@ -1582,9 +1583,8 @@ class TypedAstBuilder(
                         h != null && h in handledHashes
                     }
                 }
-                val cont = handlers.any { it.contCapable }   // ContCapable.kt
-                TypedPerform(handlers, if (cont) performBodyAsThunk(body, loc) else body, performType, loc,
-                    fullyDischarges, capturesIntoResult, bodyIsThunk = cont)
+                TypedPerform(handlers, thunk ?: body, performType, loc,
+                    fullyDischarges, capturesIntoResult, bodyIsThunk = thunk != null)
             }
             is ParsedEffectCall -> {
                 val opName = expr.operation.localName

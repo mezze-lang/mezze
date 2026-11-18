@@ -226,6 +226,7 @@ public final class TaskMachine {
     public Object runBoundary(MezzeFunction bodyThunk, MezzeRecord handler) {
         Boundary b = new Boundary(driveOf(handler), this);
         boundaries.push(b);
+        HandlerChainRegistry.enterParkScope();
         try {
             Task body = new Task(nextTaskId++, null, null);
             body.owner = b;
@@ -257,6 +258,7 @@ public final class TaskMachine {
             teardown(b);
             return body.result;
         } finally {
+            HandlerChainRegistry.exitParkScope();
             boundaries.pop();
         }
     }
@@ -325,7 +327,8 @@ public final class TaskMachine {
                 t.thunk = null;
                 cur = callWith(f, MezzeRecord.empty());
             } else {
-                cur = t.leaf.continueWith(t.deliver);
+                ev("resume-leaf", t.leaf, t.deliver);
+                cur = continueBounced(t.leaf, t.deliver);
                 t.leaf = null; t.deliver = null;
             }
         } catch (Throwable e) {
@@ -347,12 +350,14 @@ public final class TaskMachine {
     private void absorb(Boundary b, Task t, Object cur) {
         while (true) {
             if (cur instanceof NativeSuspension ns) {      // C4: a native loop waits for its callback
+                ev("absorb-ns", ns, ns.inner);
                 t.frames.push(ns);
                 cur = ns.inner;
                 continue;
             }
             if (cur instanceof ContinuationResult cr) {
                 Object yielded = cr.getResult();
+                ev("absorb-cr", cr, yielded);
                 if (yielded instanceof ContinuationResult || yielded instanceof NativeSuspension) {
                     t.frames.push(cr);
                     cur = yielded;
@@ -369,7 +374,7 @@ public final class TaskMachine {
                 }
                 throw new IllegalStateException(
                     "a root yielded something that is neither a nested continuation nor a park request: "
-                    + (yielded == null ? "null" : yielded.getClass().getName()));
+                    + describeYield(cr, yielded) + " (task " + t + ", " + t.frames.size() + " frames above)" + eventsDump());
             }
             if (t.frames.isEmpty()) {
                 t.state = DONE;
@@ -389,8 +394,41 @@ public final class TaskMachine {
         }
     }
 
+    @TruffleBoundary
+    private static String describeYield(ContinuationResult cr, Object yielded) {
+        String root;
+        try {
+            var loc = cr.getBytecodeLocation();
+            var sec = loc.getSourceLocation();
+            root = ((com.oracle.truffle.api.nodes.RootNode) cr.getContinuationRootNode().getSourceRootNode()).getName()
+                + " @ bci " + loc.getBytecodeIndex()
+                + (sec != null ? " " + sec.getSource().getName() + ":" + sec.getStartLine() + ":" + sec.getStartColumn() + " `" + sec.getCharacters().toString().replace('\n', ' ').substring(0, Math.min(60, sec.getCharacters().length())) + "`" : "");
+        } catch (Throwable e) { root = "?"; }
+        String val = yielded == null ? "null" : yielded.getClass().getSimpleName();
+        if (yielded instanceof MezzeVariant v) val += " " + v.getConstructorName();
+        return val + " yielded by root `" + root + "`";
+    }
+
+    // ---- PROBE (MEZZE_PROBE_MACHINE=1): the last events, dumped with a machine error ----
+    static final boolean PROBE = System.getenv("MEZZE_PROBE_MACHINE") != null;
+    private static final java.util.ArrayDeque<String> EVENTS = new java.util.ArrayDeque<>();
+    @TruffleBoundary
+    static void ev(String kind, Object frame, Object value) {
+        if (!PROBE) return;
+        String f = frame instanceof ContinuationResult cr ? describeYield(cr, null).replace("null yielded by root ", "") + " id=" + System.identityHashCode(cr)
+                 : frame instanceof NativeSuspension ? "NativeSuspension id=" + System.identityHashCode(frame) : String.valueOf(frame);
+        String v = value == null ? "null" : value.getClass().getSimpleName() + (value instanceof MezzeVariant mv ? " " + mv.getConstructorName() : "") + " id=" + System.identityHashCode(value);
+        synchronized (EVENTS) { EVENTS.addLast(kind + " " + f + " <- " + v); while (EVENTS.size() > 60) EVENTS.removeFirst(); }
+    }
+    @TruffleBoundary
+    static String eventsDump() {
+        if (!PROBE) return "";
+        synchronized (EVENTS) { return "\n--- last machine events ---\n" + String.join("\n", EVENTS); }
+    }
+
     private static Object resumeFrame(Object frame, Object value) {
-        if (frame instanceof ContinuationResult cr) return cr.continueWith(value);
+        ev("resume", frame, value);
+        if (frame instanceof ContinuationResult cr) return continueBounced(cr, value);
         return ((NativeSuspension) frame).resume.with(value);
     }
 
@@ -478,7 +516,42 @@ public final class TaskMachine {
         Object[] args = new Object[cv.length + 1];
         System.arraycopy(cv, 0, args, 0, cv.length);
         args[cv.length] = arg;
-        return IndirectCallNode.getUncached().call(fn.getCallTarget(), args);
+        try {
+            return IndirectCallNode.getUncached().call(fn.getCallTarget(), args);
+        } catch (com.mezze.interpreter.nodes.function.TailCallException tce) {
+            return bounce(tce);
+        }
+    }
+
+    /**
+     * BUG 74: the machine is the CALLER of every root it resumes (a continuation
+     * root has no trampoline above it) and of the thunks and predicates it invokes
+     * uncached. A tail call the root cannot fuse into a loop surfaces as a
+     * {@link com.mezze.interpreter.nodes.function.TailCallException}, which a
+     * trampoline would catch and bounce; here nothing did, and the control-flow
+     * exception reached the user as a host error. So the machine bounces, exactly
+     * as {@code TrampolineRootNode} does: call the target with the arguments the
+     * tail-call site shaped, until a value (or a suspension) comes back.
+     */
+    private static Object bounce(com.mezze.interpreter.nodes.function.TailCallException tce) {
+        com.oracle.truffle.api.CallTarget target = tce.getCallTarget();
+        Object[] args = tce.getArguments();
+        while (true) {
+            try {
+                return IndirectCallNode.getUncached().call(target, args);
+            } catch (com.mezze.interpreter.nodes.function.TailCallException again) {
+                target = again.getCallTarget();
+                args = again.getArguments();
+            }
+        }
+    }
+
+    private static Object continueBounced(ContinuationResult cr, Object value) {
+        try {
+            return cr.continueWith(value);
+        } catch (com.mezze.interpreter.nodes.function.TailCallException tce) {
+            return bounce(tce);
+        }
     }
 
     private static Object[] seqItems(Object v) {

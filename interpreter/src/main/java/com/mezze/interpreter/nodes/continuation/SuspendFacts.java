@@ -18,6 +18,18 @@ import com.oracle.truffle.api.nodes.RootNode;
 public final class SuspendFacts {
     private SuspendFacts() {}
 
+    /** Can ANY park reach this thread right now? False outside every cont-capable perform
+     *  boundary — which is where ordinary programs run — so the checks below cost nothing there. */
+    public static boolean parkPossible() {
+        return NativeSuspension.ENABLED && HandlerChainRegistry.parkPossible();
+    }
+
+    /** The route decision for a native that runs {@code fn}: a park is possible here AND the
+     *  function may suspend by its effect row. */
+    public static boolean mayPark(MezzeFunction fn) {
+        return parkPossible() && mayFunctionSuspend(fn);
+    }
+
     @TruffleBoundary
     public static boolean mayFunctionSuspend(MezzeFunction fn) {
         return mayTargetSuspend(fn.getCallTarget(), 0);
@@ -27,13 +39,16 @@ public final class SuspendFacts {
         if (!(target instanceof RootCallTarget rct) || depth > 4) return true;
         RootNode root = rct.getRootNode();
         if (root instanceof MezzeBytecodeRootNode r) return r.maySuspend;
+        // BUG 71: an un-inflated stub or an unattached trampoline answers from its own
+        // stamp instead of guessing "may suspend" — a guess that fails a `replaces`
+        // guard once demotes that node for the rest of the process.
         if (root instanceof TrampolineRootNode t) {
             RootCallTarget inner = t.peekInnerTarget();
-            return inner == null || mayTargetSuspend(inner, depth + 1);
+            return inner == null ? t.maySuspend : mayTargetSuspend(inner, depth + 1);
         }
         if (root instanceof LazyStubRootNode s) {
             CallTarget inflated = s.getInflatedTarget();
-            return inflated == null || mayTargetSuspend(inflated, depth + 1);
+            return inflated == null ? s.maySuspend : mayTargetSuspend(inflated, depth + 1);
         }
         return true;
     }

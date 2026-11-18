@@ -201,6 +201,8 @@ class BuildCommand {
             // already passed).
             val typedModuleForValidation: com.mezze.language.typedast.TypedModule?
             var metadataForValidation: Map<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedMetadata> = emptyMap()
+            var effectsForValidation: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap()
+            var performerEffectsForValidation: Map<String, Set<String>> = emptyMap()
             var warningCount = 0
 
             if (cached != null) {
@@ -228,6 +230,8 @@ class BuildCommand {
                 // build with a different one misses instead of reusing it.
                 BuildCache.recordLoweringConfig(currentDir)
                 metadataForValidation = compiled.metadataByHash
+                effectsForValidation = compiled.allEffects
+                performerEffectsForValidation = compiled.performerEffects
                 warningCount = compiled.warningCount
             }
 
@@ -290,7 +294,7 @@ class BuildCommand {
             val entryName = appConfig.entry
             if (typedModuleForValidation != null) {
                 val decls = typedModuleForValidation.decls.filterIsInstance<TypedLetDecl>()
-                EntryPointCheck.entryDiagnostic(decls, entryName, metadataForValidation)?.let { d ->
+                EntryPointCheck.entryDiagnostic(decls, entryName, metadataForValidation, effectsForValidation, performerEffectsForValidation)?.let { d ->
                     println(d.render())
                     kotlin.system.exitProcess(4)
                 }
@@ -505,6 +509,8 @@ class BuildCommand {
         val performerRecords: List<Array<String>>,
         val typedModule: com.mezze.language.typedast.TypedModule?,
         val metadataByHash: Map<com.mezze.language.typedast.Hash, com.mezze.language.parsedast.ParsedMetadata>,
+        val allEffects: Map<String, com.mezze.language.parsedast.ParsedEffectDecl> = emptyMap(),
+        val performerEffects: Map<String, Set<String>> = emptyMap(),
         // Warnings from the fresh typecheck (0 on a cache hit — we didn't
         // re-typecheck, so there's nothing new to report).
         val warningCount: Int = 0,
@@ -596,6 +602,8 @@ class BuildCommand {
             performerRecords = typeCheckResult.performerRecords,
             typedModule = typeCheckResult.typedModule,
             metadataByHash = typeCheckResult.metadataByHash,
+            allEffects = typeCheckResult.allEffects,
+            performerEffects = typeCheckResult.performerEffects,
             warningCount = typeCheckResult.warnings.size,
         )
     }

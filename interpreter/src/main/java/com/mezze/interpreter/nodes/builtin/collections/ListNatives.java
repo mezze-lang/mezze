@@ -222,7 +222,7 @@ public final class ListNatives {
 
     public static Object foldLeft(MezzeList list, Object init, MezzeFunction folder,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        if (NativeSuspension.ENABLED && SuspendFacts.mayFunctionSuspend(folder)) {
+        if (SuspendFacts.mayPark(folder)) {
             return foldResumable(list.toArray(), init, folder, callNode, false, 0);
         }
         return foldTwoArg(list, init, folder, callNode, /*reverse=*/false, /*startIndex=*/0, /*scanOut=*/null);
@@ -244,7 +244,7 @@ public final class ListNatives {
 
     public static Object foldRight(MezzeList list, Object init, MezzeFunction folder,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        if (NativeSuspension.ENABLED && SuspendFacts.mayFunctionSuspend(folder)) {
+        if (SuspendFacts.mayPark(folder)) {
             return foldResumable(list.toArray(), init, folder, callNode, true, 0);
         }
         return foldTwoArg(list, init, folder, callNode, /*reverse=*/true, /*startIndex=*/0, /*scanOut=*/null);
@@ -253,7 +253,7 @@ public final class ListNatives {
     public static Object reduce(MezzeList list, MezzeFunction reducer,
                                 com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.isEmpty()) return MezzeVariant.none();
-        if (NativeSuspension.ENABLED && SuspendFacts.mayFunctionSuspend(reducer)) {
+        if (SuspendFacts.mayPark(reducer)) {
             Object[] arr = list.toArray();
             return NativeSuspension.mapResult(foldResumable(arr, arr[0], reducer, callNode, false, 1), MezzeVariant::some);
         }
@@ -263,7 +263,7 @@ public final class ListNatives {
 
     public static Object find(MezzeList list, MezzeFunction predicate,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        if (NativeSuspension.ENABLED && SuspendFacts.mayFunctionSuspend(predicate)) {
+        if (SuspendFacts.mayPark(predicate)) {
             Object[] src = list.toArray();
             var ctx = ScalarCall.prepare1(predicate, "x");
             return ResumableLoops.run(0, src.length, new ResumableLoops.Body() {
@@ -300,7 +300,7 @@ public final class ListNatives {
 
     public static Object findIndex(MezzeList list, MezzeFunction predicate,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        if (NativeSuspension.ENABLED && SuspendFacts.mayFunctionSuspend(predicate)) {
+        if (SuspendFacts.mayPark(predicate)) {
             Object[] src = list.toArray();
             var ctx = ScalarCall.prepare1(predicate, "x");
             return ResumableLoops.run(0, src.length, new ResumableLoops.Body() {
@@ -340,7 +340,7 @@ public final class ListNatives {
 
     public static Object any(MezzeList list, MezzeFunction predicate,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        if (NativeSuspension.ENABLED && SuspendFacts.mayFunctionSuspend(predicate)) {
+        if (SuspendFacts.mayPark(predicate)) {
             Object[] src = list.toArray();
             var ctx = ScalarCall.prepare1(predicate, "x");
             return ResumableLoops.run(0, src.length, new ResumableLoops.Body() {
@@ -376,7 +376,7 @@ public final class ListNatives {
 
     public static Object all(MezzeList list, MezzeFunction predicate,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        if (NativeSuspension.ENABLED && SuspendFacts.mayFunctionSuspend(predicate)) {
+        if (SuspendFacts.mayPark(predicate)) {
             Object[] src = list.toArray();
             var ctx = ScalarCall.prepare1(predicate, "x");
             return ResumableLoops.run(0, src.length, new ResumableLoops.Body() {

@@ -6,6 +6,7 @@ import com.mezze.language.typechecker.TypeCheckResult
 import com.mezze.language.typechecker.TypeCheckWarning
 import com.mezze.language.typechecker.TypeChecker
 import com.mezze.language.typechecker.metadataInReach
+import com.mezze.language.typechecker.allEffectsInReach
 import com.mezze.language.langservice.printing.ErrorFormatter
 
 /**
@@ -67,6 +68,9 @@ object TypeCheckRunner {
             metadataByHash = success.metadataInReach(),
             importedAbilities = success.importContext?.importedAbilities ?: emptyMap(),
             importedEffects = success.importContext?.importedEffects ?: emptyMap(),
+            importedImpls = success.importContext?.importedImpls ?: emptyMap(),
+            allEffects = success.allEffectsInReach(),
+            performerEffects = success.performerEffects?.byName ?: emptyMap(),
             loweredFunctions = success.loweredFunctions ?: emptyList(),
             typedModule = success.typedModule,
             performerRecords = success.loweredPerformers,

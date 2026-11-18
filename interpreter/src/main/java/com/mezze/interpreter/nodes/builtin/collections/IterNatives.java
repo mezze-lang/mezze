@@ -527,12 +527,91 @@ public final class IterNatives {
      *  suspend. Pure callbacks never come here — measured ~15% slower than the push
      *  walk on an effectful `range.map.fold`, and that is the price of suspendability
      *  paid only by code that can park. */
+    @TruffleBoundary   // recursive over the descriptor — see stageTargetsMatch
     public static boolean resumable(MezzeIter it, MezzeFunction fn) {
-        return NativeSuspension.ENABLED && (SuspendFacts.mayFunctionSuspend(fn) || chainMaySuspend(it.getDescriptor()));
+        boolean r = SuspendFacts.parkPossible() && resumableByRow(it, fn);
+        if (r) RESUMABLE_DECISIONS.incrementAndGet();
+        return r;
     }
 
+    /** The STATIC half of the verdict — the rows alone, a function of call targets, so a
+     *  BDSL consumer may cache it per entry; the dynamic half is {@link SuspendFacts#parkPossible}. */
+    @TruffleBoundary
+    public static boolean resumableByRow(MezzeIter it, MezzeFunction fn) {
+        return SuspendFacts.mayFunctionSuspend(fn) || chainMaySuspend(it.getDescriptor());
+    }
+
+    /**
+     * The call targets of every function a chain carries, source-first — the KEY the
+     * route verdict depends on (BUG 71, second half). `resumable` costs boundary calls
+     * and is wrong as a per-execution guard: evaluated on every fold it cost +30% on a
+     * PURE chain. The BDSL consumers cache the verdict per specialization entry and
+     * guard it with {@link #stageTargetsMatch}, an identity compare over a few
+     * references.
+     */
+    @TruffleBoundary
+    public static CallTarget[] stageTargets(IterNode n) {
+        java.util.ArrayList<CallTarget> out = new java.util.ArrayList<>(4);
+        collectStageTargets(n, out);
+        return out.toArray(new CallTarget[0]);
+    }
+
+    private static void collectStageTargets(IterNode n, java.util.List<CallTarget> out) {
+        if (n instanceof UnaryOpIterNode u) { collectStageTargets(u.src, out); out.add(targetOf(u.fn)); }
+        else if (n instanceof TakeWhileIterNode t) { collectStageTargets(t.src, out); out.add(targetOf(t.predicate)); }
+        else if (n instanceof DropWhileIterNode d) { collectStageTargets(d.src, out); out.add(targetOf(d.predicate)); }
+        else if (n instanceof FlatMapIterNode f) { collectStageTargets(f.src, out); out.add(targetOf(f.fn)); }
+        else if (n instanceof UnfoldIterNode u) { out.add(targetOf(u.stepFunction)); }
+        else if (n instanceof TakeIterNode t) { collectStageTargets(t.src, out); }
+        else if (n instanceof DropIterNode d) { collectStageTargets(d.src, out); }
+        else if (n instanceof EnumerateIterNode e) { collectStageTargets(e.src, out); }
+        else if (n instanceof ChainIterNode c) { collectStageTargets(c.first, out); collectStageTargets(c.second, out); }
+        else if (n instanceof ZipIterNode z) { collectStageTargets(z.first, out); collectStageTargets(z.second, out); }
+    }
+
+    private static CallTarget targetOf(Object fn) {
+        return fn instanceof MezzeFunction f ? f.getCallTarget() : null;
+    }
+
+    /**
+     * Same chain shape and the same functions (by call target), in order. A BOUNDARY on
+     * purpose: it recurses over the descriptor, and a recursive walk inlined by partial
+     * evaluation made the whole enclosing root bail out ("too deep inlining") and run
+     * interpreted — measured as the +30% on a pure chain. As a real call it costs tens
+     * of nanoseconds per consumer call, against a thousand elements.
+     */
+    @TruffleBoundary
+    public static boolean stageTargetsMatch(IterNode n, CallTarget[] cached) {
+        int[] i = {0};
+        return matchStages(n, cached, i) && i[0] == cached.length;
+    }
+
+    private static boolean matchStages(IterNode n, CallTarget[] cached, int[] i) {
+        if (n instanceof UnaryOpIterNode u) return matchStages(u.src, cached, i) && take(cached, i, u.fn);
+        if (n instanceof TakeWhileIterNode t) return matchStages(t.src, cached, i) && take(cached, i, t.predicate);
+        if (n instanceof DropWhileIterNode d) return matchStages(d.src, cached, i) && take(cached, i, d.predicate);
+        if (n instanceof FlatMapIterNode f) return matchStages(f.src, cached, i) && take(cached, i, f.fn);
+        if (n instanceof UnfoldIterNode u) return take(cached, i, u.stepFunction);
+        if (n instanceof TakeIterNode t) return matchStages(t.src, cached, i);
+        if (n instanceof DropIterNode d) return matchStages(d.src, cached, i);
+        if (n instanceof EnumerateIterNode e) return matchStages(e.src, cached, i);
+        if (n instanceof ChainIterNode c) return matchStages(c.first, cached, i) && matchStages(c.second, cached, i);
+        if (n instanceof ZipIterNode z) return matchStages(z.first, cached, i) && matchStages(z.second, cached, i);
+        return true;
+    }
+
+    private static boolean take(CallTarget[] cached, int[] i, Object fn) {
+        if (i[0] >= cached.length) return false;
+        return cached[i[0]++] == targetOf(fn);
+    }
+
+    /** How many consumers took the cursor route — a test's view of BUG 71 (a pure chain
+     *  must never add to it). Incremented on the rare path only. */
+    public static final java.util.concurrent.atomic.AtomicLong RESUMABLE_DECISIONS = new java.util.concurrent.atomic.AtomicLong();
+
+    @TruffleBoundary
     public static boolean resumable(MezzeIter it) {
-        return NativeSuspension.ENABLED && chainMaySuspend(it.getDescriptor());
+        return SuspendFacts.parkPossible() && chainMaySuspend(it.getDescriptor());
     }
 
     /** A consumer over a cursor, with heap state. {@code element} returns CONTINUE,

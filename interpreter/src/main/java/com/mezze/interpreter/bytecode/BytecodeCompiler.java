@@ -1246,9 +1246,11 @@ public final class BytecodeCompiler {
                 final int cc = ir.getCaptureSlots().size();
                 final int pc = ir.getParamSlots().size();
                 final String[] pn = ir.getParamNames().toArray(new String[0]);
-                compiledCallTargets.computeIfAbsent(ir.getHash(),
-                        h -> new TrampolineRootNode(
-                                language, ir.getName(), cc, pc, pn).getCallTarget());
+                compiledCallTargets.computeIfAbsent(ir.getHash(), h -> {
+                    TrampolineRootNode t = new TrampolineRootNode(language, ir.getName(), cc, pc, pn);
+                    t.maySuspend = ir.getMaySuspend();   // C4 (BUG 71)
+                    return t.getCallTarget();
+                });
             }
             if (!supports(ir)) {
                 throw new IllegalArgumentException(
@@ -1380,6 +1382,7 @@ public final class BytecodeCompiler {
                         language, ir.getName(), captureCount, paramCount, paramNames);
                 compiledCallTargets.put(ir.getHash(), trampoline.getCallTarget());
             }
+            trampoline.maySuspend = ir.getMaySuspend();   // C4 (BUG 71)
         }
 
         // #356 — when a debugger is attached, use COMPLETE so source
@@ -1395,7 +1398,13 @@ public final class BytecodeCompiler {
         // Truffle debugger session — which does not flip our flag, only our own
         // DAP bridge does — could never resolve a line breakpoint.
         final boolean debug = MezzeLanguage.isBdslDebugInstrumentation();
-        BytecodeConfig config = debug ? BytecodeConfig.COMPLETE : BytecodeConfig.DEFAULT;
+        // WITH_SOURCE, not DEFAULT (BUG 75): with DEFAULT the first guest error made Truffle
+        // RE-PARSE every root on its stack to attach source information, and this parser is
+        // not reproducible on a re-parse — it reads compiler state (which callees are compiled
+        // by then, the current source) — so a root with a yield failed `updateBytecode` with a
+        // ClassCastException that REPLACED the real error. Describing sources up front costs
+        // metadata only; the hot path is unchanged (measured: control/pure/seq fold rows).
+        BytecodeConfig config = debug ? BytecodeConfig.COMPLETE : BytecodeConfig.WITH_SOURCE;
         final com.oracle.truffle.api.source.Source source = resolveSource(ir.getSourceFile());
         final int[] rootRange = (source != null)
                 ? toCharRange(source, ir.getSourceSection())
@@ -8851,20 +8860,32 @@ public final class BytecodeCompiler {
      * exactly what it would have seen had nothing suspended.
      */
     private void emitWithSuspendPropagation(Runnable emitCall, MezzeBytecodeRootNodeGen.Builder b) {
+        // `slot = call; if IsSuspension(slot) { slot = Yield(slot) }; slot`
+        //
+        // A STATEMENT `if`, not a value-carrying Conditional around the Yield (BUG 76):
+        // the ternary form compiled by the FIRST tier took the yield branch on a value
+        // that was not a suspension — a fresh forwarder root yielded the `Ok` its op
+        // call had just returned — in ~60% of runs of a fan-out that awaits a thousand
+        // settled promises after a thousand pending ones (the else branch's profile
+        // read "never executed"). The statement form has no merge of the two arms'
+        // values on the operand stack across the yield: the delivered value is stored
+        // back into the slot and the slot is read once.
         b.beginBlock();
         BytecodeLocal slot = b.createLocal();
         b.beginStoreLocal(slot);
         emitCall.run();
         b.endStoreLocal();
-        b.beginConditional();
+        b.beginIfThen();
         b.beginIsSuspension();
         b.emitLoadLocal(slot);
         b.endIsSuspension();
+        b.beginStoreLocal(slot);
         b.beginYield();
         b.emitLoadLocal(slot);
         b.endYield();
+        b.endStoreLocal();
+        b.endIfThen();
         b.emitLoadLocal(slot);
-        b.endConditional();
         b.endBlock();
     }
 

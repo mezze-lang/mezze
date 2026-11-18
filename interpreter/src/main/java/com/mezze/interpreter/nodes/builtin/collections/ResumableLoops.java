@@ -29,9 +29,10 @@ public final class ResumableLoops {
     }
 
     public static Object run(int start, int n, Body b) {
+        final boolean chk = com.mezze.interpreter.nodes.continuation.SuspendFacts.parkPossible();   // hoisted: no park possible → the exact pre-continuation loop
         for (int i = start; i < n; i++) {
             Object r = b.call(i);
-            if (NativeSuspension.isSuspension(r)) {
+            if (chk && NativeSuspension.isSuspension(r)) {
                 final int at = i;
                 return new NativeSuspension(r, v -> b.accept(at, v) == STOP ? b.finish() : run(at + 1, n, b));
             }

@@ -1,0 +1,125 @@
+## WHAT THE CONTINUATION BRANCH COSTS WHEN NOTHING PARKS — the fast paths.
+##
+## Every kernel computes the SAME checksum over the same n elements, in blocks
+## of m = 1000 (an outer loop of n/m blocks, an inner pass over 1..m), so the HOF
+## kernels and the loop kernels do identical work. Reported in ps per element.
+##
+##   1 control        a counted loop and an add
+##   2 pure call      the same loop calling a non-inlinable PURE function
+##   3 eff call       the same loop calling a function that PERFORMS an effect
+##                    (its callee may suspend, so the branch emits the
+##                    propagation check at this call site; main emits nothing)
+##   4 seq fold pure  seq::fold with a pure callback
+##   5 seq fold eff   seq::fold with a performing callback (the resumable route)
+##   6 seq map eff    seq::map with a performing callback, then a pure fold
+##   7 iter pure      iter from_seq -> map -> filter -> fold, all pure
+##   8 iter eff       the same chain with a performing map (the cursor route)
+##   9 list fold pure list::fold_left, pure
+##  10 list fold eff  list::fold_left with a performing callback
+##  11 loom spawn     LoomAsync: spawn + await per element (regression check for
+##                    Phase A ops and the Phase B chain snapshot)
+use std::effects::log::{ println, Console }
+use std::effects::args::{ SystemArgs, argv }
+use std::effects::time::{ SystemTime, monotonic }
+use std::datetime::{ duration_to_nanos, sub_duration }
+use std::effects::async::{ Async, LoomAsync, await }
+use std::collections::seq
+use std::collections::iter
+use std::collections::list
+use std::result
+use std::int
+
+let arg_at = { args, i, def } -> match seq::get { xs = args, i = i } is
+  Some { val } -> match int::from_str { s = val } is
+    Some { val = v } -> v
+    None -> def
+  None -> def
+
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  let t1 = monotonic {}
+  { ns = duration_to_nanos { d = sub_duration { a = t1, b = t0 } }, result = r }
+
+effect Unit1 where {
+  one: {} -> Int <Unit1>
+}
+impl Unit1 for Ones where {
+  one = {} -> 1
+}
+
+let m = 1000
+let m7 = { i } -> i - (i / 7) * 7
+
+## n/m blocks; `body` runs one block over 1..m and returns the new accumulator.
+let outer = { b, acc, body } -> if b <= 0 then acc else outer { b = b - 1, acc = body { acc = acc }, body = body }
+
+## 1
+let go_ctrl = { i, acc } -> if i <= 0 then acc else go_ctrl { i = i - 1, acc = acc + m7 { i = i } }
+let k_control = { n } -> outer { b = n / m, acc = 0, body = { acc } -> go_ctrl { i = m, acc = acc } }
+
+## 2 — recursive guard keeps it a real call
+let pure_fn = { x } -> if x < 0 then pure_fn { x = x + 1 } else m7 { i = x }
+let go_pure = { i, acc } -> if i <= 0 then acc else go_pure { i = i - 1, acc = acc + pure_fn { x = i } }
+let k_pure_call = { n } -> outer { b = n / m, acc = 0, body = { acc } -> go_pure { i = m, acc = acc } }
+
+## 3
+let eff_fn = { x } -> m7 { i = x } + Unit1.one {} - 1
+let go_eff = { i, acc } -> if i <= 0 then acc else go_eff { i = i - 1, acc = acc + eff_fn { x = i } }
+let k_eff_call = { n } -> perform Ones in outer { b = n / m, acc = 0, body = { acc } -> go_eff { i = m, acc = acc } }
+
+## 4..6
+let xs = seq::range { start = 1, end = m + 1 }
+let k_seq_fold_pure = { n } -> outer { b = n / m, acc = 0,
+  body = { acc } -> seq::fold { xs = xs, init = acc, f = { acc, x } -> acc + m7 { i = x } } }
+let k_seq_fold_eff = { n } -> perform Ones in outer { b = n / m, acc = 0,
+  body = { acc } -> seq::fold { xs = xs, init = acc, f = { acc, x } -> acc + eff_fn { x = x } } }
+let k_seq_map_eff = { n } -> perform Ones in outer { b = n / m, acc = 0,
+  body = { acc } -> seq::fold { xs = seq::map { xs = xs, f = { x } -> eff_fn { x = x } }, init = acc, f = { acc, x } -> acc + x } }
+
+## 7..8
+let k_iter_pure = { n } -> outer { b = n / m, acc = 0,
+  body = { acc } -> iter::fold { it = iter::filter { it = iter::map { it = iter::from_seq { xs = xs }, f = { x } -> m7 { i = x } }, p = { x } -> x >= 0 }, init = acc, f = { acc, x } -> acc + x } }
+let k_iter_eff = { n } -> perform Ones in outer { b = n / m, acc = 0,
+  body = { acc } -> iter::fold { it = iter::filter { it = iter::map { it = iter::from_seq { xs = xs }, f = { x } -> eff_fn { x = x } }, p = { x } -> x >= 0 }, init = acc, f = { acc, x } -> acc + x } }
+
+## 9..10
+let lst = list::from_seq { xs = xs }
+let k_list_fold_pure = { n } -> outer { b = n / m, acc = 0,
+  body = { acc } -> list::fold_left { xs = lst, init = acc, f = { acc, x } -> acc + m7 { i = x } } }
+let k_list_fold_eff = { n } -> perform Ones in outer { b = n / m, acc = 0,
+  body = { acc } -> list::fold_left { xs = lst, init = acc, f = { acc, x } -> acc + eff_fn { x = x } } }
+
+## 11
+let go_loom = { i, acc } -> if i <= 0 then acc else do
+  let p = Async.spawn { f = {} -> m7 { i = i } }
+  go_loom { i = i - 1, acc = acc + result::get_or { result = await { p = p }, def = 0 } }
+let k_loom = { n } -> perform LoomAsync in outer { b = n / m, acc = 0, body = { acc } -> go_loom { i = m, acc = acc } }
+
+let report = { name, n, r } ->
+  println { msg = "$(name)  $(int::to_str { n = r.ns * 1000 / n }) ps/iter  sum=$(int::to_str { n = r.result })" }
+
+let bench = { name, n, f } -> do
+  f {}
+  f {}
+  f {}
+  report { name = name, n = n, r = time_it { f = f } }
+  report { name = name, n = n, r = time_it { f = f } }
+  report { name = name, n = n, r = time_it { f = f } }
+
+pub let main = {} -> perform Console in perform SystemArgs in perform SystemTime in do
+  let args = argv {}
+  let k = arg_at { args = args, i = 0, def = 1 }
+  let n = arg_at { args = args, i = 1, def = 2000000 }
+  if k == 1 then bench { name = "1 control       ", n = n, f = {} -> k_control { n = n } }
+  else if k == 2 then bench { name = "2 pure call     ", n = n, f = {} -> k_pure_call { n = n } }
+  else if k == 3 then bench { name = "3 eff call      ", n = n, f = {} -> k_eff_call { n = n } }
+  else if k == 4 then bench { name = "4 seq fold pure ", n = n, f = {} -> k_seq_fold_pure { n = n } }
+  else if k == 5 then bench { name = "5 seq fold eff  ", n = n, f = {} -> k_seq_fold_eff { n = n } }
+  else if k == 6 then bench { name = "6 seq map eff   ", n = n, f = {} -> k_seq_map_eff { n = n } }
+  else if k == 7 then bench { name = "7 iter pure     ", n = n, f = {} -> k_iter_pure { n = n } }
+  else if k == 8 then bench { name = "8 iter eff      ", n = n, f = {} -> k_iter_eff { n = n } }
+  else if k == 9 then bench { name = "9 list fold pure", n = n, f = {} -> k_list_fold_pure { n = n } }
+  else if k == 10 then bench { name = "10 list fold eff", n = n, f = {} -> k_list_fold_eff { n = n } }
+  else if k == 11 then bench { name = "11 loom spawn   ", n = n, f = {} -> k_loom { n = n } }
+  else println { msg = "unknown kernel" }

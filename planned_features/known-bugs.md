@@ -8285,3 +8285,167 @@ involved. Found through `sort_by`'s stdlib wrapper (`{ a, b } -> if cmp { a, b }
 -1 else 1`), whose park reached the comparator as a dropped continuation instead of
 the named comparator error. Both constructors now carry the flag; asserted by a park
 inside an `if` condition through a scalar indirect call resuming (`-1`).
+
+## BUG 69 — FIXED 2026-11-18: a park propagating out of an indirect call in a tail self-call's ARGUMENT corrupts the resume
+
+```mezze
+let go = { i, acc } -> if i <= 0 then acc else do
+  yield_now {}
+  go { i = i - 1, acc = acc + i }
+let outer = { b, acc, body } -> if b <= 0 then acc else outer { b = b - 1, acc = body { acc = acc }, body = body }
+let k = { n } -> perform EventLoop in outer { b = n / 1000, acc = 0, body = { acc } -> go { i = 1000, acc = acc } }
+## k { n = 2000 }  →  Error: class java.lang.Boolean cannot be cast to …ContinuationRootNodeImpl
+```
+
+`perform EventLoop in go { i = 1000, acc = 0 }` alone works (500500). The difference is the
+suspension crossing `body { acc = acc }`, an indirect call sitting in an ARGUMENT of a tail
+self-call. Found by `bench/cases/contloop`, whose every EventLoop kernel has this shape; none
+of the 24 scheduler tests did. Host exception reaching a user = compiler bug.
+
+## BUG 70 — FIXED 2026-11-18: a cont-capable perform in a function called through a thunk leaves an Illegal frame slot
+
+```mezze
+let k = { n } -> perform EventLoop in go { i = n, acc = 0 }       ## go as in BUG 69
+let time_it = { f } -> perform SystemTime in do
+  let t0 = monotonic {}
+  let r = f {}
+  { result = r }
+let bench = { name, n, f } -> do
+  f {}
+  let r = time_it { f = f }
+  println { msg = "$(name) $(int::to_str { n = r.result })" }
+## bench { name = "k", n = 1000, f = {} -> k { n = n } }
+##   →  Error: FrameSlotTypeException: Frame slot kind Object expected, but got Illegal at frame slot index 2
+```
+
+Nothing should suspend outside `k`'s perform, yet a frame downstream reads an uninitialised
+slot. Distinct from BUG 69 (no closure-in-argument here; the perform is the whole body of a
+function reached through a thunk parameter, once as a statement and once as a `let`). Same
+bench, same session. Both say the C2/C3 propagation tests were too uniform in shape.
+
+**ROOT CAUSE (69 and 70 are one bug):** `performBodyAsThunk` wrapped the body AFTER it was typed in
+the enclosing scope, so the enclosing function's parameters and lets sat at binding depth 0 and
+`collectCaptures` (depth > 0 only) did not collect them; the thunk then read its own uninitialised
+slots. Every failing shape had a free variable of the enclosing function in the perform body; the
+one passing shape had only constants. FIX: `buildPerformBodyThunk` builds the body INSIDE a pushed
+lambda scope, exactly as a written `{} -> body`. Tests: `ParkPropagationShapesTest` (6 shapes,
+including the bench's exact wrapper shape and a six-pass variant).
+
+## BUG 74 — FIXED 2026-11-18: a tail call out of a root the machine resumes escaped as a host `TailCallException`
+
+A continuation root has no trampoline above it: when the machine resumed a frame (or called a thunk
+or predicate uncached) and the remaining code made a tail call the root could not fuse, the
+control-flow exception reached the user. `bench/cases/contloop` kernel 9 (a closure whose TAIL call
+is a `seq::fold` with a parking callback). FIX: `TaskMachine.bounce` — the machine is the caller, so
+it bounces exactly as `TrampolineRootNode` does, around every `continueWith` and `callWith`.
+
+## BUG 71 — FIXED 2026-11-18: one "may suspend" guess permanently demotes the fused iter fold/for_each op
+
+`IterFoldDynamic.doCached` (and `IterForEachDynamic`) is guarded by `!iterResumable(iter, folder)`;
+its fallback is `@Specialization(replaces = "doCached") doUncached`. `SuspendFacts.mayTargetSuspend`
+answers TRUE for a lazy stub that has not inflated yet (`inflated == null`). So the FIRST fold call
+over a fresh lambda fails the guard once, the DSL replaces the fused specialization with the generic
+one, and every later call on that node — all of them pure, all of them "not resumable" — pays the
+generic path. Measured in `bench/cases/contsurface` kernel 7 (iter pure, 20M elements):
+
+| | ps/elem | young GC |
+|---|---|---|
+| main | 21 920 | 58 |
+| branch | 28 556 (+30%) | 75 |
+| branch, `MEZZE_RESUMABLE_NATIVES=0` | 21 664 | 58 |
+
+A probe counting route decisions over the run: 6 "true" (one per pass, root = `LazyStubRootNode`),
+11 994 "false". The cost is the demotion, not the cursor path.
+
+**FIX (three parts, all measured):** (1) `LazyStubRootNode`/`TrampolineRootNode` carry a stamped
+`maySuspend` so an un-inflated stub never guesses; (2) the resumable route is its own
+non-replacing specialization (`doResumable`), the verdict's STATIC half is `@Cached` per entry and
+keyed by `iterStagesMatch` (an identity compare over the stages' call targets — a per-execution
+dynamic guard that walked the descriptor made the whole root bail out of partial evaluation with
+"too deep inlining", which was the real +30%); (3) the dynamic half, `SuspendFacts.parkPossible()`,
+is a per-thread count of active cont-capable boundaries: outside one, natives run their exact
+pre-continuation loops (per-element checks hoisted behind one read) and iter never takes the cursor.
+Result: every fast-path kernel at main's level (iter pure 20463 vs 22398, iter eff 21968 vs 20294,
+seq fold eff 9879 vs 10039, list fold eff 12764 vs 12714). Tests: `IterRouteDecisionTest`. Fix: a route decision on a
+`replaces` guard may not guess; inflate (or read the stub's `FunctionIR.maySuspend`) before
+answering, or make the resumable route its own non-replacing specialization.
+
+## BUG 72 — OPEN 2026-11-18: LoomAsync spawn+await hangs nondeterministically past a few thousand iterations (main AND branch)
+
+`contsurface` kernel 11 (spawn one task, await it, per element; 1000-element blocks): n=1000 and
+n=3000 run at 12–19 us/op on both builds; n=6000 timed out at 300 s on both builds twice, then
+finished in <75 s on the branch once. On main n=1000 also hung once and n=20000 sat for 45 min.
+`bench/cases/asyncsurface` already notes that spawn rows "cannot go past ~1600 iterations in a sane
+wall clock". BUG 66 (the compiler race) explains main's part but not the branch's. Thread dump of a hanging
+run (branch, n=6000, 100 s in): 14 threads, NO task thread alive, `main` parked in
+`MezzePromise.await` (AsyncNatives.java:428) via `promiseAwaitResultSlowPath` — the awaited promise
+was never completed, or its completion never woke the waiter. A lost wake-up between `complete` and
+`await`, nondeterministic, independent of continuations. Pre-existing on main.
+
+## BUG 73 — OPEN 2026-11-18 (MAIN): `./gradlew :cli:nativeCompile` fails — blocklisted methods reachable for runtime compilation, through `InlineMapContainsKey`
+
+Both the main head (6a4594d07, worktree-type-soundness) and worktree-continuations fail
+native-image at analysis in ~70 s: `VMError$HostedError: Blocklisted methods are reachable for
+runtime compilation`. Every trace (53 on main, 82 on the branch) runs
+`MezzeBytecodeRootNodeGen$UncachedBytecodeNode.doInlineMapContainsKey_ → InlineMapContainsKey.doSet
+→ MezzeSet.containsDirect → TrieSetStorage.contains / TrieHash.mix32 / MezzeSet.equals` and from
+there into JDK code the Truffle blocklist forbids (`ThreadLocal.get`, `jdk.nio.zipfs.ZipPath`,
+`Throwable.printStackTrace`, `DateFormatSymbols`, `CopyOnWriteArrayList.equals`). None of the
+continuation code appears in any trace. The last native CLI in `cli/build/native/nativeCompile/mez`
+dates from 2026-11-06, so the regression landed on main between then and 6a4594d07. `mez build
+--native` through the JVM dev launcher also fails (the known classpath trap), so there is currently
+NO way to build a native binary from either tree. Consequence: "BDSL yield under native-image"
+(design-doc risk 4) stays UNVERIFIED until this is fixed. The uncached `MezzeSet.containsDirect`
+path needs a `@TruffleBoundary` (or the inline op must not reach it for runtime compilation).
+
+## BUG 75 — MITIGATED 2026-11-18 (parser determinism still OPEN): the BDSL parser is not reproducible on a re-parse, and a re-parse replaced every runtime error inside continuation code with a ClassCastException
+
+Roots were parsed with `BytecodeConfig.DEFAULT` (no source info). The first guest error made
+Truffle materialise a stack trace → `ensureSourceInformation` → `BytecodeRootNodes.update` →
+the parser lambda in `BytecodeCompiler.compile` ran AGAIN. That lambda reads compiler state at run
+time (which callees are already compiled → which constants it emits, `currentSource`,
+`entryTopLevelLets`), so the re-parse emits different bytecode/constants; for a root with a yield,
+`MezzeBytecodeRootNodeGen.updateBytecode` then cast a String (a constant now at the continuation's
+index) to `ContinuationRootNodeImpl`:
+
+```
+ClassCastException ← updateBytecode ← Builder.endRoot ← BytecodeCompiler.lambda$compile$0
+  ← BytecodeRootNodes.update ← BytecodeNode.ensureSourceInformation ← PolyglotExceptionImpl.materialize
+```
+
+Consequences: (1) in a BUILT app every error inside a cont-capable perform printed as this cast
+(the "Boolean/String cannot be cast to ContinuationRootNodeImpl" first attributed to BUG 69 was
+THIS, masking the real FrameSlotTypeException); (2) a debugger attach (COMPLETE re-parse) hits
+the same non-reproducibility. MITIGATED 2026-11-18 by parsing `WITH_SOURCE` from the start (no
+error-triggered re-parse; hot path unchanged). STILL OPEN: the parser must become a pure function
+of the FunctionIR (snapshot the inputs at first parse) so the debugger's re-parse is sound.
+
+## BUG 76 — OPEN 2026-11-18: under first-tier compiled code, the propagation wrapper's yield fired on a non-suspension
+
+`bench/cases/contloop` kernel 9 (spawn 1000 tasks, then `seq::fold` awaiting each promise; the
+first 1000 awaits park, the next 1000 find settled promises) died in ~60% of runs:
+
+```
+a root yielded something that is neither a nested continuation nor a park request:
+  MezzeVariant Ok yielded by root `{ p } -> Async.await { p = p }` (async.mz:56)
+```
+
+The event trail (MEZZE_PROBE_MACHINE) shows a FRESH forwarder continuation created with `Ok` as
+its yielded value: in a fresh invocation, `IsSuspension(Ok)` was false and the yield branch ran
+anyway. Isolation on the same binary, 12 runs each: JIT off 0 fail; `engine.BackgroundCompilation=
+false` 0; `engine.MultiTier=false` 0; first tier disabled 0; **first tier only 8 fail**; inlining
+off 1; OSR off 5; splitting off 7; boxing elimination compiled out 6 (so not BE). The harness never
+saw it because `MezzeTestHelper.run` is interpreter-only (`engine.Compilation=false`) — every
+continuation test before `ParkUnderJitTest` ran without compiled code. Not reproduced by
+`runJitStress` either (low thresholds, background compilation): the app's regime differs in the
+precompiled stdlib and the order roots compile. The pattern under suspicion is the value-carrying
+`Conditional(IsSuspension(slot), Yield(slot), slot)` (emitted with `dup; branch.false`), whose else
+branch's profile read "never executed" when tier 1 compiled it. The wrapper's SHAPE is not it: a
+statement-`if` form failed 9 of 12 too, and `engine.FirstTierUseEconomy=false` 3 of 12. The
+harness does not reproduce it even first-tier-only with low thresholds (`ParkUnderJitTest`, 19/19),
+so the built app's regime (precompiled stdlib, eager compilation order) is part of it. **MITIGATED
+2026-11-18:** `engine.MultiTier=false` is now the default engine option for built apps
+(`EmbeddedExec`), the runtime server and the JIT test engines — 36/36 runs clean; last-tier-only
+compilation costs warm-up, not peak (measured beside it). `MEZZE_ENGINE_OPTS` can override. STILL
+OPEN upstream: a first-tier compiled yield-bearing BDSL root whose branch profile was one-sided takes
+the untaken branch instead of deoptimising; needs a Truffle-level minimal repro.

@@ -222,6 +222,7 @@ object RuntimeServer {
         val engineBuilder = Engine.newBuilder()
             .allowExperimentalOptions(true)
             .option("engine.WarnInterpreterOnly", "false")
+            .option("engine.MultiTier", "false")   // BUG 76 — see EmbeddedExec
         if (jitCapable) engineBuilder.option("engine.Compilation", jitEnabled.toString())
         if (devFlags.traceJit && jitCapable) {
             engineBuilder.option("engine.TraceCompilation", "true")

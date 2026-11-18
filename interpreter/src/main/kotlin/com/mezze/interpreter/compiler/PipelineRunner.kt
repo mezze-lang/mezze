@@ -183,11 +183,13 @@ object PipelineRunner {
             // time the stub inflates transparently.
             if (fn.hash in performerFactoryHashes && fn.paramSlots.isNotEmpty()) {
                 val stub = com.mezze.interpreter.bytecode.LazyStubRootNode(language, fn.hash, fn.name)
+                stub.maySuspend = fn.maySuspend   // C4 (BUG 71)
                 compiledFunctions[fn.hash] = stub.callTarget
                 language.getCachedStdlibCallTargetCache()[fn.hash] = stub.callTarget
             }
             if (fn.hash in performerOpHashes) {
                 val stub = com.mezze.interpreter.bytecode.LazyStubRootNode(language, fn.hash, fn.name)
+                stub.maySuspend = fn.maySuspend   // C4 (BUG 71)
                 compiledFunctions[fn.hash] = stub.callTarget
                 language.getCachedStdlibCallTargetCache()[fn.hash] = stub.callTarget
             }

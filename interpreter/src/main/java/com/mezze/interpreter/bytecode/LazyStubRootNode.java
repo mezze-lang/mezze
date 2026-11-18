@@ -52,6 +52,10 @@ public final class LazyStubRootNode extends RootNode {
 
     @CompilerDirectives.CompilationFinal
     private volatile CallTarget inflated;
+    /** C4 (BUG 71): the function's own `FunctionIR.maySuspend`, readable BEFORE the stub
+     *  inflates. A route decision that guessed "may suspend" for an un-inflated stub
+     *  failed a guard on a `replaces` specialization once and demoted the node for good. */
+    public volatile boolean maySuspend = true;
 
     /**
      * Closure values captured at inflate time. Empty for top-level

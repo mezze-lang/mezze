@@ -1,6 +1,7 @@
 package com.mezze.language.cli.commands
 
 import com.mezze.language.ast.MezzeType
+import com.mezze.language.parsedast.ParsedEffectDecl
 import com.mezze.language.parsedast.ParsedMetadata
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.parsedast.diagnostics.display
@@ -86,7 +87,9 @@ object EntryPointCheck {
         decls: List<TypedLetDecl>,
         entryName: String,
         metadataByHash: Map<Hash, ParsedMetadata>,
-    ): String? = entryDiagnostic(decls, entryName, metadataByHash)?.message
+        allEffects: Map<String, ParsedEffectDecl> = emptyMap(),
+        performerEffects: Map<String, Set<String>> = emptyMap(),
+    ): String? = entryDiagnostic(decls, entryName, metadataByHash, allEffects, performerEffects)?.message
 
     /** An entry error with its code, so every front door can print `error[CODE]:`. */
     data class Diagnostic(val code: ErrorCode, val message: String) {
@@ -98,6 +101,8 @@ object EntryPointCheck {
         decls: List<TypedLetDecl>,
         entryName: String,
         metadataByHash: Map<Hash, ParsedMetadata>,
+        allEffects: Map<String, ParsedEffectDecl> = emptyMap(),
+        performerEffects: Map<String, Set<String>> = emptyMap(),
     ): Diagnostic? {
         val decl = decls.find { it.name == entryName }
             ?: return Diagnostic(
@@ -106,14 +111,20 @@ object EntryPointCheck {
                     "(the entry named by Mezze.toml's `entry = \"$entryName\"`)",
             )
         val result = check(decl)
-        val message = errorMessage(result, entryName, metadataByHash) ?: return null
+        val message = errorMessage(result, entryName, metadataByHash, allEffects, performerEffects) ?: return null
         val code = if (result is Result.UnhandledEffects) ErrorCode.V0501_EFFECT_NOT_HANDLED
             else ErrorCode.V0512_ENTRY_SIGNATURE
         return Diagnostic(code, message)
     }
 
     /** Format a [Result] into a one-line user-facing error, or null if Ok. */
-    fun errorMessage(result: Result, entryName: String, metadataByHash: Map<Hash, ParsedMetadata>): String? = when (result) {
+    fun errorMessage(
+        result: Result,
+        entryName: String,
+        metadataByHash: Map<Hash, ParsedMetadata>,
+        allEffects: Map<String, ParsedEffectDecl> = emptyMap(),
+        performerEffects: Map<String, Set<String>> = emptyMap(),
+    ): String? = when (result) {
         Result.Ok -> null
         is Result.NotAFunction ->
             "Entry '$entryName' must be a function `{} -> {} <*>`, got: ${render(result.actualType)}"
@@ -132,8 +143,20 @@ object EntryPointCheck {
             val list = result.effects.joinToString(", ") { it.first }
             // Which performer to reach for is the effect author's to say
             // (`#{ unhandled: "…" }` on the effect), not a list kept here.
+            // Per effect: who brought it (a performer the user installed whose op
+            // bodies perform it — `EventLoop` performs `Time` for its deadlines; the
+            // user never wrote `Time`), then its author's advice. The advice is
+            // looked up by hash, and by NAME when the effect arrived through a
+            // performer the module imported without the effect itself.
             val advice = result.effects.mapNotNull { (name, hash) ->
-                hash?.let { metadataByHash[it]?.unhandled }?.let { "$name: $it" }
+                val carriers = performerEffects.filterValues { name in it }.keys.sorted()
+                val brought = when (carriers.size) {
+                    0 -> null
+                    1 -> "brought by `${carriers[0]}`, whose op bodies perform it, so a `$name` performer belongs beside it."
+                    else -> "brought by ${carriers.joinToString(", ") { "`$it`" }}, whose op bodies perform it, so a `$name` performer belongs beside them."
+                }
+                val hint = hash?.let { metadataByHash[it]?.unhandled } ?: allEffects[name]?.metadata?.unhandled
+                listOfNotNull(brought, hint).takeIf { it.isNotEmpty() }?.let { "$name: ${it.joinToString(" ")}" }
             }
             "Entry '$entryName' performs $list, but nothing discharges it. The entry has no " +
                 "enclosing handler, so it leaks at runtime (you get a raw suspended value, not the result). " +

@@ -421,7 +421,7 @@ class CheckCommand {
             val entryName = appConfig.entry
             val decls = typeCheckResult.typedModule?.decls
                 ?.filterIsInstance<TypedLetDecl>().orEmpty()
-            EntryPointCheck.entryDiagnostic(decls, entryName, typeCheckResult.metadataByHash)?.let { d ->
+            EntryPointCheck.entryDiagnostic(decls, entryName, typeCheckResult.metadataByHash, typeCheckResult.allEffects, typeCheckResult.performerEffects)?.let { d ->
                 if (jsonMode) {
                     jsonExitWith(null, appConfig.name,
                         DiagnosticJson(Severity.ERROR, code = d.code.display(), message = d.message), exitCode = 4)

@@ -56,6 +56,7 @@ public final class MezzeTestHelper {
         .option("engine.WarnInterpreterOnly", "false")
         // engine.Compilation defaults to true; spell it out for clarity.
         .option("engine.Compilation", "true")
+        .option("engine.MultiTier", "false")   // BUG 76: production's regime (EmbeddedExec sets the same)
         .build();
 
     private MezzeTestHelper() {}
@@ -88,6 +89,46 @@ public final class MezzeTestHelper {
      */
     public static Object runJit(String sourceCode) {
         return runWith(sourceCode, null, jitEngine, false, false);
+    }
+
+    /**
+     * JIT with LOW compilation thresholds and BACKGROUND compilation: roots compile
+     * while the program is still running them, which is production's regime and the
+     * one `run()` (interpreter only) never exercises. BUG 76 — a yield-bearing root
+     * whose propagation yield fired with a non-suspension — reproduced only here.
+     */
+    public static Object runJitStress(String sourceCode) {
+        try (Engine e = Engine.newBuilder()
+                .allowExperimentalOptions(true)
+                .option("engine.WarnInterpreterOnly", "false")
+                .option("engine.Compilation", "true")
+                .option("engine.BackgroundCompilation", "true")
+                .option("engine.MultiTier", "false")   // BUG 76: production's regime
+                .option("engine.LastTierCompilationThreshold", "60")
+                .option("engine.OSRCompilationThreshold", "100")
+                .build()) {
+            return runWith(sourceCode, null, e, false, false);
+        }
+    }
+
+    /** First tier ONLY (the last tier never compiles), low threshold, background compilation:
+     *  the regime that reproduces BUG 76 in a built app. */
+    public static Object runJitTier1(String sourceCode) {
+        try (Engine e = Engine.newBuilder()
+                .allowExperimentalOptions(true)
+                .option("engine.WarnInterpreterOnly", "false")
+                .option("engine.Compilation", "true")
+                .option("engine.BackgroundCompilation", "true")
+                .option("engine.FirstTierCompilationThreshold", "20")
+                .option("engine.LastTierCompilationThreshold", "100000000")
+                .build()) {
+            return runWith(sourceCode, null, e, false, false);
+        }
+    }
+
+    /** The Truffle runtime's name — "Interpreted" means no compiler is available in this JVM. */
+    public static String truffleRuntimeName() {
+        return com.oracle.truffle.api.Truffle.getRuntime().getName();
     }
 
     /**
