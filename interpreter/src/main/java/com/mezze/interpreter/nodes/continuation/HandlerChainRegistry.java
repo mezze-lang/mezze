@@ -813,6 +813,7 @@ public final class HandlerChainRegistry {
             // Phase B: the EFFECTIVE chain — what this task pushed since it started,
             // innermost first, then the chain it was spawned under.
             int above = s.depth - s.taskChainBaseDepth;
+            if (above == 0) return s.taskChain;        // BUG 77: a task that pushed nothing shares its chain (no copy per spawn)
             HandlerChainEntry[] snapshot = new HandlerChainEntry[above + s.taskChain.length];
             for (int i = 0; i < above; i++) {
                 snapshot[i] = new HandlerChainEntry(s.handlers[s.depth - 1 - i], s.effectHashes[s.depth - 1 - i]);
@@ -851,20 +852,21 @@ public final class HandlerChainRegistry {
     @TruffleBoundary
     public static Object[] installTaskChain(HandlerChainEntry[] chain) {
         EffectState s = STATE.get();
-        Object[] prev = new Object[]{s.taskChain, s.taskChainBaseDepth};
+        Object[] prev = new Object[]{s.taskChain, s.taskChainBaseDepth, s};   // [2]: the state, so restore skips the thread-local read
         s.taskChain = chain;
         s.taskChainBaseDepth = s.depth;
-        s.generation++;
+        // BUG 77: no generation bump. The one-entry memo compares the task chain's IDENTITY
+        // (memoTaskChain) and the snapshot cache is not consulted while a task chain is
+        // installed; bumping here made every perform after every task switch rescan the chain.
         if (SINGLE_THREADED_EFFECTS.isValid()) SINGLE_THREADED_EFFECTS.invalidate();
         return prev;
     }
 
     @TruffleBoundary
     public static void restoreTaskChain(Object[] prev) {
-        EffectState s = STATE.get();
+        EffectState s = (EffectState) prev[2];
         s.taskChain = (HandlerChainEntry[]) prev[0];
         s.taskChainBaseDepth = (Integer) prev[1];
-        s.generation++;
     }
 
     @TruffleBoundary

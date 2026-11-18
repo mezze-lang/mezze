@@ -8873,7 +8873,9 @@ public final class BytecodeCompiler {
         b.beginBlock();
         BytecodeLocal slot = b.createLocal();
         b.beginStoreLocal(slot);
+        b.beginAsObject();          // keep the slot Object-kinded: see MezzeBytecodeRootNode.AsObject
         emitCall.run();
+        b.endAsObject();
         b.endStoreLocal();
         b.beginIfThen();
         b.beginIsSuspension();

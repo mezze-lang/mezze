@@ -45,7 +45,11 @@ class CallMaySuspendIRTest {
           tick = {} -> 1,
         }
         let pure_fn = { x } -> if x > 100 then x else pure_fn { x = x + 1 }   ## recursive: never inlined
-        let eff_fn = {} -> Tick.tick {}
+        ## a `let` keeps this out of the trivial-wrapper inliner, which now inlines a bare
+        ## effect-op forwarder (`{} -> Tick.tick {}`) at its call sites
+        let eff_fn = {} -> do
+          let t = Tick.tick {}
+          t + 0
         let handled: {} -> Int <*> = {} -> perform T1 in Tick.tick {}
         let caller = {} -> do
           let a = pure_fn { x = 1 }

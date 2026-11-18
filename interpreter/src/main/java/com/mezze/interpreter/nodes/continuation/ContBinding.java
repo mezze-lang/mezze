@@ -36,6 +36,7 @@ public final class ContBinding {
         if (language.contRecord != null) return language.contRecord;
         FrameDescriptor fd = FrameDescriptor.newBuilder().build();
         MezzeNode body = new MezzeNode() {
+            private Object lastShape; private int onIdx, setIdx;
             @Override
             public Object execute(VirtualFrame frame) {
                 Object[] args = frame.getArguments();
@@ -44,7 +45,14 @@ public final class ContBinding {
                     throw new RuntimeException("cont.park expects a record argument { on, set }");
                 }
                 com.mezze.interpreter.runtime.MezzeContext.get(null).taskMachine().notePark();
-                return new ParkRequest(rec.getField("on"), rec.getField("set"));
+                // Field indices cached per shape (shapes are interned): no string lookup per park.
+                Object shape = rec.getShape();
+                int on = onIdx, set = setIdx;
+                if (shape != lastShape) {
+                    on = rec.getFieldIndex("on"); set = rec.getFieldIndex("set");
+                    onIdx = on; setIdx = set; lastShape = shape;
+                }
+                return new ParkRequest(rec.getField(on), rec.getField(set));
             }
         };
         RootCallTarget target = new MezzeRootNode(language, fd, body, "cont-park", 0, 1, new int[0]).getCallTarget();

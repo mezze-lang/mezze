@@ -8457,3 +8457,30 @@ so the built app's regime (precompiled stdlib, eager compilation order) is part 
 compilation costs warm-up, not peak (measured beside it). `MEZZE_ENGINE_OPTS` can override. STILL
 OPEN upstream: a first-tier compiled yield-bearing BDSL root whose branch profile was one-sided takes
 the untaken branch instead of deoptimising; needs a Truffle-level minimal repro.
+
+## BUG 77 — FIXED 2026-11-18: the task machine's promise bookkeeping grew without bound, and every task switch defeated the handler-lookup memo
+
+`bench/cases/contloop`, JVM, per element, 20k → 200k elements: yield/park 594 → 583 ns (flat), but
+spawn+await 1.44 → 2.76 us, fold/iter with awaiting callbacks 1.09 → 2.24 us, fan-out 0.45 → 1.26 us.
+Three maps (`ownPromises`, `promiseIds`, `promisesById`) gained an entry per promise and nothing ever
+removed one, so every lookup, resize and young-GC scan paid for every promise ever created; and
+`installTaskChain`/`restoreTaskChain` bumped the chain `generation` on every task switch, so the
+one-entry memo in `peekHandlerForEffect` missed on the first perform after every resume.
+
+FIX: completed or failed promises are forgotten at completion (`forget`); a settled promise is never
+registered by `promiseId` and an id the machine does not know reads as settled in `readyIndex` (ids
+are minted only by the machine, so absent ⇒ evicted ⇒ settled); promise ids come from a counter, not
+the map size; a task that pushed nothing above its chain shares the chain array instead of copying it
+per spawn; no generation bump on task-chain install (the memo compares the chain's identity and the
+snapshot cache is not consulted while a task chain is installed). Test: `MachineBookkeepingTest`
+(3000 spawn+awaits leave ≤ 8 entries; awaiting a forgotten promise reads settled).
+
+**MEASURED AFTER (JVM, per element, flat from 200k to 2M):** spawn+await 906 ns, yield 386, park 455,
+fold/iter with awaiting callbacks ~430, fan-out 192 — from 2.76 us / 580 / 580 / 2.2 us / 1.26 us.
+Further cuts in the same pass: effect-op forwarders (`await = { p } -> Async.await { p = p }`) are now
+inlined by `TrivialWrapperInliner` (one root fewer in every park's yield-and-resume chain), `ParkOn`
+gained `Immediately` (what `yield_now` parks on: no predicate closure, no sequence), the ready
+outcome for index 0 is shared, the spawn-site diagnostic is resolved lazily, the promise table is
+primitive-keyed, and a task switch reads the thread-local once. Still open: a park costs ~400 ns
+against a target in the low hundreds; the remaining structure is two yields (frame materialisation
+and a continuation per root) and two resumes per park plus the machine's per-run bookkeeping.

@@ -70,14 +70,15 @@ public final class TaskMachine {
         Object result;
         Boundary owner;                            // the boundary that drives this task
         HandlerChainEntry[] chain;                 // Phase B: the handlers in effect where it was spawned
-        String spawnSite;                          // for diagnostics: where the task's function was written
+        MezzeFunction spawnedFn;                   // for diagnostics: where the task's function was written (resolved lazily)
 
         Task(long id, MezzeFunction thunk, MezzePromise promise) {
             this.id = id; this.thunk = thunk; this.promise = promise;
         }
 
         @Override public String toString() {
-            return spawnSite != null ? "the task spawned at " + spawnSite : (promise == null ? "the perform body" : "Task#" + id);
+            String site = spawnedFn != null ? siteOf(spawnedFn) : null;
+            return site != null ? "the task spawned at " + site : (promise == null ? "the perform body" : "Task#" + id);
         }
     }
 
@@ -125,7 +126,13 @@ public final class TaskMachine {
     private final ArrayDeque<Boundary> boundaries = new ArrayDeque<>();
     private long nextTaskId = 1;
     private final IdentityHashMap<MezzePromise, Long> promiseIds = new IdentityHashMap<>();
-    private final HashMap<Long, MezzePromise> promisesById = new HashMap<>();
+    private long nextPromiseId = 1;
+    /** BUG 77: the size of the promise/task bookkeeping when the last boundary closed — a
+     *  test's view that completed work is forgotten (it grew without bound: every lookup,
+     *  resize and GC scan paid for every promise ever created; spawn+await went 1.4 → 2.8 us
+     *  per element from 20k to 200k elements). */
+    public static volatile int LAST_BOOKKEEPING = -1;
+    private final LongObjectMap<MezzePromise> promisesById = new LongObjectMap<>();   // primitive keys: no Long boxing per lookup
     private final IdentityHashMap<MezzePromise, Boolean> ownPromises = new IdentityHashMap<>();
     /** Stale wakes — aimed at an epoch the task has left. Countable, never silent. */
     public long staleWakes;
@@ -182,7 +189,7 @@ public final class TaskMachine {
         Task t = new Task(nextTaskId++, f, p);
         t.owner = b;
         t.chain = HandlerChainRegistry.snapshotHandlerChainEntries();
-        t.spawnSite = siteOf(f);
+        t.spawnedFn = f;                           // siteOf() walks call targets — only on the error path
         b.ready.addLast(t);
         // `Async.cancel` on the task's promise: a PARKED task is woken with
         // `ParkCancelled { reason }` so its performer's arm decides what cancellation
@@ -203,11 +210,20 @@ public final class TaskMachine {
     public long promiseId(MezzePromise p) {
         Long id = promiseIds.get(p);
         if (id == null) {
-            id = (long) promiseIds.size() + 1;
-            promiseIds.put(p, id);
+            id = nextPromiseId++;
+            if (p.isDone()) return id;                 // BUG 77: a settled promise is never registered —
+            promiseIds.put(p, id);                     // an id the machine does not know is a settled one
             promisesById.put(id, p);
         }
         return id;
+    }
+
+    /** BUG 77: completed work leaves the maps. */
+    private void forget(MezzePromise p) {
+        if (p == null) return;
+        ownPromises.remove(p);
+        Long id = promiseIds.remove(p);
+        if (id != null) promisesById.remove(id);
     }
 
 
@@ -260,6 +276,7 @@ public final class TaskMachine {
         } finally {
             HandlerChainRegistry.exitParkScope();
             boundaries.pop();
+            LAST_BOOKKEEPING = promiseIds.size() + ownPromises.size() + promisesById.size();
         }
     }
 
@@ -340,6 +357,7 @@ public final class TaskMachine {
             if (t.promise == null) throw e;          // the body's failure is the perform's
             t.state = DONE;
             t.promise.fail(e);
+            forget(t.promise);
             return;
         }
         absorb(b, t, cur);
@@ -379,7 +397,7 @@ public final class TaskMachine {
             if (t.frames.isEmpty()) {
                 t.state = DONE;
                 t.result = cur;
-                if (t.promise != null) t.promise.complete(cur);
+                if (t.promise != null) { t.promise.complete(cur); forget(t.promise); }
                 return;
             }
             try {
@@ -389,6 +407,7 @@ public final class TaskMachine {
                 if (t.promise == null) throw e;
                 t.state = DONE;
                 t.promise.fail(e);
+                forget(t.promise);
                 return;
             }
         }
@@ -454,18 +473,21 @@ public final class TaskMachine {
     /** Index of the first satisfied condition of a park request, or -1. */
     private int readyIndex(ParkRequest pr) {
         if (!(pr.on instanceof MezzeVariant on)) throw new IllegalStateException("ParkOn is not a variant: " + pr.on);
-        Object[] items = seqItems(on.getPayloadFieldByName(
-            on.getConstructorName().equals("OnPromises") ? "ids" : "fs"));
-        if (on.getConstructorName().equals("OnPromises")) {
-            for (int i = 0; i < items.length; i++) {
-                MezzePromise p = promisesById.get(asLong(items[i]));
-                if (p == null) throw new MezzeGuestException("cont.park: unknown PromiseId " + items[i]);
-                if (p.isDone()) return i;
+        int tag = on.getTag();
+        if (tag == tagImmediately()) return 0;          // yield_now: ready on the next turn, nothing to evaluate
+        boolean onPromises = tag == tagOnPromises();
+        Object payload = on.getPayloadFieldByName(onPromises ? "ids" : "fs");
+        int n = seqSize(payload);
+        if (onPromises) {
+            for (int i = 0; i < n; i++) {
+                MezzePromise p = promisesById.get(asLong(seqAt(payload, i)));
+                if (p == null) return i;                 // BUG 77: evicted ⇒ settled (ids are minted here only)
+                if (p.isDone()) { forget(p); return i; }
             }
             return -1;
         }
-        for (int i = 0; i < items.length; i++) {
-            Object r = callWith((MezzeFunction) items[i], MezzeRecord.empty());
+        for (int i = 0; i < n; i++) {
+            Object r = callWith((MezzeFunction) seqAt(payload, i), MezzeRecord.empty());
             if (r instanceof Boolean b && b) return i;
         }
         return -1;
@@ -503,6 +525,7 @@ public final class TaskMachine {
     private static String describe(ParkRequest pr) {
         if (pr.on instanceof MezzeVariant on) {
             String c = on.getConstructorName();
+            if (c.equals("Immediately")) return c;
             Object[] items = seqItems(on.getPayloadFieldByName(c.equals("OnPromises") ? "ids" : "fs"));
             return c + "(" + items.length + ")";
         }
@@ -554,6 +577,16 @@ public final class TaskMachine {
         }
     }
 
+    private static int seqSize(Object v) {
+        if (v instanceof com.mezze.datastructures.seq.MezzeSeq seq) return seq.size();
+        if (v instanceof Object[] arr) return arr.length;
+        throw new IllegalStateException("expected a sequence, got " + (v == null ? "null" : v.getClass().getName()));
+    }
+    private static Object seqAt(Object v, int i) {
+        if (v instanceof com.mezze.datastructures.seq.MezzeSeq seq) return seq.get(i);
+        return ((Object[]) v)[i];
+    }
+
     private static Object[] seqItems(Object v) {
         if (v instanceof com.mezze.datastructures.seq.MezzeSeq seq) return seq.toArray();
         if (v instanceof Object[] arr) return arr;
@@ -568,8 +601,9 @@ public final class TaskMachine {
 
     static Object parkCancelled(Object reason) {
         var registry = MezzeVariant.TagRegistry.getGlobal();
-        int tag = registry.getOrCreateTag("ParkCancelled");
-        var rec = MezzeRecord.fromFields(new String[]{"reason"}, new Object[]{reason});
+        int tag = TAG_CANCELLED;
+        if (tag < 0) TAG_CANCELLED = tag = registry.getOrCreateTag("ParkCancelled");
+        var rec = MezzeRecord.fromFields(REASON, new Object[]{reason});
         return MezzeVariant.singlePayload(registry, tag, rec);
     }
 
@@ -578,10 +612,26 @@ public final class TaskMachine {
         return MezzeVariant.noPayload(registry, registry.getOrCreateTag("CancelScopeTeardown"));
     }
 
+    private static final String[] WHICH = {"which"}, REASON = {"reason"};
+    // ParkOn constructor tags, resolved once (the tag registry is global and append-only).
+    private static volatile int TAG_IMMEDIATELY = -1, TAG_ON_PROMISES = -1;
+    private static int tagImmediately() { int t = TAG_IMMEDIATELY; if (t < 0) TAG_IMMEDIATELY = t = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Immediately"); return t; }
+    private static int tagOnPromises() { int t = TAG_ON_PROMISES; if (t < 0) TAG_ON_PROMISES = t = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("OnPromises"); return t; }
+    private static volatile int TAG_READY = -1, TAG_CANCELLED = -1;
+    private static volatile Object READY_0;
     static Object parkReady(long which) {
+        if (which == 0) {                              // the common outcome, shared (values are immutable)
+            Object r = READY_0;
+            if (r == null) READY_0 = r = parkReadyFresh(0);
+            return r;
+        }
+        return parkReadyFresh(which);
+    }
+    private static Object parkReadyFresh(long which) {
         var registry = MezzeVariant.TagRegistry.getGlobal();
-        int tag = registry.getOrCreateTag("ParkReady");
-        var rec = MezzeRecord.fromFields(new String[]{"which"}, new Object[]{which});
+        int tag = TAG_READY;
+        if (tag < 0) TAG_READY = tag = registry.getOrCreateTag("ParkReady");   // the tag registry is global
+        var rec = MezzeRecord.fromFields(WHICH, new Object[]{which});
         return MezzeVariant.singlePayload(registry, tag, rec);
     }
 }

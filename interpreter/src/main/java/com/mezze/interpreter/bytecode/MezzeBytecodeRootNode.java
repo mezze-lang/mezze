@@ -6041,6 +6041,22 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * that {@code cont.park} just produced. One instanceof pair — measured at
      * 38 ps per call site, so the flag that places it buys clarity, not speed.
      */
+    /**
+     * Identity on a boxed value. The propagation wrapper stores a call's result into a slot
+     * that may later hold a suspension object; with boxing elimination the slot's kind
+     * flipped between long and Object across yields, and every resume paid an
+     * UnexpectedResultException and a deoptimisation (measured: a yield cost 386 ns with
+     * boxing elimination on and 98 ns with it compiled out). Routing the value through an
+     * Object-typed operation keeps that slot generic, and boxing elimination everywhere else.
+     */
+    @Operation
+    public static final class AsObject {
+        @Specialization
+        public static Object box(Object value) {
+            return value;
+        }
+    }
+
     @Operation
     public static final class IsSuspension {
         @Specialization

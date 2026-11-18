@@ -371,6 +371,13 @@ object TrivialWrapperInliner {
                 }
                 true
             }
+            // An effect-op forwarder — `await = { p } -> Async.await { p = p }` — is the shape
+            // every std::effects::async entry point has, and each one un-inlined is a whole
+            // extra root in a park's yield-and-resume chain (measured: one of three roots in
+            // `yield_now`'s). The op is performed at the call site instead: the handler is
+            // looked up dynamically either way. Comptime performs stay put (they are folded
+            // at build by site).
+            is PerformOpIR -> !node.isComptime && countParamReads(node.arg, paramStart, paramEnd, counts)
             is MakeRecordIR -> {
                 for (f in node.fields) {
                     if (!countParamReads(f.value, paramStart, paramEnd, counts)) return false

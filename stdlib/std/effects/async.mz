@@ -291,6 +291,7 @@ pub type CancelOutcome = |
 pub type ParkOn = |
   OnPromises { ids: [PromiseId] },
   OnPredicates { fs: [{} -> Bool <...>] },
+  Immediately,   ## ready on the machine's next turn — no predicate, no allocation (yield_now)
 |
 
 ## Which wait set a park joins. Named sets give a scheduler per-primitive
@@ -365,7 +366,7 @@ impl Async for CoopAsync where {
       ParkReady { which } -> settled_result { p = p }
       ParkCancelled { reason } -> Err { error = AsyncCancelled { reason = reason } },
   cancel = { p, reason } -> __native_promise_cancel { p = p, reason = reason },
-  yield_now = {} -> match cont.park { on = OnPredicates { fs = [{} -> True] }, set = WaitDefault } is
+  yield_now = {} -> match cont.park { on = Immediately, set = WaitDefault } is
     ParkReady { which } -> {}
     ParkCancelled { reason } -> {},
   park = { predicate } -> match cont.park { on = OnPredicates { fs = [predicate] }, set = WaitDefault } is
