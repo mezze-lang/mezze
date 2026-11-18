@@ -920,10 +920,10 @@ public final class SeqNatives {
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (seq.isEmpty()) return MezzeVariant.none();
         Object minElem = seq.get(0);
-        Object minKey = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, minElem));
+        Object minKey = OrderCallbacks.checkNotParked(callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, minElem)), "min_by/max_by key");
         for (int i = 1; i < seq.size(); i++) {
             Object elem = seq.get(i);
-            Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
+            Object key = OrderCallbacks.checkNotParked(callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem)), "min_by/max_by key");
             if (cmpInt(cmpFn, key, minKey, callNode) < 0) {
                 minElem = elem;
                 minKey = key;
@@ -936,10 +936,10 @@ public final class SeqNatives {
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (seq.isEmpty()) return MezzeVariant.none();
         Object maxElem = seq.get(0);
-        Object maxKey = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, maxElem));
+        Object maxKey = OrderCallbacks.checkNotParked(callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, maxElem)), "min_by/max_by key");
         for (int i = 1; i < seq.size(); i++) {
             Object elem = seq.get(i);
-            Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
+            Object key = OrderCallbacks.checkNotParked(callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem)), "min_by/max_by key");
             if (cmpInt(cmpFn, key, maxKey, callNode) > 0) {
                 maxElem = elem;
                 maxKey = key;
@@ -1211,7 +1211,7 @@ public final class SeqNatives {
         result.add(lastElem);
         for (int i = 1; i < seq.size(); i++) {
             Object elem = seq.get(i);
-            Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
+            Object key = OrderCallbacks.checkNotParked(callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem)), "min_by/max_by key");
             if (!eq.callEq(callNode, key, lastKey)) {
                 result.add(elem);
                 lastElem = elem;
@@ -1286,7 +1286,7 @@ public final class SeqNatives {
 
         for (int i = 1; i < seq.size(); i++) {
             Object elem = seq.get(i);
-            Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
+            Object key = OrderCallbacks.checkNotParked(callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem)), "min_by/max_by key");
             if (eq.callEq(callNode, key, currentKey)) {
                 currentGroup.add(elem);
             } else {
@@ -1828,7 +1828,7 @@ public final class SeqNatives {
     // Element comparison via the threaded cmp closure ({a, b} -> -1/0/1).
     private static int cmpInt(MezzeFunction cmpFn, Object a, Object b,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        Object r = callNode.call(cmpFn.getCallTarget(), prepareArgsComparator(cmpFn, a, b));
+        Object r = OrderCallbacks.checkNotParked(callNode.call(cmpFn.getCallTarget(), prepareArgsComparator(cmpFn, a, b)), "comparator");
         return (r instanceof Long) ? ((Long) r).intValue() : 0;
     }
 
@@ -1844,9 +1844,9 @@ public final class SeqNatives {
         // 4-against-2 allocation ratio showing up in the number.
         var keyCall = ScalarCall.prepare1(keyFn, "x");
         var cmp = ScalarCall.prepare2(cmpFn, "a", "b");
-        Object prevKey = keyCall.call1(callNode, seq.get(0));
+        Object prevKey = OrderCallbacks.checkNotParked(keyCall.call1(callNode, seq.get(0)), "is_sorted_by key");
         for (int i = 1; i < seq.size(); i++) {
-            Object currKey = keyCall.call1(callNode, seq.get(i));
+            Object currKey = OrderCallbacks.checkNotParked(keyCall.call1(callNode, seq.get(i)), "is_sorted_by key");
             if (cmp.callCmp(callNode, prevKey, currKey) > 0) {
                 return false;
             }

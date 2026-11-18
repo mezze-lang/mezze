@@ -8269,3 +8269,19 @@ println { msg = rs.to_dbg {} }
 Found 2026-11-18 writing a C4 test; unrelated to continuations (the receiver is an
 opaque native newtype through a method chain). An internal error reaching a user is
 a compiler bug by the project's own rule. Not yet checked on main.
+
+## BUG 68 — FIXED 2026-11-18: C1's `maySuspend` was dropped by the two scalar-ABI call constructors
+
+```mezze
+let wrap = { cmp } -> { a, b } -> if cmp { a = a, b = b } then 0 - 1 else 1
+let w = wrap { cmp = { a, b } -> result::is_ok { result = await { p = a } } }
+w { a = p, b = p }        ## under EventLoop: the park inside the `if` was DROPPED
+```
+
+`ParamScalarizer` rewrites `CallIndirectIR` to `CallIndirectScalarIR` and the compiler's
+own `emitCallIndirect` has a scalar branch; neither carried `maySuspend`, so the
+propagation wrapper was never emitted around a scalar indirect call — no native
+involved. Found through `sort_by`'s stdlib wrapper (`{ a, b } -> if cmp { a, b } then
+-1 else 1`), whose park reached the comparator as a dropped continuation instead of
+the named comparator error. Both constructors now carry the flag; asserted by a park
+inside an `if` condition through a scalar indirect call resuming (`-1`).

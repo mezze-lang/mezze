@@ -70,12 +70,30 @@ public final class TaskMachine {
         Object result;
         Boundary owner;                            // the boundary that drives this task
         HandlerChainEntry[] chain;                 // Phase B: the handlers in effect where it was spawned
+        String spawnSite;                          // for diagnostics: where the task's function was written
 
         Task(long id, MezzeFunction thunk, MezzePromise promise) {
             this.id = id; this.thunk = thunk; this.promise = promise;
         }
 
-        @Override public String toString() { return "Task#" + id; }
+        @Override public String toString() {
+            return spawnSite != null ? "the task spawned at " + spawnSite : (promise == null ? "the perform body" : "Task#" + id);
+        }
+    }
+
+    /** `file:line` of a function's root, through a trampoline or stub; null when unknown. */
+    @TruffleBoundary
+    static String siteOf(MezzeFunction f) {
+        com.oracle.truffle.api.CallTarget ct = f.getCallTarget();
+        for (int hop = 0; hop < 4 && ct instanceof com.oracle.truffle.api.RootCallTarget rct; hop++) {
+            com.oracle.truffle.api.nodes.RootNode root = rct.getRootNode();
+            com.oracle.truffle.api.source.SourceSection sec = root.getSourceSection();
+            if (sec != null && sec.getSource() != null) return sec.getSource().getName() + ":" + sec.getStartLine();
+            if (root instanceof com.mezze.interpreter.bytecode.TrampolineRootNode t) { ct = t.peekInnerTarget(); continue; }
+            if (root instanceof com.mezze.interpreter.bytecode.LazyStubRootNode st) { ct = st.getInflatedTarget(); continue; }
+            break;
+        }
+        return null;
     }
 
     /** Opaque to Mezze: `RunQueue` — the ready set as the performer's `drive` sees it. */
@@ -134,17 +152,20 @@ public final class TaskMachine {
         if (parksRequested == parksAbsorbed) return;
         long lost = parksRequested - parksAbsorbed;
         parksAbsorbed = parksRequested;   // report once
+        // A native that caught its callback's park itself (OrderCallbacks) already said
+        // exactly what happened; its guest error outranks this generic one.
+        if (cause instanceof MezzeGuestException) return;
         if (cause != null) throw new MezzeGuestException(droppedParkMessage(lost, t), cause);
         throw new MezzeGuestException(droppedParkMessage(lost, t));
     }
 
     private static String droppedParkMessage(long lost, Task t) {
-        return
-            "a park was dropped on its way to the perform boundary (" + lost + " in " + t + "): the "
-            + "suspension crossed a frame the runtime cannot suspend through. Today that is a callback "
-            + "handed to a native — `seq::for_each`, `iter::map`, `seq::fold` and the rest (C4, resumable "
-            + "natives, is not built) — or a polyglot call. Park from Mezze frames only: a `match`/`do` "
-            + "loop instead of the native HOF, or keep the callback free of the parking effect.";
+        return "a park was dropped on its way to the perform boundary (" + lost + " in " + t + "): the "
+            + "suspension crossed a frame the runtime cannot suspend through. The collection HOFs resume "
+            + "(seq, iter, list: map, fold, filter, for_each, find, …); what does not: a comparator or key "
+            + "function (sort_by, min_by, dedup — reported by name when reached directly), `iter::sum` / "
+            + "`count_all` over a parking chain, a polyglot call, and a callback that crossed to another thread. "
+            + "Compute the parking part first (`map`), then hand plain values to the native.";
     }
 
     // ---------------------------------------------------------------- natives' side
@@ -161,6 +182,7 @@ public final class TaskMachine {
         Task t = new Task(nextTaskId++, f, p);
         t.owner = b;
         t.chain = HandlerChainRegistry.snapshotHandlerChainEntries();
+        t.spawnSite = siteOf(f);
         b.ready.addLast(t);
         // `Async.cancel` on the task's promise: a PARKED task is woken with
         // `ParkCancelled { reason }` so its performer's arm decides what cancellation

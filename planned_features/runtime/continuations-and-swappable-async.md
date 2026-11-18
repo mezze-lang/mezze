@@ -950,6 +950,20 @@ registration instead of its type: the chain's native runs its callbacks unless i
 one of the DEFERRING natives (`ResumableNatives.DEFERRING`, the spawn family). Both
 spellings are now V0513 at build; the runtime diagnosis keeps the function-value route.
 
+**Error quality pass, 2026-11-18.** Three things a user would have met: (1) a parking
+comparator or key function (`sort_by`, `min_by`, `dedup`, …) reached through a function
+value surfaced as the generic dropped-park text — now every order/identity callback
+site (`ScalarCall.callCmp`/`callBool`, `cmpInt`, the key calls, `ClosureHashing`)
+checks its result and names the native and the fix at once (`OrderCallbacks`), and the
+machine's generic diagnosis defers to that named error; (2) deadlock messages named
+`Task#3` — they now name the spawn site (`the task spawned at app.mz:12`); (3) the
+generic diagnosis still said "C4 is not built" — rewritten to the current set. Chasing
+(1) exposed BUG 68: C1's `maySuspend` was dropped by both scalar-ABI call constructors
+(`ParamScalarizer`, the compiler's scalar `emitCallIndirect`), so a park inside
+`if cmp { … }` through a scalar indirect call was lost with no native involved. Fixed
+and asserted. Still owed from the same pass: V0501 should name the performer that
+brings `Time` (`EventLoop`'s `park_until` deadline).
+
 **C4 — callback-taking natives hold loop state on the HEAP. PROVEN.**
 `ResumableNativeHofTest`: a `map` keeping `(xs, out, i)` in a record parks on
 every one of three elements and still produces `[11, 21, 31]` in order, re-entering

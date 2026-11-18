@@ -5062,7 +5062,7 @@ class TypedASTCompiler(
                 fnIR,
                 argIR.fields.map { it.value },
                 argIR.fields.map { it.name },
-                isTailCall, src
+                isTailCall, src, maySuspend = maySuspend   // C1: the one constructor it had missed
             )
         }
         return CallIndirectIR(fnIR, argIR, isTailCall, src, maySuspend = maySuspend)

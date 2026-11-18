@@ -233,11 +233,11 @@ class EventLoopSchedulerTest {
         """)),
     )
 
-    /** C4 is not built: a park inside a native HOF's callback cannot be resumed. The
-     *  direct spelling is V0513 at compile time (`ParkThroughNativeSpecTest`); this
-     *  reaches the native through a function VALUE, which the static rule cannot see,
-     *  so the runtime detector must FAIL loudly instead of dropping the rest of the
-     *  callback (measured before it: `after` never printed, the program finished). */
+    /** A comparator native is not resumable (C4 stops at Java's sort). The direct
+     *  spelling is V0513 at compile time (`ParkThroughNativeSpecTest`); this reaches the
+     *  native through a function VALUE, which the static rule cannot see, so the native
+     *  itself names the error at once (measured before any of it: `after` never
+     *  printed and the program finished). */
     @Test
     fun `a park inside a native callback is a loud error, not a dropped continuation`() {
         val e = assertThrows(Exception::class.java) {
@@ -255,8 +255,8 @@ class EventLoopSchedulerTest {
             """))
         }
         val msg = e.message ?: ""
-        assertTrue(msg.contains("park was dropped"), "names the condition: $msg")
-        assertTrue(msg.contains("native"), "and the cause: $msg")
+        assertTrue(msg.contains("comparator") && msg.contains("cannot park"), "named by the native, at once: $msg")
+        assertTrue(msg.contains("map"), "and what to do instead: $msg")
     }
 
     /** BUG 65: the stdlib's own helpers looped with native HOFs over `await`/`cancel`;
@@ -332,9 +332,9 @@ class EventLoopSchedulerTest {
         """)),
     )
 
-    /** `sort_by` (a comparator native) is not resumable: the park reaches the Java
-     *  frame and the machine says so (the diagnosis, not the symptom), here through a
-     *  function VALUE, which the static rule cannot see. */
+    /** `sort_by` (a comparator native) is not resumable: the comparator's park is
+     *  reported BY THE NATIVE, by name and at once (OrderCallbacks), here through a
+     *  function VALUE the static rule cannot see. */
     @Test
     fun `a host exception after a dropped park is reported as the dropped park`() {
         val e = assertThrows(Exception::class.java) {
@@ -349,7 +349,7 @@ class EventLoopSchedulerTest {
             """))
         }
         val msg = e.message ?: ""
-        assertTrue(msg.contains("park was dropped"), "the cause, not the symptom: $msg")
+        assertTrue(msg.contains("comparator") && msg.contains("cannot park"), "named at the native, at once: $msg")
         assertTrue(!msg.contains("ClassCastException"), "no host exception text: $msg")
     }
 
@@ -474,6 +474,22 @@ class EventLoopSchedulerTest {
                 "y=${'$'}(Tag.tag {})" }
               println { msg = result::get_or { result = await { p = x }, def = "?" } }
               println { msg = result::get_or { result = await { p = y }, def = "?" } }
+        """)),
+    )
+
+    /** C1 hole found through sort_by's stdlib wrapper: an indirect call rewritten to the
+     *  SCALAR ABI lost its `maySuspend` flag, so a park inside `if cmp { … } then …`
+     *  was dropped — with no native involved at all. */
+    @Test
+    fun `a park inside an if condition through a scalar indirect call propagates`() = assertEquals(
+        listOf("-1"),
+        lines(program(imports, """
+            let wrap = { cmp } -> { a, b } -> if cmp { a = a, b = b } then 0 - 1 else 1
+            perform Console, SystemTime, EventLoop in do
+              let p = Async.spawn { f = {} -> 10 }
+              let w = wrap { cmp = { a, b } -> result::is_ok { result = await { p = a } } }
+              let r = w { a = p, b = p }
+              println { msg = r.to_str {} }
         """)),
     )
 

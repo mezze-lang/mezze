@@ -408,7 +408,9 @@ object ParamScalarizer {
             if (callee !is ReadLocalIR) return n
             val plan = slotPlans[callee.slot] ?: return n
             val ordered = orderedArgs(n.arg, plan) ?: return n
-            return CallIndirectScalarIR(n.function, ordered, plan.paramNames(), n.isTailCall, n.src)
+            // C1: the rewrite keeps the callee's suspension verdict — dropping it here
+            // silently lost every park inside `if cmp { … }` through a scalar call.
+            return CallIndirectScalarIR(n.function, ordered, plan.paramNames(), n.isTailCall, n.src, maySuspend = n.maySuspend)
         }
         return n
     }

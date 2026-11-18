@@ -792,10 +792,10 @@ public final class ListNatives {
         var cmp = ScalarCall.prepare2(cmpFn, "a", "b");
         Object[] src = list.toArray();
         Object minElem = src[0];
-        Object minKey = ctx.call1(callNode, minElem);
+        Object minKey = OrderCallbacks.checkNotParked(ctx.call1(callNode, minElem), "min_by/max_by key");
         for (int i = 1; i < src.length; i++) {
             Object elem = src[i];
-            Object key = ctx.call1(callNode, elem);
+            Object key = OrderCallbacks.checkNotParked(ctx.call1(callNode, elem), "min_by/max_by key");
             if (cmp.callCmp(callNode, key, minKey) < 0) {
                 minElem = elem;
                 minKey = key;
@@ -811,10 +811,10 @@ public final class ListNatives {
         var cmp = ScalarCall.prepare2(cmpFn, "a", "b");
         Object[] src = list.toArray();
         Object maxElem = src[0];
-        Object maxKey = ctx.call1(callNode, maxElem);
+        Object maxKey = OrderCallbacks.checkNotParked(ctx.call1(callNode, maxElem), "min_by/max_by key");
         for (int i = 1; i < src.length; i++) {
             Object elem = src[i];
-            Object key = ctx.call1(callNode, elem);
+            Object key = OrderCallbacks.checkNotParked(ctx.call1(callNode, elem), "min_by/max_by key");
             if (cmp.callCmp(callNode, key, maxKey) > 0) {
                 maxElem = elem;
                 maxKey = key;
@@ -1199,7 +1199,7 @@ public final class ListNatives {
         Object[] src1 = list1.toArray();
         Object[] src2 = list2.toArray();
         for (int i = 0; i < src1.length; i++) {
-            Object result = ctx.call2(callNode, src1[i], src2[i]);
+            Object result = OrderCallbacks.checkNotParked(ctx.call2(callNode, src1[i], src2[i]), "equals eq");
             if (!(result instanceof Boolean bool) || !bool) {
                 return false;
             }
@@ -1528,7 +1528,7 @@ public final class ListNatives {
         var ctx = ScalarCall.prepare2(cmp, "a", "b");
         Object[] src = list.toArray();
         for (int i = 1; i < src.length; i++) {
-            Object result = ctx.call2(callNode, src[i - 1], src[i]);
+            Object result = OrderCallbacks.checkNotParked(ctx.call2(callNode, src[i - 1], src[i]), "is_sorted_by");
             if (result instanceof Long l && l > 0) {
                 return false;
             }
