@@ -306,6 +306,9 @@ sealed interface StringPartIR {
      *  so the compiler can inline across serialization boundaries (the
      *  interpreter module is not on the CLI classpath, so NativeSignatures
      *  is empty during `mez build` — this flag preserves the info). */
+    /** C4: an argument is a function value, so a callback may suspend INSIDE the
+     *  native; the site gets the propagation wrapper (one type test per call). */
+    val maySuspend: Boolean = false,
     val isPure: Boolean = false,
     /** When set, `maybeCollapseInlineOp` can convert this node into an
      *  `InlineBinaryOpIR` without querying NativeSignatures. */

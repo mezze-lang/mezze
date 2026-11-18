@@ -634,9 +634,12 @@ order. Pieces, each where the design said:
   AST the compiler reads, which is a loose end worth closing, not a blocker.
 - Propagation: `emitWithSuspendPropagation` wraps every `maySuspend` non-tail
   call and every perform op in `local = call; if IsSuspension(local) then
-  Yield(local) else local`. One trap, measured: the inliner splices the SAME
+  Yield(local) else local`. Two traps, both measured: the inliner splices the SAME
   node object into other roots, so a mark that outlived one wrap made the second
-  emission skip it and a continuation reached `+ 1` as a value.
+  emission skip it and a continuation reached `+ 1` as a value; and a mark kept on
+  the SHARED compiler at all raced between threads compiling lambdas lazily under
+  `LoomAsync` (BUG 66, one lambda in four failed to compile). There is no mark now:
+  the gate and the node's body are two methods.
 - The boundary: a perform over a `cont`-capable performer (syntactic check of
   its op bodies, `TypedHandlerRef.contCapable`) compiles its body as its OWN
   root — a BDSL yield suspends a root, and the boundary must be the frame that
@@ -794,6 +797,51 @@ is itself a continuation. The driver descends on a nested continuation and feeds
 completed values back outward; 25 lines. The same test pins why `YieldDriver`'s
 flat loop cannot do it — it hands the INNER CONTINUATION to the dispatcher as
 though it were an op record.
+
+**C4 — MEASURED 2026-11-17: the alternative (BDSL twins) loses; resumable natives it
+is.** The tempting shortcut — give every callback-taking native a Mezze/BDSL twin and
+select it at the call site when the callback may park — was measured on `fold` over
+2M elements with the stdlib's own unchecked-access loop (`fold_go`), two interleaved
+rounds, ps/element: pure callback native 409/517 vs twin 10,147/51,835 (the fused
+path, never redirected, so irrelevant); **effectful callback native 12,142/20,800 vs
+twin 26,554/28,336 — 1.4–2.2x slower.** A guest call per element is the floor either
+way, and the recursive BDSL loop adds its own argument plumbing on top. Not parity,
+so not acceptable: the only shape that keeps the native loop at native speed is the
+one below — one `instanceof` per callback result on the fast path, heap state only
+when a callback actually suspends, the machine driving the native's resumption like
+any other frame. The earlier shortcut considered and dropped the same day: a nested
+drive inside the callback (pins the native's Java frame; re-enters `drive`).
+
+**C4 — LANDED 2026-11-17 for the seq family, in the shape the design said.** A
+native loop that gets a suspension back from a callback returns a `NativeSuspension
+{ inner, resume }`: `inner` is what the callback handed back, `resume(v)` re-enters
+the SAME loop at the next element with the callback's eventual value (fold, map,
+for_each, filter, any/all/find — the predicate scan is one shared loop; `none` maps
+over the result). The task machine treats a `NativeSuspension` as one more frame
+kind in a task's stack beside `ContinuationResult`. The BDSL site around a native
+call gets the existing propagation wrapper when the argument record carries an
+effectful function (`CallNativeIR.maySuspend`, set ONCE in the stdlib wrapper for
+every caller; a pure callback costs nothing). Nothing is allocated unless a callback
+actually suspends; the fast path of a resumable native is one `instanceof` per
+callback result.
+
+`ResumableNatives.NAMES` (ast) is the one list two readers share — the interpreter
+(handlers written in the resumable shape; `ResumableNativesRegistryTest`) and the
+typechecker (V0513 lets a parking callback through to these). `scan` is not on it and
+fails loudly if its folder parks.
+
+Asserted (`EventLoopSchedulerTest`): `await` inside `map` over promises (the spelling
+that reached the user as a `ClassCastException` before); two tasks yielding inside
+`map` interleave element by element — `a1 b10 a2 b20 a3 b30` — each loop resuming
+at its own index; fold/filter/any/find/for_each with an `await` in the callback.
+Still refused/diagnosed: `flat_map` and every native not on the list.
+
+**Fast path measured** (2M elements, `MEZZE_RESUMABLE_NATIVES=0` as the run-time
+kill switch, three interleaved rounds, ps/element): fold pure 515/564 after vs
+409–717 before; fold effectful 16.9k/22.5k vs 12.1k–26.5k; map pure ON 26.1k/24.2k/
+22.2k vs OFF 24.3k/25.8k/17.0k; map effectful ON 36.6k/51.2k/36.9k vs OFF 41.0k/
+39.5k/36.0k. The per-result `instanceof` is inside the noise everywhere — "costs
+nothing structural" held up in the real natives, not only the prototype.
 
 **C4 — callback-taking natives hold loop state on the HEAP. PROVEN.**
 `ResumableNativeHofTest`: a `map` keeping `(xs, out, i)` in a record parks on

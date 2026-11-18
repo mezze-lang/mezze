@@ -2216,6 +2216,7 @@ class TypedASTCompiler(
                                 name = binding.name,
                                 arg = UnitLitIR(src),
                                 src = src,
+                                maySuspend = nativeMaySuspend(expr.arg),   // C4
                                 args = positional,
                                 argKinds = sig.argKinds,
                                 isPure = sig.pure,
@@ -2228,6 +2229,7 @@ class TypedASTCompiler(
                     }
                     val nativeSig = NativeSignatures.signatureOf(binding.name)
                     CallNativeIR(binding.name, argIR, src,
+                        maySuspend = nativeMaySuspend(expr.arg),   // C4
                         isPure = nativeSig?.pure == true,
                         inlineOp = nativeSig?.inlineOp,
                         producesKind = collectionKindOf(expr.type),

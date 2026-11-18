@@ -58,7 +58,9 @@ public final class TaskMachine {
     public static final class Task implements TruffleObject {
         public final long id;
         MezzeFunction thunk;                       // set until the first run
-        final ArrayDeque<ContinuationResult> frames = new ArrayDeque<>();
+        /** Frames waiting for a value: a {@link ContinuationResult} (BDSL) or a
+         *  {@link NativeSuspension} (a native loop, C4). */
+        final ArrayDeque<Object> frames = new ArrayDeque<>();
         ContinuationResult leaf;
         ParkRequest parkedOn;
         long epoch;
@@ -305,11 +307,16 @@ public final class TaskMachine {
      *  hand completed values outward until the task is done. */
     private void absorb(Boundary b, Task t, Object cur) {
         while (true) {
+            if (cur instanceof NativeSuspension ns) {      // C4: a native loop waits for its callback
+                t.frames.push(ns);
+                cur = ns.inner;
+                continue;
+            }
             if (cur instanceof ContinuationResult cr) {
                 Object yielded = cr.getResult();
-                if (yielded instanceof ContinuationResult nested) {
+                if (yielded instanceof ContinuationResult || yielded instanceof NativeSuspension) {
                     t.frames.push(cr);
-                    cur = nested;
+                    cur = yielded;
                     continue;
                 }
                 if (yielded instanceof ParkRequest pr) {
@@ -332,7 +339,7 @@ public final class TaskMachine {
                 return;
             }
             try {
-                cur = t.frames.pop().continueWith(cur);
+                cur = resumeFrame(t.frames.pop(), cur);
             } catch (Throwable e) {
                 checkNoneSwallowed(t, e);
                 if (t.promise == null) throw e;
@@ -341,6 +348,11 @@ public final class TaskMachine {
                 return;
             }
         }
+    }
+
+    private static Object resumeFrame(Object frame, Object value) {
+        if (frame instanceof ContinuationResult cr) return cr.continueWith(value);
+        return ((NativeSuspension) frame).resume.with(value);
     }
 
     /** Deliver to every parked task whose condition now holds. Returns whether any did. */

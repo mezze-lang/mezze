@@ -6034,6 +6034,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @Specialization
         public static boolean doCheck(Object value) {
             return value instanceof com.oracle.truffle.api.bytecode.ContinuationResult
+                || value instanceof com.mezze.interpreter.nodes.continuation.NativeSuspension
                 || value instanceof com.mezze.interpreter.nodes.continuation.ParkRequest;
         }
     }

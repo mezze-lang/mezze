@@ -8233,3 +8233,24 @@ sites are excluded from it on purpose (not the user's line). Fixed: `race`, `all
 `each_parking`/`map_parking` — plain Mezze recursion — and `all`/`race` are asserted
 under `EventLoop` (`EventLoopSchedulerTest`). The `fold`/`any`/`find` sites over
 `is_done`/`promise_eq` are pure predicates and stay native. Found by V0513's first run.
+
+## BUG 66 — FIXED 2026-11-18: the suspension-propagation wrapper kept a mark set on the shared compiler
+
+`BytecodeCompiler.emitNode` marked a node in an identity set for the duration of
+its propagation wrapper so the recursive emit would not wrap it again. Lambdas are
+compiled lazily on whichever thread first calls them; under `LoomAsync` two threads
+raced on that set and one lambda in four failed to compile —
+`Err { AsyncFailed { msg = "[BDSL] compile failed for lambda (hash=…) reason=emit-crash" } }`
+— which the `AsyncExtendedTest` filter tests saw as `-1` (3 of 10 serial runs, 0 of 40
+fresh processes). Surfaced by BUG 65's `map_parking`, which moved the awaiting
+callback's compilation onto the Loom threads.
+
+Two layers. (1) The wrapper's mark set: removed — the gate and the body are two
+methods. (2) Underneath it, the compiler's own per-compile state (`compilingEntry`,
+the self-tail-loop locals, `currentFunctionHash`, …) raced the same way: with the
+mark set gone, 1 run in 12 still failed, now as `Bytecode validation error … local
+offset is out of bounds` — a lambda emitted with ANOTHER compile's local slot (stack
+surfaced by printing the cause under `MEZZE_DEBUG`). main's worktree: 50/50 clean,
+so the branch had made concurrent lazy lambda compiles common for the first time.
+Fix: `BytecodeCompiler.compile` is `synchronized` — one compile at a time per
+compiler, compile time only, reentrant for its own nested pre-compiles.

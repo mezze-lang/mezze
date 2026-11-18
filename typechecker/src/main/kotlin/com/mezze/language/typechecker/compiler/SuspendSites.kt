@@ -51,3 +51,15 @@ internal fun TypedASTCompiler.calleeMaySuspend(fn: TypedExpr): Boolean =
 internal fun TypedASTCompiler.compilePerformBody(expr: TypedPerform, src: SourceInfo): NodeIR =
     if (expr.bodyIsThunk) CallIndirectIR(compileExpr(expr.body), UnitLitIR(src), false, src, maySuspend = false)
     else compileExpr(expr.body)
+
+/**
+ * C4: a native call whose argument record carries an EFFECTFUL function value may
+ * suspend inside the native (the callback parks); the site gets the propagation
+ * wrapper. In a stdlib wrapper the callback is a parameter with an open row, so the
+ * wrapper's one native call is flagged once, for every caller. A pure callback
+ * (`effects == null`) cannot park and costs nothing.
+ */
+internal fun nativeMaySuspend(arg: TypedExpr): Boolean {
+    val rec = arg.type as? MezzeType.RecordType ?: return false
+    return rec.fields.values.any { it is MezzeType.FunctionType && it.effects != null }
+}

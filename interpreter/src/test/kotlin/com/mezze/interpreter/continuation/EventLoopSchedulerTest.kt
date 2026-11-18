@@ -49,6 +49,8 @@ class EventLoopSchedulerTest {
                                    settled_result, promise_id, ParkOn, WaitSet, ParkOutcome, PromiseState, AsyncError,
                                    CancelReason, CancelOutcome, RunQueue, Task }
         use std::effects::log::{ Console, println }
+        use std::collections::seq
+        use std::int
         use std::effects::time::{ Time, SystemTime, MockTime }
         use std::datetime::{ test_clock_at, test_clock_advance, duration_millis, epoch }
         use std::result
@@ -241,11 +243,12 @@ class EventLoopSchedulerTest {
         val e = assertThrows(Exception::class.java) {
             lines(program(imports, """
                 use std::collections::seq
-                let each = { xs, f } -> seq::for_each { xs = xs, f = f }
+                let each = { xs, f } -> seq::flat_map { xs = xs, f = f }
                 let via = { g } -> g { xs = [1, 2], f = { x } -> do
                   println { msg = "before" }
                   yield_now {}
-                  println { msg = "after" } }
+                  println { msg = "after" }
+                  [x] }
                 perform Console, SystemTime, EventLoop in do
                   via { g = each }
                   println { msg = "done" }
@@ -276,16 +279,70 @@ class EventLoopSchedulerTest {
         """)),
     )
 
-    /** The method-chain spelling is not seen by V0513 (an inherent op in between), and
-     *  the native stores the continuation IN ITS RESULT: measured as a raw
-     *  ClassCastException reaching the user. The machine owns the diagnosis. */
+    /** C4: the method-chain spelling (`ps.map { … await … }`) that reached the user as a
+     *  raw ClassCastException before `map` was resumable. */
+    @Test
+    fun `await inside a map over promises works - the native resumes`() = assertEquals(
+        listOf("[10, 20]"),
+        lines(program(imports, """
+            perform Console, SystemTime, EventLoop in do
+              let ps = [1, 2].map { f = { x } -> Async.spawn { f = {} -> x * 10 } }
+              let rs = ps.map { f = { x } -> result::get_or { result = await { p = x }, def = -1 } }
+              println { msg = rs.to_dbg {} }
+        """)),
+    )
+
+    /** Two tasks each `map` with a yield per element: the loops interleave element by
+     *  element, each resuming at its own index — the heap state is per native call. */
+    @Test
+    fun `two tasks yielding inside map interleave element by element`() = assertEquals(
+        listOf("a1", "b10", "a2", "b20", "a3", "b30", "a=[1, 2, 3] b=[10, 20, 30]"),
+        lines(program(imports, """
+            let step = { name, x } -> do
+              println { msg = "${'$'}(name)${'$'}(int::to_str { n = x })" }
+              yield_now {}
+              x
+            perform Console, SystemTime, EventLoop in do
+              let a = Async.spawn { f = {} -> seq::map { xs = [1, 2, 3], f = { x } -> step { name = "a", x = x } } }
+              let b = Async.spawn { f = {} -> seq::map { xs = [10, 20, 30], f = { x } -> step { name = "b", x = x } } }
+              let ra = result::get_or { result = await { p = a }, def = [] }
+              let rb = result::get_or { result = await { p = b }, def = [] }
+              println { msg = "a=${'$'}(ra.to_dbg {}) b=${'$'}(rb.to_dbg {})" }
+        """)),
+    )
+
+    @Test
+    fun `fold, filter, any and find resume after an await inside their callback`() = assertEquals(
+        listOf("fold=60", "filter=[20, 30]", "any=True", "find=Some { val = 30 }", "for_each=done"),
+        lines(program(imports, """
+            use std::collections::seq
+            let settled = { p } -> result::get_or { result = await { p = p }, def = -1 }
+            perform Console, SystemTime, EventLoop in do
+              let ps = seq::map { xs = [10, 20, 30], f = { x } -> Async.spawn { f = {} -> do
+                yield_now {}
+                x } }
+              println { msg = "fold=${'$'}((seq::fold { xs = ps, init = 0, f = { acc, x } -> acc + settled { p = x } }).to_str {})" }
+              println { msg = "filter=${'$'}((seq::filter { xs = ps, p = { x } -> settled { p = x } > 15 }).map { f = { x } -> settled { p = x } }.to_dbg {})" }
+              println { msg = "any=${'$'}((seq::any { xs = ps, p = { x } -> settled { p = x } == 20 }).to_dbg {})" }
+              println { msg = "find=${'$'}((seq::find { xs = ps, p = { x } -> settled { p = x } == 30 }).map { f = { val } -> settled { p = val } }.to_dbg {})" }
+              seq::for_each { xs = ps, f = { x } -> do
+                let _ = settled { p = x }
+                {} }
+              println { msg = "for_each=done" }
+        """)),
+    )
+
+    /** `flat_map` is not resumable yet: the park reaches the Java frame and the machine
+     *  says so (the diagnosis, not the symptom), here through a method chain V0513
+     *  cannot see. */
     @Test
     fun `a host exception after a dropped park is reported as the dropped park`() {
         val e = assertThrows(Exception::class.java) {
             lines(program(imports, """
+                use std::collections::seq
                 perform Console, SystemTime, EventLoop in do
                   let ps = [1, 2].map { f = { x } -> Async.spawn { f = {} -> x * 10 } }
-                  let rs = ps.map { f = { x } -> result::get_or { result = await { p = x }, def = -1 } }
+                  let rs = ps.flat_map { f = { x } -> [result::get_or { result = await { p = x }, def = -1 }] }
                   println { msg = rs.to_dbg {} }
             """))
         }

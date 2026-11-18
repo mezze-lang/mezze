@@ -1295,7 +1295,16 @@ public final class BytecodeCompiler {
      * {@link #supports} returned true and any callees are already in
      * {@link #compiledCallTargets}. Violating either throws.
      */
-    public RootNode compile(FunctionIR ir) {
+    /**
+     * One compile at a time per compiler: the emitter keeps per-compile state on
+     * this instance (`compilingEntry`, the self-tail-loop locals, the current
+     * function hash, …), and lambdas are compiled LAZILY on whichever thread first
+     * calls them — under `LoomAsync` that is several threads at once. Measured
+     * (BUG 66): a lambda emitted with another compile's local slot, "local offset
+     * is out of bounds", one run in twelve. Compile time only; reentrant for the
+     * nested pre-compiles a compile performs on its own thread.
+     */
+    public synchronized RootNode compile(FunctionIR ir) {
         // Per-function scope: clear local lambda tracking so entries from
         // a previous compile() don't pollute this function's slot namespace.
         localLambdas.clear();
@@ -2081,19 +2090,22 @@ public final class BytecodeCompiler {
         // TAIL call needs none: the callee's continuation IS this frame's. The
         // perform op itself is wrapped the same way (a parking handler returns a
         // park request through it).
-        if (!suspendWrapped.contains(node) && needsSuspendPropagation(node)) {
-            // The mark lives only while THIS wrap emits: the inliner splices the
-            // same node object into other roots, and a mark left behind made the
-            // second emission skip its wrapper — the continuation then reached
-            // `+ 1` as a value (measured: "cannot add an internal value and an Int").
-            suspendWrapped.add(node);
-            try {
-                emitWithSuspendPropagation(() -> emitNode(node, b, argCount, localMap), b);
-            } finally {
-                suspendWrapped.remove(node);
-            }
+        if (needsSuspendPropagation(node)) {
+            // The wrapper emits the node's own body directly (emitNodeBody), never
+            // through this gate again. An earlier version marked the node in a set on
+            // the compiler for the duration of the wrap; lambdas are compiled lazily
+            // on whichever thread first calls them, so under LoomAsync two threads
+            // raced on that set and one lambda in four failed to compile
+            // ("[BDSL] compile failed … reason=emit-crash", measured 9/25).
+            emitWithSuspendPropagation(() -> emitNodeBody(node, b, argCount, localMap), b);
             return;
         }
+        emitNodeBody(node, b, argCount, localMap);
+    }
+
+    /** The emission of a node WITHOUT the suspension-propagation gate. */
+    private void emitNodeBody(NodeIR node, MezzeBytecodeRootNodeGen.Builder b,
+                              int argCount, BytecodeLocal[] localMap) {
         if (node instanceof LongLitIR lit) {
             b.emitLoadLongConstant(lit.getValue());
             return;
@@ -8814,11 +8826,6 @@ public final class BytecodeCompiler {
      * wrapping in reverse: emit the innermost B first as {@code body},
      * then A wraps that.
      */
-    /** The node whose propagation wrapper is being emitted RIGHT NOW (identity),
-     *  so the recursive emit inside the wrapper does not wrap it again. */
-    private final java.util.Set<NodeIR> suspendWrapped =
-        java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
-
     /** A/B kill switch for the suspension-propagation wrapper (read at run time —
      *  the lowering runs in the process that executes): MEZZE_SUSPEND_PROPAGATION=0. */
     private static final boolean SUSPEND_PROPAGATION =
@@ -8832,6 +8839,7 @@ public final class BytecodeCompiler {
         if (node instanceof CallLocalIR cl) return cl.getMaySuspend() && !cl.isTailCall();
         if (node instanceof DictMethodCallIR dm) return dm.getMaySuspend();
         if (node instanceof PerformOpIR) return true;
+        if (node instanceof CallNativeIR cn) return cn.getMaySuspend();   // C4
         return false;
     }
 

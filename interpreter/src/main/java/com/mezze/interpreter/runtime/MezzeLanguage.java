@@ -323,6 +323,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         } catch (Throwable t) {
             if (System.getenv("MEZZE_DEBUG") != null) {
                 System.err.println("[BDSL] emit failed for " + ir.getName() + ": " + t);
+                t.printStackTrace();   // the reason behind "emit-crash" is otherwise lost
             }
             bdslMisses.incrementAndGet();
             if (BDSL_STATS) {

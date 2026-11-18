@@ -25,11 +25,14 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
         rejects(
             """
             $imports
-            pub let main = {} -> perform SystemTime, EventLoop in
-              seq::for_each { xs = [1, 2], f = { x } -> yield_now {} }
+            pub let main = {} -> perform SystemTime, EventLoop in do
+              let ys = seq::flat_map { xs = [1, 2], f = { x } -> do
+                yield_now {}
+                [x] }
+              {}
             """,
             "V0513",
-            "the native would swallow the park; the runtime detector is the backstop, this is the front door",
+            "`flat_map` is not resumable (C4 covers fold/map/for_each/filter/any/all/find); the native would swallow the park",
         )
     }
 
@@ -38,8 +41,11 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
         accepts(
             """
             $imports
-            pub let main = {} -> perform LoomAsync in
-              seq::for_each { xs = [1, 2], f = { x } -> yield_now {} }
+            pub let main = {} -> perform LoomAsync in do
+              let ys = seq::flat_map { xs = [1, 2], f = { x } -> do
+                yield_now {}
+                [x] }
+              {}
             """,
             "LoomAsync never parks: its yield_now is a thread yield inside the native",
         )
@@ -61,6 +67,25 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
      *  only its `await`/`yield_now`/`park`/`park_until` mention `cont`. The first cut of
      *  the rule flagged this line (measured on the CLI) and told the user to rewrite a
      *  loop that was fine. */
+    /** C4: these natives resume after a parking callback — no refusal, it just works. */
+    @Test
+    fun `a parking callback handed to a RESUMABLE native is fine - for_each, map, fold`() {
+        accepts(
+            """
+            $imports
+            use std::effects::async::{ await }
+            use std::result
+            pub let main = {} -> perform SystemTime, EventLoop in do
+              seq::for_each { xs = [1, 2], f = { x } -> yield_now {} }
+              let ps = seq::map { xs = [1, 2], f = { x } -> Async.spawn { f = {} -> x * 10 } }
+              let rs = seq::map { xs = ps, f = { x } -> result::get_or { result = await { p = x }, def = -1 } }
+              let total = seq::fold { xs = ps, init = 0, f = { acc, x } -> acc + result::get_or { result = await { p = x }, def = 0 } }
+              {}
+            """,
+            "fold/map/for_each/filter/any/all/find hold their loop state on the heap when a callback suspends",
+        )
+    }
+
     @Test
     fun `a callback that only reaches a non-parking op is fine - spawn in a map`() {
         accepts(
@@ -83,7 +108,7 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
             use std::result
             pub let main = {} -> perform SystemTime, EventLoop in do
               let ps = seq::map { xs = [1, 2], f = { x } -> Async.spawn { f = {} -> x * 10 } }
-              let rs = seq::map { xs = ps, f = { x } -> result::get_or { result = await { p = x }, def = -1 } }
+              let rs = seq::flat_map { xs = ps, f = { x } -> [result::get_or { result = await { p = x }, def = -1 }] }
               {}
             """,
             "V0513",

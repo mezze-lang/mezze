@@ -2,6 +2,7 @@ package com.mezze.language.typechecker.compiler
 
 import com.mezze.language.ast.MezzeType
 import com.mezze.language.ast.ModulePathConventions
+import com.mezze.language.ast.ResumableNatives
 import com.mezze.language.parsedast.Loc
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.truffleir.BlockIR
@@ -99,7 +100,8 @@ internal class ParkThroughNativeLedger {
             t is MezzeType.FunctionType && t.effects?.rowVar == calleeRow
         }.keys
         if (synchronous.isEmpty()) return
-        if (!isNativeWrapper(irOf(hash) ?: return)) return
+        val native = nativeWrapped(irOf(hash) ?: return) ?: return
+        if (native in ResumableNatives.NAMES) return   // C4: this loop resumes; a park inside is fine
         for (entry in arg.entries) {
             val field = entry as? TypedRecordEntry.Field ?: continue
             if (field.name !in synchronous) continue
@@ -165,11 +167,11 @@ internal class ParkThroughNativeLedger {
         }
     }
 
-    /** The lowered body is a direct native call, possibly under an empty block. */
-    private fun isNativeWrapper(ir: FunctionIR): Boolean {
+    /** The native a wrapper's lowered body calls directly (possibly under an empty block), or null. */
+    private fun nativeWrapped(ir: FunctionIR): String? {
         var body = ir.body
         var depth = 0
         while (body is BlockIR && body.stmts.isEmpty() && depth++ < 3) body = body.result
-        return body is CallNativeIR
+        return (body as? CallNativeIR)?.name
     }
 }
