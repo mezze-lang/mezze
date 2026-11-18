@@ -178,6 +178,11 @@ data class FunctionIR(
     val sourceFile: String,
     val sourceSection: SourceInfo,
     /** Optional return type descriptor, populated when type info is available from Resolver */
+    /** C4: the body may suspend — a perform op, a call whose callee may, a native
+     *  with an effectful callback, or a nested lambda that may. A function value
+     *  handed to a native as a callback is routed to the native's resumable path
+     *  by this flag; a pure callback costs nothing. */
+    val maySuspend: Boolean = false,
     val returnType: String? = null,
     /** How this function's RESULT can be ordered — see [OrdKind]. Decided by the
      *  compiler, where the solved type is in hand, so a consumer never has to

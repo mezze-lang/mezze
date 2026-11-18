@@ -1,5 +1,15 @@
 package com.mezze.language.typechecker.compiler
 
+import com.mezze.language.typedast.Hash
+import com.mezze.language.truffleir.forEachChildIR
+import com.mezze.language.truffleir.FunctionIR
+import com.mezze.language.truffleir.MakeLambdaIR
+import com.mezze.language.truffleir.CallNativeIR
+import com.mezze.language.truffleir.DictMethodCallIR
+import com.mezze.language.truffleir.CallLocalIR
+import com.mezze.language.truffleir.CallIndirectScalarIR
+import com.mezze.language.truffleir.CallDirectIR
+import com.mezze.language.truffleir.PerformOpIR
 import com.mezze.language.truffleir.SourceInfo
 import com.mezze.language.truffleir.NodeIR
 import com.mezze.language.truffleir.UnitLitIR
@@ -62,4 +72,36 @@ internal fun TypedASTCompiler.compilePerformBody(expr: TypedPerform, src: Source
 internal fun nativeMaySuspend(arg: TypedExpr): Boolean {
     val rec = arg.type as? MezzeType.RecordType ?: return false
     return rec.fields.values.any { it is MezzeType.FunctionType && it.effects != null }
+}
+
+/**
+ * C4: does this function BODY possibly suspend? A perform op; a call carrying a
+ * `maySuspend` verdict (C1); a native call with an effectful callback; or a nested
+ * lambda whose own body may (looked up by hash — lambdas are lowered before the
+ * function that creates them). Stamped on `FunctionIR.maySuspend`, read by the
+ * natives to pick a resumable path only for callbacks that need one.
+ */
+internal fun bodyMaySuspend(body: NodeIR, lookup: (Hash) -> FunctionIR?): Boolean {
+    var found = false
+    val seen = HashSet<Hash>()
+    fun walk(n: NodeIR, depth: Int) {
+        if (found) return
+        when (n) {
+            is PerformOpIR -> { found = true; return }
+            is CallDirectIR -> if (n.maySuspend) { found = true; return }
+            is CallIndirectIR -> if (n.maySuspend) { found = true; return }
+            is CallIndirectScalarIR -> if (n.maySuspend) { found = true; return }
+            is CallLocalIR -> if (n.maySuspend) { found = true; return }
+            is DictMethodCallIR -> if (n.maySuspend) { found = true; return }
+            is CallNativeIR -> if (n.maySuspend) { found = true; return }
+            is MakeLambdaIR -> if (depth < 6 && seen.add(n.functionHash)) {
+                val inner = lookup(n.functionHash)
+                if (inner == null || inner.maySuspend) { found = true; return }
+            }
+            else -> {}
+        }
+        n.forEachChildIR { walk(it, depth + 1) }
+    }
+    walk(body, 0)
+    return found
 }

@@ -20,5 +20,14 @@ object ResumableNatives {
         "__native_seq_any",
         "__native_seq_all",
         "__native_seq_find",
+        // iter: the consumers pull through resumable cursors when any callback in the
+        // chain or the consumer's own may suspend; the stage constructors below only
+        // build the descriptor, so a parking callback handed to them is fine.
+        "__native_iter_fold", "__native_iter_for_each", "__native_iter_count", "__native_iter_any",
+        "__native_iter_all", "__native_iter_find", "__native_iter_reduce", "__native_iter_to_seq",
+        "__native_iter_to_list", "__native_iter_first", "__native_iter_last", "__native_iter_sum",
+        "__native_iter_count_all",
+        "__native_iter_map", "__native_iter_filter", "__native_iter_take_while", "__native_iter_drop_while",
+        "__native_iter_flat_map", "__native_iter_unfold",
     )
 }

@@ -1825,6 +1825,7 @@ public final class BytecodeCompiler {
             }
         });
         RootNode inner = nodes.getNode(0);
+        if (inner instanceof MezzeBytecodeRootNode mbr) mbr.maySuspend = ir.getMaySuspend();   // C4
         // PROBE: MEZZE_DUMP_BC=<substring> prints the emitted bytecode for any
         // function whose name contains the substring. The three self-tail tiers
         // choose between a fused Java loop, a direct while, and a flag-based

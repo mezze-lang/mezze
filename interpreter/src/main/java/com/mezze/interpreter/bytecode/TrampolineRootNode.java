@@ -189,6 +189,9 @@ public final class TrampolineRootNode extends RootNode {
      * deterministic, the losing thread's inner is functionally equivalent
      * — just discard it and keep the first.
      */
+    /** The attached inner target, or null before attachment (C4 reads its flag). */
+    public RootCallTarget peekInnerTarget() { return innerTarget; }
+
     public synchronized void attachInner(RootNode inner, boolean hasTailCalls) {
         if (this.innerTarget != null) return;
         this.innerTarget = inner.getCallTarget();

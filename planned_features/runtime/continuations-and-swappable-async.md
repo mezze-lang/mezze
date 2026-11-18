@@ -843,6 +843,30 @@ kill switch, three interleaved rounds, ps/element): fold pure 515/564 after vs
 39.5k/36.0k. The per-result `instanceof` is inside the noise everywhere — "costs
 nothing structural" held up in the real natives, not only the prototype.
 
+**C4 for `iter` — LANDED 2026-11-18, by routing, not by rewriting the walker.** The
+iter consumers are PUSH-based (`walkElements` with nested consumer lambdas; the walk's
+state is the Java stack), which cannot resume; only the pull-based `IterCursor` keeps
+the chain's state on the heap. Measured (`range.map.fold`, 2M, three rounds): pure
+callback 404–552 ps either way (the fused path); effectful callback **cursor +15–20%**
+over the push walk (11.9–16.0k vs 10.4–13.5k ps). So the cursor is used ONLY when
+something in the call may suspend, decided at run time from a fact stamped at compile
+time: `FunctionIR.maySuspend` (a perform op, a C1-flagged call, a native with an
+effectful callback, or a nested lambda that may) is stamped onto the bytecode root and
+read through trampolines and lazy stubs by `SuspendFacts.mayFunctionSuspend` — one
+boolean per native call, not per element. `IterNatives.resumable(it, fn)` = the
+consumer's callback or any callback in the chain's descriptor may suspend; the three
+BDSL iter ops' cached specialisations carry the same guard, so a parking callback
+falls to the uncached path and the cursor. Every cursor stage keeps its own pending
+step (`next` may return a suspension; `resume(v)` completes the step): map, filter,
+take_while, drop_while, flat_map, unfold with their callbacks; take, drop, enumerate,
+chain, zip pass suspensions through. Consumers are sinks over one `pull` driver:
+fold, reduce, for_each, count, any/all/find, to_seq, to_list, first, last. `sum` and
+`count_all` stay push-only (long-typed op; a parking chain under them is the runtime
+detector's). Asserted (`EventLoopSchedulerTest`): awaits in map/filter/take_while/
+flat_map stages under fold/to_seq/count/find; two tasks yielding inside
+`iter::for_each` interleave `a1 b1 a2 b2`. After routing: pure 457–508 ps unchanged,
+effectful auto-routed at 11.7–22.6k.
+
 **C4 — callback-taking natives hold loop state on the HEAP. PROVEN.**
 `ResumableNativeHofTest`: a `map` keeping `(xs, out, i)` in a record parks on
 every one of three elements and still produces `[11, 21, 31]` in order, re-entering

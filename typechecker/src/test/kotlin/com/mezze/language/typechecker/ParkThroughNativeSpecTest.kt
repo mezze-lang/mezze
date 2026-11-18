@@ -87,6 +87,23 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
     }
 
     @Test
+    fun `iter stages and consumers are resumable too`() {
+        accepts(
+            """
+            $imports
+            use std::effects::async::{ await }
+            use std::collections::iter
+            use std::result
+            pub let main = {} -> perform SystemTime, EventLoop in do
+              let ps = seq::map { xs = [1, 2], f = { x } -> Async.spawn { f = {} -> x * 10 } }
+              let total = iter::fold { it = iter::map { it = iter::from_seq { xs = ps }, f = { x } -> result::get_or { result = await { p = x }, def = 0 } }, init = 0, f = { acc, x } -> acc + x }
+              {}
+            """,
+            "the consumer pulls through resumable cursors when the chain may suspend",
+        )
+    }
+
+    @Test
     fun `a callback that only reaches a non-parking op is fine - spawn in a map`() {
         accepts(
             """

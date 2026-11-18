@@ -351,6 +351,45 @@ class EventLoopSchedulerTest {
         assertTrue(!msg.contains("ClassCastException"), "no host exception text: $msg")
     }
 
+    /** C4 for iter: consumers pull through resumable cursors when a callback in the
+     *  chain or their own may suspend. Each stage kind keeps its own pending step. */
+    @Test
+    fun `iter chains resume after awaits in any stage - map, filter, take_while, fold`() = assertEquals(
+        listOf("fold=60", "seq=[20, 30]", "tw=[10]", "count=2", "find=Some { val = 30 }", "flat=[10, 20, 30]"),
+        lines(program(imports, """
+            use std::collections::iter
+            let settled = { p } -> result::get_or { result = await { p = p }, def = -1 }
+            perform Console, SystemTime, EventLoop in do
+              let ps = seq::map { xs = [10, 20, 30], f = { x } -> Async.spawn { f = {} -> do
+                yield_now {}
+                x } }
+              let it = {} -> iter::from_seq { xs = ps }
+              println { msg = "fold=${'$'}((iter::fold { it = iter::map { it = it {}, f = { x } -> settled { p = x } }, init = 0, f = { acc, x } -> acc + x }).to_str {})" }
+              println { msg = "seq=${'$'}((iter::to_seq { it = iter::filter { it = iter::map { it = it {}, f = { x } -> settled { p = x } }, p = { x } -> x > 15 } }).to_dbg {})" }
+              println { msg = "tw=${'$'}((iter::to_seq { it = iter::take_while { it = iter::map { it = it {}, f = { x } -> settled { p = x } }, p = { x } -> x < 15 } }).to_dbg {})" }
+              println { msg = "count=${'$'}((iter::count { it = iter::filter { it = it {}, p = { x } -> settled { p = x } > 15 } }).to_str {})" }
+              println { msg = "find=${'$'}((iter::find { it = it {}, p = { x } -> settled { p = x } == 30 }).map { f = { val } -> settled { p = val } }.to_dbg {})" }
+              println { msg = "flat=${'$'}((iter::to_seq { it = iter::flat_map { it = it {}, f = { x } -> iter::from_seq { xs = [settled { p = x }] } } }).to_dbg {})" }
+        """)),
+    )
+
+    @Test
+    fun `two tasks yielding inside iter for_each interleave`() = assertEquals(
+        listOf("a1", "b1", "a2", "b2", "end"),
+        lines(program(imports, """
+            use std::collections::iter
+            let worker = { name } -> iter::for_each { it = iter::range { start = 1, end = 3 }, f = { x } -> do
+              println { msg = "${'$'}(name)${'$'}(int::to_str { n = x })" }
+              yield_now {} }
+            perform Console, SystemTime, EventLoop in do
+              let a = Async.spawn { f = {} -> worker { name = "a" } }
+              let b = Async.spawn { f = {} -> worker { name = "b" } }
+              let _ = await { p = a }
+              let _ = await { p = b }
+              println { msg = "end" }
+        """)),
+    )
+
     @Test
     fun `nothing runnable and nothing that can wake is a deadlock, named`() {
         val e = assertThrows(Exception::class.java) {

@@ -922,6 +922,7 @@ class TypedASTCompiler(
             captureSlots = captureInfo.map { it.second },
             captureNames = captureInfo.map { it.first },
             body = bodyIR,
+            maySuspend = bodyMaySuspend(bodyIR) { h -> hashToFunctionIR[h] ?: preloweredFunctions[h] },
             sourceFile = loc.file,
             sourceSection = locToSourceInfo(loc),
             returnOrd = ordKindOf(body.type),
@@ -3049,6 +3050,7 @@ class TypedASTCompiler(
                 localNames = emptyList(),
                 captureSlots = emptyList(),
                 captureNames = emptyList(),
+                maySuspend = true,   // C4: the body is a call that may suspend
                 body = CallDirectIR(opHash, listOf(MakeRecordIR(innerArgFields, src)), false, src, maySuspend = true),   // C1: see SuspendSites.kt
                 sourceFile = src.fileIndex.toString(),
                 sourceSection = src

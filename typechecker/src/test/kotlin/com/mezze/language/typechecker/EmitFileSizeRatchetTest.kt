@@ -291,7 +291,9 @@ class EmitFileSizeRatchetTest {
             // its scope live in ParkThroughNative.kt.
             // 5066 -> 5068: C4 — `maySuspend = nativeMaySuspend(expr.arg)` on the two native
             // call constructions; the rule is in SuspendSites.kt.
-            C + "TypedASTCompiler.kt" to 5068,   // was 5,580 before the split
+            // 5068 -> 5070: C4 — `maySuspend = bodyMaySuspend(…)` stamped on the two FunctionIR
+            // constructions (functions and the effect-op wrappers); the rule is in SuspendSites.kt.
+            C + "TypedASTCompiler.kt" to 5070,   // was 5,580 before the split
             // +42 for `contextRowWithBodyAssocTypes`: an INLINE lambda was stamped
             // with the row from the pushed CONTEXT, so a callback's associated
             // type was the CALLEE's variable rather than what the body threw, and

@@ -214,6 +214,11 @@ import com.oracle.truffle.api.profiles.InlinedLoopConditionProfile;
 @ReportPolymorphism
 public abstract class MezzeBytecodeRootNode extends RootNode implements BytecodeRootNode {
 
+    /** C4: may this function's body suspend? Stamped from `FunctionIR.maySuspend` at
+     *  compile; conservative (true) until then. Read through {@code SuspendFacts} by
+     *  natives choosing between their fast loop and their resumable path. */
+    public volatile boolean maySuspend = true;
+
     protected MezzeBytecodeRootNode(MezzeLanguage language, FrameDescriptor frameDescriptor) {
         super(language, frameDescriptor);
     }
@@ -6761,6 +6766,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     public static final class IterFoldDynamic {
 
         @Specialization(guards = {
+            "!iterResumable(iter, folder)",   // C4: a callback that may park takes the resumable path
             "iterFoldTargetMatches(folder, cachedFolderTarget)",
             "iterFoldDescClass(iter) == cachedDescClass"
         }, limit = "3", excludeForUncached = true)
@@ -6853,6 +6859,10 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return cached != null && fn.getCallTarget() == cached;
         }
 
+        static boolean iterResumable(com.mezze.datastructures.iter.MezzeIter iter, MezzeFunction fn) {
+            return com.mezze.interpreter.nodes.builtin.collections.IterNatives.resumable(iter, fn);
+        }
+
         static Class<?> iterFoldDescClass(com.mezze.datastructures.iter.MezzeIter iter) {
             return iter.getDescriptor().getClass();
         }
@@ -6914,6 +6924,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     public static final class IterForEachDynamic {
 
         @Specialization(guards = {
+            "!iterResumable(iter, callback)",   // C4
             "iterFoldTargetMatches(callback, cachedCallbackTarget)",
             "iterFoldDescClass(iter) == cachedDescClass"
         }, limit = "3", excludeForUncached = true)
@@ -6997,6 +7008,10 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
         static boolean iterFoldTargetMatches(MezzeFunction fn, CallTarget cached) {
             return IterFoldDynamic.iterFoldTargetMatches(fn, cached);
+        }
+
+        static boolean iterResumable(com.mezze.datastructures.iter.MezzeIter iter, MezzeFunction fn) {
+            return com.mezze.interpreter.nodes.builtin.collections.IterNatives.resumable(iter, fn);
         }
 
         static Class<?> iterFoldDescClass(com.mezze.datastructures.iter.MezzeIter iter) {
@@ -7094,6 +7109,10 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @TruffleBoundary
         public static long doUncached(com.mezze.datastructures.iter.MezzeIter iter) {
             return com.mezze.interpreter.nodes.builtin.collections.IterNatives.sum(iter);
+        }
+
+        static boolean iterResumable(com.mezze.datastructures.iter.MezzeIter iter, MezzeFunction fn) {
+            return com.mezze.interpreter.nodes.builtin.collections.IterNatives.resumable(iter, fn);
         }
 
         static Class<?> iterFoldDescClass(com.mezze.datastructures.iter.MezzeIter iter) {
