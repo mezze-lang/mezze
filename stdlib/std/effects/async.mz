@@ -351,10 +351,10 @@ pub let settled_result: { p: Promise 'a } -> Result 'a AsyncError = { p } -> mat
 ## gives the loop a turn only at `await`, `yield_now`, `park` and `park_until`,
 ## and the order is FIFO (no `drive`). `park_until` parks on TWO predicates, the
 ## caller's and "the deadline has passed" — so the performer performs `Time`, and
-## an entry that installs `EventLoop` installs a `Time` performer beside it
+## an entry that installs `CoopAsync` installs a `Time` performer beside it
 ## (`SystemTime`, or `MockTime` for a deterministic run). The runtime never reads
 ## a clock on its own: that is what keeps a test scheduler deterministic.
-impl Async for EventLoop where {
+impl Async for CoopAsync where {
   initialize_scope = {} -> {},
   finalize_scope = {} -> {},
   spawn = { f } -> spawn_task { f = f },
@@ -417,7 +417,7 @@ pub type JoinOutcome 'a = |
 ## cancellation points). Pure CPU-bound tasks are not interruptible
 ## by design — sprinkle a natural yield point (await, sleep, or the
 ## like) if you need cooperative cancel.
-#{ unhandled: "Wrap it in `perform LoomAsync in …` (virtual threads), `OSThreadAsync` for a thread pool, or `EventLoop` for a single-threaded, deterministic scheduler (install a `Time` performer beside it)." }
+#{ unhandled: "Wrap it in `perform LoomAsync in …` (virtual threads), `OSThreadAsync` for a thread pool, or `CoopAsync` for a single-threaded, deterministic scheduler (install a `Time` performer beside it)." }
 effect Async where {
   ## Spawn a computation, returning a Promise immediately.
   ##

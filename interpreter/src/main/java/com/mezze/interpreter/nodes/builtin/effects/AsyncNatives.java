@@ -422,7 +422,13 @@ public final class AsyncNatives {
             }
 
             // Park with waiter registration
-            WAITER.setRelease(this, Thread.currentThread());
+            // BUG 72: a VOLATILE store, not a release store. The completer does CAS(outcome) then
+            // getAcquire(waiter); this side does store(waiter) then load(outcome) — Dekker's pattern,
+            // which needs a StoreLoad fence on BOTH sides. A release store followed by an acquire
+            // load has none on x86, so this thread could read a stale PENDING after the completer
+            // had read a null waiter: nobody unparked and the await hung (bench contsurface kernel
+            // 11 at n=6000 hung in ~50% of runs, main and branch alike). setVolatile is a full fence.
+            WAITER.setVolatile(this, Thread.currentThread());
             try {
                 while ((o = outcome) == PENDING_SENTINEL) {
                     LockSupport.park(this);
@@ -448,7 +454,13 @@ public final class AsyncNatives {
             }
 
             long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
-            WAITER.setRelease(this, Thread.currentThread());
+            // BUG 72: a VOLATILE store, not a release store. The completer does CAS(outcome) then
+            // getAcquire(waiter); this side does store(waiter) then load(outcome) — Dekker's pattern,
+            // which needs a StoreLoad fence on BOTH sides. A release store followed by an acquire
+            // load has none on x86, so this thread could read a stale PENDING after the completer
+            // had read a null waiter: nobody unparked and the await hung (bench contsurface kernel
+            // 11 at n=6000 hung in ~50% of runs, main and branch alike). setVolatile is a full fence.
+            WAITER.setVolatile(this, Thread.currentThread());
             try {
                 while ((o = outcome) == PENDING_SENTINEL) {
                     long remaining = deadline - System.nanoTime();

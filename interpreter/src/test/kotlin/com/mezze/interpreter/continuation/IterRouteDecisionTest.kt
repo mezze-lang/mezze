@@ -60,10 +60,10 @@ class IterRouteDecisionTest {
         val r = MezzeTestHelper.run("""
             use std::collections::iter
             use std::collections::seq
-            use std::effects::async::{ Async, EventLoop, yield_now }
+            use std::effects::async::{ Async, CoopAsync, yield_now }
             use std::effects::time::{ SystemTime }
             let xs = seq::range { start = 1, end = 11 }
-            perform SystemTime in perform EventLoop in iter::fold { it = iter::map { it = iter::from_seq { xs = xs }, f = { x } -> do
+            perform SystemTime in perform CoopAsync in iter::fold { it = iter::map { it = iter::from_seq { xs = xs }, f = { x } -> do
                 yield_now {}
                 x }, init = 0, f = { acc, x } -> acc + x }
         """.trimIndent())

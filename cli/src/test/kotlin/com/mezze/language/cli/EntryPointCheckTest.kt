@@ -198,8 +198,8 @@ class EntryPointCheckTest {
     }
 
     /**
-     * An effect the user never wrote: `EventLoop` performs `Time` for its deadlines,
-     * so an entry under `perform Console, EventLoop` leaks `Time`. Before this the
+     * An effect the user never wrote: `CoopAsync` performs `Time` for its deadlines,
+     * so an entry under `perform Console, CoopAsync` leaks `Time`. Before this the
      * message said only "performs Time" — nothing about where Time came from, and
      * no advice, because the module never imported `Time` so its metadata was not
      * in reach by hash. Now it names the performer that brought it and finds the
@@ -208,11 +208,11 @@ class EntryPointCheckTest {
     @Test
     fun `an effect brought by an installed performer is traced to it`() {
         val source = """
-            use std::effects::async::{ Async, EventLoop, await }
+            use std::effects::async::{ Async, CoopAsync, await }
             use std::effects::log::{ Console, println }
             use std::result
 
-            let main = {} -> perform Console, EventLoop in do
+            let main = {} -> perform Console, CoopAsync in do
               let p = Async.spawn { f = {} -> 41 }
               let n = result::get_or { result = await { p = p }, def = 0 } + 1
               println { msg = n.to_str {} }
@@ -224,7 +224,7 @@ class EntryPointCheckTest {
         val msg = EntryPointCheck.entryError(decls, "main", wrapped.metadataByHash, wrapped.allEffects, wrapped.performerEffects)!!
 
         assertTrue(msg.contains("performs Time"), "the leaking effect: $msg")
-        assertTrue(msg.contains("Time: brought by `EventLoop`"), "who brought it: $msg")
+        assertTrue(msg.contains("Time: brought by `CoopAsync`"), "who brought it: $msg")
         // Not yet: the `Time` decl's own advice is two hops away (a module only the
         // performer's module imports) and is not in `allEffects` — tracked as a follow-up.
     }

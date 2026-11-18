@@ -29,7 +29,7 @@ data class TypeCheckResult(
     // `use …::{ Console }` brings the performer but not the `Log` effect).
     val allEffects: Map<String, ParsedEffectDecl> = emptyMap(),
     // Every performer in reach whose op bodies raise an effect, by performer name
-    // (`EventLoop` → {Time, Async}); the entry check names them when such an effect
+    // (`CoopAsync` → {Time, Async}); the entry check names them when such an effect
     // leaks, since the user never wrote it.
     val performerEffects: Map<String, Set<String>> = emptyMap(),
     val loweredFunctions: List<FunctionIR> = emptyList(),
@@ -110,7 +110,7 @@ fun TypeChecker.TypeCheckResult.Success.metadataInReach():
         }
     }
     // An effect can leak from an entry without this module ever naming it: a
-    // performer it installs performs the effect in its op bodies (`EventLoop`
+    // performer it installs performs the effect in its op bodies (`CoopAsync`
     // performs `Time`). That decl is two hops away, in a module only the
     // performer's module imports — its headers are in reach, so its advice is.
     for (decl in effectHeadersInReach()) {

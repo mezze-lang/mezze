@@ -1,24 +1,24 @@
-## WHAT A PARK COSTS — the yield path, measured on the branch only (EventLoop
+## WHAT A PARK COSTS — the yield path, measured on the branch only (CoopAsync
 ## does not exist on main). Same block structure and checksum as contsurface.
 ##
 ##   1 control          a counted loop and an add
-##   2 loop spawn+await EventLoop: spawn + await per element — one park, one
+##   2 loop spawn+await CoopAsync: spawn + await per element — one park, one
 ##                      resume, one task switch each
-##   3 loop yield_now   EventLoop: yield_now per element — a park whose predicate
+##   3 loop yield_now   CoopAsync: yield_now per element — a park whose predicate
 ##                      is already true: the pure suspend/resume cost
-##   4 loop park True   EventLoop: park on `{} -> True` per element
+##   4 loop park True   CoopAsync: park on `{} -> True` per element
 ##   5 loom spawn+await LoomAsync, in this case for a same-process reference
-##   6 loop seq fold    EventLoop: seq::fold whose callback spawns and awaits —
+##   6 loop seq fold    CoopAsync: seq::fold whose callback spawns and awaits —
 ##                      a park THROUGH the resumable native, per element
-##   7 loop iter        EventLoop: the same through iter map -> fold (cursor route)
-##   8 loop list fold   EventLoop: the same through list::fold_left
-##   9 loop fan-out     EventLoop: spawn m tasks, then await them all (the
+##   7 loop iter        CoopAsync: the same through iter map -> fold (cursor route)
+##   8 loop list fold   CoopAsync: the same through list::fold_left
+##   9 loop fan-out     CoopAsync: spawn m tasks, then await them all (the
 ##                      realistic shape: m parks that mostly find settled promises)
 use std::effects::log::{ println, Console }
 use std::effects::args::{ SystemArgs, argv }
 use std::effects::time::{ SystemTime, monotonic }
 use std::datetime::{ duration_to_nanos, sub_duration }
-use std::effects::async::{ Async, LoomAsync, EventLoop, await, yield_now, park }
+use std::effects::async::{ Async, LoomAsync, CoopAsync, await, yield_now, park }
 use std::collections::seq
 use std::collections::iter
 use std::collections::list
@@ -51,32 +51,32 @@ let k_control = { n } -> outer { b = n / m, acc = 0, body = { acc } -> go_ctrl {
 let go_spawn = { i, acc } -> if i <= 0 then acc else do
   let p = Async.spawn { f = {} -> m7 { i = i } }
   go_spawn { i = i - 1, acc = acc + result::get_or { result = await { p = p }, def = 0 } }
-let k_loop_spawn = { n } -> perform EventLoop in outer { b = n / m, acc = 0, body = { acc } -> go_spawn { i = m, acc = acc } }
+let k_loop_spawn = { n } -> perform CoopAsync in outer { b = n / m, acc = 0, body = { acc } -> go_spawn { i = m, acc = acc } }
 let k_loom_spawn = { n } -> perform LoomAsync in outer { b = n / m, acc = 0, body = { acc } -> go_spawn { i = m, acc = acc } }
 
 ## 3
 let go_yield = { i, acc } -> if i <= 0 then acc else do
   yield_now {}
   go_yield { i = i - 1, acc = acc + m7 { i = i } }
-let k_loop_yield = { n } -> perform EventLoop in outer { b = n / m, acc = 0, body = { acc } -> go_yield { i = m, acc = acc } }
+let k_loop_yield = { n } -> perform CoopAsync in outer { b = n / m, acc = 0, body = { acc } -> go_yield { i = m, acc = acc } }
 
 ## 4
 let go_park = { i, acc } -> if i <= 0 then acc else do
   park { predicate = {} -> True }
   go_park { i = i - 1, acc = acc + m7 { i = i } }
-let k_loop_park = { n } -> perform EventLoop in outer { b = n / m, acc = 0, body = { acc } -> go_park { i = m, acc = acc } }
+let k_loop_park = { n } -> perform CoopAsync in outer { b = n / m, acc = 0, body = { acc } -> go_park { i = m, acc = acc } }
 
 ## 6..8 — the callback parks inside the native
 let await_of = { x } -> result::get_or { result = await { p = Async.spawn { f = {} -> m7 { i = x } } }, def = 0 }
-let k_loop_seq = { n } -> perform EventLoop in outer { b = n / m, acc = 0,
+let k_loop_seq = { n } -> perform CoopAsync in outer { b = n / m, acc = 0,
   body = { acc } -> seq::fold { xs = xs, init = acc, f = { acc, x } -> acc + await_of { x = x } } }
-let k_loop_iter = { n } -> perform EventLoop in outer { b = n / m, acc = 0,
+let k_loop_iter = { n } -> perform CoopAsync in outer { b = n / m, acc = 0,
   body = { acc } -> iter::fold { it = iter::map { it = iter::from_seq { xs = xs }, f = { x } -> await_of { x = x } }, init = acc, f = { acc, x } -> acc + x } }
-let k_loop_list = { n } -> perform EventLoop in outer { b = n / m, acc = 0,
+let k_loop_list = { n } -> perform CoopAsync in outer { b = n / m, acc = 0,
   body = { acc } -> list::fold_left { xs = lst, init = acc, f = { acc, x } -> acc + await_of { x = x } } }
 
 ## 9
-let k_loop_fanout = { n } -> perform EventLoop in outer { b = n / m, acc = 0,
+let k_loop_fanout = { n } -> perform CoopAsync in outer { b = n / m, acc = 0,
   body = { acc } -> do
     let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> m7 { i = x } } }
     seq::fold { xs = ps, init = acc, f = { acc, x } -> acc + result::get_or { result = await { p = x }, def = 0 } } }

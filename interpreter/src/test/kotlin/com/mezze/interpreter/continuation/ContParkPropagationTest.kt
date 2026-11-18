@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test
  * The park's predicate is `{} -> True`, so the machine answers it on its next
  * turn; this test is about the mechanism, not policy. (An EMPTY wait set,
  * `fs = []`, is unsatisfiable and is a deadlock — asserted in
- * `EventLoopSchedulerTest`.)
+ * `CoopAsyncSchedulerTest`.)
  */
 class ContParkPropagationTest {
 

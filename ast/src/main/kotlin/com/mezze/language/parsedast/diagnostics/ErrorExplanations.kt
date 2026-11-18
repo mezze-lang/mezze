@@ -854,7 +854,7 @@ fun ErrorCode.explain(): String = when (this) {
 
     ErrorCode.V0513_PARK_THROUGH_NATIVE -> """
         A callback that performs an effect a cont-capable performer (one that mentions
-        `cont`, such as `EventLoop`) may PARK on was handed to a native function that
+        `cont`, such as `CoopAsync`) may PARK on was handed to a native function that
         runs it synchronously — `seq::for_each`, `iter::map`, `seq::fold` and the rest.
         A native frame cannot be suspended through, so a park inside the callback
         would be lost along with the rest of the callback. Until natives are

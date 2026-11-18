@@ -8,9 +8,9 @@ import org.junit.jupiter.api.Test
 /**
  * BUG 69 / BUG 70: a park must propagate through EVERY ordinary program shape, not
  * only the one the scheduler tests happened to use. Both shapes here came from
- * `bench/cases/contloop`, where every EventLoop kernel crashed with a HOST
+ * `bench/cases/contloop`, where every CoopAsync kernel crashed with a HOST
  * exception (a Boolean or String cast to a continuation root; an Illegal frame
- * slot) while `let r = perform EventLoop in go { … }` directly in `main` worked.
+ * slot) while `let r = perform CoopAsync in go { … }` directly in `main` worked.
  * A host exception reaching a user is a compiler bug.
  */
 class ParkPropagationShapesTest {
@@ -25,7 +25,7 @@ class ParkPropagationShapesTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     private val imports = """
-        use std::effects::async::{ Async, EventLoop, await, yield_now }
+        use std::effects::async::{ Async, CoopAsync, await, yield_now }
         use std::effects::time::{ SystemTime, monotonic }
         use std::result
         use std::int
@@ -43,7 +43,7 @@ class ParkPropagationShapesTest {
         500500L,
         eval(program(imports, go, """
             perform SystemTime in do
-              let r = perform EventLoop in go { i = 1000, acc = 0 }
+              let r = perform CoopAsync in go { i = 1000, acc = 0 }
               r
         """)),
     )
@@ -55,7 +55,7 @@ class ParkPropagationShapesTest {
         1001000L,
         eval(program(imports, go, """
             let outer = { b, acc, body } -> if b <= 0 then acc else outer { b = b - 1, acc = body { acc = acc }, body = body }
-            let k = { n } -> perform EventLoop in outer { b = n / 1000, acc = 0, body = { acc } -> go { i = 1000, acc = acc } }
+            let k = { n } -> perform CoopAsync in outer { b = n / 1000, acc = 0, body = { acc } -> go { i = 1000, acc = acc } }
             perform SystemTime in k { n = 2000 }
         """)),
     )
@@ -66,7 +66,7 @@ class ParkPropagationShapesTest {
     fun `BUG 70 - a cont-capable perform in a function reached through a thunk`() = assertEquals(
         500500L,
         eval(program(imports, go, """
-            let k = { n } -> perform EventLoop in go { i = n, acc = 0 }
+            let k = { n } -> perform CoopAsync in go { i = n, acc = 0 }
             let time_it = { f } -> perform SystemTime in do
               let t0 = monotonic {}
               let r = f {}
@@ -89,7 +89,7 @@ class ParkPropagationShapesTest {
             use std::collections::seq
             let xs = seq::range { start = 1, end = 1001 }
             let outer = { b, acc, body } -> if b <= 0 then acc else outer { b = b - 1, acc = body { acc = acc }, body = body }
-            let k = { n } -> perform EventLoop in outer { b = n / 1000, acc = 0,
+            let k = { n } -> perform CoopAsync in outer { b = n / 1000, acc = 0,
               body = { acc } -> do
                 let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> x } }
                 seq::fold { xs = ps, init = acc, f = { acc, x } -> acc + result::get_or { result = await { p = x }, def = 0 } } }
@@ -107,7 +107,7 @@ class ParkPropagationShapesTest {
             use std::collections::seq
             let xs = seq::range { start = 1, end = 1001 }
             let outer = { b, acc, body } -> if b <= 0 then acc else outer { b = b - 1, acc = body { acc = acc }, body = body }
-            let k = { n } -> perform EventLoop in outer { b = n / 1000, acc = 0,
+            let k = { n } -> perform CoopAsync in outer { b = n / 1000, acc = 0,
               body = { acc } -> do
                 let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> x } }
                 seq::fold { xs = ps, init = acc, f = { acc, x } -> acc + result::get_or { result = await { p = x }, def = 0 } } }
@@ -126,7 +126,7 @@ class ParkPropagationShapesTest {
             use std::datetime::{ duration_to_nanos, sub_duration }
             let xs = seq::range { start = 1, end = 1001 }
             let outer = { b, acc, body } -> if b <= 0 then acc else outer { b = b - 1, acc = body { acc = acc }, body = body }
-            let k = { n } -> perform EventLoop in outer { b = n / 1000, acc = 0,
+            let k = { n } -> perform CoopAsync in outer { b = n / 1000, acc = 0,
               body = { acc } -> do
                 let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> x } }
                 seq::fold { xs = ps, init = acc, f = { acc, x } -> acc + result::get_or { result = await { p = x }, def = 0 } } }
@@ -155,7 +155,7 @@ class ParkPropagationShapesTest {
         eval(program(imports, go, """
             let k = { n } -> perform SystemTime in do
               let t0 = monotonic {}
-              let r = perform EventLoop in go { i = n, acc = 0 }
+              let r = perform CoopAsync in go { i = n, acc = 0 }
               let t1 = monotonic {}
               r
             k { n = 1000 }

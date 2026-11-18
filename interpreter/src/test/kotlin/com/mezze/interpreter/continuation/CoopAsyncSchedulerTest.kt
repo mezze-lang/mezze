@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test
  * (`Mut` is hermetic and cannot share a row with `Async`, which is why the log is
  * stdout and not a mutable seq.)
  *
- *  - `EventLoop` (stdlib, no `drive`) is FIFO: two workers that yield between
+ *  - `CoopAsync` (stdlib, no `drive`) is FIFO: two workers that yield between
  *    steps interleave a1 b1 a2 b2 a3 b3.
  *  - A userland performer with `drive = { runnable } -> runnable.last {}` is LIFO:
  *    the same program runs b to completion first. It has no native of its own.
@@ -26,7 +26,7 @@ import org.junit.jupiter.api.Test
  *    runnable ones finish, the parked ones are delivered `ParkCancelled`, and an
  *    inner boundary never touches an outer one's tasks.
  */
-class EventLoopSchedulerTest {
+class CoopAsyncSchedulerTest {
 
     @BeforeEach
     fun setUp() {
@@ -45,7 +45,7 @@ class EventLoopSchedulerTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
     private val imports = """
-        use std::effects::async::{ Async, EventLoop, await, yield_now, park, park_until, cancel, is_done, spawn_task, inspect, all, race,
+        use std::effects::async::{ Async, CoopAsync, await, yield_now, park, park_until, cancel, is_done, spawn_task, inspect, all, race,
                                    settled_result, promise_id, ParkOn, WaitSet, ParkOutcome, PromiseState, AsyncError,
                                    CancelReason, CancelOutcome, RunQueue, Task }
         use std::effects::log::{ Console, println }
@@ -74,12 +74,12 @@ class EventLoopSchedulerTest {
     """.trimIndent()
 
     @Test
-    fun `EventLoop is FIFO - two yielding workers interleave`() = assertEquals(
+    fun `CoopAsync is FIFO - two yielding workers interleave`() = assertEquals(
         listOf("a1", "b1", "a2", "b2", "a3", "b3", "end"),
-        lines(program(imports, twoWorkers, "perform Console, SystemTime, EventLoop in program {}")),
+        lines(program(imports, twoWorkers, "perform Console, SystemTime, CoopAsync in program {}")),
     )
 
-    /** A userland scheduler: same ops as EventLoop, LIFO `drive`. No native of its own. */
+    /** A userland scheduler: same ops as CoopAsync, LIFO `drive`. No native of its own. */
     private val lifo = """
         impl Async for LifoLoop where {
           initialize_scope = {} -> {},
@@ -115,7 +115,7 @@ class EventLoopSchedulerTest {
     fun `await parks the awaiting task and resumes it with the value - nested`() = assertEquals(
         42L,
         eval(program(imports, """
-            perform SystemTime, EventLoop in do
+            perform SystemTime, CoopAsync in do
               let inner = Async.spawn { f = {} -> 20 }
               let outer = Async.spawn { f = {} -> result::get_or { result = await { p = inner }, def = -1 } + 22 }
               result::get_or { result = await { p = outer }, def = -1 }
@@ -126,7 +126,7 @@ class EventLoopSchedulerTest {
     fun `park on a predicate another task's progress makes true`() = assertEquals(
         listOf("spawned", "flip", "after"),
         lines(program(imports, """
-            perform Console, SystemTime, EventLoop in do
+            perform Console, SystemTime, CoopAsync in do
               let t = Async.spawn { f = {} -> do
                 yield_now {}
                 println { msg = "flip" }
@@ -142,7 +142,7 @@ class EventLoopSchedulerTest {
         listOf("end", "late", "out"),
         lines(program(imports, """
             perform Console in do
-              let r = perform SystemTime, EventLoop in do
+              let r = perform SystemTime, CoopAsync in do
                 let t = Async.spawn { f = {} -> do
                   yield_now {}
                   println { msg = "late" }
@@ -157,7 +157,7 @@ class EventLoopSchedulerTest {
     fun `a task parked forever is cancelled at scope teardown and sees ParkCancelled`() = assertEquals(
         listOf("end", "cancelled"),
         lines(program(imports, """
-            perform Console, SystemTime, EventLoop in do
+            perform Console, SystemTime, CoopAsync in do
               let never = Async.spawn { f = {} -> do
                 park { predicate = {} -> False }
                 1 }
@@ -172,13 +172,13 @@ class EventLoopSchedulerTest {
     fun `an inner boundary drives only its own tasks`() = assertEquals(
         listOf("u", "mid", "t"),
         lines(program(imports, """
-            perform Console, SystemTime, EventLoop in do
+            perform Console, SystemTime, CoopAsync in do
               let t = Async.spawn { f = {} -> do
                 yield_now {}
                 yield_now {}
                 println { msg = "t" }
                 {} }
-              let inner = perform SystemTime, EventLoop in do
+              let inner = perform SystemTime, CoopAsync in do
                 let u = Async.spawn { f = {} -> do
                   println { msg = "u" }
                   {} }
@@ -192,7 +192,7 @@ class EventLoopSchedulerTest {
     fun `cancel wakes a parked task with ParkCancelled`() = assertEquals(
         listOf("cancel-sent", "woke"),
         lines(program(imports, """
-            perform Console, SystemTime, EventLoop in do
+            perform Console, SystemTime, CoopAsync in do
               let t = Async.spawn { f = {} -> do
                 park { predicate = {} -> False }
                 println { msg = "woke" }
@@ -210,7 +210,7 @@ class EventLoopSchedulerTest {
         listOf("advanced", "timed-out=False"),
         lines(program(imports, """
             let clock = test_clock_at { i = epoch {} }
-            perform Console, MockTime { clock = clock }, EventLoop in do
+            perform Console, MockTime { clock = clock }, CoopAsync in do
               let t = Async.spawn { f = {} -> do
                 yield_now {}
                 test_clock_advance { c = clock, d = duration_millis { n = 150 } }
@@ -226,7 +226,7 @@ class EventLoopSchedulerTest {
         listOf("True"),
         lines(program(imports, """
             let clock = test_clock_at { i = epoch {} }
-            perform Console, MockTime { clock = clock }, EventLoop in do
+            perform Console, MockTime { clock = clock }, CoopAsync in do
               let t = Async.spawn { f = {} -> 1 }
               let r = park_until { predicate = {} -> is_done { p = t }, ms = 100 }
               println { msg = r.to_dbg {} }
@@ -249,7 +249,7 @@ class EventLoopSchedulerTest {
                   yield_now {}
                   println { msg = "after" }
                   True }
-                perform Console, SystemTime, EventLoop in do
+                perform Console, SystemTime, CoopAsync in do
                   via { g = each }
                   println { msg = "done" }
             """))
@@ -262,10 +262,10 @@ class EventLoopSchedulerTest {
     /** BUG 65: the stdlib's own helpers looped with native HOFs over `await`/`cancel`;
      *  under a cooperative scheduler that is a park through a native. Now Mezze loops. */
     @Test
-    fun `await_all and race work under EventLoop`() = assertEquals(
+    fun `await_all and race work under CoopAsync`() = assertEquals(
         listOf("all=[Ok { val = 1 }, Ok { val = 2 }]", "race=Ok { val = 10 }"),
         lines(program(imports, """
-            perform Console, SystemTime, EventLoop in do
+            perform Console, SystemTime, CoopAsync in do
               let a = Async.spawn { f = {} -> do
                 yield_now {}
                 1 }
@@ -285,7 +285,7 @@ class EventLoopSchedulerTest {
     fun `await inside a map over promises works - the native resumes`() = assertEquals(
         listOf("[10, 20]"),
         lines(program(imports, """
-            perform Console, SystemTime, EventLoop in do
+            perform Console, SystemTime, CoopAsync in do
               let ps = [1, 2].map { f = { x } -> Async.spawn { f = {} -> x * 10 } }
               let rs = ps.map { f = { x } -> result::get_or { result = await { p = x }, def = -1 } }
               println { msg = rs.to_dbg {} }
@@ -302,7 +302,7 @@ class EventLoopSchedulerTest {
               println { msg = "${'$'}(name)${'$'}(int::to_str { n = x })" }
               yield_now {}
               x
-            perform Console, SystemTime, EventLoop in do
+            perform Console, SystemTime, CoopAsync in do
               let a = Async.spawn { f = {} -> seq::map { xs = [1, 2, 3], f = { x } -> step { name = "a", x = x } } }
               let b = Async.spawn { f = {} -> seq::map { xs = [10, 20, 30], f = { x } -> step { name = "b", x = x } } }
               let ra = result::get_or { result = await { p = a }, def = [] }
@@ -317,7 +317,7 @@ class EventLoopSchedulerTest {
         lines(program(imports, """
             use std::collections::seq
             let settled = { p } -> result::get_or { result = await { p = p }, def = -1 }
-            perform Console, SystemTime, EventLoop in do
+            perform Console, SystemTime, CoopAsync in do
               let ps = seq::map { xs = [10, 20, 30], f = { x } -> Async.spawn { f = {} -> do
                 yield_now {}
                 x } }
@@ -340,7 +340,7 @@ class EventLoopSchedulerTest {
         val e = assertThrows(Exception::class.java) {
             lines(program(imports, """
                 use std::collections::seq
-                perform Console, SystemTime, EventLoop in do
+                perform Console, SystemTime, CoopAsync in do
                   let ps = [1, 2].map { f = { x } -> Async.spawn { f = {} -> x * 10 } }
                   let sorter = { xs, cmp } -> seq::sort_by { xs = xs, cmp = cmp }
                   let via = { g } -> g { xs = ps, cmp = { a, b } -> result::is_ok { result = await { p = a } } }
@@ -361,7 +361,7 @@ class EventLoopSchedulerTest {
         lines(program(imports, """
             use std::collections::iter
             let settled = { p } -> result::get_or { result = await { p = p }, def = -1 }
-            perform Console, SystemTime, EventLoop in do
+            perform Console, SystemTime, CoopAsync in do
               let ps = seq::map { xs = [10, 20, 30], f = { x } -> Async.spawn { f = {} -> do
                 yield_now {}
                 x } }
@@ -383,7 +383,7 @@ class EventLoopSchedulerTest {
             let worker = { name } -> iter::for_each { it = iter::range { start = 1, end = 3 }, f = { x } -> do
               println { msg = "${'$'}(name)${'$'}(int::to_str { n = x })" }
               yield_now {} }
-            perform Console, SystemTime, EventLoop in do
+            perform Console, SystemTime, CoopAsync in do
               let a = Async.spawn { f = {} -> worker { name = "a" } }
               let b = Async.spawn { f = {} -> worker { name = "b" } }
               let _ = await { p = a }
@@ -401,7 +401,7 @@ class EventLoopSchedulerTest {
         lines(program(imports, """
             use std::collections::list
             let settled = { p } -> result::get_or { result = await { p = p }, def = -1 }
-            perform Console, SystemTime, EventLoop in do
+            perform Console, SystemTime, CoopAsync in do
               let ps = seq::map { xs = [10, 20, 30], f = { x } -> Async.spawn { f = {} -> do
                 yield_now {}
                 x } }
@@ -440,7 +440,7 @@ class EventLoopSchedulerTest {
               finalize_scope = {} -> {},
               tag = {} -> "B",
             }
-            perform Console, SystemTime, EventLoop, A in do
+            perform Console, SystemTime, CoopAsync, A in do
               let t = perform B in Async.spawn { f = {} -> do
                 yield_now {}
                 Tag.tag {} }
@@ -464,7 +464,7 @@ class EventLoopSchedulerTest {
               finalize_scope = {} -> {},
               tag = {} -> "Y",
             }
-            perform Console, SystemTime, EventLoop in do
+            perform Console, SystemTime, CoopAsync in do
               let x = perform X in Async.spawn { f = {} -> do
                 yield_now {}
                 yield_now {}
@@ -485,7 +485,7 @@ class EventLoopSchedulerTest {
         listOf("-1"),
         lines(program(imports, """
             let wrap = { cmp } -> { a, b } -> if cmp { a = a, b = b } then 0 - 1 else 1
-            perform Console, SystemTime, EventLoop in do
+            perform Console, SystemTime, CoopAsync in do
               let p = Async.spawn { f = {} -> 10 }
               let w = wrap { cmp = { a, b } -> result::is_ok { result = await { p = a } } }
               let r = w { a = p, b = p }
@@ -497,7 +497,7 @@ class EventLoopSchedulerTest {
     fun `nothing runnable and nothing that can wake is a deadlock, named`() {
         val e = assertThrows(Exception::class.java) {
             eval(program(imports, """
-                perform SystemTime, EventLoop in do
+                perform SystemTime, CoopAsync in do
                   park { predicate = {} -> False }
                   1
             """))

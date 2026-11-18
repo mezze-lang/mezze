@@ -144,7 +144,7 @@ object EntryPointCheck {
             // Which performer to reach for is the effect author's to say
             // (`#{ unhandled: "…" }` on the effect), not a list kept here.
             // Per effect: who brought it (a performer the user installed whose op
-            // bodies perform it — `EventLoop` performs `Time` for its deadlines; the
+            // bodies perform it — `CoopAsync` performs `Time` for its deadlines; the
             // user never wrote `Time`), then its author's advice. The advice is
             // looked up by hash, and by NAME when the effect arrived through a
             // performer the module imported without the effect itself.

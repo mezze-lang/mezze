@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test
 /**
  * V0513 — until C4 (resumable natives): a callback that may PARK, handed to a native
  * that runs it synchronously, is refused at compile time. Measured before the rule:
- * `seq::for_each { f = { x } -> yield_now {} }` under `EventLoop` dropped the rest of
+ * `seq::for_each { f = { x } -> yield_now {} }` under `CoopAsync` dropped the rest of
  * the callback and the program finished "normally".
  *
  * Decided from types, not names: the callee is a native wrapper, its row carries the
@@ -15,17 +15,17 @@ import org.junit.jupiter.api.Test
 class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
 
     private val imports = """
-        use std::effects::async::{ Async, EventLoop, LoomAsync, yield_now, spawn_task }
+        use std::effects::async::{ Async, CoopAsync, LoomAsync, yield_now, spawn_task }
         use std::effects::time::{ Time, SystemTime }
         use std::collections::seq
     """
 
     @Test
-    fun `a parking callback handed to a native HOF under EventLoop is refused`() {
+    fun `a parking callback handed to a native HOF under CoopAsync is refused`() {
         rejects(
             """
             $imports
-            pub let main = {} -> perform SystemTime, EventLoop in do
+            pub let main = {} -> perform SystemTime, CoopAsync in do
               let m = seq::sort_by { xs = [1, 2], cmp = { a, b } -> do
                 yield_now {}
                 True }
@@ -52,18 +52,18 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
     }
 
     @Test
-    fun `a callback free of the parking effect is fine under EventLoop`() {
+    fun `a callback free of the parking effect is fine under CoopAsync`() {
         accepts(
             """
             $imports
-            pub let main = {} -> perform SystemTime, EventLoop in
+            pub let main = {} -> perform SystemTime, CoopAsync in
               seq::for_each { xs = [1, 2], f = { x } -> x + 1 }
             """,
             "no effect in the row, nothing to park on",
         )
     }
 
-    /** Op-granular: `spawn` is an op of `Async`, but EventLoop's `spawn` never parks —
+    /** Op-granular: `spawn` is an op of `Async`, but CoopAsync's `spawn` never parks —
      *  only its `await`/`yield_now`/`park`/`park_until` mention `cont`. The first cut of
      *  the rule flagged this line (measured on the CLI) and told the user to rewrite a
      *  loop that was fine. */
@@ -75,7 +75,7 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
             $imports
             use std::effects::async::{ await }
             use std::result
-            pub let main = {} -> perform SystemTime, EventLoop in do
+            pub let main = {} -> perform SystemTime, CoopAsync in do
               seq::for_each { xs = [1, 2], f = { x } -> yield_now {} }
               let ps = seq::map { xs = [1, 2], f = { x } -> Async.spawn { f = {} -> x * 10 } }
               let rs = seq::map { xs = ps, f = { x } -> result::get_or { result = await { p = x }, def = -1 } }
@@ -94,7 +94,7 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
             use std::effects::async::{ await }
             use std::collections::iter
             use std::result
-            pub let main = {} -> perform SystemTime, EventLoop in do
+            pub let main = {} -> perform SystemTime, CoopAsync in do
               let ps = seq::map { xs = [1, 2], f = { x } -> Async.spawn { f = {} -> x * 10 } }
               let total = iter::fold { it = iter::map { it = iter::from_seq { xs = ps }, f = { x } -> result::get_or { result = await { p = x }, def = 0 } }, init = 0, f = { acc, x } -> acc + x }
               {}
@@ -109,7 +109,7 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
         rejects(
             """
             $imports
-            pub let main = {} -> perform SystemTime, EventLoop in do
+            pub let main = {} -> perform SystemTime, CoopAsync in do
               let m = seq::min_by { xs = [1, 2], f = { x } -> do
                 yield_now {}
                 x }
@@ -126,7 +126,7 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
         rejects(
             """
             $imports
-            pub let main = {} -> perform SystemTime, EventLoop in do
+            pub let main = {} -> perform SystemTime, CoopAsync in do
               let m = [1, 2].sort_by { cmp = { a, b } -> do
                 yield_now {}
                 True }
@@ -142,11 +142,11 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
         accepts(
             """
             $imports
-            pub let main = {} -> perform SystemTime, EventLoop in do
+            pub let main = {} -> perform SystemTime, CoopAsync in do
               let ps = seq::map { xs = [1, 2], f = { x } -> Async.spawn { f = {} -> x * 10 } }
               {}
             """,
-            "`spawn` does not mention `cont` in EventLoop; the rule is per op, not per effect",
+            "`spawn` does not mention `cont` in CoopAsync; the rule is per op, not per effect",
         )
     }
 
@@ -157,7 +157,7 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
             $imports
             use std::effects::async::{ await }
             use std::result
-            pub let main = {} -> perform SystemTime, EventLoop in do
+            pub let main = {} -> perform SystemTime, CoopAsync in do
               let ps = seq::map { xs = [1, 2], f = { x } -> Async.spawn { f = {} -> x * 10 } }
               let m = seq::sort_by { xs = ps, cmp = { a, b } -> result::is_ok { result = await { p = a } } }
               {}
@@ -172,7 +172,7 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
         accepts(
             """
             $imports
-            pub let main = {} -> perform SystemTime, EventLoop in do
+            pub let main = {} -> perform SystemTime, CoopAsync in do
               let p = spawn_task { f = {} -> yield_now {} }
               yield_now {}
             """,
@@ -190,7 +190,7 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
               [x, ...rest] -> do
                 f { x = x }
                 each { xs = rest, f = f }
-            pub let main = {} -> perform SystemTime, EventLoop in
+            pub let main = {} -> perform SystemTime, CoopAsync in
               each { xs = [1, 2], f = { x } -> yield_now {} }
             """,
             "only natives cannot be suspended through",

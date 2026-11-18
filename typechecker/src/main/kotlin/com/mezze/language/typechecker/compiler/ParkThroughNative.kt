@@ -38,10 +38,10 @@ import com.mezze.language.typedast.TypedVar
  *    callback's effects. `spawn_task { f }` does not (`-> Promise 'a`, a pure
  *    arrow): the callback runs later as a task, so it is never flagged;
  *  - the callback performs an effect that THIS module installs a cont-capable
- *    performer for (`EventLoop` for `Async`). Under `LoomAsync` the same program
+ *    performer for (`CoopAsync` for `Async`). Under `LoomAsync` the same program
  *    is fine, and says so by compiling.
  *
- * Conservative in one way: program-wide. A module that installs `EventLoop`
+ * Conservative in one way: program-wide. A module that installs `CoopAsync`
  * anywhere pays the rule everywhere; C4 deletes it.
  */
 internal class ParkThroughNativeLedger {

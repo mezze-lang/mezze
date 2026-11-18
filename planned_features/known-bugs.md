@@ -8225,13 +8225,13 @@ an `AbilityRequired` whose type ARGUMENT is still open. Spec:
 
 `await_all`/`join` (`seq::map { f = { x } -> await { p = x } }`), `race`
 (`seq::for_each` with `cancel`), `seq::any`/`find` over `is_done` in
-`std/effects/async.mz`. Fine under `LoomAsync`; under `EventLoop` each parks
+`std/effects/async.mz`. Fine under `LoomAsync`; under `CoopAsync` each parks
 through a native frame and trips the runtime detector ("a park was dropped on its
 way to the perform boundary"). V0513 catches the same shape in USER code; stdlib
 sites are excluded from it on purpose (not the user's line). Fixed: `race`, `all`,
 `try_all`, `try_any` and the bounded-concurrency drain now loop through
 `each_parking`/`map_parking` — plain Mezze recursion — and `all`/`race` are asserted
-under `EventLoop` (`EventLoopSchedulerTest`). The `fold`/`any`/`find` sites over
+under `CoopAsync` (`CoopAsyncSchedulerTest`). The `fold`/`any`/`find` sites over
 `is_done`/`promise_eq` are pure predicates and stay native. Found by V0513's first run.
 
 ## BUG 66 — FIXED 2026-11-18: the suspension-propagation wrapper kept a mark set on the shared compiler
@@ -8275,7 +8275,7 @@ a compiler bug by the project's own rule. Not yet checked on main.
 ```mezze
 let wrap = { cmp } -> { a, b } -> if cmp { a = a, b = b } then 0 - 1 else 1
 let w = wrap { cmp = { a, b } -> result::is_ok { result = await { p = a } } }
-w { a = p, b = p }        ## under EventLoop: the park inside the `if` was DROPPED
+w { a = p, b = p }        ## under CoopAsync: the park inside the `if` was DROPPED
 ```
 
 `ParamScalarizer` rewrites `CallIndirectIR` to `CallIndirectScalarIR` and the compiler's
@@ -8293,19 +8293,19 @@ let go = { i, acc } -> if i <= 0 then acc else do
   yield_now {}
   go { i = i - 1, acc = acc + i }
 let outer = { b, acc, body } -> if b <= 0 then acc else outer { b = b - 1, acc = body { acc = acc }, body = body }
-let k = { n } -> perform EventLoop in outer { b = n / 1000, acc = 0, body = { acc } -> go { i = 1000, acc = acc } }
+let k = { n } -> perform CoopAsync in outer { b = n / 1000, acc = 0, body = { acc } -> go { i = 1000, acc = acc } }
 ## k { n = 2000 }  →  Error: class java.lang.Boolean cannot be cast to …ContinuationRootNodeImpl
 ```
 
-`perform EventLoop in go { i = 1000, acc = 0 }` alone works (500500). The difference is the
+`perform CoopAsync in go { i = 1000, acc = 0 }` alone works (500500). The difference is the
 suspension crossing `body { acc = acc }`, an indirect call sitting in an ARGUMENT of a tail
-self-call. Found by `bench/cases/contloop`, whose every EventLoop kernel has this shape; none
+self-call. Found by `bench/cases/contloop`, whose every CoopAsync kernel has this shape; none
 of the 24 scheduler tests did. Host exception reaching a user = compiler bug.
 
 ## BUG 70 — FIXED 2026-11-18: a cont-capable perform in a function called through a thunk leaves an Illegal frame slot
 
 ```mezze
-let k = { n } -> perform EventLoop in go { i = n, acc = 0 }       ## go as in BUG 69
+let k = { n } -> perform CoopAsync in go { i = n, acc = 0 }       ## go as in BUG 69
 let time_it = { f } -> perform SystemTime in do
   let t0 = monotonic {}
   let r = f {}
@@ -8370,7 +8370,7 @@ seq fold eff 9879 vs 10039, list fold eff 12764 vs 12714). Tests: `IterRouteDeci
 `replaces` guard may not guess; inflate (or read the stub's `FunctionIR.maySuspend`) before
 answering, or make the resumable route its own non-replacing specialization.
 
-## BUG 72 — OPEN 2026-11-18: LoomAsync spawn+await hangs nondeterministically past a few thousand iterations (main AND branch)
+## BUG 72 — FIX IN VERIFICATION 2026-11-18: LoomAsync spawn+await hangs nondeterministically past a few thousand iterations (main AND branch)
 
 `contsurface` kernel 11 (spawn one task, await it, per element; 1000-element blocks): n=1000 and
 n=3000 run at 12–19 us/op on both builds; n=6000 timed out at 300 s on both builds twice, then
@@ -8382,7 +8382,14 @@ run (branch, n=6000, 100 s in): 14 threads, NO task thread alive, `main` parked 
 was never completed, or its completion never woke the waiter. A lost wake-up between `complete` and
 `await`, nondeterministic, independent of continuations. Pre-existing on main.
 
-## BUG 73 — OPEN 2026-11-18 (MAIN): `./gradlew :cli:nativeCompile` fails — blocklisted methods reachable for runtime compilation, through `InlineMapContainsKey`
+**ROOT CAUSE:** Dekker's pattern with a missing fence. `MezzePromise.await` publishes the waiter
+with `WAITER.setRelease(this, thread)` and then re-reads the volatile `outcome`; the completer does
+`OUTCOME.compareAndSet` (a full fence) then `WAITER.getAcquire`. A release STORE followed by an
+acquire LOAD has no StoreLoad barrier on x86 (TSO lets the load pass the buffered store), so the
+waiter can read a stale PENDING after the completer has read a null waiter: nobody unparks.
+FIX: `WAITER.setVolatile(...)` at both await sites (a volatile store is a full fence).
+
+## BUG 73 — FIX IN VERIFICATION 2026-11-18 (MAIN): `./gradlew :cli:nativeCompile` fails — blocklisted methods reachable for runtime compilation, through `InlineMapContainsKey`
 
 Both the main head (6a4594d07, worktree-type-soundness) and worktree-continuations fail
 native-image at analysis in ~70 s: `VMError$HostedError: Blocklisted methods are reachable for
@@ -8395,8 +8402,9 @@ continuation code appears in any trace. The last native CLI in `cli/build/native
 dates from 2026-11-06, so the regression landed on main between then and 6a4594d07. `mez build
 --native` through the JVM dev launcher also fails (the known classpath trap), so there is currently
 NO way to build a native binary from either tree. Consequence: "BDSL yield under native-image"
-(design-doc risk 4) stays UNVERIFIED until this is fixed. The uncached `MezzeSet.containsDirect`
-path needs a `@TruffleBoundary` (or the inline op must not reach it for runtime compilation).
+(design-doc risk 4) stays UNVERIFIED until this is fixed. FIX: `@TruffleBoundary` on `InlineMapContainsKey.doSet` — the direct probe stays a plain Java
+call (the 1.33x over the NativeDispatch path was the record and dispatch, not the hash), and
+runtime compilation no longer sees `Object.hashCode`/`Objects.equals` on arbitrary elements.
 
 ## BUG 75 — MITIGATED 2026-11-18 (parser determinism still OPEN): the BDSL parser is not reproducible on a re-parse, and a re-parse replaced every runtime error inside continuation code with a ClassCastException
 

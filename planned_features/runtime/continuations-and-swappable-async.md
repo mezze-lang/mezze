@@ -177,7 +177,7 @@ No `cont`, no suspension, today's direct call, today's cost.
 ### `drive` — the third impl-only field
 
 Control returns to the PERFORM BOUNDARY when a task parks, not to user code:
-`perform EventLoop {} in body {}` must not evaluate to "suspended", or every
+`perform CoopAsync {} in body {}` must not evaluate to "suspended", or every
 `perform` in the language would have to return a variant. So the performer
 supplies a hook the runtime calls while the body is parked.
 
@@ -198,7 +198,7 @@ which dwarfs every number in the measurement record below.
 
 ### A scheduler, whole
 
-    impl Async for EventLoop where {
+    impl Async for CoopAsync where {
       initialize_scope = {} -> { … },
       finalize_scope   = {} -> … ,
 
@@ -441,7 +441,16 @@ retry, `workflow.retry`, `http.retry`. Nine call sites of the park natives
 across the stdlib. Semaphores and channels are also the vindication of keeping
 NAMED WAIT SETS: each wants its own wakeup order.
 
-### 4. BDSL CONTINUATIONS UNDER NATIVE-IMAGE ARE UNVERIFIED
+### 4. BDSL CONTINUATIONS UNDER NATIVE-IMAGE — VERIFIED 2026-11-18
+
+`mez build --native` through the native CLI (`:cli:nativeCompile`, after BUG 73's two
+`@TruffleBoundary` fixes) of a yield loop, the bench-shape program (BUG 69/70/74 shape) and
+`bench/cases/contloop`: all nine park kernels run as native binaries with correct checksums
+(spawn+await, yield_now, park, fold/iter/list with awaiting callbacks, fan-out). The fast path
+in native sits near the JVM numbers at 2M elements (control 1050 vs ~850 ps, seq fold eff 14.4 vs
+~10 ns, iter pure 32 vs 33 ns). The paragraph below is the pre-verification note, kept for the record.
+
+### 4-old. BDSL CONTINUATIONS UNDER NATIVE-IMAGE ARE UNVERIFIED
 
 The AOT test in the measurement record below is **Loom's**, not BDSL's. The
 BDSL prototype and the five suites added this session all run on the JVM. Since
@@ -717,8 +726,8 @@ order. Pieces, each where the design said:
   all still check under the honest rule.
 
 **D1 — the task machine, `drive`, and a scheduler written in Mezze. LANDED
-2026-11-17.** `EventLoopSchedulerTest`, all on ONE thread, interleavings asserted
-as strings: `EventLoop` (stdlib, FIFO) runs two yielding workers `a1 b1 a2 b2 a3
+2026-11-17.** `CoopAsyncSchedulerTest`, all on ONE thread, interleavings asserted
+as strings: `CoopAsync` (stdlib, FIFO) runs two yielding workers `a1 b1 a2 b2 a3
 b3`; a userland performer with `drive = { runnable } -> runnable.last {}` — no
 native of its own — runs the same program `b1 b2 b3 a1 a2 a3`; `await` parks and
 resumes with the value through a nested await (42); `park { predicate }` wakes on
@@ -737,7 +746,7 @@ error naming the tasks and what they wait on, and an EMPTY wait set is one.
   that returns anything but a runnable task is an error.
 - L1 mechanism in `std::effects::async`: `spawn_task` (the ONE native a scheduler
   needs), `promise_id`, `settled_result`, the `RunQueue`/`Task` handles. The
-  `EventLoop` performer is otherwise plain Mezze: `await` = `cont.park` on
+  `CoopAsync` performer is otherwise plain Mezze: `await` = `cont.park` on
   `OnPromises`, `yield_now` = park on `[{} -> True]`, `park` = park on the
   predicate.
 - Wakes are a scan of parked tasks after every run (registered O(1) wake is an
@@ -772,19 +781,19 @@ not know who owned a task. Settled by code, three of the open rules:
 **D3 — cancellation reaches a park; deadlines are `Time` predicates. LANDED
 2026-11-17.** `Async.cancel` on a machine task's promise wakes the task, if parked,
 with `ParkCancelled { reason }` (the promise's cancel hook; the performer's arm
-decides what cancellation means — asserted `cancel-sent, woke`). `EventLoop`'s
+decides what cancellation means — asserted `cancel-sent, woke`). `CoopAsync`'s
 `park_until` parks on TWO predicates, the caller's and `{} -> after { now, deadline }`,
 so the performer performs `Time` — and the DECIDED obligation surfaces exactly as
-written above, verified on the CLI: `perform Console, EventLoop in …` as an entry
+written above, verified on the CLI: `perform Console, CoopAsync in …` as an entry
 is **V0501 "Entry 'main' performs Time, but nothing discharges it"**, `perform
-Console, SystemTime, EventLoop` is clean, and `LoomAsync` carries no obligation.
+Console, SystemTime, CoopAsync` is clean, and `LoomAsync` carries no obligation.
 With `MockTime` the whole run is deterministic: a task advances the clock, the
 waiter times out (`advanced, timed-out=False`). Rule 5 (stale resumers) is moot in
 this machine: a task has exactly one leaf continuation and the machine holds it.
 
 **D4 — a park that cannot reach its boundary is an ERROR, twice over. LANDED
 2026-11-17.** Measured first: `seq::for_each { f = { x } -> yield_now {} }` under
-`EventLoop` printed `before 1, before 2, done` — the native received the callback's
+`CoopAsync` printed `before 1, before 2, done` — the native received the callback's
 continuation as a value and the rest of the callback was silently lost (risk 7's
 family; the C4 gap). Two detectors, front door and backstop:
 
@@ -801,14 +810,14 @@ family; the C4 gap). Two detectors, front door and backstop:
   carries imports as `additionalModules` under file paths).
 - **The runtime backstop**: the machine counts park requests created against parks
   absorbed at a boundary and reports any gap after every run, naming the cause and
-  the fix (`EventLoopSchedulerTest`, reaching the native through a function value
+  the fix (`CoopAsyncSchedulerTest`, reaching the native through a function value
   the static rule cannot see). `cont.park` with no boundary at all — top level,
   comptime, a native or polyglot frame — is an error at the park.
 
 Refined the same day after a CLI probe of the three common spellings:
 
 - **Op-granular.** The first cut flagged `seq::map { f = { x } -> Async.spawn … }`
-  — `spawn` is an op of `Async`, but `EventLoop`'s `spawn` never parks. The rule now
+  — `spawn` is an op of `Async`, but `CoopAsync`'s `spawn` never parks. The rule now
   carries the performer's `contOps` (the ops whose bodies mention `cont` — the only
   places a park can originate, since `cont` is V0702 anywhere else) and the
   callback's reach at `(effect, op)` granularity: a `TypedPerformOp` names its op, a
@@ -829,11 +838,11 @@ Refined the same day after a CLI probe of the three common spellings:
 BUG 65 (FIXED the same day): the async helpers themselves looped with native HOFs
 over `await`/`cancel` — `race`, `all`, `try_all`, `try_any`, the bounded drain. They
 go through `each_parking`/`map_parking` (plain recursion) now; `all`/`race` are
-asserted under `EventLoop`.
+asserted under `CoopAsync`.
 
 Stated limitations, each a later slice's subject: tasks run under the DRIVING
 boundary's handler chain (Phase B lifts it); a `WaitNamed` set is accepted and
-ignored; `sleep` under `EventLoop` is still the Time performer's blocking sleep —
+ignored; `sleep` under `CoopAsync` is still the Time performer's blocking sleep —
 a cooperative `Time` performer that parks on the clock is the natural next
 performer, and the first one written against `cont` outside `Async`.
 Measured gotchas: `Mut` is hermetic and cannot share a row with `Async`, so the
@@ -887,7 +896,7 @@ callback result.
 typechecker (V0513 lets a parking callback through to these). `scan` is not on it and
 fails loudly if its folder parks.
 
-Asserted (`EventLoopSchedulerTest`): `await` inside `map` over promises (the spelling
+Asserted (`CoopAsyncSchedulerTest`): `await` inside `map` over promises (the spelling
 that reached the user as a `ClassCastException` before); two tasks yielding inside
 `map` interleave element by element — `a1 b10 a2 b20 a3 b30` — each loop resuming
 at its own index; fold/filter/any/find/for_each with an `await` in the callback.
@@ -919,7 +928,7 @@ take_while, drop_while, flat_map, unfold with their callbacks; take, drop, enume
 chain, zip pass suspensions through. Consumers are sinks over one `pull` driver:
 fold, reduce, for_each, count, any/all/find, to_seq, to_list, first, last. `sum` and
 `count_all` stay push-only (long-typed op; a parking chain under them is the runtime
-detector's). Asserted (`EventLoopSchedulerTest`): awaits in map/filter/take_while/
+detector's). Asserted (`CoopAsyncSchedulerTest`): awaits in map/filter/take_while/
 flat_map stages under fold/to_seq/count/find; two tasks yielding inside
 `iter::for_each` interleave `a1 b1 a2 b2`. After routing: pure 457–508 ps unchanged,
 effectful auto-routed at 11.7–22.6k.
@@ -938,7 +947,7 @@ as they are for pure callbacks and fold over the array only when
 therefore still refused by V0513 / diagnosed at run time: the key/comparator natives
 (`sort_by`, `sort_by_ord`, `min_by`, `max_by`, `dedup`, `unique`, `group_by_with_evidence`,
 `last_index_of`) and the concurrency natives. `ResumableNatives.NAMES` lists what is in.
-Asserted: awaits inside every ported native under `EventLoop`, one program.
+Asserted: awaits inside every ported native under `CoopAsync`, one program.
 
 Two findings on the way. BUG 67 (OPEN, unrelated) — `to_dbg` on a sorted seq of
 promises is an internal compiler error (#394 family). And V0513's wrapper test looked
@@ -949,6 +958,25 @@ row-less callee — an inherent op resolved to its hash carries no row — is de
 registration instead of its type: the chain's native runs its callbacks unless it is
 one of the DEFERRING natives (`ResumableNatives.DEFERRING`, the spawn family). Both
 spellings are now V0513 at build; the runtime diagnosis keeps the function-value route.
+
+**MEASURED AND FIXED, 2026-11-18 (bench/cases/contsurface + contloop, main vs branch dev launchers,
+slope method, one kernel per process).** Before the fixes: no tax where nothing parks, but iter chains
++30% even PURE (a recursive dynamic guard made the root bail out of PE), effectful seq/list callbacks
++10–18%, and EVERY CoopAsync kernel shape but one crashed (BUG 69/70: the perform thunk did not
+capture the enclosing function's locals; BUG 74: a tail call out of a resumed root escaped). The
+built app also hid every real error behind a ClassCastException (BUG 75, error-time re-parse) and,
+once visible, failed 60–80% of fan-out runs under the JIT (BUG 76: first-tier compiled yield-bearing
+root takes the wrong branch; mitigated with `engine.MultiTier=false` — warm-up cost, peak unchanged;
+upstream repro owed). After: all nine park shapes run; fast path at main parity on every kernel
+(control 692 vs 697, seq fold eff 9811 vs 9882, list fold eff 12764 vs 12714, iter pure 20463 vs
+22398, iter eff 21968 vs 20294); the tax is DYNAMIC — `SuspendFacts.parkPossible()` is true only
+inside a cont-capable boundary, so programs that never install one run the exact pre-continuation
+code. Park path (CoopAsync, per element, n=1000): spawn+await ~12 us, yield_now ~11 us, park ~11 us,
+fold-with-await ~10–23 us, fan-out ~12–17 us — unoptimised, interpreter-dominated at that size.
+The test harness's `run()` is interpreter-only; `ParkUnderJitTest` adds JIT coverage, and BUG 76 was
+only ever visible in the built app. Still open from this pass: parser reproducibility on re-parse
+(BUG 75 proper), the BUG 76 upstream repro, Loom lost wake-up (BUG 72) and main's native blocklist
+(BUG 73) in verification, and BDSL yield under native image once BUG 73 is fixed.
 
 **Error quality pass, 2026-11-18.** Three things a user would have met: (1) a parking
 comparator or key function (`sort_by`, `min_by`, `dedup`, …) reached through a function
@@ -962,7 +990,7 @@ generic diagnosis still said "C4 is not built" — rewritten to the current set.
 (`ParamScalarizer`, the compiler's scalar `emitCallIndirect`), so a park inside
 `if cmp { … }` through a scalar indirect call was lost with no native involved. Fixed
 and asserted. Still owed from the same pass: V0501 should name the performer that
-brings `Time` (`EventLoop`'s `park_until` deadline).
+brings `Time` (`CoopAsync`'s `park_until` deadline).
 
 **C4 — callback-taking natives hold loop state on the HEAP. PROVEN.**
 `ResumableNativeHofTest`: a `map` keeping `(xs, out, i)` in a record parks on

@@ -28,13 +28,13 @@ class ParkUnderJitTest {
     }
 
     private val fanOut = """
-        use std::effects::async::{ Async, EventLoop, await }
+        use std::effects::async::{ Async, CoopAsync, await }
         use std::effects::time::{ SystemTime }
         use std::collections::seq
         use std::result
         let xs = seq::range { start = 1, end = 1001 }
         let outer = { b, acc, body } -> if b <= 0 then acc else outer { b = b - 1, acc = body { acc = acc }, body = body }
-        let k = { n } -> perform EventLoop in outer { b = n / 1000, acc = 0,
+        let k = { n } -> perform CoopAsync in outer { b = n / 1000, acc = 0,
           body = { acc } -> do
             let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> x } }
             seq::fold { xs = ps, init = acc, f = { acc, x } -> acc + result::get_or { result = await { p = x }, def = 0 } } }
@@ -46,13 +46,13 @@ class ParkUnderJitTest {
      *  SETTLED promise. A root compiled at tier 1 during phase one ran its propagation
      *  yield in phase two on the `Ok` it had just received. */
     private val twoPhase = """
-        use std::effects::async::{ Async, EventLoop, await }
+        use std::effects::async::{ Async, CoopAsync, await }
         use std::effects::time::{ SystemTime }
         use std::collections::seq
         use std::result
         let xs = seq::range { start = 1, end = 2001 }
         let awaits = { ps, acc } -> seq::fold { xs = ps, init = acc, f = { acc, x } -> acc + result::get_or { result = await { p = x }, def = 0 } }
-        perform SystemTime in perform EventLoop in do
+        perform SystemTime in perform CoopAsync in do
           let ps = seq::map { xs = xs, f = { x } -> Async.spawn { f = {} -> x } }
           let a = awaits { ps = ps, acc = 0 }
           let b = awaits { ps = ps, acc = 0 }

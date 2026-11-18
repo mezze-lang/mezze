@@ -189,6 +189,10 @@ public final class MezzeContext {
     // Async machine owns), so it has to be reachable from every one of them.
     private volatile com.mezze.interpreter.nodes.continuation.TaskMachine taskMachine;
 
+    /** BUG 73: the lazy construction (an IdentityHashMap inside the machine) must not be
+     *  reachable from partially-evaluated code — `ContBinding` calls this from a node — or
+     *  native-image's runtime-compilation analysis blocklists it. */
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     public com.mezze.interpreter.nodes.continuation.TaskMachine taskMachine() {
         var m = taskMachine;
         if (m == null) {

@@ -550,7 +550,14 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return com.mezze.interpreter.nodes.builtin.collections.MapNatives.containsKey(m, k);
         }
 
+        /** BUG 73: `containsDirect` hashes and compares ARBITRARY elements (`Object.hashCode`,
+         *  `Objects.equals`); reached from partially-evaluated code, that let native-image's
+         *  runtime-compilation analysis follow every hashCode/equals in the image — ThreadLocal,
+         *  zipfs, DateFormatSymbols — into the Truffle blocklist, failing `:cli:nativeCompile` on
+         *  main and branch alike. The probe stays a direct Java call (no NativeDispatch record),
+         *  behind one boundary. */
         @Specialization
+        @TruffleBoundary
         public static boolean doSet(com.mezze.datastructures.set.MezzeSet<?> s, Object x) {
             if (s.hasDirectProbe()) {
                 return s.containsDirect(x);

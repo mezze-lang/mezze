@@ -9,7 +9,7 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
 /**
  * Natives of the task machine (continuations-and-swappable-async). Stdlib-only
- * (#109): `std::effects::async` wraps them as the `EventLoop` performer's `spawn`,
+ * (#109): `std::effects::async` wraps them as the `CoopAsync` performer's `spawn`,
  * `promise_id`, and the `RunQueue` / `Task` handle methods a `drive` selector uses.
  */
 public final class TaskNatives {
