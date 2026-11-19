@@ -1,7 +1,5 @@
 package com.mezze.interpreter.nodes.builtin.collections;
 
-import com.mezze.interpreter.nodes.continuation.SuspendFacts;
-import com.mezze.interpreter.nodes.continuation.NativeSuspension;
 import com.mezze.datastructures.deque.MezzeDeque;
 import com.mezze.datastructures.list.MezzeList;
 import com.mezze.datastructures.set.ElementHashing;
@@ -199,9 +197,9 @@ public final class ListNatives {
         Object[] src = list.toArray();
         Object[] result = new Object[src.length];
         var ctx = ScalarCall.prepare1(mapper, "x");
-        return ResumableLoops.run(0, src.length, new ResumableLoops.Body() {
+        return CallbackLoops.run(0, src.length, new CallbackLoops.Body() {
             public Object call(int i) { return ctx.call1(callNode, src[i]); }
-            public Object accept(int i, Object r) { result[i] = r; return ResumableLoops.CONTINUE; }
+            public Object accept(int i, Object r) { result[i] = r; return CallbackLoops.CONTINUE; }
             public Object finish() { return MezzeList.of(result); }
         });
     }
@@ -212,67 +210,35 @@ public final class ListNatives {
         Object[] src = list.toArray();
         Object[] temp = new Object[src.length];
         var ctx = ScalarCall.prepare1(predicate, "x");
-        return ResumableLoops.run(0, src.length, new ResumableLoops.Body() {
+        return CallbackLoops.run(0, src.length, new CallbackLoops.Body() {
             int count;
             public Object call(int i) { return ctx.call1(callNode, src[i]); }
-            public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) temp[count++] = src[i]; return ResumableLoops.CONTINUE; }
+            public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) temp[count++] = src[i]; return CallbackLoops.CONTINUE; }
             public Object finish() { return MezzeList.of(java.util.Arrays.copyOf(temp, count)); }
         });
     }
 
     public static Object foldLeft(MezzeList list, Object init, MezzeFunction folder,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        if (SuspendFacts.mayPark(folder)) {
-            return foldResumable(list.toArray(), init, folder, callNode, false, 0);
-        }
         return foldTwoArg(list, init, folder, callNode, /*reverse=*/false, /*startIndex=*/0, /*scanOut=*/null);
     }
 
     /** C4: the cons walk cannot resume; a folder that may park folds over the array. */
-    private static Object foldResumable(Object[] arr, Object init, MezzeFunction folder,
-                                        com.oracle.truffle.api.nodes.IndirectCallNode callNode,
-                                        boolean reverse, int start) {
-        var f = new ResumableLoops.Call2(folder, callNode);
-        int n = arr.length;
-        return ResumableLoops.run(start, n, new ResumableLoops.Body() {
-            Object acc = init;
-            public Object call(int i) { return f.on(acc, arr[reverse ? n - 1 - i : i]); }
-            public Object accept(int i, Object r) { acc = r; return ResumableLoops.CONTINUE; }
-            public Object finish() { return acc; }
-        });
-    }
 
     public static Object foldRight(MezzeList list, Object init, MezzeFunction folder,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        if (SuspendFacts.mayPark(folder)) {
-            return foldResumable(list.toArray(), init, folder, callNode, true, 0);
-        }
         return foldTwoArg(list, init, folder, callNode, /*reverse=*/true, /*startIndex=*/0, /*scanOut=*/null);
     }
 
     public static Object reduce(MezzeList list, MezzeFunction reducer,
                                 com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (list.isEmpty()) return MezzeVariant.none();
-        if (SuspendFacts.mayPark(reducer)) {
-            Object[] arr = list.toArray();
-            return NativeSuspension.mapResult(foldResumable(arr, arr[0], reducer, callNode, false, 1), MezzeVariant::some);
-        }
         return MezzeVariant.some(foldTwoArg(list, list.head(), reducer, callNode, /*reverse=*/false, /*startIndex=*/1, /*scanOut=*/null));
     }
 
 
     public static Object find(MezzeList list, MezzeFunction predicate,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        if (SuspendFacts.mayPark(predicate)) {
-            Object[] src = list.toArray();
-            var ctx = ScalarCall.prepare1(predicate, "x");
-            return ResumableLoops.run(0, src.length, new ResumableLoops.Body() {
-                Object answer;
-                public Object call(int i) { return ctx.call1(callNode, src[i]); }
-                public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) { answer = MezzeVariant.some(src[i]); return ResumableLoops.STOP; } return ResumableLoops.CONTINUE; }
-                public Object finish() { return answer != null ? answer : MezzeVariant.none(); }
-            });
-        }
         return findWalk(list, predicate, callNode);
     }
 
@@ -300,16 +266,6 @@ public final class ListNatives {
 
     public static Object findIndex(MezzeList list, MezzeFunction predicate,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        if (SuspendFacts.mayPark(predicate)) {
-            Object[] src = list.toArray();
-            var ctx = ScalarCall.prepare1(predicate, "x");
-            return ResumableLoops.run(0, src.length, new ResumableLoops.Body() {
-                Object answer;
-                public Object call(int i) { return ctx.call1(callNode, src[i]); }
-                public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) { answer = MezzeVariant.some((long) i); return ResumableLoops.STOP; } return ResumableLoops.CONTINUE; }
-                public Object finish() { return answer != null ? answer : MezzeVariant.none(); }
-            });
-        }
         return findIndexWalk(list, predicate, callNode);
     }
 
@@ -340,16 +296,6 @@ public final class ListNatives {
 
     public static Object any(MezzeList list, MezzeFunction predicate,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        if (SuspendFacts.mayPark(predicate)) {
-            Object[] src = list.toArray();
-            var ctx = ScalarCall.prepare1(predicate, "x");
-            return ResumableLoops.run(0, src.length, new ResumableLoops.Body() {
-                boolean hit;
-                public Object call(int i) { return ctx.call1(callNode, src[i]); }
-                public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) { hit = true; return ResumableLoops.STOP; } return ResumableLoops.CONTINUE; }
-                public Object finish() { return hit; }
-            });
-        }
         return anyWalk(list, predicate, callNode);
     }
 
@@ -376,16 +322,6 @@ public final class ListNatives {
 
     public static Object all(MezzeList list, MezzeFunction predicate,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        if (SuspendFacts.mayPark(predicate)) {
-            Object[] src = list.toArray();
-            var ctx = ScalarCall.prepare1(predicate, "x");
-            return ResumableLoops.run(0, src.length, new ResumableLoops.Body() {
-                boolean miss;
-                public Object call(int i) { return ctx.call1(callNode, src[i]); }
-                public Object accept(int i, Object r) { if (!((r instanceof Boolean && (Boolean) r))) { miss = true; return ResumableLoops.STOP; } return ResumableLoops.CONTINUE; }
-                public Object finish() { return !miss; }
-            });
-        }
         return allWalk(list, predicate, callNode);
     }
 
@@ -418,10 +354,10 @@ public final class ListNatives {
         Object[] src = list.toArray();
         Object[] matching = new Object[src.length];
         Object[] nonMatching = new Object[src.length];
-        return ResumableLoops.run(0, src.length, new ResumableLoops.Body() {
+        return CallbackLoops.run(0, src.length, new CallbackLoops.Body() {
             int matchCount, nonMatchCount;
             public Object call(int i) { return ctx.call1(callNode, src[i]); }
-            public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) matching[matchCount++] = src[i]; else nonMatching[nonMatchCount++] = src[i]; return ResumableLoops.CONTINUE; }
+            public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) matching[matchCount++] = src[i]; else nonMatching[nonMatchCount++] = src[i]; return CallbackLoops.CONTINUE; }
             public Object finish() {
                 return MezzeRecord.fromFields(new String[]{"pass", "fail"},
                     new Object[]{MezzeList.of(java.util.Arrays.copyOf(matching, matchCount)), MezzeList.of(java.util.Arrays.copyOf(nonMatching, nonMatchCount))});
@@ -792,10 +728,10 @@ public final class ListNatives {
         var cmp = ScalarCall.prepare2(cmpFn, "a", "b");
         Object[] src = list.toArray();
         Object minElem = src[0];
-        Object minKey = OrderCallbacks.checkNotParked(ctx.call1(callNode, minElem), "min_by/max_by key");
+        Object minKey = ctx.call1(callNode, minElem);
         for (int i = 1; i < src.length; i++) {
             Object elem = src[i];
-            Object key = OrderCallbacks.checkNotParked(ctx.call1(callNode, elem), "min_by/max_by key");
+            Object key = ctx.call1(callNode, elem);
             if (cmp.callCmp(callNode, key, minKey) < 0) {
                 minElem = elem;
                 minKey = key;
@@ -811,10 +747,10 @@ public final class ListNatives {
         var cmp = ScalarCall.prepare2(cmpFn, "a", "b");
         Object[] src = list.toArray();
         Object maxElem = src[0];
-        Object maxKey = OrderCallbacks.checkNotParked(ctx.call1(callNode, maxElem), "min_by/max_by key");
+        Object maxKey = ctx.call1(callNode, maxElem);
         for (int i = 1; i < src.length; i++) {
             Object elem = src[i];
-            Object key = OrderCallbacks.checkNotParked(ctx.call1(callNode, elem), "min_by/max_by key");
+            Object key = ctx.call1(callNode, elem);
             if (cmp.callCmp(callNode, key, maxKey) > 0) {
                 maxElem = elem;
                 maxKey = key;
@@ -950,9 +886,9 @@ public final class ListNatives {
                                  com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(fn, "x");
         Object[] src = list.toArray();
-        return ResumableLoops.run(0, src.length, new ResumableLoops.Body() {
+        return CallbackLoops.run(0, src.length, new CallbackLoops.Body() {
             public Object call(int i) { return ctx.call1(callNode, src[i]); }
-            public Object accept(int i, Object r) { return ResumableLoops.CONTINUE; }
+            public Object accept(int i, Object r) { return CallbackLoops.CONTINUE; }
             public Object finish() { return MezzeRecord.empty(); }
         });
     }
@@ -1033,11 +969,11 @@ public final class ListNatives {
         var ctx = ScalarCall.prepare1(mapper, "x");
         Object[] src = list.toArray();
         java.util.ArrayList<Object> results = new java.util.ArrayList<>();
-        return ResumableLoops.run(0, src.length, new ResumableLoops.Body() {
+        return CallbackLoops.run(0, src.length, new CallbackLoops.Body() {
             public Object call(int i) { return ctx.call1(callNode, src[i]); }
             public Object accept(int i, Object mapped) {
                 if (mapped instanceof MezzeList innerList) for (Object o : innerList.toArray()) results.add(o);
-                return ResumableLoops.CONTINUE;
+                return CallbackLoops.CONTINUE;
             }
             public Object finish() { return MezzeList.of(results.toArray()); }
         });
@@ -1080,7 +1016,7 @@ public final class ListNatives {
 
     public static Object none(MezzeList list, MezzeFunction predicate,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        return NativeSuspension.mapResult(any(list, predicate, callNode), r -> !(Boolean) r);
+        return !(Boolean) (any(list, predicate, callNode));
     }
 
     public static long count(MezzeList list, MezzeFunction predicate,
@@ -1199,7 +1135,7 @@ public final class ListNatives {
         Object[] src1 = list1.toArray();
         Object[] src2 = list2.toArray();
         for (int i = 0; i < src1.length; i++) {
-            Object result = OrderCallbacks.checkNotParked(ctx.call2(callNode, src1[i], src2[i]), "equals eq");
+            Object result = ctx.call2(callNode, src1[i], src2[i]);
             if (!(result instanceof Boolean bool) || !bool) {
                 return false;
             }
@@ -1528,7 +1464,7 @@ public final class ListNatives {
         var ctx = ScalarCall.prepare2(cmp, "a", "b");
         Object[] src = list.toArray();
         for (int i = 1; i < src.length; i++) {
-            Object result = OrderCallbacks.checkNotParked(ctx.call2(callNode, src[i - 1], src[i]), "is_sorted_by");
+            Object result = ctx.call2(callNode, src[i - 1], src[i]);
             if (result instanceof Long l && l > 0) {
                 return false;
             }

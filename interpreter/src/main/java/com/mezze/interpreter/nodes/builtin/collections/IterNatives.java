@@ -1,7 +1,5 @@
 package com.mezze.interpreter.nodes.builtin.collections;
 
-import com.mezze.interpreter.nodes.continuation.NativeSuspension;
-import com.mezze.interpreter.nodes.continuation.SuspendFacts;
 import com.mezze.datastructures.iter.*;
 import com.mezze.datastructures.list.MezzeList;
 import com.mezze.interpreter.values.MezzeFunction;
@@ -130,7 +128,6 @@ public final class IterNatives {
     @TruffleBoundary
     public static Object fold(MezzeIter it, Object init, MezzeFunction folder,
                               IndirectCallNode callNode) {
-        if (resumable(it, folder)) return pull(IterCursor.of(it, callNode), new FoldSink(init, folder, callNode));
         return foldWalk(it.getDescriptor(), init, folder, callNode);
     }
 
@@ -171,7 +168,6 @@ public final class IterNatives {
 
     @TruffleBoundary
     public static Object forEach(MezzeIter it, MezzeFunction f, IndirectCallNode callNode) {
-        if (resumable(it, f)) return pull(IterCursor.of(it, callNode), new ForEachSink(f, callNode));
         return forEachWalk(it, f, callNode);
     }
 
@@ -203,7 +199,6 @@ public final class IterNatives {
 
     @TruffleBoundary
     public static Object count(MezzeIter it, MezzeFunction p, IndirectCallNode callNode) {
-        if (resumable(it, p)) return pull(IterCursor.of(it, callNode), new CountSink(p, callNode));
         return countWalk(it, p, callNode);
     }
 
@@ -238,7 +233,6 @@ public final class IterNatives {
 
     @TruffleBoundary
     public static Object any(MezzeIter it, MezzeFunction p, IndirectCallNode callNode) {
-        if (resumable(it, p)) return pull(IterCursor.of(it, callNode), new SearchSink(p, callNode, SEARCH_ANY));
         return anyWalk(it, p, callNode);
     }
 
@@ -279,7 +273,6 @@ public final class IterNatives {
 
     @TruffleBoundary
     public static Object all(MezzeIter it, MezzeFunction p, IndirectCallNode callNode) {
-        if (resumable(it, p)) return pull(IterCursor.of(it, callNode), new SearchSink(p, callNode, SEARCH_ALL));
         return allWalk(it, p, callNode);
     }
 
@@ -320,7 +313,6 @@ public final class IterNatives {
 
     @TruffleBoundary
     public static Object find(MezzeIter it, MezzeFunction p, IndirectCallNode callNode) {
-        if (resumable(it, p)) return pull(IterCursor.of(it, callNode), new SearchSink(p, callNode, SEARCH_FIND));
         return findWalk(it, p, callNode);
     }
 
@@ -361,7 +353,6 @@ public final class IterNatives {
 
     @TruffleBoundary
     public static Object reduce(MezzeIter it, MezzeFunction f, IndirectCallNode callNode) {
-        if (resumable(it, f)) return pull(IterCursor.of(it, callNode), new ReduceSink(f, callNode));
         return reduceWalk(it, f, callNode);
     }
 
@@ -424,7 +415,6 @@ public final class IterNatives {
 
     @TruffleBoundary
     public static Object toSeq(MezzeIter it, IndirectCallNode callNode) {
-        if (resumable(it)) return pull(IterCursor.of(it, callNode), new CollectSink(false));
         return toSeqWalk(it, callNode);
     }
 
@@ -443,7 +433,6 @@ public final class IterNatives {
 
     @TruffleBoundary
     public static Object first(MezzeIter it, IndirectCallNode callNode) {
-        if (resumable(it)) return pull(IterCursor.of(it, callNode), new EdgeSink(true));
         return firstWalk(it, callNode);
     }
 
@@ -458,7 +447,6 @@ public final class IterNatives {
 
     @TruffleBoundary
     public static Object last(MezzeIter it, IndirectCallNode callNode) {
-        if (resumable(it)) return pull(IterCursor.of(it, callNode), new EdgeSink(false));
         return lastWalk(it, callNode);
     }
 
@@ -470,7 +458,6 @@ public final class IterNatives {
 
     @TruffleBoundary
     public static Object toList(MezzeIter it, IndirectCallNode callNode) {
-        if (resumable(it)) return pull(IterCursor.of(it, callNode), new CollectSink(true));
         return toListWalk(it, callNode);
     }
 
@@ -502,248 +489,6 @@ public final class IterNatives {
      * producer.
      */
 
-    // ------------------------------------------------------------------ C4: resumable path
-
-    /** Any callback in the chain's descriptor may suspend (read once per call). */
-    public static boolean chainMaySuspend(IterNode n) {
-        if (n instanceof UnaryOpIterNode u) return fnMay(u.fn) || chainMaySuspend(u.src);
-        if (n instanceof TakeWhileIterNode t) return fnMay(t.predicate) || chainMaySuspend(t.src);
-        if (n instanceof DropWhileIterNode d) return fnMay(d.predicate) || chainMaySuspend(d.src);
-        if (n instanceof FlatMapIterNode f) return fnMay(f.fn) || chainMaySuspend(f.src);
-        if (n instanceof UnfoldIterNode u) return fnMay(u.stepFunction);
-        if (n instanceof TakeIterNode t) return chainMaySuspend(t.src);
-        if (n instanceof DropIterNode d) return chainMaySuspend(d.src);
-        if (n instanceof EnumerateIterNode e) return chainMaySuspend(e.src);
-        if (n instanceof ChainIterNode c) return chainMaySuspend(c.first) || chainMaySuspend(c.second);
-        if (n instanceof ZipIterNode z) return chainMaySuspend(z.first) || chainMaySuspend(z.second);
-        return false;
-    }
-
-    private static boolean fnMay(Object fn) {
-        return fn instanceof MezzeFunction f && SuspendFacts.mayFunctionSuspend(f);
-    }
-
-    /** Take the resumable (cursor) path: the consumer's callback or the chain may
-     *  suspend. Pure callbacks never come here — measured ~15% slower than the push
-     *  walk on an effectful `range.map.fold`, and that is the price of suspendability
-     *  paid only by code that can park. */
-    @TruffleBoundary   // recursive over the descriptor — see stageTargetsMatch
-    public static boolean resumable(MezzeIter it, MezzeFunction fn) {
-        boolean r = SuspendFacts.parkPossible() && resumableByRow(it, fn);
-        if (r) RESUMABLE_DECISIONS.incrementAndGet();
-        return r;
-    }
-
-    /** The STATIC half of the verdict — the rows alone, a function of call targets, so a
-     *  BDSL consumer may cache it per entry; the dynamic half is {@link SuspendFacts#parkPossible}. */
-    @TruffleBoundary
-    public static boolean resumableByRow(MezzeIter it, MezzeFunction fn) {
-        return SuspendFacts.mayFunctionSuspend(fn) || chainMaySuspend(it.getDescriptor());
-    }
-
-    /**
-     * The call targets of every function a chain carries, source-first — the KEY the
-     * route verdict depends on (BUG 71, second half). `resumable` costs boundary calls
-     * and is wrong as a per-execution guard: evaluated on every fold it cost +30% on a
-     * PURE chain. The BDSL consumers cache the verdict per specialization entry and
-     * guard it with {@link #stageTargetsMatch}, an identity compare over a few
-     * references.
-     */
-    @TruffleBoundary
-    public static CallTarget[] stageTargets(IterNode n) {
-        java.util.ArrayList<CallTarget> out = new java.util.ArrayList<>(4);
-        collectStageTargets(n, out);
-        return out.toArray(new CallTarget[0]);
-    }
-
-    private static void collectStageTargets(IterNode n, java.util.List<CallTarget> out) {
-        if (n instanceof UnaryOpIterNode u) { collectStageTargets(u.src, out); out.add(targetOf(u.fn)); }
-        else if (n instanceof TakeWhileIterNode t) { collectStageTargets(t.src, out); out.add(targetOf(t.predicate)); }
-        else if (n instanceof DropWhileIterNode d) { collectStageTargets(d.src, out); out.add(targetOf(d.predicate)); }
-        else if (n instanceof FlatMapIterNode f) { collectStageTargets(f.src, out); out.add(targetOf(f.fn)); }
-        else if (n instanceof UnfoldIterNode u) { out.add(targetOf(u.stepFunction)); }
-        else if (n instanceof TakeIterNode t) { collectStageTargets(t.src, out); }
-        else if (n instanceof DropIterNode d) { collectStageTargets(d.src, out); }
-        else if (n instanceof EnumerateIterNode e) { collectStageTargets(e.src, out); }
-        else if (n instanceof ChainIterNode c) { collectStageTargets(c.first, out); collectStageTargets(c.second, out); }
-        else if (n instanceof ZipIterNode z) { collectStageTargets(z.first, out); collectStageTargets(z.second, out); }
-    }
-
-    private static CallTarget targetOf(Object fn) {
-        return fn instanceof MezzeFunction f ? f.getCallTarget() : null;
-    }
-
-    /**
-     * Same chain shape and the same functions (by call target), in order. A BOUNDARY on
-     * purpose: it recurses over the descriptor, and a recursive walk inlined by partial
-     * evaluation made the whole enclosing root bail out ("too deep inlining") and run
-     * interpreted — measured as the +30% on a pure chain. As a real call it costs tens
-     * of nanoseconds per consumer call, against a thousand elements.
-     */
-    @TruffleBoundary
-    public static boolean stageTargetsMatch(IterNode n, CallTarget[] cached) {
-        int[] i = {0};
-        return matchStages(n, cached, i) && i[0] == cached.length;
-    }
-
-    private static boolean matchStages(IterNode n, CallTarget[] cached, int[] i) {
-        if (n instanceof UnaryOpIterNode u) return matchStages(u.src, cached, i) && take(cached, i, u.fn);
-        if (n instanceof TakeWhileIterNode t) return matchStages(t.src, cached, i) && take(cached, i, t.predicate);
-        if (n instanceof DropWhileIterNode d) return matchStages(d.src, cached, i) && take(cached, i, d.predicate);
-        if (n instanceof FlatMapIterNode f) return matchStages(f.src, cached, i) && take(cached, i, f.fn);
-        if (n instanceof UnfoldIterNode u) return take(cached, i, u.stepFunction);
-        if (n instanceof TakeIterNode t) return matchStages(t.src, cached, i);
-        if (n instanceof DropIterNode d) return matchStages(d.src, cached, i);
-        if (n instanceof EnumerateIterNode e) return matchStages(e.src, cached, i);
-        if (n instanceof ChainIterNode c) return matchStages(c.first, cached, i) && matchStages(c.second, cached, i);
-        if (n instanceof ZipIterNode z) return matchStages(z.first, cached, i) && matchStages(z.second, cached, i);
-        return true;
-    }
-
-    private static boolean take(CallTarget[] cached, int[] i, Object fn) {
-        if (i[0] >= cached.length) return false;
-        return cached[i[0]++] == targetOf(fn);
-    }
-
-    /** How many consumers took the cursor route — a test's view of BUG 71 (a pure chain
-     *  must never add to it). Incremented on the rare path only. */
-    public static final java.util.concurrent.atomic.AtomicLong RESUMABLE_DECISIONS = new java.util.concurrent.atomic.AtomicLong();
-
-    @TruffleBoundary
-    public static boolean resumable(MezzeIter it) {
-        return SuspendFacts.parkPossible() && chainMaySuspend(it.getDescriptor());
-    }
-
-    /** A consumer over a cursor, with heap state. {@code element} returns CONTINUE,
-     *  STOP, or a suspension (its callback parked); {@code resumeElement} completes
-     *  the step with the callback's value and answers CONTINUE/STOP. */
-    interface Sink {
-        Object element(Object x);
-        Object resumeElement(Object v);
-        Object finish();
-    }
-    static final Object CONTINUE = new Object(), STOP = new Object();
-
-    /** Drive a sink over a cursor; a suspension from either side becomes a
-     *  NativeSuspension whose resume re-enters here. */
-    static Object pull(IterCursor c, Sink sink) {
-        return drive(c, sink, c.next());
-    }
-
-    private static Object drive(IterCursor c, Sink sink, Object x) {
-        while (true) {
-            if (IterCursor.susp(x)) {
-                return new NativeSuspension(x, v -> drive(c, sink, c.resume(v)));
-            }
-            if (x == IterCursor.END) return sink.finish();
-            Object r = sink.element(x);
-            if (IterCursor.susp(r)) {
-                return new NativeSuspension(r, v -> {
-                    Object d = sink.resumeElement(v);
-                    return d == STOP ? sink.finish() : drive(c, sink, c.next());
-                });
-            }
-            if (r == STOP) return sink.finish();
-            x = c.next();
-        }
-    }
-
-    /** A two-argument call (folder/reducer) honouring the scalar ABI's slot order. */
-    private static final class Call2 {
-        private final CallTarget target; private final Object[] args; private final int accSlot, elemSlot; private final boolean scalar;
-        private final IndirectCallNode callNode;
-        Call2(MezzeFunction fn, IndirectCallNode callNode) {
-            this.callNode = callNode;
-            Object[] closure = fn.getClosureValues(); int len = closure.length;
-            CallTarget inner = ScalarBypass.tryResolve(fn);
-            scalar = inner != null;
-            target = scalar ? inner : fn.getCallTarget();
-            if (scalar) {
-                String[] params = fn.getParameterNames();
-                boolean accFirst = params.length < 2 || "acc".equals(params[0]);
-                accSlot = accFirst ? len : len + 1; elemSlot = accFirst ? len + 1 : len;
-                args = new Object[len + 2];
-            } else { accSlot = len; elemSlot = -1; args = new Object[len + 1]; }
-            System.arraycopy(closure, 0, args, 0, len);
-        }
-        Object on(Object acc, Object x) {
-            if (scalar) { args[accSlot] = acc; args[elemSlot] = x; }
-            else args[accSlot] = MezzeRecord.wrapAccX(acc, x);
-            return callNode.call(target, args);
-        }
-    }
-
-    private static final class FoldSink implements Sink {
-        private Object acc; private final Call2 f;
-        FoldSink(Object init, MezzeFunction folder, IndirectCallNode cn) { acc = init; f = new Call2(folder, cn); }
-        public Object element(Object x) { Object r = f.on(acc, x); if (IterCursor.susp(r)) return r; acc = r; return CONTINUE; }
-        public Object resumeElement(Object v) { acc = v; return CONTINUE; }
-        public Object finish() { return acc; }
-    }
-    private static final class ReduceSink implements Sink {
-        private Object acc; private boolean first = true; private final Call2 f;
-        ReduceSink(MezzeFunction fn, IndirectCallNode cn) { f = new Call2(fn, cn); }
-        public Object element(Object x) {
-            if (first) { first = false; acc = x; return CONTINUE; }
-            Object r = f.on(acc, x); if (IterCursor.susp(r)) return r; acc = r; return CONTINUE;
-        }
-        public Object resumeElement(Object v) { acc = v; return CONTINUE; }
-        public Object finish() { return first ? MezzeVariant.none() : MezzeVariant.some(acc); }
-    }
-    private static final class ForEachSink implements Sink {
-        private final IterCursor.Call f;
-        ForEachSink(MezzeFunction fn, IndirectCallNode cn) { f = new IterCursor.Call(fn, cn); }
-        public Object element(Object x) { Object r = f.on(x); return IterCursor.susp(r) ? r : CONTINUE; }
-        public Object resumeElement(Object v) { return CONTINUE; }
-        public Object finish() { return MezzeRecord.empty(); }
-    }
-    private static final class CountSink implements Sink {
-        private long n; private final IterCursor.Call p;
-        CountSink(MezzeFunction fn, IndirectCallNode cn) { p = new IterCursor.Call(fn, cn); }
-        public Object element(Object x) { Object r = p.on(x); if (IterCursor.susp(r)) return r; if (r instanceof Boolean b && b) n++; return CONTINUE; }
-        public Object resumeElement(Object v) { if (v instanceof Boolean b && b) n++; return CONTINUE; }
-        public Object finish() { return n; }
-    }
-    private static final int SEARCH_ANY = 0, SEARCH_ALL = 1, SEARCH_FIND = 2;
-    private static final class SearchSink implements Sink {
-        private final IterCursor.Call p; private final int mode; private Object pendingX; private Object answer;
-        SearchSink(MezzeFunction fn, IndirectCallNode cn, int mode) { p = new IterCursor.Call(fn, cn); this.mode = mode; }
-        public Object element(Object x) { pendingX = x; Object r = p.on(x); return IterCursor.susp(r) ? r : decide(r); }
-        public Object resumeElement(Object v) { return decide(v); }
-        private Object decide(Object r) {
-            boolean yes = r instanceof Boolean b && b;
-            switch (mode) {
-                case SEARCH_ANY: if (yes) { answer = Boolean.TRUE; return STOP; } return CONTINUE;
-                case SEARCH_ALL: if (!yes) { answer = Boolean.FALSE; return STOP; } return CONTINUE;
-                default: if (yes) { answer = MezzeVariant.some(pendingX); return STOP; } return CONTINUE;
-            }
-        }
-        public Object finish() {
-            if (answer != null) return answer;
-            switch (mode) { case SEARCH_ANY: return Boolean.FALSE; case SEARCH_ALL: return Boolean.TRUE; default: return MezzeVariant.none(); }
-        }
-    }
-    private static final class CollectSink implements Sink {
-        private final java.util.ArrayList<Object> buf = new java.util.ArrayList<>(); private final boolean list;
-        CollectSink(boolean list) { this.list = list; }
-        public Object element(Object x) { buf.add(x); return CONTINUE; }
-        public Object resumeElement(Object v) { return CONTINUE; }
-        public Object finish() {
-            if (!list) return com.mezze.datastructures.seq.MezzeSeq.fromArray(buf.toArray());
-            com.mezze.datastructures.list.MezzeList result = com.mezze.datastructures.list.MezzeNil.INSTANCE;
-            for (int i = buf.size() - 1; i >= 0; i--) result = result.prepend(buf.get(i));
-            return result;
-        }
-    }
-    private static final class EdgeSink implements Sink {
-        private final boolean first; private Object seen; private boolean any;
-        EdgeSink(boolean first) { this.first = first; }
-        public Object element(Object x) { seen = x; any = true; return first ? STOP : CONTINUE; }
-        public Object resumeElement(Object v) { return CONTINUE; }
-        public Object finish() { return any ? MezzeVariant.some(seen) : MezzeVariant.none(); }
-    }
-
-    @FunctionalInterface
     private interface ElementConsumer {
         /** @return true to keep walking, false to stop now. */
         boolean accept(Object element);

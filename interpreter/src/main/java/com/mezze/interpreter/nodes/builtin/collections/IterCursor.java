@@ -1,6 +1,5 @@
 package com.mezze.interpreter.nodes.builtin.collections;
 
-import com.mezze.interpreter.nodes.continuation.NativeSuspension;
 import com.mezze.datastructures.iter.ChainIterNode;
 import com.mezze.datastructures.iter.DropIterNode;
 import com.mezze.datastructures.iter.DropWhileIterNode;
@@ -81,7 +80,10 @@ public abstract class IterCursor {
         throw new IllegalStateException(getClass().getSimpleName() + " is not suspended");
     }
 
-    static boolean susp(Object x) { return NativeSuspension.isSuspension(x); }
+    /** Always false since the carrier machine: a callback that parks blocks its carrier and the
+     *  cursor never sees a suspension. The pending/resume plumbing below is dead and kept only until
+     *  the cursor is rewritten without it. */
+    static boolean susp(Object x) { return false; }
     private static final Object CONTINUE = new Object();
 
     // ==================== construction ====================

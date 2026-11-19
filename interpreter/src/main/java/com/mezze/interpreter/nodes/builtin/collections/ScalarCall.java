@@ -224,7 +224,7 @@ public final class ScalarCall {
      * walk, where the exception would surface far from its cause.
      */
     public boolean callBool(IndirectCallNode callNode, Object a, Object b) {
-        return OrderCallbacks.checkNotParked(call2(callNode, a, b), "comparator") instanceof Boolean result && result;
+        return call2(callNode, a, b) instanceof Boolean result && result;
     }
 
     /**
@@ -234,7 +234,7 @@ public final class ScalarCall {
      * instead of corrupting it.
      */
     public int callCmp(IndirectCallNode callNode, Object a, Object b) {
-        Object result = OrderCallbacks.checkNotParked(call2(callNode, a, b), "comparator");
+        Object result = call2(callNode, a, b);
         return result instanceof Long value ? Long.signum(value) : 0;
     }
 

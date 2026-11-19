@@ -47,7 +47,7 @@ public final class ClosureHashing implements ElementHashing {
         Object[] args = new Object[closureValues.length + 1];
         System.arraycopy(closureValues, 0, args, 0, closureValues.length);
         args[closureValues.length] = MezzeRecord.wrapIt(element);
-        Object result = OrderCallbacks.checkNotParked(hashFn.getCallTarget().call(args), "hash");
+        Object result = hashFn.getCallTarget().call(args);
         // A Mezze `hash` returns Int; the int view is what buckets, and a wide
         // payload must not collapse two different hashes onto one bucket-sized value
         // any more than Java's own Long.hashCode does.
@@ -64,7 +64,7 @@ public final class ClosureHashing implements ElementHashing {
         // names. Passing a comparator's `{ a, b }` shape instead returned the
         // function itself rather than a result, and every comparison read false.
         args[closureValues.length] = MezzeRecord.wrapItR(a, b);
-        Object result = OrderCallbacks.checkNotParked(eqFn.getCallTarget().call(args), "eq");
+        Object result = eqFn.getCallTarget().call(args);
         return result instanceof Boolean value && value;
     }
 }

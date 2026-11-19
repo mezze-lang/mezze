@@ -2100,16 +2100,6 @@ public final class BytecodeCompiler {
         // TAIL call needs none: the callee's continuation IS this frame's. The
         // perform op itself is wrapped the same way (a parking handler returns a
         // park request through it).
-        if (needsSuspendPropagation(node)) {
-            // The wrapper emits the node's own body directly (emitNodeBody), never
-            // through this gate again. An earlier version marked the node in a set on
-            // the compiler for the duration of the wrap; lambdas are compiled lazily
-            // on whichever thread first calls them, so under LoomAsync two threads
-            // raced on that set and one lambda in four failed to compile
-            // ("[BDSL] compile failed … reason=emit-crash", measured 9/25).
-            emitWithSuspendPropagation(() -> emitNodeBody(node, b, argCount, localMap), b);
-            return;
-        }
         emitNodeBody(node, b, argCount, localMap);
     }
 
@@ -8836,60 +8826,8 @@ public final class BytecodeCompiler {
      * wrapping in reverse: emit the innermost B first as {@code body},
      * then A wraps that.
      */
-    /** A/B kill switch for the suspension-propagation wrapper (read at run time —
-     *  the lowering runs in the process that executes): MEZZE_SUSPEND_PROPAGATION=0. */
-    private static final boolean SUSPEND_PROPAGATION =
-        "1".equals(System.getenv("MEZZE_SUSPEND_PROPAGATION"));   // OFF: a park blocks its carrier; nothing propagates (see TaskMachine)
 
-    private static boolean needsSuspendPropagation(NodeIR node) {
-        if (!SUSPEND_PROPAGATION) return false;
-        if (node instanceof CallDirectIR c) return c.getMaySuspend() && !c.isTailCall();
-        if (node instanceof CallIndirectIR ci) return ci.getMaySuspend() && !ci.isTailCall();
-        if (node instanceof com.mezze.language.truffleir.CallIndirectScalarIR cs) return cs.getMaySuspend() && !cs.isTailCall();
-        if (node instanceof CallLocalIR cl) return cl.getMaySuspend() && !cl.isTailCall();
-        if (node instanceof DictMethodCallIR dm) return dm.getMaySuspend();
-        if (node instanceof PerformOpIR) return true;
-        if (node instanceof CallNativeIR cn) return cn.getMaySuspend();   // C4
-        return false;
-    }
 
-    /**
-     * {@code local = <call>; if IsSuspension(local) then Yield(local) else local}.
-     * The Yield's own value — what the driver hands back with {@code continueWith}
-     * — is the callee's FINAL result, so the expression around the call sees
-     * exactly what it would have seen had nothing suspended.
-     */
-    private void emitWithSuspendPropagation(Runnable emitCall, MezzeBytecodeRootNodeGen.Builder b) {
-        // `slot = call; if IsSuspension(slot) { slot = Yield(slot) }; slot`
-        //
-        // A STATEMENT `if`, not a value-carrying Conditional around the Yield (BUG 76):
-        // the ternary form compiled by the FIRST tier took the yield branch on a value
-        // that was not a suspension — a fresh forwarder root yielded the `Ok` its op
-        // call had just returned — in ~60% of runs of a fan-out that awaits a thousand
-        // settled promises after a thousand pending ones (the else branch's profile
-        // read "never executed"). The statement form has no merge of the two arms'
-        // values on the operand stack across the yield: the delivered value is stored
-        // back into the slot and the slot is read once.
-        b.beginBlock();
-        BytecodeLocal slot = b.createLocal();
-        b.beginStoreLocal(slot);
-        b.beginAsObject();          // keep the slot Object-kinded: see MezzeBytecodeRootNode.AsObject
-        emitCall.run();
-        b.endAsObject();
-        b.endStoreLocal();
-        b.beginIfThen();
-        b.beginIsSuspension();
-        b.emitLoadLocal(slot);
-        b.endIsSuspension();
-        b.beginStoreLocal(slot);
-        b.beginYield();
-        b.emitLoadLocal(slot);
-        b.endYield();
-        b.endStoreLocal();
-        b.endIfThen();
-        b.emitLoadLocal(slot);
-        b.endBlock();
-    }
 
     private void emitHandle(HandleIR h, MezzeBytecodeRootNodeGen.Builder b,
                             int argCount, BytecodeLocal[] localMap) {

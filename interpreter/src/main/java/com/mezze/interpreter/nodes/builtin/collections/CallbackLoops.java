@@ -1,21 +1,15 @@
 package com.mezze.interpreter.nodes.builtin.collections;
 
-import com.mezze.interpreter.nodes.continuation.NativeSuspension;
 
 import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
 
-/**
- * C4: an indexed native loop that RESUMES after a callback suspends. The loop's
- * state lives in the {@link Body} (a small object the native builds once per call);
- * a suspension at element {@code i} becomes a {@link NativeSuspension} whose resume
- * delivers the callback's eventual value to {@code accept(i, v)} and continues at
- * {@code i + 1}. The fast path is one {@code instanceof} per callback result.
- */
-public final class ResumableLoops {
-    private ResumableLoops() {}
+/** The callback loops the list and seq natives share: `call` an element, `accept` the result
+ *  (CONTINUE or STOP), `finish`. A callback that parks blocks its carrier; the loop never sees it. */
+public final class CallbackLoops {
+    private CallbackLoops() {}
 
     public static final Object CONTINUE = new Object(), STOP = new Object();
 
@@ -29,13 +23,8 @@ public final class ResumableLoops {
     }
 
     public static Object run(int start, int n, Body b) {
-        final boolean chk = com.mezze.interpreter.nodes.continuation.SuspendFacts.parkPossible();   // hoisted: no park possible → the exact pre-continuation loop
         for (int i = start; i < n; i++) {
             Object r = b.call(i);
-            if (chk && NativeSuspension.isSuspension(r)) {
-                final int at = i;
-                return new NativeSuspension(r, v -> b.accept(at, v) == STOP ? b.finish() : run(at + 1, n, b));
-            }
             if (b.accept(i, r) == STOP) return b.finish();
         }
         return b.finish();

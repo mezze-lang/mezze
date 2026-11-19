@@ -63,7 +63,6 @@ public final class HandlerChainRegistry {
         /** How many cont-capable perform boundaries are active on this thread (TaskMachine
          *  bumps it). Zero means NO park can originate here, so natives run their exact
          *  pre-continuation loops and iter consumers never take the cursor route. */
-        int parkScopes;
         // Merged handler chain + D8 handle stack — parallel flat arrays.
         MezzeRecord[] handlers = new MezzeRecord[INITIAL_CAPACITY];
         com.mezze.language.typedast.Hash[] effectHashes = new com.mezze.language.typedast.Hash[INITIAL_CAPACITY];
@@ -856,11 +855,8 @@ public final class HandlerChainRegistry {
      * no acquired chains fall back to re-resolving (the guarded tier) the first time any
      * task chain is installed — a program without tasks never pays this.
      */
-    @TruffleBoundary public static void enterParkScope() { STATE.get().parkScopes++; }
-    @TruffleBoundary public static void exitParkScope() { STATE.get().parkScopes--; }
     /** The design's rule, read at runtime: the capability tax is paid only where a handler
      *  that mentions `cont` is active — i.e. inside a cont-capable perform boundary. */
-    @TruffleBoundary public static boolean parkPossible() { return STATE.get().parkScopes > 0; }
 
     @TruffleBoundary
     public static Object[] installTaskChain(HandlerChainEntry[] chain) {

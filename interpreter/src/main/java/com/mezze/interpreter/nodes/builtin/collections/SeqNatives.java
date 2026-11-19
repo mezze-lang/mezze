@@ -1,6 +1,5 @@
 package com.mezze.interpreter.nodes.builtin.collections;
 
-import com.mezze.interpreter.nodes.continuation.NativeSuspension;
 import com.mezze.datastructures.deque.MezzeDeque;
 import com.mezze.datastructures.map.MezzeMap;
 import com.mezze.datastructures.list.MezzeList;
@@ -198,10 +197,10 @@ public final class SeqNatives {
     public static Object findIndex(MezzeSeq seq, MezzeFunction predicate,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "x");
-        return ResumableLoops.run(0, seq.size(), new ResumableLoops.Body() {
+        return CallbackLoops.run(0, seq.size(), new CallbackLoops.Body() {
             Object answer;
             public Object call(int i) { return ctx.call1(callNode, seq.get(i)); }
-            public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) { answer = MezzeVariant.some((long) i); return ResumableLoops.STOP; } return ResumableLoops.CONTINUE; }
+            public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) { answer = MezzeVariant.some((long) i); return CallbackLoops.STOP; } return CallbackLoops.CONTINUE; }
             public Object finish() { return answer != null ? answer : MezzeVariant.none(); }
         });
     }
@@ -220,7 +219,6 @@ public final class SeqNatives {
     private static Object searchFrom(MezzeSeq seq, MezzeFunction predicate,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode,
                                      int start, int mode) {
-        final boolean chk = com.mezze.interpreter.nodes.continuation.SuspendFacts.parkPossible();   // hoisted: no park possible → the exact pre-continuation loop
         Object[] closureValues = predicate.getClosureValues();
         int closureLen = closureValues.length;
         CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
@@ -232,13 +230,6 @@ public final class SeqNatives {
             Object elem = seq.get(i);
             args[closureLen] = innerTarget != null ? elem : MezzeRecord.wrapX(elem);
             Object result = callNode.call(target, args);
-            if (chk && NativeSuspension.isSuspension(result)) {
-                final int at = i;
-                return new NativeSuspension(result, v -> {
-                    Object decided = searchDecide(mode, elem, v);
-                    return decided != CONTINUE ? decided : searchFrom(seq, predicate, callNode, at + 1, mode);
-                });
-            }
             Object decided = searchDecide(mode, elem, result);
             if (decided != CONTINUE) return decided;
         }
@@ -278,7 +269,6 @@ public final class SeqNatives {
     private static Object mapFrom(MezzeSeq seq, MezzeFunction mapper,
                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode,
                                   Object[] result, int start) {
-        final boolean chk = com.mezze.interpreter.nodes.continuation.SuspendFacts.parkPossible();   // hoisted: no park possible → the exact pre-continuation loop
         Object[] closureValues = mapper.getClosureValues();
         int closureLen = closureValues.length;
         int size = seq.size();
@@ -290,10 +280,6 @@ public final class SeqNatives {
             Object elem = seq.get(i);
             args[closureLen] = innerTarget != null ? elem : MezzeRecord.wrapX(elem);
             Object r = callNode.call(target, args);
-            if (chk && NativeSuspension.isSuspension(r)) {
-                final int at = i;
-                return new NativeSuspension(r, v -> { result[at] = v; return mapFrom(seq, mapper, callNode, result, at + 1); });
-            }
             result[i] = r;
         }
         return MezzeSeq.fromArray(result);
@@ -310,7 +296,6 @@ public final class SeqNatives {
     private static Object filterFrom(MezzeSeq seq, MezzeFunction predicate,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode,
                                      Object[] buf, int count, int start) {
-        final boolean chk = com.mezze.interpreter.nodes.continuation.SuspendFacts.parkPossible();   // hoisted: no park possible → the exact pre-continuation loop
         int size = seq.size();
         Object[] closureValues = predicate.getClosureValues();
         int closureLen = closureValues.length;
@@ -322,17 +307,6 @@ public final class SeqNatives {
             Object elem = seq.get(i);
             args[closureLen] = innerTarget != null ? elem : MezzeRecord.wrapX(elem);
             Object result = callNode.call(target, args);
-            if (chk && NativeSuspension.isSuspension(result)) {
-                final Object[] b = buf; final int c = count; final int at = i;
-                return new NativeSuspension(result, v -> {
-                    Object[] nb = b; int nc = c;
-                    if (v instanceof Boolean && (Boolean) v) {
-                        if (nc == nb.length) nb = java.util.Arrays.copyOf(nb, nb.length * 2);
-                        nb[nc++] = elem;
-                    }
-                    return filterFrom(seq, predicate, callNode, nb, nc, at + 1);
-                });
-            }
             if (result instanceof Boolean && (Boolean) result) {
                 if (count == buf.length) buf = java.util.Arrays.copyOf(buf, buf.length * 2);
                 buf[count++] = elem;
@@ -362,22 +336,22 @@ public final class SeqNatives {
         Object[] args = new Object[closureLen + 1];
         System.arraycopy(closureValues, 0, args, 0, closureLen);
         Object[] result = new Object[size];
-        return ResumableLoops.run(0, size, new ResumableLoops.Body() {
+        return CallbackLoops.run(0, size, new CallbackLoops.Body() {
             Object err;
             public Object call(int i) { args[closureLen] = MezzeRecord.wrapX(seq.get(i)); return callNode.call(target, args); }
             public Object accept(int i, Object elemResult) {
                 if (elemResult instanceof MezzeVariant v) {
-                    if (v.isErr()) { err = v; return ResumableLoops.STOP; }
+                    if (v.isErr()) { err = v; return CallbackLoops.STOP; }
                     if (v.isOk()) {
                         Object payload = v.getPayloadValue();
                         if (payload instanceof MezzeRecord r) {
                             try { result[i] = r.getFieldByName("val"); } catch (Exception e) { result[i] = payload; }
                         } else result[i] = payload;
-                        return ResumableLoops.CONTINUE;
+                        return CallbackLoops.CONTINUE;
                     }
                 }
                 result[i] = elemResult;
-                return ResumableLoops.CONTINUE;
+                return CallbackLoops.CONTINUE;
             }
             public Object finish() { return err != null ? err : MezzeVariant.ok(MezzeSeq.fromArray(result)); }
         });
@@ -387,11 +361,11 @@ public final class SeqNatives {
                                  com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(mapper, "x");
         java.util.ArrayList<Object> results = new java.util.ArrayList<>();
-        return ResumableLoops.run(0, seq.size(), new ResumableLoops.Body() {
+        return CallbackLoops.run(0, seq.size(), new CallbackLoops.Body() {
             public Object call(int i) { return ctx.call1(callNode, seq.get(i)); }
             public Object accept(int i, Object mapped) {
                 if (mapped instanceof MezzeSeq innerSeq) for (int j = 0; j < innerSeq.size(); j++) results.add(innerSeq.get(j));
-                return ResumableLoops.CONTINUE;
+                return CallbackLoops.CONTINUE;
             }
             public Object finish() { return MezzeSeq.fromArray(results.toArray()); }
         });
@@ -496,9 +470,7 @@ public final class SeqNatives {
     public static Object reduce(MezzeSeq seq, MezzeFunction reducer,
                                 com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (seq.isEmpty()) return MezzeVariant.none();
-        return NativeSuspension.mapResult(
-            foldTwoArg(seq, seq.get(0), reducer, callNode, /*startIndex=*/1, /*scanOut=*/null),
-            MezzeVariant::some);
+        return MezzeVariant.some(foldTwoArg(seq, seq.get(0), reducer, callNode, /*startIndex=*/1, /*scanOut=*/null));
     }
 
     // ==================== Predicate Operations ====================
@@ -515,16 +487,16 @@ public final class SeqNatives {
 
     public static Object none(MezzeSeq seq, MezzeFunction predicate,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        return NativeSuspension.mapResult(any(seq, predicate, callNode), r -> !(Boolean) r);
+        return !(Boolean) (any(seq, predicate, callNode));
     }
 
     public static Object count(MezzeSeq seq, MezzeFunction predicate,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "x");
-        return ResumableLoops.run(0, seq.size(), new ResumableLoops.Body() {
+        return CallbackLoops.run(0, seq.size(), new CallbackLoops.Body() {
             long n;
             public Object call(int i) { return ctx.call1(callNode, seq.get(i)); }
-            public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) n++; return ResumableLoops.CONTINUE; }
+            public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) n++; return CallbackLoops.CONTINUE; }
             public Object finish() { return n; }
         });
     }
@@ -586,10 +558,10 @@ public final class SeqNatives {
         }
         var ctx = ScalarCall.prepare1(predicate, "x");
         boolean[] matches = new boolean[size];
-        return ResumableLoops.run(0, size, new ResumableLoops.Body() {
+        return CallbackLoops.run(0, size, new CallbackLoops.Body() {
             int matchCount;
             public Object call(int i) { return ctx.call1(callNode, seq.get(i)); }
-            public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) { matches[i] = true; matchCount++; } return ResumableLoops.CONTINUE; }
+            public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) { matches[i] = true; matchCount++; } return CallbackLoops.CONTINUE; }
             public Object finish() {
                 Object[] matchingArr = new Object[matchCount];
                 Object[] nonMatchingArr = new Object[size - matchCount];
@@ -859,9 +831,9 @@ public final class SeqNatives {
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "x");
         java.util.ArrayList<Object> results = new java.util.ArrayList<>();
-        return ResumableLoops.run(0, seq.size(), new ResumableLoops.Body() {
+        return CallbackLoops.run(0, seq.size(), new CallbackLoops.Body() {
             public Object call(int i) { return ctx.call1(callNode, seq.get(i)); }
-            public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) { results.add(seq.get(i)); return ResumableLoops.CONTINUE; } return ResumableLoops.STOP; }
+            public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) { results.add(seq.get(i)); return CallbackLoops.CONTINUE; } return CallbackLoops.STOP; }
             public Object finish() { return MezzeSeq.fromArray(results.toArray()); }
         });
     }
@@ -869,10 +841,10 @@ public final class SeqNatives {
     public static Object dropWhile(MezzeSeq seq, MezzeFunction predicate,
                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(predicate, "x");
-        return ResumableLoops.run(0, seq.size(), new ResumableLoops.Body() {
+        return CallbackLoops.run(0, seq.size(), new CallbackLoops.Body() {
             int dropCount;
             public Object call(int i) { return ctx.call1(callNode, seq.get(i)); }
-            public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) { dropCount++; return ResumableLoops.CONTINUE; } return ResumableLoops.STOP; }
+            public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) { dropCount++; return CallbackLoops.CONTINUE; } return CallbackLoops.STOP; }
             public Object finish() { return seq.drop(dropCount); }
         });
     }
@@ -923,10 +895,10 @@ public final class SeqNatives {
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (seq.isEmpty()) return MezzeVariant.none();
         Object minElem = seq.get(0);
-        Object minKey = OrderCallbacks.checkNotParked(callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, minElem)), "min_by/max_by key");
+        Object minKey = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, minElem));
         for (int i = 1; i < seq.size(); i++) {
             Object elem = seq.get(i);
-            Object key = OrderCallbacks.checkNotParked(callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem)), "min_by/max_by key");
+            Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
             if (cmpInt(cmpFn, key, minKey, callNode) < 0) {
                 minElem = elem;
                 minKey = key;
@@ -939,10 +911,10 @@ public final class SeqNatives {
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         if (seq.isEmpty()) return MezzeVariant.none();
         Object maxElem = seq.get(0);
-        Object maxKey = OrderCallbacks.checkNotParked(callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, maxElem)), "min_by/max_by key");
+        Object maxKey = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, maxElem));
         for (int i = 1; i < seq.size(); i++) {
             Object elem = seq.get(i);
-            Object key = OrderCallbacks.checkNotParked(callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem)), "min_by/max_by key");
+            Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
             if (cmpInt(cmpFn, key, maxKey, callNode) > 0) {
                 maxElem = elem;
                 maxKey = key;
@@ -1046,9 +1018,9 @@ public final class SeqNatives {
                                  com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         var ctx = ScalarCall.prepare1(keyFn, "x");
         java.util.LinkedHashMap<Object, java.util.ArrayList<Object>> groups = new java.util.LinkedHashMap<>();
-        return ResumableLoops.run(0, seq.size(), new ResumableLoops.Body() {
+        return CallbackLoops.run(0, seq.size(), new CallbackLoops.Body() {
             public Object call(int i) { return ctx.call1(callNode, seq.get(i)); }
-            public Object accept(int i, Object key) { groups.computeIfAbsent(key, k -> new java.util.ArrayList<>()).add(seq.get(i)); return ResumableLoops.CONTINUE; }
+            public Object accept(int i, Object key) { groups.computeIfAbsent(key, k -> new java.util.ArrayList<>()).add(seq.get(i)); return CallbackLoops.CONTINUE; }
             public Object finish() {
                 Object[] result = new Object[groups.size()];
                 int idx = 0;
@@ -1126,7 +1098,6 @@ public final class SeqNatives {
     /** C4-resumable. */
     private static Object forEachFrom(MezzeSeq seq, MezzeFunction fn,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode, int start) {
-        final boolean chk = com.mezze.interpreter.nodes.continuation.SuspendFacts.parkPossible();   // hoisted: no park possible → the exact pre-continuation loop
         Object[] closureValues = fn.getClosureValues();
         int closureLen = closureValues.length;
         CallTarget innerTarget = ScalarBypass.tryResolve(fn);
@@ -1137,10 +1108,6 @@ public final class SeqNatives {
             Object elem = seq.get(i);
             args[closureLen] = innerTarget != null ? elem : MezzeRecord.wrapX(elem);
             Object r = callNode.call(target, args);
-            if (chk && NativeSuspension.isSuspension(r)) {
-                final int at = i;
-                return new NativeSuspension(r, v -> forEachFrom(seq, fn, callNode, at + 1));
-            }
         }
         return MezzeRecord.empty();  // Returns unit
     }
@@ -1149,11 +1116,11 @@ public final class SeqNatives {
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] result = new Object[seq.size() + 1];
         result[0] = init;
-        var f = new ResumableLoops.Call2(fn, callNode);
-        return ResumableLoops.run(0, seq.size(), new ResumableLoops.Body() {
+        var f = new CallbackLoops.Call2(fn, callNode);
+        return CallbackLoops.run(0, seq.size(), new CallbackLoops.Body() {
             Object acc = init;
             public Object call(int i) { return f.on(acc, seq.get(i)); }
-            public Object accept(int i, Object r) { acc = r; result[i + 1] = acc; return ResumableLoops.CONTINUE; }
+            public Object accept(int i, Object r) { acc = r; result[i + 1] = acc; return CallbackLoops.CONTINUE; }
             public Object finish() { return MezzeSeq.fromArray(result); }
         });
     }
@@ -1215,7 +1182,7 @@ public final class SeqNatives {
         result.add(lastElem);
         for (int i = 1; i < seq.size(); i++) {
             Object elem = seq.get(i);
-            Object key = OrderCallbacks.checkNotParked(callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem)), "min_by/max_by key");
+            Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
             if (!eq.callEq(callNode, key, lastKey)) {
                 result.add(elem);
                 lastElem = elem;
@@ -1290,7 +1257,7 @@ public final class SeqNatives {
 
         for (int i = 1; i < seq.size(); i++) {
             Object elem = seq.get(i);
-            Object key = OrderCallbacks.checkNotParked(callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem)), "min_by/max_by key");
+            Object key = callNode.call(keyFn.getCallTarget(), prepareArgs(keyFn, elem));
             if (eq.callEq(callNode, key, currentKey)) {
                 currentGroup.add(elem);
             } else {
@@ -1539,7 +1506,6 @@ public final class SeqNatives {
     private static Object foldTwoArg(MezzeSeq seq, Object init, MezzeFunction folder,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode,
                                      int startIndex, Object[] scanOut) {
-        final boolean chk = com.mezze.interpreter.nodes.continuation.SuspendFacts.parkPossible();   // hoisted: no park possible → the exact pre-continuation loop
         Object[] closureValues = folder.getClosureValues();
         int closureLen = closureValues.length;
         int size = seq.size();
@@ -1557,7 +1523,6 @@ public final class SeqNatives {
                 args[accSlot] = acc;
                 args[elemSlot] = seq.get(i);
                 acc = callNode.call(innerTarget, args);
-                if (chk && NativeSuspension.isSuspension(acc)) return suspendFold(seq, folder, callNode, i, scanOut, acc);
                 if (scanOut != null) scanOut[i + 1] = acc;
             }
             return acc;
@@ -1569,18 +1534,9 @@ public final class SeqNatives {
         for (int i = startIndex; i < size; i++) {
             args[closureLen] = MezzeRecord.wrapAccX(acc, seq.get(i));
             acc = callNode.call(target, args);
-            if (chk && NativeSuspension.isSuspension(acc)) return suspendFold(seq, folder, callNode, i, scanOut, acc);
             if (scanOut != null) scanOut[i + 1] = acc;
         }
         return acc;
-    }
-
-    /** C4: the folder suspended at element {@code i}; resume the fold from {@code i + 1}
-     *  with whatever the callback finally returns. `scan` is not registered resumable. */
-    private static Object suspendFold(MezzeSeq seq, MezzeFunction folder,
-                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode,
-                                      int i, Object[] scanOut, Object suspension) {
-        return new NativeSuspension(suspension, v -> foldTwoArg(seq, v, folder, callNode, i + 1, null));
     }
 
     private static Object[] prepareArgsTwo(MezzeFunction fn, Object arg1, Object arg2) {
@@ -1833,7 +1789,7 @@ public final class SeqNatives {
     // Element comparison via the threaded cmp closure ({a, b} -> -1/0/1).
     private static int cmpInt(MezzeFunction cmpFn, Object a, Object b,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        Object r = OrderCallbacks.checkNotParked(callNode.call(cmpFn.getCallTarget(), prepareArgsComparator(cmpFn, a, b)), "comparator");
+        Object r = callNode.call(cmpFn.getCallTarget(), prepareArgsComparator(cmpFn, a, b));
         return (r instanceof Long) ? ((Long) r).intValue() : 0;
     }
 
@@ -1849,9 +1805,9 @@ public final class SeqNatives {
         // 4-against-2 allocation ratio showing up in the number.
         var keyCall = ScalarCall.prepare1(keyFn, "x");
         var cmp = ScalarCall.prepare2(cmpFn, "a", "b");
-        Object prevKey = OrderCallbacks.checkNotParked(keyCall.call1(callNode, seq.get(0)), "is_sorted_by key");
+        Object prevKey = keyCall.call1(callNode, seq.get(0));
         for (int i = 1; i < seq.size(); i++) {
-            Object currKey = OrderCallbacks.checkNotParked(keyCall.call1(callNode, seq.get(i)), "is_sorted_by key");
+            Object currKey = keyCall.call1(callNode, seq.get(i));
             if (cmp.callCmp(callNode, prevKey, currKey) > 0) {
                 return false;
             }

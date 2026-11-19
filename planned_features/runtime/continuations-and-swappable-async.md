@@ -1037,6 +1037,24 @@ equal (spawn+await 777 vs 771, yield 41 vs 39), first timed run of yield_now SLO
 (288 vs 51 ns at 200k) — the default stays `engine.MultiTier=false`. Native image re-verified after the
 second pass (yield_now 89 ns, spawn+await 954, fan-out 673, seq fold with await 1030 at 200k).
 
+**Relics removed, 2026-11-19 (fourth pass).** With the carrier machine nothing yields, so the
+capture-era machinery was dead by construction and is gone: `NativeSuspension`, `SuspendFacts`, the
+resumable natives (`ResumableLoops` is now `CallbackLoops`, a plain callback loop; the iter cursor
+routes, sinks and stage-target guards; `ListNatives.foldResumable`; the seq natives' `chk` branches),
+`OrderCallbacks` (an order callback that parks now just parks), the `AsObject`/`IsSuspension` BDSL
+ops and the compiler's propagation gate, the registry's park-scope counters, and the typechecker's
+V0513 ledger with its `ResumableNatives` name list; the relic-only tests went with them
+(`ResumableNativeHofTest`, `ResumableNativesRegistryTest`, `IterRouteDecisionTest`). Kept: the C1
+`maySuspend` IR flag and the root stamps (cheap metadata, no runtime consumer), the public
+`iter::cursor` surface (its internal pending/resume plumbing is dead and awaits a rewrite), the
+`V0513` error-code constant, and `ParkThroughNativeSpecTest` as a set of acceptances.
+Fast path after the removal (contsurface 20M, quiet, best of 3 × 3 cells, main / pre-removal / post):
+list fold pure 1470 / 1564–1667 / 1466–1592, iter eff 21081–21782 / 20429–22754 / 21286–21855, list fold
+eff 12612–12890 / 12128–12467 / 12064–12323 — the removal is neutral; the ~6% list-fold-pure gap to main
+PREDATES it (present at f1651c6cb) and is owed its own A/B against main's `foldTwoArg`. Gates:
+typechecker 5502/5502, interpreter 8252/8252 + `ForeignThreadParkTest` 5/5 (its new race test needed a
+cooperative op in the body: a `perform` whose body performs nothing the handler fires on is rejected).
+
 Still owed on the carrier design: the per-spawn cost (spawn+await = 2 handoffs ≈ 300 ns each plus
 ~250 ns of promise/map bookkeeping — the fan-out kernel shows the floor at 216); a foreign-thread
 park (a Mezze callback on a Loom/HTTP thread calling `cont.park` is refused with a clear message —

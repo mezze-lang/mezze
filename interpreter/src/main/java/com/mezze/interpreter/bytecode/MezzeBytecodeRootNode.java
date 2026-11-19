@@ -6049,24 +6049,6 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * boxing elimination on and 98 ns with it compiled out). Routing the value through an
      * Object-typed operation keeps that slot generic, and boxing elimination everywhere else.
      */
-    @Operation
-    public static final class AsObject {
-        @Specialization
-        public static Object box(Object value) {
-            return value;
-        }
-    }
-
-    @Operation
-    public static final class IsSuspension {
-        @Specialization
-        public static boolean doCheck(Object value) {
-            return value instanceof com.oracle.truffle.api.bytecode.ContinuationResult
-                || value instanceof com.mezze.interpreter.nodes.continuation.NativeSuspension
-                || value instanceof com.mezze.interpreter.nodes.continuation.ParkRequest;
-        }
-    }
-
     /**
      * The perform BOUNDARY of a cont-capable handler. The operand is the body's THUNK
      * (its own root); the context's {@link
@@ -6791,16 +6773,12 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @Specialization(guards = {
             "iterFoldTargetMatches(folder, cachedFolderTarget)",
             "iterFoldDescClass(iter) == cachedDescClass",
-            "iterStagesMatch(iter, cachedStageTargets)",   // C4 (BUG 71): the verdict's key, an identity compare
-            "!parkRoute(cachedResumable)"    // static half cached per entry; dynamic half is one thread-local read
         }, limit = "3", excludeForUncached = true)
         public static Object doCached(
                 com.mezze.datastructures.iter.MezzeIter iter,
                 Object init,
                 MezzeFunction folder,
                 @Cached("folder.getCallTarget()") CallTarget cachedFolderTarget,
-                @Cached("iterStageTargets(iter)") CallTarget[] cachedStageTargets,
-                @Cached("iterResumableByRow(iter, folder)") boolean cachedResumable,
                 @Cached("iterFoldTryScalarResolve(folder)") CallTarget scalarTarget,
                 @Cached("folder.getClosureValues().length") int closureLen,
                 @Cached("iterFoldDescClass(iter)") Class<?> cachedDescClass,
@@ -6868,17 +6846,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return acc;
         }
 
-        /** C4 (BUG 71): the resumable route is its OWN specialization, so a callback that
+        /** (The resumable route that once sat here is gone with the carrier machine.) so a callback that
          *  may park never fails {@code doCached}'s guard into the replacing generic path. */
-        @Specialization(guards = "iterResumable(iter, folder)")
-        @TruffleBoundary
-        public static Object doResumable(
-                com.mezze.datastructures.iter.MezzeIter iter,
-                Object init,
-                MezzeFunction folder) {
-            return com.mezze.interpreter.nodes.builtin.collections.IterNatives.fold(
-                iter, init, folder, IndirectCallNode.getUncached());
-        }
 
         @Specialization(replaces = "doCached")
         @TruffleBoundary
@@ -6896,30 +6865,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return cached != null && fn.getCallTarget() == cached;
         }
 
-        static boolean iterResumable(com.mezze.datastructures.iter.MezzeIter iter, MezzeFunction fn) {
-            return com.mezze.interpreter.nodes.builtin.collections.IterNatives.resumable(iter, fn);
-        }
-
-        static CallTarget[] iterStageTargets(com.mezze.datastructures.iter.MezzeIter iter) {
-            return com.mezze.interpreter.nodes.builtin.collections.IterNatives.stageTargets(iter.getDescriptor());
-        }
-
-        static boolean iterResumableByRow(com.mezze.datastructures.iter.MezzeIter iter, MezzeFunction fn) {
-            return com.mezze.interpreter.nodes.builtin.collections.IterNatives.resumableByRow(iter, fn);
-        }
-
-        static boolean parkPossibleNow() {
-            return com.mezze.interpreter.nodes.continuation.SuspendFacts.parkPossible();
-        }
-
         /** The route verdict at THIS execution: the entry's static verdict, and a park being possible now. */
-        static boolean parkRoute(boolean cachedResumable) {
-            return cachedResumable && com.mezze.interpreter.nodes.continuation.SuspendFacts.parkPossible();
-        }
-
-        static boolean iterStagesMatch(com.mezze.datastructures.iter.MezzeIter iter, CallTarget[] cached) {
-            return com.mezze.interpreter.nodes.builtin.collections.IterNatives.stageTargetsMatch(iter.getDescriptor(), cached);
-        }
 
         static Class<?> iterFoldDescClass(com.mezze.datastructures.iter.MezzeIter iter) {
             return iter.getDescriptor().getClass();
@@ -6984,15 +6930,11 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @Specialization(guards = {
             "iterFoldTargetMatches(callback, cachedCallbackTarget)",
             "iterFoldDescClass(iter) == cachedDescClass",
-            "iterStagesMatch(iter, cachedStageTargets)",   // C4 (BUG 71), see IterFoldDynamic
-            "!parkRoute(cachedResumable)"    // static half cached per entry; dynamic half is one thread-local read
         }, limit = "3", excludeForUncached = true)
         public static Object doCached(
                 com.mezze.datastructures.iter.MezzeIter iter,
                 MezzeFunction callback,
                 @Cached("callback.getCallTarget()") CallTarget cachedCallbackTarget,
-                @Cached("iterStageTargets(iter)") CallTarget[] cachedStageTargets,
-                @Cached("iterResumableByRow(iter, callback)") boolean cachedResumable,
                 @Cached("iterForEachTryScalarResolve(callback)") CallTarget scalarTarget,
                 @Cached("callback.getClosureValues().length") int closureLen,
                 @Cached("iterFoldDescClass(iter)") Class<?> cachedDescClass,
@@ -7056,15 +6998,6 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return MezzeRecord.empty();
         }
 
-        @Specialization(guards = "iterResumable(iter, callback)")   // C4 (BUG 71), see IterFoldDynamic
-        @TruffleBoundary
-        public static Object doResumable(
-                com.mezze.datastructures.iter.MezzeIter iter,
-                MezzeFunction callback) {
-            return com.mezze.interpreter.nodes.builtin.collections.IterNatives.forEach(
-                iter, callback, IndirectCallNode.getUncached());
-        }
-
         @Specialization(replaces = "doCached")
         @TruffleBoundary
         public static Object doUncached(
@@ -7076,32 +7009,8 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
 
         // Reuse helpers from IterFoldDynamic via qualified name.
 
-        static CallTarget[] iterStageTargets(com.mezze.datastructures.iter.MezzeIter iter) {
-            return IterFoldDynamic.iterStageTargets(iter);
-        }
-
-        static boolean iterResumableByRow(com.mezze.datastructures.iter.MezzeIter iter, MezzeFunction fn) {
-            return IterFoldDynamic.iterResumableByRow(iter, fn);
-        }
-
-        static boolean parkPossibleNow() {
-            return IterFoldDynamic.parkPossibleNow();
-        }
-
-        static boolean parkRoute(boolean cachedResumable) {
-            return IterFoldDynamic.parkRoute(cachedResumable);
-        }
-
-        static boolean iterStagesMatch(com.mezze.datastructures.iter.MezzeIter iter, CallTarget[] cached) {
-            return IterFoldDynamic.iterStagesMatch(iter, cached);
-        }
-
         static boolean iterFoldTargetMatches(MezzeFunction fn, CallTarget cached) {
             return IterFoldDynamic.iterFoldTargetMatches(fn, cached);
-        }
-
-        static boolean iterResumable(com.mezze.datastructures.iter.MezzeIter iter, MezzeFunction fn) {
-            return com.mezze.interpreter.nodes.builtin.collections.IterNatives.resumable(iter, fn);
         }
 
         static Class<?> iterFoldDescClass(com.mezze.datastructures.iter.MezzeIter iter) {
@@ -7199,10 +7108,6 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         @TruffleBoundary
         public static long doUncached(com.mezze.datastructures.iter.MezzeIter iter) {
             return com.mezze.interpreter.nodes.builtin.collections.IterNatives.sum(iter);
-        }
-
-        static boolean iterResumable(com.mezze.datastructures.iter.MezzeIter iter, MezzeFunction fn) {
-            return com.mezze.interpreter.nodes.builtin.collections.IterNatives.resumable(iter, fn);
         }
 
         static Class<?> iterFoldDescClass(com.mezze.datastructures.iter.MezzeIter iter) {

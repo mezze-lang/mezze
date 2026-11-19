@@ -64,6 +64,30 @@ class ForeignThreadParkTest {
         ),
     )
 
+    /** The idle verdict vs a promise settling on a host thread: the body host-awaits a Loom task
+     *  that finishes within microseconds; before the fix the verdict found the promise already
+     *  settled (so "not external"), nothing else parked, and declared a deadlock — 3/3 probe runs.
+     *  Sixty rounds here to cross the window reliably. */
+    @Test
+    fun `a promise settling between the wake check and the idle verdict is not a deadlock`() = assertEquals(
+        1830L,
+        eval(
+            """
+            use std::effects::async::{ Async, LoomAsync, CoopAsync, await, yield_now }
+            use std::result
+            let step = { acc, i } -> if i <= 0 then acc else do
+              let r = perform LoomAsync in do
+                let p = Async.spawn { f = {} -> i }
+                result::get_or { result = await { p = p }, def = 0 - 1 }
+              step { acc = acc + r, i = i - 1 }
+            perform CoopAsync in do
+              let total = step { acc = 0, i = 60 }
+              yield_now {}
+              total
+            """,
+        ),
+    )
+
     /** A foreign thread SPAWNING a cooperative task: the Loom task reaches the outer CoopAsync's
      *  `spawn` through `Async.spawn` only if CoopAsync is innermost for it — so spell the outer
      *  one through a handler the inner performer does not shadow: a user effect whose op spawns. */

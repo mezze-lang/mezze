@@ -257,7 +257,6 @@ class TypedASTCompiler(
      *  IR (eliminates the call entirely). Limited to functions compiled before
      *  the current one — self-recursion and forward refs stay on the call path. */
     private val hashToFunctionIR = mutableMapOf<Hash, FunctionIR>()
-    private val parkLedger = ParkThroughNativeLedger()   // V0513, see ParkThroughNative.kt
 
     /**
      * Tracks recursive let-bound lambdas inside do blocks.
@@ -451,7 +450,6 @@ class TypedASTCompiler(
         monoSpecializations: List<com.mezze.language.typechecker.mono.Monomorphizer.Specialization> = emptyList(),
         isStdlibCompilation: Boolean = false
     ): CompileResult {
-        parkLedger.resetFor(module, isStdlibCompilation) { h -> hashToFunctionIR[h] ?: preloweredFunctions[h] }   // V0513
         extractedFunctions.clear()
         performerRecords.clear()
         files.clear()
@@ -755,7 +753,6 @@ class TypedASTCompiler(
                 )
             }
         }
-        parkLedger.check()
         return CompileResult(final, performerRecords.toList())
     }
 
@@ -1230,7 +1227,6 @@ class TypedASTCompiler(
                 HandleIR(
                     compilePerformBody(expr, src),
                     expr.handlers.map { h ->
-                        if (h.contCapable) parkLedger.noteContCapable(h)
                         HandlerBindIR(h.performerHash, h.effectHash, h.performerName, h.params?.let { compileExpr(it) }, h.isScoped, contCapable = h.contCapable)
                     },
                     src,
@@ -1570,7 +1566,6 @@ class TypedASTCompiler(
         val fn = expr.function
         val calleeMaySuspend = calleeMaySuspend(fn)   // C1: one verdict for every node this call becomes
         val argIR = compileArgWithDictWrapping(expr.arg, src)
-        parkLedger.noteCall(expr); parkLedger.pendingSite = if (fn is TypedFieldAccess) expr else null   // V0513
 
         // Check for method call: receiver.method { args }
         if (fn is TypedFieldAccess) {
@@ -4783,7 +4778,6 @@ class TypedASTCompiler(
         src: SourceInfo,
         typeTag: String? = null
     ): NodeIR {
-        parkLedger.consumePending(targetHash)   // V0513, method spelling
         // Kill switch — MEZZE_DISABLE_SCALAR=true forces the record ABI.
         val scalarDisabled = System.getenv("MEZZE_DISABLE_SCALAR") == "true"
         val calleeParams = if (scalarDisabled) null else paramNamesForHash(targetHash)
