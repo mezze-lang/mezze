@@ -223,7 +223,6 @@ public final class ListNatives {
         return foldTwoArg(list, init, folder, callNode, /*reverse=*/false, /*startIndex=*/0, /*scanOut=*/null);
     }
 
-    /** C4: the cons walk cannot resume; a folder that may park folds over the array. */
 
     public static Object foldRight(MezzeList list, Object init, MezzeFunction folder,
                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {

@@ -139,10 +139,10 @@ public final class IterNatives {
         return acc[0];
     }
 
-    // ==================== Cursors (pull, resumable) ====================
+    // ==================== Cursors (pull) ====================
 
     /**
-     * A resumable pull view over `it`. See {@link IterCursor} for why this is
+     * A pull view over `it` (`iter::cursor`). See {@link IterCursor} for why this is
      * a second mechanism rather than a replacement for the push walk.
      *
      * The cursor is MUTABLE POSITION, so it is a handle like a FileHandle
@@ -629,7 +629,7 @@ public final class IterNatives {
             // which meant zipping anything endless exhausted memory — and
             // `zip { a = finite, b = endless }` is an ordinary thing to write.
             // Interleaving two pushes is what a push driver cannot do, so each
-            // side gets a resumable pull view instead and this holds one pair
+            // side gets a pull view instead and this holds one pair
             // at a time. Stops at the shorter side, as before.
             IterCursor left = IterCursor.of(zip.first, callNode);
             IterCursor right = IterCursor.of(zip.second, callNode);

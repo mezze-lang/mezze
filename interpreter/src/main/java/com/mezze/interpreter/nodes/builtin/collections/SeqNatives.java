@@ -213,7 +213,7 @@ public final class SeqNatives {
     private static final int SEARCH_ANY = 0, SEARCH_ALL = 1, SEARCH_FIND = 2;
     private static final Object CONTINUE = new Object();
 
-    /** C4-resumable predicate scan shared by any/all/find: stops at the first element
+    /** Predicate scan shared by any/all/find: stops at the first element
      *  that decides the answer; a suspended predicate resumes the scan with the
      *  predicate's eventual answer for the same element. */
     private static Object searchFrom(MezzeSeq seq, MezzeFunction predicate,
@@ -265,7 +265,7 @@ public final class SeqNatives {
         return mapFrom(seq, mapper, callNode, new Object[seq.size()], 0);
     }
 
-    /** C4-resumable: the loop from element {@code start} into {@code result}. */
+    /** The map loop from element {@code start} into {@code result}. */
     private static Object mapFrom(MezzeSeq seq, MezzeFunction mapper,
                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode,
                                   Object[] result, int start) {
@@ -292,7 +292,7 @@ public final class SeqNatives {
         return filterFrom(seq, predicate, callNode, new Object[Math.min(size, 16)], 0, 0);
     }
 
-    /** C4-resumable: {@code buf[0..count)} holds the kept elements so far. */
+    /** The filter loop: {@code buf[0..count)} holds the kept elements so far. */
     private static Object filterFrom(MezzeSeq seq, MezzeFunction predicate,
                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode,
                                      Object[] buf, int count, int start) {
@@ -1095,7 +1095,6 @@ public final class SeqNatives {
         return forEachFrom(seq, fn, callNode, 0);
     }
 
-    /** C4-resumable. */
     private static Object forEachFrom(MezzeSeq seq, MezzeFunction fn,
                                       com.oracle.truffle.api.nodes.IndirectCallNode callNode, int start) {
         Object[] closureValues = fn.getClosureValues();
