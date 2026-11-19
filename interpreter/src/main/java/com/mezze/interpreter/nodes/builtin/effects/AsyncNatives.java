@@ -480,7 +480,8 @@ public final class AsyncNatives {
 
             long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
             if (com.mezze.interpreter.nodes.continuation.TaskMachine.onCarrier()) {
-                com.mezze.interpreter.nodes.continuation.TaskMachine.javaWait(() -> outcome != PENDING_SENTINEL || System.nanoTime() - deadline >= 0);
+                com.mezze.interpreter.nodes.continuation.TaskMachine.javaWait(
+                    new com.mezze.interpreter.nodes.continuation.TaskMachine.PromiseOrDeadline(this, deadline));
                 o = outcome;
                 if (o == PENDING_SENTINEL) throw new TimeoutException();
                 return getResultOrThrow(o);

@@ -50,6 +50,46 @@ public final class ContBinding {
         return f;
     }
 
+    /**
+     * `wait_on { on, test }`: a predicate FUNCTION (so every performer's `park` accepts it) that
+     * also names the wait queue it belongs to. Closure values: [queue, test]. The task machine
+     * recognises the shared call target, registers the parked task with the queue and evaluates
+     * `test` only when the queue is signalled; a thread-per-task performer just calls it.
+     */
+    public static RootCallTarget waitOnTarget() {
+        MezzeLanguage language = MezzeLanguage.get(null);
+        RootCallTarget cached = language.waitOnTarget;
+        if (cached != null) return cached;
+        return buildWaitOn(language);
+    }
+
+    public static MezzeFunction waitOn(WaitQueue queue, MezzeFunction test) {
+        return new MezzeFunction(waitOnTarget(), "wait_on", new Object[]{queue, test});
+    }
+
+    /** The queue a wait_on predicate names, or null for an ordinary predicate. */
+    public static WaitQueue queueOf(Object predicate) {
+        if (predicate instanceof MezzeFunction f && f.getCallTarget() == MezzeLanguage.get(null).waitOnTarget) {
+            return (WaitQueue) f.getClosureValues()[0];
+        }
+        return null;
+    }
+
+    @TruffleBoundary
+    private static synchronized RootCallTarget buildWaitOn(MezzeLanguage language) {
+        if (language.waitOnTarget != null) return language.waitOnTarget;
+        FrameDescriptor fd = FrameDescriptor.newBuilder().build();
+        MezzeNode body = new MezzeNode() {
+            @Override public Object execute(VirtualFrame frame) {
+                Object[] a = frame.getArguments();            // [queue, test, argRecord]
+                return TaskMachine.callWith((MezzeFunction) a[1], MezzeRecord.empty());
+            }
+        };
+        RootCallTarget target = new MezzeRootNode(language, fd, body, "wait_on", 2, 1, new int[0]).getCallTarget();
+        language.waitOnTarget = target;
+        return target;
+    }
+
     public static Object contRecord() {
         MezzeLanguage language = MezzeLanguage.get(null);
         Object cached = language.contRecord;

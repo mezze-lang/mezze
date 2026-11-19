@@ -708,12 +708,13 @@ class BuildCommand {
             # JVM, and adds a process to every launch. One cosmetic line is not
             # worth breaking Ctrl-C. Dropping --add-modules instead would silently
             # disable the SIMD path, which is a performance regression.
+            # CUSTOMIZE_THRESHOLD=-1: BUG 78: Truffle 25.0.2's virtual-thread mount hook recurses through MethodHandle customisation (InternalError: StackOverflowError on a ForkJoinPool worker, 2 in 33 runs of the idle probe); customisation off removes the recursion.
             # NOTE: Do NOT use -XX:TieredStopAtLevel=1 here. While it saves
             # ~100ms startup, it disables the Graal/JVMCI JIT compiler that
             # Truffle uses for Mezze code — causing a 10-20× regression on
             # compute-heavy workloads (e.g. 12ms → 139ms for a 20M-iteration
             # tail loop). The Graal JIT requires at least tier 4 (C2 level).
-            DEFAULT_OPTS="-Xmx4g -XX:+UseSerialGC -XX:NewRatio=1 $cdsFlag-Xlog:cds=off --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-modules=jdk.incubator.vector,jdk.internal.vm.ci"
+            DEFAULT_OPTS="-Xmx4g -XX:+UseSerialGC -Djava.lang.invoke.MethodHandle.CUSTOMIZE_THRESHOLD=-1 -XX:NewRatio=1 $cdsFlag-Xlog:cds=off --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-modules=jdk.incubator.vector,jdk.internal.vm.ci"
             OPTS="${'$'}{MEZZE_JAVA_OPTS:-${'$'}DEFAULT_OPTS}"
 
             $launchExec
@@ -745,7 +746,7 @@ class BuildCommand {
                 exit /b 1
             )
             if "%MEZZE_JAVA%"=="" set "MEZZE_JAVA=java"
-            if "%MEZZE_JAVA_OPTS%"=="" set "MEZZE_JAVA_OPTS=-Xmx4g -XX:+UseSerialGC -XX:NewRatio=1 $cdsFlag-Xlog:cds=off --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-modules=jdk.incubator.vector,jdk.internal.vm.ci"
+            if "%MEZZE_JAVA_OPTS%"=="" set "MEZZE_JAVA_OPTS=-Xmx4g -XX:+UseSerialGC -Djava.lang.invoke.MethodHandle.CUSTOMIZE_THRESHOLD=-1 -XX:NewRatio=1 $cdsFlag-Xlog:cds=off --enable-native-access=ALL-UNNAMED --sun-misc-unsafe-memory-access=allow --add-modules=jdk.incubator.vector,jdk.internal.vm.ci"
             $launchExec
         """.trimIndent() + "\r\n"
         launcher.writeText(script)

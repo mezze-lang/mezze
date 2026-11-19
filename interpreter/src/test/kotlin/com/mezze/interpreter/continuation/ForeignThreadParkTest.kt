@@ -88,6 +88,80 @@ class ForeignThreadParkTest {
         ),
     )
 
+    /** Flaw 2 of the carrier design, fixed: a task parked on a PLAIN predicate over state that a
+     *  foreign thread will change was reported as a deadlock (nothing in the machine could wake
+     *  it). The machine never guesses now: it re-checks with backoff and only an EMPTY wait set
+     *  is an error. */
+    @Test
+    fun `a predicate flipped by a Loom thread is waited for, not declared a deadlock`() = assertEquals(
+        1L,
+        eval(
+            """
+            use std::effects::async::{ Async, LoomAsync, CoopAsync, park, sleep }
+            use std::effects::time::{ SystemTime }
+            use std::effects::async::atom::{ atom, deref, reset }
+            use std::result
+            perform SystemTime, CoopAsync in do
+              let flag = atom { val = 0 }
+              perform LoomAsync in do
+                let _ = Async.spawn { f = {} -> do
+                  sleep { ms = 30 }
+                  reset { atom = flag, val = 1 } }
+                {}
+              park { predicate = {} -> deref { atom = flag } == 1 }
+              deref { atom = flag }
+            """,
+        ),
+    )
+
+    /** A channel fed by a Loom thread and drained by a cooperative task: the send signals the
+     *  channel's wait queue from the foreign thread and the parked receiver is woken at once —
+     *  no poll, no deadlock verdict. */
+    @Test
+    fun `a channel fed from a Loom thread wakes the cooperative receiver`() = assertEquals(
+        4950L,
+        eval(
+            """
+            use std::effects::async::{ Async, LoomAsync, CoopAsync, await, sleep }
+            use std::effects::async::channel::{ chan_bounded, send, recv }
+            use std::effects::time::{ SystemTime }
+            use std::collections::seq
+            use std::result
+            perform SystemTime, CoopAsync in do
+              let ch = chan_bounded { cap = 4 }
+              let producer = perform LoomAsync in Async.spawn { f = {} -> do
+                seq::range { start = 0, end = 100 }.for_each { f = { x } -> do
+                  sleep { ms = 1 }
+                  send { ch = ch, val = x } }
+                {} }
+              seq::fold { xs = seq::range { start = 0, end = 100 }, init = 0, f = { acc, x } -> acc + recv { ch = ch } }
+            """,
+        ),
+    )
+
+    /** The surface a userland reactor needs (an io_uring or any Java-library backend): build a
+     *  promise with `promise_from`, hand `complete` to a foreign thread, and let a cooperative task
+     *  await it. The machine idles with nothing to do, the foreign thread completes the promise, and
+     *  the settlement wakes the idle carrier at once — no poll, no deadlock verdict. */
+    @Test
+    fun `a promise completed later from a foreign thread wakes the idle cooperative awaiter`() = assertEquals(
+        42L,
+        eval(
+            """
+            use std::effects::async::{ Async, LoomAsync, CoopAsync, await, sleep, promise_from }
+            use std::effects::time::{ SystemTime }
+            use std::result
+            perform SystemTime, CoopAsync in do
+              let p = promise_from { setup = { complete, fail, on_cancel } -> perform LoomAsync in do
+                let _ = Async.spawn { f = {} -> do
+                  sleep { ms = 30 }
+                  complete { val = 42 } }
+                {} }
+              result::get_or { result = await { p = p }, def = 0 - 1 }
+            """,
+        ),
+    )
+
     /** A foreign thread SPAWNING a cooperative task: the Loom task reaches the outer CoopAsync's
      *  `spawn` through `Async.spawn` only if CoopAsync is innermost for it — so spell the outer
      *  one through a handler the inner performer does not shadow: a user effect whose op spawns. */

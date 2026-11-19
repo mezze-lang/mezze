@@ -40,7 +40,10 @@ application {
         "-XX:ReservedCodeCacheSize=64m",
 
         // Truffle/Polyglot engine options for fast startup
-        "-Dpolyglot.engine.WarnInterpreterOnly=false"
+        "-Dpolyglot.engine.WarnInterpreterOnly=false",
+
+        // BUG 78: Truffle 25.0.2's virtual-thread mount hook recurses through MethodHandle customisation (InternalError: StackOverflowError on a ForkJoinPool worker, 2 in 33 runs of the idle probe); customisation off removes the recursion
+        "-Djava.lang.invoke.MethodHandle.CUSTOMIZE_THRESHOLD=-1"
     )
 }
 

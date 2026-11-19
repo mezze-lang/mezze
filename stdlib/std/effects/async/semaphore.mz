@@ -1,5 +1,5 @@
 use std::abilities::compare::{ Eq, Hash, structural_hash }
-use std::effects::async::{ Async, park }
+use std::effects::async::{ Async, park, wait_on }
 
 ## Counting semaphore for limiting concurrent access.
 pub newtype Semaphore = __NativeSemaphore
@@ -47,11 +47,11 @@ pub let acquire_n: { sem: Semaphore, permits: Int } -> {} <Async> = { sem, permi
 
 ## Park-aware acquire: routes through park.
 pub let acquire_async: { sem: Semaphore } -> {} <Async, ...> = { sem } ->
-  park { predicate = {} -> __native_semaphore_try_acquire { sem = sem } }
+  park { predicate = wait_on { on = sem, test = {} -> __native_semaphore_try_acquire { sem = sem } } }
 
 ## Park-aware acquire_n: routes through park.
 pub let acquire_n_async: { sem: Semaphore, permits: Int } -> {} <Async, ...> = { sem, permits } ->
-  park { predicate = {} -> __native_semaphore_try_acquire_n { sem = sem, permits = permits } }
+  park { predicate = wait_on { on = sem, test = {} -> __native_semaphore_try_acquire_n { sem = sem, permits = permits } } }
 
 ## Release one permit.
 pub let release: { sem: Semaphore } -> {} <Async> = { sem } ->

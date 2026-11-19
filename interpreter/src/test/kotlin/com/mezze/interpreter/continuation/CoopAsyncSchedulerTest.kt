@@ -483,22 +483,19 @@ class CoopAsyncSchedulerTest {
         """)),
     )
 
+    /** A plain predicate that never becomes true is NOT reported as a deadlock any more: in an open
+     *  system a foreign thread may change the state, so the machine re-checks with backoff (and
+     *  prints one diagnostic after the grace period). A deadline bounds it here. */
     @Test
-    fun `nothing runnable and nothing that can wake is a deadlock, named`() {
-        val e = assertThrows(Exception::class.java) {
-            eval(program(imports, """
-                perform SystemTime, CoopAsync in do
-                  park { predicate = {} -> False }
-                  1
-            """))
-        }
-        val msg = e.message ?: ""
-        assertTrue(msg.contains("deadlock"), "the error names the condition: $msg")
-        assertTrue(msg.contains("OnPredicates(1)"), "and what the task is parked on: $msg")
-    }
+    fun `a plain predicate that never holds is waited for until its deadline, not declared a deadlock`() = assertEquals(
+        false,
+        eval(program(imports, """
+            perform SystemTime, CoopAsync in park_until { predicate = {} -> False, ms = 60 }
+        """)),
+    )
 
     @Test
-    fun `an empty wait set is unsatisfiable, so it is a deadlock too`() {
+    fun `an empty wait set is unsatisfiable, so it is the one deadlock the machine reports`() {
         val e = assertThrows(Exception::class.java) {
             eval(program("""
                 use std::effects::async::{ ParkOn, WaitSet, ParkOutcome }

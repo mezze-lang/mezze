@@ -243,6 +243,7 @@ public final class ConcurrencyNatives {
         int depth = transactionNestingDepth.get();
         if (depth <= 0) {
             // No transaction to commit - shouldn't happen with proper pairing
+            STM_WAIT_QUEUE.signal();
             return MezzeRecord.empty();
         }
 
@@ -269,6 +270,7 @@ public final class ConcurrencyNatives {
             }
         }
         // Inner levels just decrement and return
+        STM_WAIT_QUEUE.signal();
         return MezzeRecord.empty();
     }
 
@@ -283,6 +285,7 @@ public final class ConcurrencyNatives {
 
         int depth = transactionNestingDepth.get();
         if (depth <= 0) {
+            STM_WAIT_QUEUE.signal();
             return MezzeRecord.empty();
         }
 
@@ -304,6 +307,7 @@ public final class ConcurrencyNatives {
                 }
             }
         }
+        STM_WAIT_QUEUE.signal();
         return MezzeRecord.empty();
     }
 
@@ -724,11 +728,35 @@ public final class ConcurrencyNatives {
 
     // ==================== Mutex ====================
 
+    /** Every STM commit signals this queue: `retry` waiters re-check their read sets. */
+    public static final com.mezze.interpreter.nodes.continuation.WaitQueue STM_WAIT_QUEUE = new com.mezze.interpreter.nodes.continuation.WaitQueue();
+
+    /** `__native_wait_on { on, test }`: a predicate that names its wake-up queue. */
+    @TruffleBoundary
+    public static Object waitOn(MezzeRecord args) {
+        Object on = getField(args, "on");
+        Object test = getField(args, "test");
+        com.mezze.interpreter.nodes.continuation.WaitQueue q;
+        if (on instanceof MezzeMutex m) q = m.waitQueue;
+        else if (on instanceof MezzeSemaphore sm) q = sm.waitQueue;
+        else if (on instanceof MezzeLatch l) q = l.waitQueue;
+        else if (on instanceof MezzeWaitGroup w) q = w.waitQueue;
+        else if (on instanceof MezzeChannel c) q = c.waitQueue;
+        else if (on instanceof com.mezze.interpreter.nodes.continuation.WaitQueue wq) q = wq;
+        else throw new com.mezze.interpreter.values.MezzeGuestException(
+            "wait_on: `on` must be a channel, mutex, semaphore, latch, wait group or the STM; got " + on);
+        if (!(test instanceof com.mezze.interpreter.values.MezzeFunction f)) throw new com.mezze.interpreter.values.MezzeGuestException("wait_on: `test` must be a function");
+        return com.mezze.interpreter.nodes.continuation.ContBinding.waitOn(q, f);
+    }
+
+    public static Object stmQueue(MezzeRecord args) { return STM_WAIT_QUEUE; }
+
     public static class MezzeMutex {
+        public final com.mezze.interpreter.nodes.continuation.WaitQueue waitQueue = new com.mezze.interpreter.nodes.continuation.WaitQueue();
         private final ReentrantLock lock = new ReentrantLock();
         public void lock() { lock.lock(); }
         public void lockInterruptibly() throws InterruptedException { lock.lockInterruptibly(); }
-        public void unlock() { lock.unlock(); }
+        public void unlock() { lock.unlock(); waitQueue.signal(); }
         public boolean tryLock() { return lock.tryLock(); }
         @Override public String toString() { return "<mutex>"; }
     }
@@ -780,6 +808,7 @@ public final class ConcurrencyNatives {
     // ==================== Semaphore ====================
 
     public static class MezzeSemaphore {
+        public final com.mezze.interpreter.nodes.continuation.WaitQueue waitQueue = new com.mezze.interpreter.nodes.continuation.WaitQueue();
         private final Semaphore semaphore;
         public MezzeSemaphore(int permits) { this.semaphore = new Semaphore(permits); }
         public void acquire() throws InterruptedException { semaphore.acquire(); }
@@ -811,6 +840,7 @@ public final class ConcurrencyNatives {
     public static MezzeRecord semaphoreRelease(MezzeRecord args) {
         MezzeSemaphore sem = getSemaphore(args, "sem");
         sem.release();
+        sem.waitQueue.signal();
         return MezzeRecord.empty();
     }
 
@@ -841,6 +871,7 @@ public final class ConcurrencyNatives {
     // ==================== Latch ====================
 
     public static class MezzeLatch {
+        public final com.mezze.interpreter.nodes.continuation.WaitQueue waitQueue = new com.mezze.interpreter.nodes.continuation.WaitQueue();
         private final CountDownLatch latch;
         public MezzeLatch(int count) { this.latch = new CountDownLatch(count); }
         public void countDown() { latch.countDown(); }
@@ -859,6 +890,7 @@ public final class ConcurrencyNatives {
     public static MezzeRecord latchCountDown(MezzeRecord args) {
         MezzeLatch latch = getLatch(args, "latch");
         latch.countDown();
+        latch.waitQueue.signal();
         return MezzeRecord.empty();
     }
 
@@ -895,6 +927,7 @@ public final class ConcurrencyNatives {
     // ==================== WaitGroup ====================
 
     public static class MezzeWaitGroup {
+        public final com.mezze.interpreter.nodes.continuation.WaitQueue waitQueue = new com.mezze.interpreter.nodes.continuation.WaitQueue();
         private final AtomicInteger count = new AtomicInteger(0);
         private final CountDownLatch done = new CountDownLatch(1);
 
@@ -927,6 +960,7 @@ public final class ConcurrencyNatives {
     public static MezzeRecord waitgroupDone(MezzeRecord args) {
         MezzeWaitGroup wg = getWaitGroup(args, "wg");
         wg.done();
+        wg.waitQueue.signal();
         return MezzeRecord.empty();
     }
 
@@ -963,6 +997,7 @@ public final class ConcurrencyNatives {
     // ==================== Channel ====================
 
     public static class MezzeChannel {
+        public final com.mezze.interpreter.nodes.continuation.WaitQueue waitQueue = new com.mezze.interpreter.nodes.continuation.WaitQueue();
         final BlockingQueue<Object> queue;
         private volatile boolean closed = false;
         // Waiters registered by channelRecvAnyTimeout — unparked on offer.
@@ -1006,6 +1041,7 @@ public final class ConcurrencyNatives {
     public static MezzeRecord channelClose(MezzeRecord args) {
         MezzeChannel ch = getChannel(args, "ch");
         ch.close();
+        ch.waitQueue.signal();
         return MezzeRecord.empty();
     }
 
@@ -1022,6 +1058,7 @@ public final class ConcurrencyNatives {
         if (ch.isClosed()) return false;
         boolean sent = ch.queue.offer(val);
         if (sent) {
+            ch.waitQueue.signal();                     // a receiver may be waiting
             // Wake any threads parked in channelRecvAnyTimeout select.
             Thread w;
             while ((w = ch.selectWaiters.poll()) != null) {
@@ -1036,6 +1073,7 @@ public final class ConcurrencyNatives {
         MezzeChannel ch = getChannel(args, "ch");
         Object val = ch.queue.poll();
         if (val == null) return createNone();
+        ch.waitQueue.signal();                         // a sender may be waiting for room
         return createSome(val);
     }
 
@@ -1736,6 +1774,7 @@ public final class ConcurrencyNatives {
         MezzeSemaphore sem = getSemaphore(args, "sem");
         long permits = getLong(args, "permits");
         for (int i = 0; i < permits; i++) sem.release();
+        sem.waitQueue.signal();
         return MezzeRecord.empty();
     }
 

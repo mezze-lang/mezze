@@ -1,5 +1,5 @@
 use std::abilities::compare::{ Eq, Hash, structural_hash }
-use std::effects::async::{ Async, park }
+use std::effects::async::{ Async, park, wait_on }
 
 ## Reentrant mutual exclusion lock.
 pub newtype Mutex = __NativeLock
@@ -41,7 +41,7 @@ pub let lock: { mutex: Mutex } -> {} <Async> = { mutex } -> __native_mutex_lock 
 
 ## Park-aware lock: routes through park.
 pub let lock_async: { mutex: Mutex } -> {} <Async, ...> = { mutex } ->
-  park { predicate = {} -> __native_mutex_try_lock { mutex = mutex } }
+  park { predicate = wait_on { on = mutex, test = {} -> __native_mutex_try_lock { mutex = mutex } } }
 
 ## Release the lock. Must be called by the thread that holds it.
 pub let unlock: { mutex: Mutex } -> {} <Async> = { mutex } ->

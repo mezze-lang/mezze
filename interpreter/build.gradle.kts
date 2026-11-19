@@ -186,7 +186,8 @@ fun org.gradle.api.tasks.testing.Test.applyCommonTestConfig() {
         "--enable-native-access=ALL-UNNAMED",
         "--add-opens=java.base/java.lang=ALL-UNNAMED",
         "--add-opens=java.base/sun.misc=ALL-UNNAMED",
-        "--add-modules=jdk.incubator.vector"
+        "--add-modules=jdk.incubator.vector",
+        "-Djava.lang.invoke.MethodHandle.CUSTOMIZE_THRESHOLD=-1"   // BUG 78, see cli/build.gradle.kts
     )
 
     maxHeapSize = "2g"

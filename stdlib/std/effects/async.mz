@@ -127,6 +127,15 @@ pub let sleep: { ms: Int } -> {} <Time> = { ms } ->
 ## The predicate is the runtime's own `{} -> True`, which the task machine recognises by
 ## identity (no predicate call, the task goes straight behind the others) and a
 ## thread-per-task performer answers with a thread yield.
+## A predicate that names the primitive it waits on. `park { predicate = wait_on { on, test } }`
+## is what the stdlib's channel, mutex, semaphore, latch, wait group and STM do: a cooperative
+## scheduler registers the task with the primitive's wake-up list and runs `test` only when the
+## primitive changes state — from ANY thread — so a wait is woken, never polled; a thread-per-task
+## performer simply calls it. Use it for your own primitives: `on` is the native object whose
+## state `test` reads.
+pub let wait_on: { on: 'o, test: {} -> Bool <...> } -> ({} -> Bool <...>) = { on, test } ->
+  __native_wait_on { on = on, test = test }
+
 ## The runtime's `{} -> True`, fetched once when this module loads (not per yield).
 let ready_pred: {} -> Bool <...> = __native_ready_predicate {}
 pub let yield_now: {} -> {} <Async> = {} -> Async.park { predicate = ready_pred }

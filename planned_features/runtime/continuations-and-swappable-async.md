@@ -1125,6 +1125,52 @@ green) removes the call: yield_now 54 → 50 ns. The last 10 ns to the old `Imme
 one-element predicate list the `park` op builds and the forwarder call; a single-predicate `ParkOn`
 constructor would take them and widens the performer-facing type — a trade left to the user.
 
+**Event-driven waits and a verdict that never guesses, 2026-11-19 (tenth pass).** The eight flaws of the
+honest assessment, taken in order. (2 and the one it hid) The stdlib's channel, mutex, semaphore, latch,
+wait group and STM retry all waited through `park { predicate }`, which had two costs the carrier design
+inherited: a scheduler step re-evaluated EVERY parked predicate (linear in parked waiters), and a waiter
+whose producer was a foreign thread looked like a deadlock. Now each primitive owns a `WaitQueue`
+signalled by its natives on every state change, from any thread, and the stdlib parks on
+`wait_on { on, test }` — a predicate FUNCTION (so every performer's `park` accepts it, and a
+thread-per-task performer just calls it) that names its queue through a shared root the machine
+recognises. The machine registers the parked task with the queue, evaluates `test` only when the queue
+is signalled, and is woken from the idle park by the signal. A wake is O(1) per waiter and never a poll.
+A `park` whose predicate already holds returns without a dispatch. The deadlock VERDICT is now
+principled: the only error is an EMPTY wait set, which is provably unsatisfiable; promise waits,
+`wait_on` waits and deadlines are woken by their event; a plain predicate over state the machine cannot
+see is re-evaluated with exponential backoff (50 us → 20 ms) and, after a grace period (10 s,
+`-Dmezze.coop.graceMillis`), ONE diagnostic names the parked tasks on stderr — a stuck program is
+visible, never guessed at. (4) The baton spin is adaptive per carrier: a spin that caught the handoff
+doubles the budget, one that ended in a real park halves it, so a long wait stops burning CPU after a
+few rounds. (5) A timed host-level await carries its promise AND deadline (`PromiseOrDeadline`): woken
+by the settlement or at the deadline; no opaque host wait remains in the stdlib. (8) BUG 78's cause is
+Truffle 25.0.2's virtual-thread mount hook recursing through MethodHandle customisation
+(`InternalError: StackOverflowError` on a ForkJoinPool worker, 2 in 33 probe runs); customisation off
+(`-Djava.lang.invoke.MethodHandle.CUSTOMIZE_THRESHOLD=-1`, in every default JVM option list) removes
+the recursion: 0 in 60, no measurable cost. (7) The reactor surface exists and is tested: `promise_from`
+hands `complete`/`fail`/`on_cancel` to foreign code, a foreign thread completing the promise wakes the
+idle cooperative awaiter at once. What is still missing for a Java library's OWN threads is a bridge
+that hands a Mezze function to Java as a functional interface; today a package wraps the Java future on
+a Mezze-side thread. io_uring itself: Netty 4.2 (2025-04) made it a first-class transport, Linux only
+(kernel ≥ 5.14, x86-64/aarch64/riscv64, memlock), falling back to epoll/NIO through the same API, about
+two megabytes of jars (common 728 KB, transport 557 KB, buffer ~340 KB, unix-common 46 KB, plus the
+io_uring classes and native jars); and OpenJDK's Loom repository opened an `io_uring` branch (2026-02)
+for the virtual-thread I/O poller itself, which would reach every blocking read under LoomAsync and
+under our carriers with no Mezze change. So io_uring is NOT built in: the JDK poller is the built-in
+path, a Netty-backed performer is a package. (1, 3) Measured below.
+
+Measured: (3) channel ping-pong between two long-lived tasks, bounded channels of one, 1M round trips —
+2.1 us per round trip (two messages) under CoopAsync, 62 us under LoomAsync; the first wait-queue build
+read 3.6 us because the FIRST adaptive-spin policy (halve on every real park) collapsed to zero in this
+shape — each turn's real work outlasted a halved budget — and every handoff fell through to the pool
+(JFR: 41% in `ForkJoinPool.deactivate`/`runWorker`); the policy now adapts to the OBSERVED wait (grow
+towards a wait short enough to have been caught, shrink only on a long one) and the round trip is back
+where the polled design was, now event-driven. (1) 300,000 tasks spawned and parked in under six seconds
+including JVM start, all completed; the heap-per-parked-task number is still owed because the probe's
+gate used `Time.sleep`, which turned out to BLOCK its carrier (see the eleventh pass). Kernels unchanged:
+yield_now 53, park-True 55, spawn+await 145, fold with await 153, fan-out 140–178 (noisy). Gates:
+typechecker 5502/5502, interpreter 8259/8259 (incl. testTiming), cli 357/357.
+
 Still owed on the carrier design: the handoff cost when the inline child does NOT apply (two carriers
 waiting on each other, ~300 ns each; the fan-out kernel is that shape at 176 ns per element); a foreign-thread
 park (a Mezze callback on a Loom/HTTP thread calling `cont.park` is refused with a clear message —

@@ -265,6 +265,8 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     public volatile Object contRecord;
     /** The `yield_now` predicate, built once per language (see ContBinding.readyPredicate). */
     public volatile com.mezze.interpreter.values.MezzeFunction readyPredicate;
+    /** The `wait_on` predicate root, built once per language (see ContBinding.waitOnTarget). */
+    public volatile com.oracle.truffle.api.RootCallTarget waitOnTarget;
     private final java.util.concurrent.atomic.AtomicLong bdslHits = new java.util.concurrent.atomic.AtomicLong();
     private final java.util.concurrent.atomic.AtomicLong bdslMisses = new java.util.concurrent.atomic.AtomicLong();
 

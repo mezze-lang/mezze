@@ -3232,6 +3232,8 @@ public final class NativeDispatch extends MezzeNode {
 
         // === Mutex ===
         HANDLERS.put("__native_mutex_new", (r, c) -> ConcurrencyNatives.mutexNew(r));
+        HANDLERS.put("__native_wait_on", (r, c) -> com.mezze.interpreter.nodes.builtin.concurrency.ConcurrencyNatives.waitOn(r));
+        HANDLERS.put("__native_stm_queue", (r, c) -> com.mezze.interpreter.nodes.builtin.concurrency.ConcurrencyNatives.stmQueue(r));
         HANDLERS.put("__native_mutex_lock", (r, c) -> ConcurrencyNatives.mutexLock(r));
         HANDLERS.put("__native_mutex_unlock", (r, c) -> ConcurrencyNatives.mutexUnlock(r));
         HANDLERS.put("__native_mutex_try_lock", (r, c) -> ConcurrencyNatives.mutexTryLock(r));
