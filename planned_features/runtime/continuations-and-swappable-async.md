@@ -1119,8 +1119,11 @@ the task the promise already carries. Measured (2M, ns/elem, before → after): 
 spawn+await 192 → 140, seq fold with await 210 → 152, iter map→fold 222 → 165, list fold 208 → 165,
 fan-out 179 → 142; park on a real predicate 75 → 75 (its cost is the predicate call). Still above the
 40 ns the six-op `Immediately` path had: the remaining yield cost is the `__native_ready_predicate` call
-and the one-element predicate list the `park` op builds — a module-level `ready` value would remove the
-call if top-level native values are safe under the stdlib snapshot (checked next).
+and the one-element predicate list the `park` op builds — a module-level `ready` value (`let ready_pred = __native_ready_predicate {}`, fetched once when
+the module loads — the first top-level native value in the stdlib; snapshot, stdlib and comptime tests
+green) removes the call: yield_now 54 → 50 ns. The last 10 ns to the old `Immediately` path are the
+one-element predicate list the `park` op builds and the forwarder call; a single-predicate `ParkOn`
+constructor would take them and widens the performer-facing type — a trade left to the user.
 
 Still owed on the carrier design: the handoff cost when the inline child does NOT apply (two carriers
 waiting on each other, ~300 ns each; the fan-out kernel is that shape at 176 ns per element); a foreign-thread

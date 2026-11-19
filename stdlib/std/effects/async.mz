@@ -127,7 +127,9 @@ pub let sleep: { ms: Int } -> {} <Time> = { ms } ->
 ## The predicate is the runtime's own `{} -> True`, which the task machine recognises by
 ## identity (no predicate call, the task goes straight behind the others) and a
 ## thread-per-task performer answers with a thread yield.
-pub let yield_now: {} -> {} <Async> = {} -> Async.park { predicate = __native_ready_predicate {} }
+## The runtime's `{} -> True`, fetched once when this module loads (not per yield).
+let ready_pred: {} -> Bool <...> = __native_ready_predicate {}
+pub let yield_now: {} -> {} <Async> = {} -> Async.park { predicate = ready_pred }
 
 ## Suspend until predicate returns True.
 pub let park: { predicate: {} -> Bool <...> } -> {} <Async, ...> = { predicate } ->
