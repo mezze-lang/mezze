@@ -181,6 +181,9 @@ public final class AsyncNatives {
          *  settles, which is what tells a wait on it from a wait on the outside world. */
         public long machineId;
         public boolean machineOwned;
+        /** The task machine's idle carrier waiting on this promise, if any — woken on settlement
+         *  beside the ordinary {@code waiter}. Volatile on both sides (Dekker with the re-check). */
+        public volatile Thread machineWaiter;
 
         public MezzePromise(Thread executingThread, Semaphore semaphore) {
             this.executingThread = executingThread;
@@ -378,6 +381,8 @@ public final class AsyncNatives {
             if (w != null) {
                 LockSupport.unpark(w);
             }
+            Thread mw = machineWaiter;
+            if (mw != null) LockSupport.unpark(mw);
         }
 
         public boolean isDone() {
@@ -436,7 +441,7 @@ public final class AsyncNatives {
             // 11 at n=6000 hung in ~50% of runs, main and branch alike). setVolatile is a full fence.
             if (com.mezze.interpreter.nodes.continuation.TaskMachine.onCarrier()) {
                 // On a cooperative carrier a blocking wait would hold the baton: park the TASK instead.
-                com.mezze.interpreter.nodes.continuation.TaskMachine.javaWait(() -> outcome != PENDING_SENTINEL);
+                com.mezze.interpreter.nodes.continuation.TaskMachine.awaitPromiseOnCarrier(this);
                 o = outcome;
                 if (startNanos != 0) recordCompletionTime(System.nanoTime() - startNanos);
                 return getResultOrThrow(o);

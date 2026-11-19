@@ -178,6 +178,9 @@ public final class TaskMachine {
         final java.util.concurrent.ConcurrentLinkedQueue<Object> inbox = new java.util.concurrent.ConcurrentLinkedQueue<>();   // ForeignPark | Task (a foreign spawn)
         final MezzeRecord handler;
         Boundary prevForHandler;
+        /** The carrier idling in {@link #blockOrDeadlock}, to be woken by a settling promise or a
+         *  foreign post instead of waiting out the fallback. */
+        volatile Thread idler;
         Boundary(MezzeFunction drive, MezzeRecord handler) { this.handler = handler; this.drive = drive; this.runQueue = new RunQueue(this); this.entryThread = Thread.currentThread(); }
     }
 
@@ -258,7 +261,7 @@ public final class TaskMachine {
         t.scope = HandlerChainRegistry.lookupScopeVar();
         t.spawnedFn = f;
         p.setCancelHook(reason -> cancelParked(t, reason));
-        if (foreign) b.inbox.add(t);                   // a Loom task / HTTP handler spawning under this boundary: the step queues it
+        if (foreign) { b.inbox.add(t); wakeIdler(b); } // a Loom task / HTTP handler spawning under this boundary: the step queues it
         else b.ready.addLast(t);
         return p;
     }
@@ -282,6 +285,21 @@ public final class TaskMachine {
         while (!ready.getAsBoolean()) t.machine.park(new ParkRequest(ready, null));
     }
 
+    /** A host-level await of a promise on a carrier: the task parks on the PROMISE, so an idle
+     *  boundary is woken by its settlement ({@code machineWaiter}) rather than by polling. */
+    public static void awaitPromiseOnCarrier(MezzePromise p) {
+        Task t = CURRENT.get();
+        if (t == null) throw new IllegalStateException("awaitPromiseOnCarrier off a carrier");
+        while (!p.isDone()) t.machine.park(new ParkRequest(p, null));
+    }
+
+    /** A time-based host wait: the idle fallback parks only until the nearest deadline. */
+    public static final class Deadline implements java.util.function.BooleanSupplier {
+        final long at;
+        Deadline(long at) { this.at = at; }
+        @Override public boolean getAsBoolean() { return System.nanoTime() - at >= 0; }
+    }
+
     /** A condition that is false once, then true: a host-level yield (one turn to the others). */
     public static final class OnceFalse implements java.util.function.BooleanSupplier {
         private boolean asked;
@@ -291,8 +309,7 @@ public final class TaskMachine {
     /** {@code LockSupport.parkNanos} that yields the baton when on a carrier. */
     public static void parkNanosCooperatively(long nanos) {
         if (CURRENT.get() == null) { LockSupport.parkNanos(nanos); return; }
-        long deadline = System.nanoTime() + nanos;
-        javaWait(() -> System.nanoTime() - deadline >= 0);
+        javaWait(new Deadline(System.nanoTime() + nanos));
     }
 
     private void cancelParked(Task t, Object reason) {
@@ -463,6 +480,11 @@ public final class TaskMachine {
         BoundaryAbandoned() { super("the perform this task belongs to has failed", null, false, false); }
     }
 
+    private static void wakeIdler(Boundary b) {
+        Thread i = b.idler;
+        if (i != null) LockSupport.unpark(i);
+    }
+
     private void finish(Boundary b) {
         b.finished = true;
         LockSupport.unpark(b.entryThread);
@@ -584,6 +606,7 @@ public final class TaskMachine {
             + "performer mentions `cont`) somewhere above it on this thread");
         ForeignPark fp = new ForeignPark(request, HandlerChainRegistry.snapshotHandlerChainEntries());
         b.inbox.add(fp);
+        wakeIdler(b);
         long deadline = 0;
         Object d;
         while ((d = fp.deliver) == null) {
@@ -635,6 +658,7 @@ public final class TaskMachine {
     }
 
     private int readyIndex(ParkRequest pr) {
+        if (pr.on instanceof MezzePromise p) return p.isDone() ? 0 : -1;                                     // awaitPromiseOnCarrier
         if (pr.on instanceof java.util.function.BooleanSupplier host) return host.getAsBoolean() ? 0 : -1;   // javaWait
         if (!(pr.on instanceof MezzeVariant on)) throw new IllegalStateException("ParkOn is not a variant: " + pr.on);
         int tag = on.getTag();
@@ -669,19 +693,48 @@ public final class TaskMachine {
 
     private void blockOrDeadlock(Boundary b) {
         boolean external = false;
+        long nearest = Long.MAX_VALUE;                 // nearest Deadline, if any
+        Thread me = Thread.currentThread();
+        ArrayList<MezzePromise> hooked = null;
         for (Task t : b.parked) {
-            if (t.parkedOn.on instanceof java.util.function.BooleanSupplier) { external = true; continue; }   // a host wait: someone outside settles it
-            if (t.parkedOn.on instanceof MezzeVariant on && on.getTag() == tagOnPromises()) {
-                Object payload = on.getPayloadFieldByName("ids");
+            Object on = t.parkedOn.on;
+            if (on instanceof MezzePromise p) {
+                // Settled between wakeParked's check and this one (a Loom task completing on its own
+                // thread does that within microseconds): not a deadlock — the next step wakes it.
+                if (p.isDone()) return;
+                external = true; p.machineWaiter = me; (hooked == null ? hooked = new ArrayList<>() : hooked).add(p);
+                continue;
+            }
+            if (on instanceof Deadline d) { external = true; nearest = Math.min(nearest, d.at); continue; }
+            if (on instanceof java.util.function.BooleanSupplier) { external = true; continue; }   // opaque host wait: fallback only
+            if (on instanceof MezzeVariant v && v.getTag() == tagOnPromises()) {
+                Object payload = v.getPayloadFieldByName("ids");
                 int n = seqSize(payload);
                 for (int i = 0; i < n; i++) {
                     MezzePromise p = promisesById.get(asLong(seqAt(payload, i)));
-                    if (p != null && !p.isDone() && !p.machineOwned) external = true;
+                    if (p == null || p.isDone()) return;        // settled since the wake check: the next step wakes it
+                    if (!p.machineOwned) { external = true; p.machineWaiter = me; (hooked == null ? hooked = new ArrayList<>() : hooked).add(p); }
                 }
             }
         }
         if (external) {
-            LockSupport.parkNanos(50_000L);
+            // Idle until something can have changed: a hooked promise settles (its completer unparks
+            // machineWaiter), a foreign thread posts to the inbox (it unparks idler), the nearest
+            // deadline passes, or the 1 ms fallback. Register, then RE-CHECK before parking (Dekker:
+            // both sides' stores are volatile) so a settlement racing the registration is not missed.
+            b.idler = me;
+            try {
+                boolean settled = false;
+                if (hooked != null) for (MezzePromise p : hooked) if (p.isDone()) { settled = true; break; }
+                if (!settled && b.inbox.isEmpty()) {
+                    long wait = 1_000_000L;
+                    if (nearest != Long.MAX_VALUE) wait = Math.max(1_000L, Math.min(wait, nearest - System.nanoTime()));
+                    LockSupport.parkNanos(this, wait);
+                }
+            } finally {
+                b.idler = null;
+                if (hooked != null) for (MezzePromise p : hooked) if (p.machineWaiter == me) p.machineWaiter = null;
+            }
             return;
         }
         StringBuilder sb = new StringBuilder("deadlock: ").append(b.parked.size())
@@ -693,6 +746,7 @@ public final class TaskMachine {
     }
 
     private static String describe(ParkRequest pr) {
+        if (pr.on instanceof MezzePromise) return "a promise (host-level await)";
         if (pr.on instanceof java.util.function.BooleanSupplier) return "a host-level wait";
         if (pr.on instanceof MezzeVariant on) {
             String c = on.getConstructorName();

@@ -1025,6 +1025,18 @@ interpreter 8257/8257, cli 357/357; `ForeignThreadParkTest` 4/4 (a Loom task par
 cont-capable performer, several at once while the body runs, a Loom task awaiting a Coop promise, a Loom
 task spawning a cooperative task on the outer boundary).
 
+**Idle hook, 2026-11-19 (third pass).** An idle boundary — every task parked on something only the
+outside world settles — used to poll every 50 us. Now the idling carrier registers itself on each
+external promise it waits on (`MezzePromise.machineWaiter`, woken by the same `unparkWaiter` as the
+ordinary waiter), a host-level promise await parks the task on the PROMISE itself
+(`awaitPromiseOnCarrier`), a time-based host wait carries its deadline (`Deadline`) so the idle park
+lasts until the nearest one, a foreign post to the inbox unparks the idler, and a 1 ms fallback remains
+for opaque host waits. Register-then-re-check keeps a settlement racing the registration from being
+missed (both stores volatile). MultiTier re-measured with BUG 76 moot: 12/12 correct with it on, peak
+equal (spawn+await 777 vs 771, yield 41 vs 39), first timed run of yield_now SLOWER with it on
+(288 vs 51 ns at 200k) — the default stays `engine.MultiTier=false`. Native image re-verified after the
+second pass (yield_now 89 ns, spawn+await 954, fan-out 673, seq fold with await 1030 at 200k).
+
 Still owed on the carrier design: the per-spawn cost (spawn+await = 2 handoffs ≈ 300 ns each plus
 ~250 ns of promise/map bookkeeping — the fan-out kernel shows the floor at 216); a foreign-thread
 park (a Mezze callback on a Loom/HTTP thread calling `cont.park` is refused with a clear message —

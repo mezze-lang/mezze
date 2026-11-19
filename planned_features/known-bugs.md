@@ -8370,7 +8370,9 @@ seq fold eff 9879 vs 10039, list fold eff 12764 vs 12714). Tests: `IterRouteDeci
 `replaces` guard may not guess; inflate (or read the stub's `FunctionIR.maySuspend`) before
 answering, or make the resumable route its own non-replacing specialization.
 
-## BUG 72 — FIX IN VERIFICATION 2026-11-18: LoomAsync spawn+await hangs nondeterministically past a few thousand iterations (main AND branch)
+## BUG 72 — FIXED 2026-11-19 (verified on the branch; main still carries the bug): LoomAsync spawn+await hangs nondeterministically past a few thousand iterations
+
+**Verified 2026-11-19:** `contloop` k5 (LoomAsync spawn+await per element) runs 2,000,000 elements per process, repeatedly, on the branch (8.5 us/elem) — the Dekker fence (`WAITER.setVolatile`) holds. Main has not received the fix (the feature branch is not merged).
 
 `contsurface` kernel 11 (spawn one task, await it, per element; 1000-element blocks): n=1000 and
 n=3000 run at 12–19 us/op on both builds; n=6000 timed out at 300 s on both builds twice, then
@@ -8389,7 +8391,9 @@ acquire LOAD has no StoreLoad barrier on x86 (TSO lets the load pass the buffere
 waiter can read a stale PENDING after the completer has read a null waiter: nobody unparks.
 FIX: `WAITER.setVolatile(...)` at both await sites (a volatile store is a full fence).
 
-## BUG 73 — FIX IN VERIFICATION 2026-11-18 (MAIN): `./gradlew :cli:nativeCompile` fails — blocklisted methods reachable for runtime compilation, through `InlineMapContainsKey`
+## BUG 73 — FIXED 2026-11-19 (verified on the branch): `./gradlew :cli:nativeCompile` fails — blocklisted methods reachable for runtime compilation, through `InlineMapContainsKey`
+
+**Verified 2026-11-19:** `:cli:nativeCompile` built three times today on the branch (`@TruffleBoundary` on `InlineMapContainsKey.doSet` and `MezzeContext.taskMachine()`), and a `mez build --native` user binary ran every park kernel. Main still needs the same two annotations.
 
 Both the main head (6a4594d07, worktree-type-soundness) and worktree-continuations fail
 native-image at analysis in ~70 s: `VMError$HostedError: Blocklisted methods are reachable for
@@ -8464,6 +8468,16 @@ so the built app's regime (precompiled stdlib, eager compilation order) is part 
 compilation costs warm-up, not peak (measured beside it). `MEZZE_ENGINE_OPTS` can override. STILL
 OPEN upstream: a first-tier compiled yield-bearing BDSL root whose branch profile was one-sided takes
 the untaken branch instead of deoptimising; needs a Truffle-level minimal repro.
+
+## BUG 78 — OPEN 2026-11-19 (flake, text not captured): one uncaught exception on a ForkJoinPool worker at the end of the idle-wake probe, 1 run in 17
+
+The probe (200 × a `perform LoomAsync in await (Async.spawn { sleep 2 ms })` under an outer `CoopAsync`,
+scratch project `idle`) printed `Exception in thread "ForkJoinPool-1-worker-3"` once, interleaved
+with the correct final line (`sum=20100 wall_ms=517`); the program's result was right and the exit
+was clean. 12 further runs with stderr captured: 0/12. Suspects: a Loom task's virtual thread
+unwinding during context close (`MachineClosed` or a Truffle cancellation reaching the FJP worker),
+or the `machineWaiter` unpark racing the exit. To chase: run the probe in a loop with stderr to a
+file until it reproduces; the text names the thrower.
 
 ## BUG 77 — FIXED 2026-11-18: the task machine's promise bookkeeping grew without bound, and every task switch defeated the handler-lookup memo
 
