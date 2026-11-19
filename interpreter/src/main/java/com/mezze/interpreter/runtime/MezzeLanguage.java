@@ -1147,6 +1147,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
      */
     @Override
     protected void disposeContext(MezzeContext context) {
+        context.shutdownTaskMachine();   // the cooperative carriers are pooled virtual threads
         // Sockets and thread pools a native started for this context, before
         // anything else — they can still be running guest code.
         context.closeRegisteredResources();

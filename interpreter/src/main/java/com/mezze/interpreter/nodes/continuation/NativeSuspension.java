@@ -26,7 +26,7 @@ public final class NativeSuspension implements TruffleObject {
 
     /** A/B kill switch for the per-callback-result test (MEZZE_RESUMABLE_NATIVES=0);
      *  a static final the JIT folds, so OFF is exactly the pre-C4 loop. */
-    public static final boolean ENABLED = !"0".equals(System.getenv("MEZZE_RESUMABLE_NATIVES"));
+    public static final boolean ENABLED = "1".equals(System.getenv("MEZZE_RESUMABLE_NATIVES"));   // OFF: a park blocks its carrier, natives run plain loops
 
     /** Is this value a suspension a native must stop at? */
     public static boolean isSuspension(Object v) {

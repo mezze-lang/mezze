@@ -8839,7 +8839,7 @@ public final class BytecodeCompiler {
     /** A/B kill switch for the suspension-propagation wrapper (read at run time —
      *  the lowering runs in the process that executes): MEZZE_SUSPEND_PROPAGATION=0. */
     private static final boolean SUSPEND_PROPAGATION =
-        !"0".equals(System.getenv("MEZZE_SUSPEND_PROPAGATION"));
+        "1".equals(System.getenv("MEZZE_SUSPEND_PROPAGATION"));   // OFF: a park blocks its carrier; nothing propagates (see TaskMachine)
 
     private static boolean needsSuspendPropagation(NodeIR node) {
         if (!SUSPEND_PROPAGATION) return false;

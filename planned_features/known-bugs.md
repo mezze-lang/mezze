@@ -8406,7 +8406,7 @@ NO way to build a native binary from either tree. Consequence: "BDSL yield under
 call (the 1.33x over the NativeDispatch path was the record and dispatch, not the hash), and
 runtime compilation no longer sees `Object.hashCode`/`Objects.equals` on arbitrary elements.
 
-## BUG 75 — MITIGATED 2026-11-18 (parser determinism still OPEN): the BDSL parser is not reproducible on a re-parse, and a re-parse replaced every runtime error inside continuation code with a ClassCastException
+## BUG 75 — MITIGATED 2026-11-18 (parser determinism still OPEN; the continuation trigger is gone since 2026-11-19 — no root yields any more): the BDSL parser is not reproducible on a re-parse, and a re-parse replaced every runtime error inside continuation code with a ClassCastException
 
 Roots were parsed with `BytecodeConfig.DEFAULT` (no source info). The first guest error made
 Truffle materialise a stack trace → `ensureSourceInformation` → `BytecodeRootNodes.update` →
@@ -8428,7 +8428,14 @@ the same non-reproducibility. MITIGATED 2026-11-18 by parsing `WITH_SOURCE` from
 error-triggered re-parse; hot path unchanged). STILL OPEN: the parser must become a pure function
 of the FunctionIR (snapshot the inputs at first parse) so the debugger's re-parse is sound.
 
-## BUG 76 — OPEN 2026-11-18: under first-tier compiled code, the propagation wrapper's yield fired on a non-suspension
+## BUG 76 — MOOT 2026-11-19 (was OPEN 2026-11-18): under first-tier compiled code, the propagation wrapper's yield fired on a non-suspension
+
+**MOOT 2026-11-19:** the carrier machine (see the design doc's "THE CARRIER MACHINE" block) emits no
+propagation wrappers by default — a park blocks its virtual-thread carrier, nothing yields — so the
+miscompiled shape is not in any built program. `MEZZE_SUSPEND_PROPAGATION=1` re-enables the wrappers
+for the record; the upstream Truffle repro is still owed if that path is ever revived. `engine.MultiTier
+=false` stays the default for now (re-measure warm-up with it back on; nothing needs it any more).
+
 
 `bench/cases/contloop` kernel 9 (spawn 1000 tasks, then `seq::fold` awaiting each promise; the
 first 1000 awaits park, the next 1000 find settled promises) died in ~60% of runs:

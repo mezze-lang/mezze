@@ -172,6 +172,10 @@ internal class ParkThroughNativeLedger {
     }
 
     fun check() {
+        // Retired with the carrier machine: a park inside a native callback blocks its carrier and
+        // the native never sees it, so there is nothing to refuse. Kept behind MEZZE_V0513=1 for
+        // the record of what the static rule saw.
+        if (System.getenv("MEZZE_V0513") != "1") return
         if (candidates.isEmpty() || contCapable.isEmpty()) return
         for (c in candidates) {
             for (r in c.reaches) {

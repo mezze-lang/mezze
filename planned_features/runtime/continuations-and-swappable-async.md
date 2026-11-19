@@ -959,6 +959,59 @@ registration instead of its type: the chain's native runs its callbacks unless i
 one of the DEFERRING natives (`ResumableNatives.DEFERRING`, the spawn family). Both
 spellings are now V0513 at build; the runtime diagnosis keeps the function-value route.
 
+**THE CARRIER MACHINE — REDESIGNED AND LANDED 2026-11-19. A suspended task is a parked virtual
+thread, not a chain of BDSL continuations.** Why: the BDSL design's park floor was boxing
+elimination — `long` slots across continuation frames made the interpreter's compiled helpers
+not-entrant on every resume (386 ns a yield with BE on, 98 off; BE is a 3.8x win on loops and stays).
+And every "a park cannot get through X" case (comparator natives, Java callbacks, polyglot frames,
+the V0513 rule, the resumable-native registry, the propagation wrappers, BUG 76's tier-1 miscompile,
+BUG 75's re-parse trigger) existed only because a continuation has to be CAPTURED through every frame.
+Now nothing is captured: each task runs on a CARRIER (a pooled virtual thread entered through
+`Env.newTruffleThreadBuilder`), exactly one carrier holds the BATON at a time, and `cont.park` is a
+blocking call on the carrier — it hands the baton to the next runnable task and waits. The thread that
+entered the perform parks once, until the boundary finishes; the carrier giving up the baton runs the
+scheduler step itself (pick → `drive` → hand over, or wake parked, or tear down / deadlock), so every
+handoff is virtual-to-virtual. Sequential semantics are unchanged (never two tasks at once, `drive`
+stays deterministic, the per-task handler chain AND the performer scope variable travel with the task).
+`TaskMachine.java` is the whole mechanism (~600 lines); `ContBinding.park` blocks; the propagation
+wrappers (`MEZZE_SUSPEND_PROPAGATION=1`), the resumable natives (`MEZZE_RESUMABLE_NATIVES=1`) and
+V0513 (`MEZZE_V0513=1`) are opt-in relics kept for the record.
+
+What it took to get right, each found by a failing test: (1) context close waits for every polyglot
+thread, so the carrier pool lives only while a boundary is open and is released when the last one
+closes (plus `disposeContext` → `shutdownTaskMachine` as the backstop); (2) a boundary that FAILS
+(deadlock, teardown exhaustion) with tasks still parked must unwind those carriers or the close hangs
+— they are woken one at a time with an ABANDON marker that throws `BoundaryAbandoned` out of the park;
+(3) `wakeParked` runs BEFORE `drive` picks, so a task that just yielded is back in the ready set the
+scheduler sees (the LIFO-drive test caught the order); (4) the pool is LIFO so an ending carrier runs
+the next fresh task itself — no thread switch; (5) a handoff through park/unpark alone costs ~400 ns
+and, measured with JFR on contloop k2, 45% of the kernel sat in `ForkJoinPool.deactivate`/
+`runWorker` — the baton is now SPUN on for up to 5 us (`Thread.onSpinWait`, both carriers stay
+mounted) before a real park; off when the virtual-thread scheduler has one worker
+(`MEZZE_COOP_SPIN_NANOS` overrides); computed per machine instance, not at image build time.
+
+Measured (bench/cases/contloop, 2M elements, dev launcher, JVM; ns per element; BDSL design in
+brackets): yield_now 44 [386]; park on `{} -> True` 70 [~400]; spawn+await 842 [906]; seq fold with
+await 862, iter map→fold with await 890, list fold with await 884 [the resumable-native routes, 10–23 us
+before tuning]; fan-out 216 [192]; LoomAsync spawn+await 8548 for reference. Spin off: spawn+await
+2147. Fast path (contsurface, 20M, main vs branch): control 709/688, iter pure 1977/1333, 1124/1120,
+seq fold eff 10030/9450, iter eff 20151/20264 — the dynamic tax is gone with the wrappers, and the
+pure iter chain is FASTER than main because the resumable-route guards left the fused op. Tests:
+277 across 40 async/continuation/scoped classes green; the two "a park inside a comparator is a loud
+error" tests became "it just parks and the sort completes"; the V0513 spec became four acceptances;
+`IterRouteDecisionTest` asserts NO cursor route even inside a boundary. Gates: typechecker 5502/5502,
+interpreter 8253/8253 (incl. testTiming), cli 357/357. NATIVE IMAGE VERIFIED: `:cli:nativeCompile` builds, a
+`mez build --native` of contloop runs every park shape — 200k elements: yield_now 113 ns, spawn+await
+1151, fan-out 418, seq fold with await 1213 (no JIT warm-up curve to hide behind; the spin bound is
+computed at run time, not image build time).
+
+Still owed on the carrier design: the per-spawn cost (spawn+await = 2 handoffs ≈ 300 ns each plus
+~250 ns of promise/map bookkeeping — the fan-out kernel shows the floor at 216); a foreign-thread
+park (a Mezze callback on a Loom/HTTP thread calling `cont.park` is refused with a clear message —
+an inbox so it can park the boundary is the next step); a multi-carrier budget for `parallel`-style
+performers (the single-active discipline is a property of CoopAsync's `drive`, not of the machine);
+the idle hook (an `OnPromises` wait on an external promise polls at 50 us).
+
 **MEASURED AND FIXED, 2026-11-18 (bench/cases/contsurface + contloop, main vs branch dev launchers,
 slope method, one kernel per process).** Before the fixes: no tax where nothing parks, but iter chains
 +30% even PURE (a recursive dynamic guard made the root bail out of PE), effectful seq/list callbacks

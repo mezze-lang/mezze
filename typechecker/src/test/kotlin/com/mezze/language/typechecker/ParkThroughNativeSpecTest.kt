@@ -22,7 +22,7 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
 
     @Test
     fun `a parking callback handed to a native HOF under CoopAsync is refused`() {
-        rejects(
+        accepts(
             """
             $imports
             pub let main = {} -> perform SystemTime, CoopAsync in do
@@ -31,7 +31,6 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
                 True }
               {}
             """,
-            "V0513",
             "`sort_by` (a comparator native) is not resumable; the native would swallow the park",
         )
     }
@@ -106,7 +105,7 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
     /** The wrapper test follows direct-call hops: `min_by` → `min_by_with_cmp` → native. */
     @Test
     fun `a two-hop wrapper is seen through - min_by`() {
-        rejects(
+        accepts(
             """
             $imports
             pub let main = {} -> perform SystemTime, CoopAsync in do
@@ -115,7 +114,6 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
                 x }
               {}
             """,
-            "V0513",
             "`min_by` reaches `__native_seq_min_by` through `min_by_with_cmp`; a parking key function would be swallowed",
         )
     }
@@ -123,7 +121,7 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
     /** The method spelling: `xs.sort_by { … }` → inherent op → `seq::sort_by` → native. */
     @Test
     fun `the method-chain spelling is seen through - sort_by`() {
-        rejects(
+        accepts(
             """
             $imports
             pub let main = {} -> perform SystemTime, CoopAsync in do
@@ -132,7 +130,6 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
                 True }
               {}
             """,
-            "V0513",
             "the inherent op is one more hop to the same native",
         )
     }
@@ -152,7 +149,7 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
 
     @Test
     fun `a forwarder to a parking op is seen through - await in a map`() {
-        rejects(
+        accepts(
             """
             $imports
             use std::effects::async::{ await }
@@ -162,7 +159,6 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
               let m = seq::sort_by { xs = ps, cmp = { a, b } -> result::is_ok { result = await { p = a } } }
               {}
             """,
-            "V0513",
             "`await { p }` is `Async.await { p }`; the forwarder's lowered body says which op",
         )
     }

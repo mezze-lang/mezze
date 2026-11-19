@@ -192,6 +192,12 @@ public final class MezzeContext {
     /** BUG 73: the lazy construction (an IdentityHashMap inside the machine) must not be
      *  reachable from partially-evaluated code — `ContBinding` calls this from a node — or
      *  native-image's runtime-compilation analysis blocklists it. */
+    /** Context disposal: stop the pooled carrier threads, if a machine was ever created. */
+    public void shutdownTaskMachine() {
+        var m = taskMachine;
+        if (m != null) m.shutdown();
+    }
+
     @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     public com.mezze.interpreter.nodes.continuation.TaskMachine taskMachine() {
         var m = taskMachine;

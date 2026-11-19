@@ -239,24 +239,21 @@ class CoopAsyncSchedulerTest {
      *  itself names the error at once (measured before any of it: `after` never
      *  printed and the program finished). */
     @Test
-    fun `a park inside a native callback is a loud error, not a dropped continuation`() {
-        val e = assertThrows(Exception::class.java) {
-            lines(program(imports, """
-                use std::collections::seq
-                let each = { xs, f } -> seq::sort_by { xs = xs, cmp = f }
-                let via = { g } -> g { xs = [1, 2], f = { a, b } -> do
-                  println { msg = "before" }
-                  yield_now {}
-                  println { msg = "after" }
-                  True }
-                perform Console, SystemTime, CoopAsync in do
-                  via { g = each }
-                  println { msg = "done" }
-            """))
-        }
-        val msg = e.message ?: ""
-        assertTrue(msg.contains("comparator") && msg.contains("cannot park"), "named by the native, at once: $msg")
-        assertTrue(msg.contains("map"), "and what to do instead: $msg")
+    fun `a park inside a comparator just parks - the carrier blocks and the sort completes`() {
+        val out = lines(program(imports, """
+            use std::collections::seq
+            let each = { xs, f } -> seq::sort_by { xs = xs, cmp = f }
+            let via = { g } -> g { xs = [1, 2], f = { a, b } -> do
+              println { msg = "before" }
+              yield_now {}
+              println { msg = "after" }
+              True }
+            perform Console, SystemTime, CoopAsync in do
+              via { g = each }
+              println { msg = "done" }
+        """))
+        assertTrue(out.contains("after"), "the comparator resumed after its park: $out")
+        assertEquals("done", out.last(), "the sort completed: $out")
     }
 
     /** BUG 65: the stdlib's own helpers looped with native HOFs over `await`/`cancel`;
@@ -336,22 +333,18 @@ class CoopAsyncSchedulerTest {
      *  reported BY THE NATIVE, by name and at once (OrderCallbacks), here through a
      *  function VALUE the static rule cannot see. */
     @Test
-    fun `a host exception after a dropped park is reported as the dropped park`() {
-        val e = assertThrows(Exception::class.java) {
-            lines(program(imports, """
-                use std::collections::seq
-                perform Console, SystemTime, CoopAsync in do
-                  let ps = [1, 2].map { f = { x } -> Async.spawn { f = {} -> x * 10 } }
-                  let sorter = { xs, cmp } -> seq::sort_by { xs = xs, cmp = cmp }
-                  let via = { g } -> g { xs = ps, cmp = { a, b } -> result::is_ok { result = await { p = a } } }
-                  let rs = via { g = sorter }
-                  println { msg = (seq::size { xs = rs }).to_str {} }
-            """))
-        }
-        val msg = e.message ?: ""
-        assertTrue(msg.contains("comparator") && msg.contains("cannot park"), "named at the native, at once: $msg")
-        assertTrue(!msg.contains("ClassCastException"), "no host exception text: $msg")
-    }
+    fun `an await inside a comparator through a function value just works`() = assertEquals(
+        listOf("2"),
+        lines(program(imports, """
+            use std::collections::seq
+            perform Console, SystemTime, CoopAsync in do
+              let ps = [1, 2].map { f = { x } -> Async.spawn { f = {} -> x * 10 } }
+              let sorter = { xs, cmp } -> seq::sort_by { xs = xs, cmp = cmp }
+              let via = { g } -> g { xs = ps, cmp = { a, b } -> result::is_ok { result = await { p = a } } }
+              let rs = via { g = sorter }
+              println { msg = (seq::size { xs = rs }).to_str {} }
+        """)),
+    )
 
     /** C4 for iter: consumers pull through resumable cursors when a callback in the
      *  chain or their own may suspend. Each stage kind keeps its own pending step. */

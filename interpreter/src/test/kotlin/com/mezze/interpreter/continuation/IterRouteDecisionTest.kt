@@ -55,7 +55,7 @@ class IterRouteDecisionTest {
     }
 
     @Test
-    fun `an effectful callback inside a cont-capable boundary takes the resumable route`() {
+    fun `a parking callback inside a boundary stays on the plain route - the carrier blocks`() {
         val before = IterNatives.RESUMABLE_DECISIONS.get()
         val r = MezzeTestHelper.run("""
             use std::collections::iter
@@ -68,6 +68,8 @@ class IterRouteDecisionTest {
                 x }, init = 0, f = { acc, x } -> acc + x }
         """.trimIndent())
         assertEquals(55L, r)
-        assertTrue(IterNatives.RESUMABLE_DECISIONS.get() > before, "inside a boundary the parking chain must be routed to the cursor")
+        // Carrier machine: a park blocks the carrier inside the native's own loop, so even a
+        // parking chain inside a boundary stays on the plain push walk.
+        assertEquals(0L, IterNatives.RESUMABLE_DECISIONS.get() - before, "no cursor route under the carrier machine")
     }
 }
