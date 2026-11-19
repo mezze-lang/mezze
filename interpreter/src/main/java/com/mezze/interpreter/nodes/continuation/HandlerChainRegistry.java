@@ -859,6 +859,26 @@ public final class HandlerChainRegistry {
      *  that mentions `cont` is active — i.e. inside a cont-capable perform boundary. */
 
     @TruffleBoundary
+    /** This thread's effect state, for a caller that will touch it many times (a carrier). */
+    static EffectState state() { return STATE.get(); }
+
+    /** {@link #installTaskChain(HandlerChainEntry[])} on a known state: no thread-local read. */
+    static Object[] installTaskChain(EffectState s, HandlerChainEntry[] chain) {
+        Object[] prev = new Object[]{s.taskChain, s.taskChainBaseDepth, s};
+        s.taskChain = chain;
+        s.taskChainBaseDepth = s.depth;
+        if (SINGLE_THREADED_EFFECTS.isValid()) SINGLE_THREADED_EFFECTS.invalidate();
+        return prev;
+    }
+    static Object installScopeVar(EffectState s, Object scope) {
+        if (scope == null) return null;
+        Object prev = s.currentScope;
+        s.currentScope = scope;
+        return prev;
+    }
+    static void restoreScopeVar(EffectState s, Object prev) { s.currentScope = prev; }
+    static HandlerChainEntry[] installedTaskChain(EffectState s) { return s.taskChain; }
+
     public static Object[] installTaskChain(HandlerChainEntry[] chain) {
         EffectState s = STATE.get();
         Object[] prev = new Object[]{s.taskChain, s.taskChainBaseDepth, s};   // [2]: the state, so restore skips the thread-local read

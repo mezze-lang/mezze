@@ -198,16 +198,17 @@ public final class MezzeContext {
         if (m != null) m.shutdown();
     }
 
-    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
     public com.mezze.interpreter.nodes.continuation.TaskMachine taskMachine() {
         var m = taskMachine;
-        if (m == null) {
-            synchronized (this) {
-                m = taskMachine;
-                if (m == null) taskMachine = m = new com.mezze.interpreter.nodes.continuation.TaskMachine();
-            }
+        return m != null ? m : createTaskMachine();   // the hot path is one volatile read
+    }
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+    private com.mezze.interpreter.nodes.continuation.TaskMachine createTaskMachine() {
+        synchronized (this) {
+            var m = taskMachine;
+            if (m == null) taskMachine = m = new com.mezze.interpreter.nodes.continuation.TaskMachine();
+            return m;
         }
-        return m;
     }
 
     public MezzeContext(MezzeLanguage language, Env env) {

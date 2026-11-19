@@ -263,6 +263,8 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
     public volatile Object chainResumeFn;
     /** The `cont` record (`{ park, abort }`) bound in performer op bodies. */
     public volatile Object contRecord;
+    /** The `yield_now` predicate, built once per language (see ContBinding.readyPredicate). */
+    public volatile com.mezze.interpreter.values.MezzeFunction readyPredicate;
     private final java.util.concurrent.atomic.AtomicLong bdslHits = new java.util.concurrent.atomic.AtomicLong();
     private final java.util.concurrent.atomic.AtomicLong bdslMisses = new java.util.concurrent.atomic.AtomicLong();
 

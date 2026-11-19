@@ -123,10 +123,11 @@ pub let sleep: { ms: Int } -> {} <Time> = { ms } ->
   Time.sleep { d = duration_millis { n = ms } }
 
 ## Voluntarily yield the current task's execution slot.
-## Give the other tasks a turn. Not an op: it is `park` on a condition that already holds,
-## which every performer answers on its next turn (a scheduler re-queues the task behind the
-## others; a thread-per-task performer returns at once).
-pub let yield_now: {} -> {} <Async> = {} -> Async.park { predicate = {} -> True }
+## Give the other tasks a turn. Not an op: it is `park` on a condition that already holds.
+## The predicate is the runtime's own `{} -> True`, which the task machine recognises by
+## identity (no predicate call, the task goes straight behind the others) and a
+## thread-per-task performer answers with a thread yield.
+pub let yield_now: {} -> {} <Async> = {} -> Async.park { predicate = __native_ready_predicate {} }
 
 ## Suspend until predicate returns True.
 pub let park: { predicate: {} -> Bool <...> } -> {} <Async, ...> = { predicate } ->
@@ -310,7 +311,7 @@ pub type ParkOutcome = |
   ParkCancelled { reason: CancelReason },
 |
 
-pub newtype PromiseId = Int
+pub newtype PromiseId = __NativePromiseRef
 pub newtype TaskId = Int
 pub newtype WaitSetId = Int
 

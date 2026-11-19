@@ -24,6 +24,32 @@ import com.oracle.truffle.api.frame.VirtualFrame;
 public final class ContBinding {
     private ContBinding() {}
 
+    /**
+     * The predicate `yield_now` parks on: a real `{} -> True` the machine recognises BY IDENTITY, so
+     * a yield costs no predicate call and no parked-list round trip (`TaskMachine.park`), and a
+     * thread-per-task performer answers it with `Thread.yield`. Handed out by
+     * `__native_ready_predicate`.
+     */
+    public static MezzeFunction readyPredicate() {
+        MezzeLanguage language = MezzeLanguage.get(null);
+        MezzeFunction cached = language.readyPredicate;
+        if (cached != null) return cached;
+        return buildReady(language);
+    }
+
+    @TruffleBoundary
+    private static synchronized MezzeFunction buildReady(MezzeLanguage language) {
+        if (language.readyPredicate != null) return language.readyPredicate;
+        FrameDescriptor fd = FrameDescriptor.newBuilder().build();
+        MezzeNode body = new MezzeNode() {
+            @Override public Object execute(VirtualFrame frame) { return Boolean.TRUE; }
+        };
+        RootCallTarget target = new MezzeRootNode(language, fd, body, "ready", 0, 1, new int[0]).getCallTarget();
+        MezzeFunction f = new MezzeFunction(target, "ready", new Object[0]);
+        language.readyPredicate = f;
+        return f;
+    }
+
     public static Object contRecord() {
         MezzeLanguage language = MezzeLanguage.get(null);
         Object cached = language.contRecord;

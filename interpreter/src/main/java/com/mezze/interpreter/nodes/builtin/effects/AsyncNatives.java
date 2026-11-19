@@ -179,7 +179,6 @@ public final class AsyncNatives {
          *  ~5% of a spawn+await). {@code machineId} is minted by the machine that first parked on
          *  this promise (0 = none); {@code machineOwned} marks a promise the machine's own task
          *  settles, which is what tells a wait on it from a wait on the outside world. */
-        public long machineId;
         public boolean machineOwned;
         /** The task machine's idle carrier waiting on this promise, if any — woken on settlement
          *  beside the ordinary {@code waiter}. Volatile on both sides (Dekker with the re-check). */
@@ -299,7 +298,9 @@ public final class AsyncNatives {
                     executingThread.interrupt();
                 }
                 java.util.function.Consumer<Object> hook = cancelHook;
-                if (hook != null) {
+                if (machineTask != null) {             // a task machine's promise: no per-spawn hook object
+                    com.mezze.interpreter.nodes.continuation.TaskMachine.cancelFromPromise(this, reason);
+                } else if (hook != null) {
                     try { hook.accept(reason); } catch (Throwable ignored) { /* hook errors don't unwind cancel */ }
                 }
                 unparkWaiter();
@@ -327,7 +328,9 @@ public final class AsyncNatives {
                     executingThread.interrupt();
                 }
                 java.util.function.Consumer<Object> hook = cancelHook;
-                if (hook != null) {
+                if (machineTask != null) {             // a task machine's promise: no per-spawn hook object
+                    com.mezze.interpreter.nodes.continuation.TaskMachine.cancelFromPromise(this, reason);
+                } else if (hook != null) {
                     try { hook.accept(reason); } catch (Throwable ignored) { /* hook errors don't unwind cancel */ }
                 }
                 unparkWaiter();
@@ -1143,6 +1146,7 @@ public final class AsyncNatives {
     @TruffleBoundary
     public static boolean parkUntilDeadline(MezzeRecord args, IndirectCallNode callNode) {
         MezzeFunction predicate = getFunction(args, "predicate");
+        if (predicate == com.mezze.interpreter.nodes.continuation.ContBinding.readyPredicate()) { Thread.yield(); return true; }
         long ms = getLong(args, "ms");
         // A non-positive deadline is a poll: check once, do not wait.
         long deadline = System.nanoTime() + Math.max(0L, ms) * 1_000_000L;
@@ -1167,6 +1171,7 @@ public final class AsyncNatives {
     @TruffleBoundary
     public static MezzeRecord parkUntil(MezzeRecord args, IndirectCallNode callNode) {
         MezzeFunction predicate = getFunction(args, "predicate");
+        if (predicate == com.mezze.interpreter.nodes.continuation.ContBinding.readyPredicate()) { Thread.yield(); return MezzeRecord.empty(); }
         long backoffNanos = 1_000L; // 1µs to start
         final long maxBackoffNanos = 1_000_000L; // 1ms cap
         while (true) {
@@ -1397,14 +1402,24 @@ public final class AsyncNatives {
         PENDING_SINGLETON = v;
         return v;
     }
+    // Tags and shapes resolved once: `inspect` runs on every await, and a name lookup in the
+    // tag registry plus a shape lookup by field-name list cost ~30 ns each (measured, JFR).
+    private static volatile int TAG_PROMISE_COMPLETED = -1, TAG_PROMISE_FAILED = -1;
+    private static volatile com.mezze.interpreter.values.MezzeRecord.Shape SHAPE_VAL, SHAPE_ERR;
     private static MezzeVariant promiseStateCompleted(Object val) {
-        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("PromiseCompleted");
-        MezzeRecord rec = MezzeRecord.fromFields(new String[]{"val"}, new Object[]{val});
+        int tag = TAG_PROMISE_COMPLETED;
+        if (tag < 0) TAG_PROMISE_COMPLETED = tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("PromiseCompleted");
+        com.mezze.interpreter.values.MezzeRecord.Shape sh = SHAPE_VAL;
+        if (sh == null) SHAPE_VAL = sh = com.mezze.interpreter.values.ShapeCache.getOrCreateAllObjects(new String[]{"val"});
+        MezzeRecord rec = new MezzeRecord(sh, null, null, new Object[]{val});
         return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, rec);
     }
     private static MezzeVariant promiseStateFailed(Object errVariant) {
-        int tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("PromiseFailed");
-        MezzeRecord rec = MezzeRecord.fromFields(new String[]{"err"}, new Object[]{errVariant});
+        int tag = TAG_PROMISE_FAILED;
+        if (tag < 0) TAG_PROMISE_FAILED = tag = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("PromiseFailed");
+        com.mezze.interpreter.values.MezzeRecord.Shape sh = SHAPE_ERR;
+        if (sh == null) SHAPE_ERR = sh = com.mezze.interpreter.values.ShapeCache.getOrCreateAllObjects(new String[]{"err"});
+        MezzeRecord rec = new MezzeRecord(sh, null, null, new Object[]{errVariant});
         return MezzeVariant.singlePayload(MezzeVariant.TagRegistry.getGlobal(), tag, rec);
     }
 

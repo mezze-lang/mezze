@@ -1101,6 +1101,27 @@ the two scope hooks. `park_until` stays an op so the performer, not the caller, 
 `async` effect owns `wait`/`timeout` the same way; ZIO and Eio put the clock in the type or pass it as a
 value instead, and that trade was weighed and declined (see the `Time` discussion above).
 
+**Per-operation costs, 2026-11-19 (eighth pass) — from two JFR profiles of the working side.** What a
+park spent, measured: `ThreadLocal.get` 14–20% (the handler-chain state read once per install, the
+scope variable, the current task); `inspect` rebuilding its variant tag by NAME and its record shape by
+field-name LIST on every call (~30 ns each); `promise_id` registering an id in a map that `forget` then
+emptied; a one-element id list per await; a `yield_now` that parked into the parked list only to be pulled
+out by the next step after evaluating `{} -> True` through a trampoline; a Truffle boundary on the machine
+accessor; a cancel-hook lambda per spawn. Fixes: a carrier reads its effect state ONCE and the machine
+passes it to every install/restore (overloads on `HandlerChainRegistry`); the current task lives on the
+carrier (one thread-local read, no set/remove per task); cached tags and shapes in the promise natives;
+`PromiseId` IS the promise (an opaque `__NativePromiseRef`: no map, no `forget`, BUG 77 moot by
+construction); a machine-recognised READY predicate (`ContBinding.readyPredicate`, handed out by
+`__native_ready_predicate`) so `yield_now` is detected by identity in `park` and re-queued behind the
+others without touching the parked list or calling anything — a thread-per-task performer answers it with
+`Thread.yield`; the accessor's hot path is one volatile read; cancellation reaches the machine through
+the task the promise already carries. Measured (2M, ns/elem, before → after): yield_now 77 → 54,
+spawn+await 192 → 140, seq fold with await 210 → 152, iter map→fold 222 → 165, list fold 208 → 165,
+fan-out 179 → 142; park on a real predicate 75 → 75 (its cost is the predicate call). Still above the
+40 ns the six-op `Immediately` path had: the remaining yield cost is the `__native_ready_predicate` call
+and the one-element predicate list the `park` op builds — a module-level `ready` value would remove the
+call if top-level native values are safe under the stdlib snapshot (checked next).
+
 Still owed on the carrier design: the handoff cost when the inline child does NOT apply (two carriers
 waiting on each other, ~300 ns each; the fan-out kernel is that shape at 176 ns per element); a foreign-thread
 park (a Mezze callback on a Loom/HTTP thread calling `cont.park` is refused with a clear message —

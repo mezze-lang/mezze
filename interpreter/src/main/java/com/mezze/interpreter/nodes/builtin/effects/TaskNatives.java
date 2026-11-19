@@ -27,10 +27,11 @@ public final class TaskNatives {
     }
 
     @TruffleBoundary
+    /** `PromiseId` IS the promise: an opaque reference, no registration, no map, nothing to forget. */
     public static Object promiseId(MezzeRecord args) {
         Object p = args.getField("p");
-        if (!(p instanceof AsyncNatives.MezzePromise promise)) throw new MezzeGuestException("__native_promise_id: `p` must be a Promise");
-        return machine().promiseId(promise);
+        if (!(p instanceof com.mezze.interpreter.nodes.builtin.effects.AsyncNatives.MezzePromise)) throw new MezzeGuestException("promise_id: expected a Promise, got " + p);
+        return p;
     }
 
     private static TaskMachine.RunQueue queue(MezzeRecord args) {

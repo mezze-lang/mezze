@@ -9,7 +9,10 @@ import org.junit.jupiter.api.Test
 /**
  * BUG 77: the machine's promise/task maps grew without bound — nothing removed a completed
  * promise — so every lookup, resize and GC scan paid for every promise ever created
- * (spawn+await 1.4 → 2.8 us per element from 20k to 200k). Completed work is forgotten.
+ * (spawn+await 1.4 → 2.8 us per element from 20k to 200k). First fixed by forgetting completed
+ * work; since 2026-11-19 the machine keeps NO per-promise registry at all — a `PromiseId` is the
+ * promise itself — so `LAST_BOOKKEEPING` is zero by construction and the first test pins that
+ * nothing is reintroduced. The second test is the behaviour: an await long after the wake.
  */
 class MachineBookkeepingTest {
     @BeforeEach
@@ -19,7 +22,7 @@ class MachineBookkeepingTest {
     }
 
     @Test
-    fun `three thousand spawned and awaited promises leave the maps empty`() {
+    fun `three thousand spawned and awaited promises leave nothing registered`() {
         val r = MezzeTestHelper.run("""
             use std::effects::async::{ Async, CoopAsync, await }
             use std::effects::time::{ SystemTime }

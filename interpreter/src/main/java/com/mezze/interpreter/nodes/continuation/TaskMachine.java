@@ -188,12 +188,18 @@ public final class TaskMachine {
     private final class Carrier implements Runnable {
         final Thread thread;
         volatile Task assigned;
+        /** This thread's effect state and the task it runs, read once instead of a thread-local
+         *  per operation (ThreadLocal.get was 14–20% of a park, measured). */
+        HandlerChainRegistry.EffectState es;
+        Task current;
         Carrier(Env env) {
             thread = env.newTruffleThreadBuilder(this).virtual(true).build();
             thread.setName("mezze-coop-" + (++carriersMinted));
             allCarriers.add(this);
         }
         @Override public void run() {
+            es = HandlerChainRegistry.state();
+            CURRENT_CARRIER.set(this);
             while (true) {
                 Task t;
                 long deadline = 0;
@@ -230,10 +236,10 @@ public final class TaskMachine {
     private volatile boolean closing;
     private Env env;
     private static final Task POISON = new Task(-1, null, null);
-    private static final ThreadLocal<Task> CURRENT = new ThreadLocal<>();
+    private static final ThreadLocal<Carrier> CURRENT_CARRIER = new ThreadLocal<>();
+    private static Task currentTask() { Carrier c = CURRENT_CARRIER.get(); return c == null ? null : c.current; }
 
     private final java.util.concurrent.atomic.AtomicLong nextTaskId = new java.util.concurrent.atomic.AtomicLong(1);   // foreign spawns mint too
-    private long nextPromiseId = 1;
     /** Open boundaries by their handler record, for a foreign thread to find the one it runs
      *  under through its own handler chain (identity: the record pushed by the perform IS the
      *  record in every chain snapshot taken beneath it). Read by foreign threads. */
@@ -241,12 +247,11 @@ public final class TaskMachine {
         java.util.Collections.synchronizedMap(new IdentityHashMap<>());
     /** BUG 77: the size of the promise bookkeeping when the last boundary closed (a test's view). */
     public static volatile int LAST_BOOKKEEPING = -1;
-    private final LongObjectMap<MezzePromise> promisesById = new LongObjectMap<>();
 
     // ---------------------------------------------------------------- spawn / promises
 
     public MezzePromise spawn(MezzeFunction f) {
-        Task cur = CURRENT.get();
+        Task cur = currentTask();
         boolean foreign = cur == null;
         Boundary b = cur != null ? cur.owner : boundaryOfForeignThread();
         if (b == null) throw new MezzeGuestException(
@@ -260,8 +265,7 @@ public final class TaskMachine {
         t.chain = HandlerChainRegistry.snapshotHandlerChainEntries();
         t.scope = HandlerChainRegistry.lookupScopeVar();
         t.spawnedFn = f;
-        p.machineTask = t;
-        p.setCancelHook(reason -> cancelParked(t, reason));
+        p.machineTask = t;                             // cancel reaches the machine through the task (no hook object per spawn)
         if (foreign) { b.inbox.add(t); wakeIdler(b); } // a Loom task / HTTP handler spawning under this boundary: the step queues it
         else b.ready.addLast(t);
         return p;
@@ -270,7 +274,7 @@ public final class TaskMachine {
     // ---------------------------------------------------------------- host-level waits on a carrier
 
     /** True on a thread that is a carrier running one of the machine's tasks. */
-    public static boolean onCarrier() { return CURRENT.get() != null; }
+    public static boolean onCarrier() { return currentTask() != null; }
 
     /**
      * A Java-level wait by code running ON A CARRIER — a Loom-style promise await, a sleep, a
@@ -281,7 +285,7 @@ public final class TaskMachine {
      * counts as external for the deadlock verdict (the machine cannot know who satisfies it).
      */
     public static void javaWait(java.util.function.BooleanSupplier ready) {
-        Task t = CURRENT.get();
+        Task t = currentTask();
         if (t == null) throw new IllegalStateException("javaWait off a carrier");
         while (!ready.getAsBoolean()) t.machine.park(new ParkRequest(ready, null));
     }
@@ -289,7 +293,7 @@ public final class TaskMachine {
     /** A host-level await of a promise on a carrier: the task parks on the PROMISE, so an idle
      *  boundary is woken by its settlement ({@code machineWaiter}) rather than by polling. */
     public static void awaitPromiseOnCarrier(MezzePromise p) {
-        Task t = CURRENT.get();
+        Task t = currentTask();
         if (t == null) throw new IllegalStateException("awaitPromiseOnCarrier off a carrier");
         while (!p.isDone()) t.machine.park(new ParkRequest(p, null));
     }
@@ -309,9 +313,10 @@ public final class TaskMachine {
 
     /** {@code LockSupport.parkNanos} that yields the baton when on a carrier. */
     public static void parkNanosCooperatively(long nanos) {
-        if (CURRENT.get() == null) { LockSupport.parkNanos(nanos); return; }
+        if (currentTask() == null) { LockSupport.parkNanos(nanos); return; }
         javaWait(new Deadline(System.nanoTime() + nanos));
     }
+
 
     private void cancelParked(Task t, Object reason) {
         if (t.state != PARKED || t.owner == null) return;
@@ -360,22 +365,15 @@ public final class TaskMachine {
         return null;
     }
 
-    public long promiseId(MezzePromise p) {
-        long id = p.machineId;
-        if (id == 0) {
-            id = nextPromiseId++;
-            if (p.isDone()) return id;                 // a settled promise is never registered —
-            p.machineId = id;                          // an id the machine does not know is a settled one
-            promisesById.put(id, p);
-        }
-        return id;
+    /** Cancellation of a machine promise, from the promise itself (no per-spawn hook object). */
+    public static void cancelFromPromise(MezzePromise p, Object reason) {
+        if (p.machineTask instanceof Task t && t.machine != null) t.machine.cancelParked(t, reason);
     }
 
-    /** Completed work leaves the map (BUG 77). */
-    private void forget(MezzePromise p) {
-        if (p == null) return;
-        long id = p.machineId;
-        if (id != 0) { p.machineId = 0; promisesById.remove(id); }
+    /** The promise a `PromiseId` names: the id IS the promise (an opaque reference). */
+    private static MezzePromise promiseOf(Object id) {
+        if (id instanceof MezzePromise p) return p;
+        throw new IllegalStateException("PromiseId is not a promise reference: " + (id == null ? "null" : id.getClass().getName()));
     }
 
     // ---------------------------------------------------------------- the boundary
@@ -407,7 +405,7 @@ public final class TaskMachine {
         } finally {
             boundaries.pop();
             if (handler != null) { if (b.prevForHandler != null) openByHandler.put(handler, b.prevForHandler); else openByHandler.remove(handler); }
-            LAST_BOOKKEEPING = promisesById.size();
+            LAST_BOOKKEEPING = 0;                      // BUG 77: nothing is registered any more — the id is the promise
             // The pool lives as long as some boundary is open. Context close waits for every
             // polyglot thread, so idle carriers must not outlive the last perform.
             if (boundaries.isEmpty()) releaseIdleCarriers();
@@ -431,9 +429,13 @@ public final class TaskMachine {
      * baton, or null when the boundary finished.
      */
     private Task dispatch(Boundary b) {
+        return dispatch(b, null, HandlerChainRegistry.state());
+    }
+
+    private Task dispatch(Boundary b, Task self, HandlerChainRegistry.EffectState es) {
         while (true) {
             drainInbox(b);
-            wakeParked(b);                             // first: a task that just yielded is back in the ready set BEFORE drive picks
+            wakeParked(b, es);                         // first: a task that just yielded is back in the ready set BEFORE drive picks
             if (!b.ready.isEmpty()) {
                 Task next = pick(b);
                 give(next);
@@ -531,9 +533,11 @@ public final class TaskMachine {
 
     /** Carrier side: run the task's thunk to completion under the task's handler chain. */
     private void execute(Task t) {
-        CURRENT.set(t);
-        Object[] prev = HandlerChainRegistry.installTaskChain(t.chain);
-        Object prevScope = HandlerChainRegistry.installScopeVar(t.scope);
+        Carrier me = t.carrier;
+        HandlerChainRegistry.EffectState es = me.es;
+        me.current = t;
+        Object[] prev = HandlerChainRegistry.installTaskChain(es, t.chain);
+        Object prevScope = HandlerChainRegistry.installScopeVar(es, t.scope);
         try {
             Object r = callWith(t.thunk, MezzeRecord.empty());
             t.result = r;
@@ -544,7 +548,7 @@ public final class TaskMachine {
             t.failure = e;
             t.state = FAILED;
         } finally {
-            HandlerChainRegistry.restoreScopeVar(prevScope);
+            HandlerChainRegistry.restoreScopeVar(es, prevScope);
             HandlerChainRegistry.restoreTaskChain(prev);
         }
         Boundary b = t.owner;
@@ -552,17 +556,16 @@ public final class TaskMachine {
         t.carrier = null;
         if (t.promise != null) {
             if (t.state == DONE) t.promise.complete(t.result); else t.promise.fail(t.failure);
-            forget(t.promise);
         } else if (t.state == FAILED && b.failure == null) {
             b.failure = t.failure;                     // the body's failure is the perform's, rethrown on the entry thread
         }
         idle.addFirst(mine);                           // LIFO, so dispatch hands THIS carrier the next fresh task: no thread switch at all
-        Object[] bodyChain = HandlerChainRegistry.installTaskChain(b.body.chain);   // the step's Mezze calls (drive) see the boundary's handlers
+        Object[] bodyChain = HandlerChainRegistry.installTaskChain(es, b.body.chain);   // the step's Mezze calls (drive) see the boundary's handlers
         try {
-            dispatch(b);
+            dispatch(b, null, es);
         } finally {
             HandlerChainRegistry.restoreTaskChain(bodyChain);
-            CURRENT.remove();
+            me.current = null;
         }
     }
 
@@ -572,7 +575,7 @@ public final class TaskMachine {
      */
     @TruffleBoundary
     public Object park(ParkRequest request) {
-        Task t = CURRENT.get();
+        Task t = currentTask();
         if (t == null) return parkForeign(request);
         Boundary b = t.owner;
         if (b.abandoning) throw new BoundaryAbandoned();   // a task that swallowed its abandonment and parked again
@@ -587,13 +590,21 @@ public final class TaskMachine {
             if (which >= 0) return parkReady(which);
             // (the child settled its promise, so this is unreachable; fall through to a real park)
         }
+        HandlerChainRegistry.EffectState es = t.carrier.es;
         t.parkedOn = request;
-        t.state = PARKED;
         t.turn = TURN_DRIVER;
-        b.parked.add(t);
-        Object[] prev = HandlerChainRegistry.installTaskChain(b.body.chain);
+        if (isYield(request)) {                        // ready by construction: straight behind the others, no parked-list round trip
+            t.deliver = parkReady(0);
+            t.state = RUNNABLE;
+            b.ready.addLast(t);
+        } else {
+            t.state = PARKED;
+            b.parked.add(t);
+        }
+        boolean sameChain = HandlerChainRegistry.installedTaskChain(es) == b.body.chain;
+        Object[] prev = sameChain ? null : HandlerChainRegistry.installTaskChain(es, b.body.chain);
         Task next;
-        try { next = dispatch(b); } finally { HandlerChainRegistry.restoreTaskChain(prev); }
+        try { next = dispatch(b, t, es); } finally { if (prev != null) HandlerChainRegistry.restoreTaskChain(prev); }
         if (next != t) awaitTurn(t, TURN_TASK, this);   // someone else holds the baton: wait for it to come back
         // next == t: woken at once (yield_now, a settled promise) — no park, no handoff
         Object d = t.deliver;
@@ -644,8 +655,8 @@ public final class TaskMachine {
         if (b.ready.size() != 1 || !b.inbox.isEmpty()) return null;
         Object payload = on.getPayloadFieldByName("ids");
         if (seqSize(payload) != 1) return null;
-        MezzePromise p = promisesById.get(asLong(seqAt(payload, 0)));
-        if (p == null || p.isDone() || !(p.machineTask instanceof Task c)) return null;
+        MezzePromise p = promiseOf(seqAt(payload, 0));
+        if (p.isDone() || !(p.machineTask instanceof Task c)) return null;
         if (c.state != RUNNABLE || c.carrier != null || c.thunk == null || b.ready.peekFirst() != c) return null;
         b.ready.pollFirst();
         return c;
@@ -656,11 +667,12 @@ public final class TaskMachine {
      *  the parent continues at once. */
     private void runInline(Task parent, Task child) {
         child.state = RUNNING;
-        child.carrier = parent.carrier;                // a nested park/resume uses this carrier's thread
-        Task prevCur = CURRENT.get();
-        CURRENT.set(child);
-        Object[] prev = HandlerChainRegistry.installTaskChain(child.chain);
-        Object prevScope = HandlerChainRegistry.installScopeVar(child.scope);
+        Carrier me = parent.carrier;
+        child.carrier = me;                            // a nested park/resume uses this carrier's thread
+        HandlerChainRegistry.EffectState es = me.es;
+        me.current = child;
+        Object[] prev = HandlerChainRegistry.installTaskChain(es, child.chain);
+        Object prevScope = HandlerChainRegistry.installScopeVar(es, child.scope);
         try {
             child.result = callWith(child.thunk, MezzeRecord.empty());
             child.state = DONE;
@@ -670,13 +682,12 @@ public final class TaskMachine {
             child.failure = e;
             child.state = FAILED;
         } finally {
-            HandlerChainRegistry.restoreScopeVar(prevScope);
+            HandlerChainRegistry.restoreScopeVar(es, prevScope);
             HandlerChainRegistry.restoreTaskChain(prev);
-            CURRENT.set(prevCur);
+            me.current = parent;
         }
         child.carrier = null;
         if (child.state == DONE) child.promise.complete(child.result); else child.promise.fail(child.failure);
-        forget(child.promise);
     }
 
     /** Thrown through a parked carrier when its context is disposed, so the thread exits. */
@@ -698,11 +709,11 @@ public final class TaskMachine {
 
     // ---------------------------------------------------------------- wakes
 
-    private boolean wakeParked(Boundary b) {
+    private boolean wakeParked(Boundary b, HandlerChainRegistry.EffectState es) {
         boolean any = false;
         for (int i = 0; i < b.parked.size(); ) {
             Task t = b.parked.get(i);
-            int which = needsChain(t.parkedOn) ? readyIndexUnderChain(t) : readyIndex(t.parkedOn);
+            int which = needsChain(t.parkedOn) ? readyIndexUnderChain(t, es) : readyIndex(t.parkedOn);
             if (which >= 0) {
                 b.parked.remove(i);
                 deliver(b, t, parkReady(which));
@@ -725,14 +736,14 @@ public final class TaskMachine {
         int n = seqSize(payload);
         if (onPromises) {
             for (int i = 0; i < n; i++) {
-                MezzePromise p = promisesById.get(asLong(seqAt(payload, i)));
-                if (p == null) return i;                 // evicted ⇒ settled (ids are minted here only)
-                if (p.isDone()) { forget(p); return i; }
+                if (promiseOf(seqAt(payload, i)).isDone()) return i;
             }
             return -1;
         }
         for (int i = 0; i < n; i++) {
-            Object r = callWith((MezzeFunction) seqAt(payload, i), MezzeRecord.empty());
+            Object f = seqAt(payload, i);
+            if (f == ContBinding.readyPredicate()) return i;    // `yield_now`: true by identity, no call
+            Object r = callWith((MezzeFunction) f, MezzeRecord.empty());
             if (r instanceof Boolean b && b) return i;
         }
         return -1;
@@ -740,11 +751,21 @@ public final class TaskMachine {
 
     /** Only predicates run Mezze code and need the parker's handlers installed. */
     private static boolean needsChain(ParkRequest pr) {
-        return pr.on instanceof MezzeVariant on && on.getTag() != tagImmediately() && on.getTag() != tagOnPromises();
+        return pr.on instanceof MezzeVariant on && on.getTag() != tagImmediately() && on.getTag() != tagOnPromises() && !isYield(pr);
     }
 
-    private int readyIndexUnderChain(Task t) {
-        Object[] prev = HandlerChainRegistry.installTaskChain(t.chain);
+    /** A park that is ready at once by construction: `Immediately`, or the READY predicate alone. */
+    private static boolean isYield(ParkRequest pr) {
+        if (!(pr.on instanceof MezzeVariant on)) return false;
+        if (on.getTag() == tagImmediately()) return true;
+        if (on.getTag() != tagOnPredicates()) return false;
+        Object payload = on.getPayloadFieldByName("fs");
+        return seqSize(payload) == 1 && seqAt(payload, 0) == ContBinding.readyPredicate();
+    }
+
+    private int readyIndexUnderChain(Task t, HandlerChainRegistry.EffectState es) {
+        if (HandlerChainRegistry.installedTaskChain(es) == t.chain) return readyIndex(t.parkedOn);   // already in place
+        Object[] prev = HandlerChainRegistry.installTaskChain(es, t.chain);
         try { return readyIndex(t.parkedOn); } finally { HandlerChainRegistry.restoreTaskChain(prev); }
     }
 
@@ -768,8 +789,8 @@ public final class TaskMachine {
                 Object payload = v.getPayloadFieldByName("ids");
                 int n = seqSize(payload);
                 for (int i = 0; i < n; i++) {
-                    MezzePromise p = promisesById.get(asLong(seqAt(payload, i)));
-                    if (p == null || p.isDone()) return;        // settled since the wake check: the next step wakes it
+                    MezzePromise p = promiseOf(seqAt(payload, i));
+                    if (p.isDone()) return;                     // settled since the wake check: the next step wakes it
                     if (!p.machineOwned) { external = true; p.machineWaiter = me; (hooked == null ? hooked = new ArrayList<>() : hooked).add(p); }
                 }
             }
@@ -865,6 +886,8 @@ public final class TaskMachine {
     private static final String[] WHICH = {"which"}, REASON = {"reason"};
     private static volatile int TAG_READY = -1, TAG_CANCELLED = -1, TAG_IMMEDIATELY = -1, TAG_ON_PROMISES = -1;
     private static int tagImmediately() { int t = TAG_IMMEDIATELY; if (t < 0) TAG_IMMEDIATELY = t = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("Immediately"); return t; }
+    private static volatile int TAG_ON_PREDICATES = -1;
+    private static int tagOnPredicates() { int t = TAG_ON_PREDICATES; if (t < 0) TAG_ON_PREDICATES = t = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("OnPredicates"); return t; }
     private static int tagOnPromises() { int t = TAG_ON_PROMISES; if (t < 0) TAG_ON_PROMISES = t = MezzeVariant.TagRegistry.getGlobal().getOrCreateTag("OnPromises"); return t; }
 
     static Object parkCancelled(Object reason) {

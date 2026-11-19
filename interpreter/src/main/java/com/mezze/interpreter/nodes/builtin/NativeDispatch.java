@@ -3165,6 +3165,7 @@ public final class NativeDispatch extends MezzeNode {
         // runtime owns, driven at a cont-capable perform boundary.
         HANDLERS.put("__native_task_spawn", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.TaskNatives.spawn(r));
         HANDLERS.put("__native_promise_id", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.TaskNatives.promiseId(r));
+        HANDLERS.put("__native_ready_predicate", (r, c) -> com.mezze.interpreter.nodes.continuation.ContBinding.readyPredicate());
         HANDLERS.put("__native_runq_first", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.TaskNatives.runqFirst(r));
         HANDLERS.put("__native_runq_last", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.TaskNatives.runqLast(r));
         HANDLERS.put("__native_runq_len", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.TaskNatives.runqLen(r));
