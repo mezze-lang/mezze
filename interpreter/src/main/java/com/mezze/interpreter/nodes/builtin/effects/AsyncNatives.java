@@ -184,6 +184,10 @@ public final class AsyncNatives {
         /** The task machine's idle carrier waiting on this promise, if any — woken on settlement
          *  beside the ordinary {@code waiter}. Volatile on both sides (Dekker with the re-check). */
         public volatile Thread machineWaiter;
+        /** The machine task that settles this promise (a `TaskMachine.Task`), for the inline-child
+         *  fast path: an await of exactly this promise while its task has not started runs the task
+         *  on the awaiting carrier. */
+        public Object machineTask;
 
         public MezzePromise(Thread executingThread, Semaphore semaphore) {
             this.executingThread = executingThread;

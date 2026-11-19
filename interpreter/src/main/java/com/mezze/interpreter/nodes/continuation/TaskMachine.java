@@ -260,6 +260,7 @@ public final class TaskMachine {
         t.chain = HandlerChainRegistry.snapshotHandlerChainEntries();
         t.scope = HandlerChainRegistry.lookupScopeVar();
         t.spawnedFn = f;
+        p.machineTask = t;
         p.setCancelHook(reason -> cancelParked(t, reason));
         if (foreign) { b.inbox.add(t); wakeIdler(b); } // a Loom task / HTTP handler spawning under this boundary: the step queues it
         else b.ready.addLast(t);
@@ -575,6 +576,17 @@ public final class TaskMachine {
         if (t == null) return parkForeign(request);
         Boundary b = t.owner;
         if (b.abandoning) throw new BoundaryAbandoned();   // a task that swallowed its abandonment and parked again
+        Task child = inlineChild(b, request);
+        if (child != null) {
+            // Zero handoffs: the awaited task runs on THIS carrier, nested above the awaiter. The
+            // awaiter could not have run before it anyway (it waits for exactly this task), and a
+            // sole runnable is the only pick `drive` could make, so nothing observable changes.
+            runInline(t, child);
+            if (b.abandoning) throw new BoundaryAbandoned();
+            int which = readyIndex(request);
+            if (which >= 0) return parkReady(which);
+            // (the child settled its promise, so this is unreachable; fall through to a real park)
+        }
         t.parkedOn = request;
         t.state = PARKED;
         t.turn = TURN_DRIVER;
@@ -620,6 +632,51 @@ public final class TaskMachine {
         }
         if (d == ABANDON) throw new BoundaryAbandoned();
         return d;
+    }
+
+    /**
+     * The inline-child fast path's precondition: the request waits on exactly one promise, that
+     * promise is settled by a task of this boundary that has not started, that task is the ONLY
+     * runnable one, and nothing is waiting in the inbox ahead of it.
+     */
+    private Task inlineChild(Boundary b, ParkRequest request) {
+        if (!(request.on instanceof MezzeVariant on) || on.getTag() != tagOnPromises()) return null;
+        if (b.ready.size() != 1 || !b.inbox.isEmpty()) return null;
+        Object payload = on.getPayloadFieldByName("ids");
+        if (seqSize(payload) != 1) return null;
+        MezzePromise p = promisesById.get(asLong(seqAt(payload, 0)));
+        if (p == null || p.isDone() || !(p.machineTask instanceof Task c)) return null;
+        if (c.state != RUNNABLE || c.carrier != null || c.thunk == null || b.ready.peekFirst() != c) return null;
+        b.ready.pollFirst();
+        return c;
+    }
+
+    /** Run {@code child} to completion (or until it parks and is later resumed on this same
+     *  carrier) nested on {@code parent}'s carrier; settle its promise. No dispatch afterwards:
+     *  the parent continues at once. */
+    private void runInline(Task parent, Task child) {
+        child.state = RUNNING;
+        child.carrier = parent.carrier;                // a nested park/resume uses this carrier's thread
+        Task prevCur = CURRENT.get();
+        CURRENT.set(child);
+        Object[] prev = HandlerChainRegistry.installTaskChain(child.chain);
+        Object prevScope = HandlerChainRegistry.installScopeVar(child.scope);
+        try {
+            child.result = callWith(child.thunk, MezzeRecord.empty());
+            child.state = DONE;
+        } catch (MachineClosed closed) {
+            throw closed;
+        } catch (Throwable e) {
+            child.failure = e;
+            child.state = FAILED;
+        } finally {
+            HandlerChainRegistry.restoreScopeVar(prevScope);
+            HandlerChainRegistry.restoreTaskChain(prev);
+            CURRENT.set(prevCur);
+        }
+        child.carrier = null;
+        if (child.state == DONE) child.promise.complete(child.result); else child.promise.fail(child.failure);
+        forget(child.promise);
     }
 
     /** Thrown through a parked carrier when its context is disposed, so the thread exits. */

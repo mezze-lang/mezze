@@ -1055,8 +1055,36 @@ PREDATES it (present at f1651c6cb) and is owed its own A/B against main's `foldT
 typechecker 5502/5502, interpreter 8252/8252 + `ForeignThreadParkTest` 5/5 (its new race test needed a
 cooperative op in the body: a `perform` whose body performs nothing the handler fires on is rejected).
 
-Still owed on the carrier design: the per-spawn cost (spawn+await = 2 handoffs ≈ 300 ns each plus
-~250 ns of promise/map bookkeeping — the fan-out kernel shows the floor at 216); a foreign-thread
+**CORRECTION, 2026-11-19 — a like-for-like row the earlier table lacked.** The "folds with await
+10–23 us" figure quoted above for the OLD design was its first, untuned, n=1000 measurement; the
+tuned old design (78bac71bf, rebuilt in a scratch worktree, same bench binaries, 2M elements,
+interleaved) measures: seq fold with await 410 ns, iter map→fold with await 381, list fold with await
+376, spawn+await 844, yield_now 376, fan-out 197. Against the carrier machine's 793 / 804 / 790 / 788 /
+40 / 173. So: yield_now 9.5x better, spawn+await and fan-out at parity or better, and the THREE FOLD
+SHAPES 2x WORSE. The cause is structural: under the old design a park inside a native's callback
+captured only the callback frame (the native held its loop on the heap), while a park out of a deep
+Mezze recursion captured the whole chain — so folds were cheap and `go_spawn` dear; under the carrier
+machine every park costs the same two handoffs (~300 ns each) whatever the depth. The fix in flight:
+when a task awaits exactly ONE promise, that promise belongs to a task that has not started, and that
+task is the only runnable one, run it INLINE on the awaiting carrier — zero handoffs, and the
+scheduler's observable order is unchanged because a sole runnable is the only thing `drive` could
+pick. See the next block for the result.
+
+**The inline child, 2026-11-19 (fifth pass) — the fold shapes beat the old design 2x and spawn+await 4x.**
+`TaskMachine.park` checks one precondition before parking: the request waits on exactly ONE promise,
+that promise is settled by a task of this boundary that has not started (`MezzePromise.machineTask`),
+that task is the ONLY runnable one, and the inbox is empty. Then the awaiting carrier runs the task
+itself (`runInline`), nested on its own stack, settles the promise and continues — no handoff. Nothing
+observable changes: the awaiter could not have run before a task it awaits, and a sole runnable is the
+only pick `drive` could make. A nested park inside the inlined task uses the shared carrier's thread
+(its `turn` flag is per task), a nested spawn+await nests again, a failure fails the promise, and an
+abandoned boundary unwinds the pair in order. `InlineChildTest` pins those four. Measured (2M, JVM, ns;
+old tuned design / carrier before / carrier now): spawn+await 844 / 788 / 203; seq fold with await
+410 / 793 / 203; iter map→fold with await 381 / 804 / 215; list fold with await 376 / 790 / 210;
+yield_now 376 / 40 / 40; park-True ~400 / 73 / 75; fan-out 197 / 173 / 176.
+
+Still owed on the carrier design: the handoff cost when the inline child does NOT apply (two carriers
+waiting on each other, ~300 ns each; the fan-out kernel is that shape at 176 ns per element); a foreign-thread
 park (a Mezze callback on a Loom/HTTP thread calling `cont.park` is refused with a clear message —
 an inbox so it can park the boundary is the next step); a multi-carrier budget for `parallel`-style
 performers (the single-active discipline is a property of CoopAsync's `drive`, not of the machine);
