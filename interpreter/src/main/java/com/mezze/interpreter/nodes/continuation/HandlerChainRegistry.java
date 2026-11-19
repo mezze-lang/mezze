@@ -478,6 +478,19 @@ public final class HandlerChainRegistry {
     /** The innermost handler record on this thread's chain, or null. The perform
      *  boundary reads its performer's `drive` from it. */
     @TruffleBoundary
+    /** Every handler in effect on THIS thread, innermost first: the pushed stack, then the task
+     *  chain installed under it (a Loom task's or a carrier's). For a foreign thread looking for
+     *  the cont-capable boundary it is running under. */
+    public static MezzeRecord[] currentHandlersInnermostFirst() {
+        EffectState s = STATE.get();
+        int n = s.depth + (s.taskChain != null ? s.taskChain.length : 0);
+        MezzeRecord[] out = new MezzeRecord[n];
+        int k = 0;
+        for (int i = s.depth - 1; i >= 0; i--) out[k++] = s.handlers[i];
+        if (s.taskChain != null) for (HandlerChainEntry e : s.taskChain) out[k++] = e.handler();
+        return out;
+    }
+
     public static MezzeRecord topHandler() {
         EffectState s = STATE.get();
         return s.depth == 0 ? null : s.handlers[s.depth - 1];

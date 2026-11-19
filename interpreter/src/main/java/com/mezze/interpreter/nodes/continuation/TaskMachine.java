@@ -102,13 +102,28 @@ public final class TaskMachine {
         Object scope;                              // the performer scope variable where it was spawned (per thread, like the chain)
         MezzeFunction spawnedFn;                   // for diagnostics, resolved lazily
         Carrier carrier;
+        /** A FOREIGN parker (a Loom task, an HTTP handler, a polyglot callback) that called
+         *  `cont.park` under this boundary: no carrier, no baton — the outcome is delivered to
+         *  its own thread, which blocks meanwhile. Null for the machine's own tasks. */
+        ForeignPark foreign;
+        TaskMachine machine;
         Task(long id, MezzeFunction thunk, MezzePromise promise) {
             this.id = id; this.thunk = thunk; this.promise = promise;
         }
         @Override public String toString() {
+            if (foreign != null) return "the foreign thread `" + foreign.thread.getName() + "`";
             String site = spawnedFn != null ? siteOf(spawnedFn) : null;
             return site != null ? "the task spawned at " + site : (promise == null ? "the perform body" : "Task#" + id);
         }
+    }
+
+    /** A park posted by a thread the machine does not drive. See {@link #park}. */
+    static final class ForeignPark {
+        final Thread thread = Thread.currentThread();
+        final ParkRequest request;
+        final HandlerChainEntry[] chain;
+        volatile Object deliver;
+        ForeignPark(ParkRequest request, HandlerChainEntry[] chain) { this.request = request; this.chain = chain; }
     }
 
     /** `file:line` of a function's root, through a trampoline or stub; null when unknown. */
@@ -159,7 +174,11 @@ public final class TaskMachine {
         /** Set once the boundary has failed with tasks still parked: each is woken with
          *  {@link #ABANDON} and unwinds its carrier, one at a time, before the boundary finishes. */
         boolean abandoning;
-        Boundary(MezzeFunction drive) { this.drive = drive; this.runQueue = new RunQueue(this); this.entryThread = Thread.currentThread(); }
+        /** Parks posted by foreign threads, drained by the scheduler step. */
+        final java.util.concurrent.ConcurrentLinkedQueue<Object> inbox = new java.util.concurrent.ConcurrentLinkedQueue<>();   // ForeignPark | Task (a foreign spawn)
+        final MezzeRecord handler;
+        Boundary prevForHandler;
+        Boundary(MezzeFunction drive, MezzeRecord handler) { this.handler = handler; this.drive = drive; this.runQueue = new RunQueue(this); this.entryThread = Thread.currentThread(); }
     }
 
     /** A pooled virtual thread that runs one task at a time. */
@@ -210,59 +229,135 @@ public final class TaskMachine {
     private static final Task POISON = new Task(-1, null, null);
     private static final ThreadLocal<Task> CURRENT = new ThreadLocal<>();
 
-    private long nextTaskId = 1;
-    private final IdentityHashMap<MezzePromise, Long> promiseIds = new IdentityHashMap<>();
+    private final java.util.concurrent.atomic.AtomicLong nextTaskId = new java.util.concurrent.atomic.AtomicLong(1);   // foreign spawns mint too
     private long nextPromiseId = 1;
+    /** Open boundaries by their handler record, for a foreign thread to find the one it runs
+     *  under through its own handler chain (identity: the record pushed by the perform IS the
+     *  record in every chain snapshot taken beneath it). Read by foreign threads. */
+    private final java.util.Map<MezzeRecord, Boundary> openByHandler =
+        java.util.Collections.synchronizedMap(new IdentityHashMap<>());
     /** BUG 77: the size of the promise bookkeeping when the last boundary closed (a test's view). */
     public static volatile int LAST_BOOKKEEPING = -1;
     private final LongObjectMap<MezzePromise> promisesById = new LongObjectMap<>();
-    private final IdentityHashMap<MezzePromise, Boolean> ownPromises = new IdentityHashMap<>();
 
     // ---------------------------------------------------------------- spawn / promises
 
     public MezzePromise spawn(MezzeFunction f) {
         Task cur = CURRENT.get();
-        Boundary b = cur != null ? cur.owner : boundaries.peek();
+        boolean foreign = cur == null;
+        Boundary b = cur != null ? cur.owner : boundaryOfForeignThread();
         if (b == null) throw new MezzeGuestException(
             "spawn_task outside a scheduler: a task needs a cont-capable `perform` (one whose "
             + "performer mentions `cont`) to be driven by");
         MezzePromise p = new MezzePromise(null, null);
-        ownPromises.put(p, Boolean.TRUE);
-        Task t = new Task(nextTaskId++, f, p);
+        p.machineOwned = true;
+        Task t = new Task(nextTaskId.getAndIncrement(), f, p);
+        t.machine = this;
         t.owner = b;
         t.chain = HandlerChainRegistry.snapshotHandlerChainEntries();
         t.scope = HandlerChainRegistry.lookupScopeVar();
         t.spawnedFn = f;
-        b.ready.addLast(t);
         p.setCancelHook(reason -> cancelParked(t, reason));
+        if (foreign) b.inbox.add(t);                   // a Loom task / HTTP handler spawning under this boundary: the step queues it
+        else b.ready.addLast(t);
         return p;
+    }
+
+    // ---------------------------------------------------------------- host-level waits on a carrier
+
+    /** True on a thread that is a carrier running one of the machine's tasks. */
+    public static boolean onCarrier() { return CURRENT.get() != null; }
+
+    /**
+     * A Java-level wait by code running ON A CARRIER — a Loom-style promise await, a sleep, a
+     * backoff loop — must not block the thread: it holds the baton, and every other task of the
+     * boundary would stall behind it (measured as a deadlock: a body awaiting a Loom promise while
+     * the Loom task parks on the body's boundary). Instead the task parks on the condition; the
+     * scheduler step re-checks it like a predicate and the other tasks take their turns. The wait
+     * counts as external for the deadlock verdict (the machine cannot know who satisfies it).
+     */
+    public static void javaWait(java.util.function.BooleanSupplier ready) {
+        Task t = CURRENT.get();
+        if (t == null) throw new IllegalStateException("javaWait off a carrier");
+        while (!ready.getAsBoolean()) t.machine.park(new ParkRequest(ready, null));
+    }
+
+    /** A condition that is false once, then true: a host-level yield (one turn to the others). */
+    public static final class OnceFalse implements java.util.function.BooleanSupplier {
+        private boolean asked;
+        @Override public boolean getAsBoolean() { if (asked) return true; asked = true; return false; }
+    }
+
+    /** {@code LockSupport.parkNanos} that yields the baton when on a carrier. */
+    public static void parkNanosCooperatively(long nanos) {
+        if (CURRENT.get() == null) { LockSupport.parkNanos(nanos); return; }
+        long deadline = System.nanoTime() + nanos;
+        javaWait(() -> System.nanoTime() - deadline >= 0);
     }
 
     private void cancelParked(Task t, Object reason) {
         if (t.state != PARKED || t.owner == null) return;
         t.owner.parked.remove(t);
-        t.deliver = parkCancelled(reason);
+        deliver(t.owner, t, parkCancelled(reason));
+    }
+
+    /** A parked task gets its outcome: the machine's own tasks become runnable and receive it on
+     *  their next turn; a foreign parker receives it on its own thread at once. */
+    private static void deliver(Boundary b, Task t, Object outcome) {
+        if (t.foreign != null) {
+            t.state = DONE;
+            t.foreign.deliver = outcome;
+            LockSupport.unpark(t.foreign.thread);
+            return;
+        }
+        t.deliver = outcome;
         t.state = RUNNABLE;
-        t.owner.ready.addLast(t);
+        b.ready.addLast(t);
+    }
+
+    /** Foreign parks become parked tasks of the boundary, evaluated like any other. */
+    private void drainInbox(Boundary b) {
+        Object m;
+        while ((m = b.inbox.poll()) != null) {
+            if (m instanceof Task spawned) { b.ready.addLast(spawned); continue; }
+            ForeignPark fp = (ForeignPark) m;
+            Task t = new Task(nextTaskId.getAndIncrement(), null, null);
+            t.machine = this;
+            t.owner = b;
+            t.foreign = fp;
+            t.chain = fp.chain;
+            t.parkedOn = fp.request;
+            t.state = PARKED;
+            b.parked.add(t);
+        }
+    }
+
+    /** The boundary a foreign thread runs under: the innermost handler of ITS chain that an open
+     *  boundary was entered with. Null when none. */
+    private Boundary boundaryOfForeignThread() {
+        for (MezzeRecord h : HandlerChainRegistry.currentHandlersInnermostFirst()) {
+            Boundary b = openByHandler.get(h);
+            if (b != null) return b;
+        }
+        return null;
     }
 
     public long promiseId(MezzePromise p) {
-        Long id = promiseIds.get(p);
-        if (id == null) {
+        long id = p.machineId;
+        if (id == 0) {
             id = nextPromiseId++;
             if (p.isDone()) return id;                 // a settled promise is never registered —
-            promiseIds.put(p, id);                     // an id the machine does not know is a settled one
+            p.machineId = id;                          // an id the machine does not know is a settled one
             promisesById.put(id, p);
         }
         return id;
     }
 
-    /** Completed work leaves the maps (BUG 77). */
+    /** Completed work leaves the map (BUG 77). */
     private void forget(MezzePromise p) {
         if (p == null) return;
-        ownPromises.remove(p);
-        Long id = promiseIds.remove(p);
-        if (id != null) promisesById.remove(id);
+        long id = p.machineId;
+        if (id != 0) { p.machineId = 0; promisesById.remove(id); }
     }
 
     // ---------------------------------------------------------------- the boundary
@@ -274,10 +369,12 @@ public final class TaskMachine {
      */
     @TruffleBoundary
     public Object runBoundary(MezzeFunction bodyThunk, MezzeRecord handler) {
-        Boundary b = new Boundary(driveOf(handler));
+        Boundary b = new Boundary(driveOf(handler), handler);
         boundaries.push(b);
+        if (handler != null) b.prevForHandler = openByHandler.put(handler, b);
         try {
-            Task body = new Task(nextTaskId++, bodyThunk, null);
+            Task body = new Task(nextTaskId.getAndIncrement(), bodyThunk, null);
+            body.machine = this;
             body.owner = b;
             body.chain = HandlerChainRegistry.snapshotHandlerChainEntries();
             body.scope = HandlerChainRegistry.lookupScopeVar();
@@ -291,7 +388,8 @@ public final class TaskMachine {
             return body.result;
         } finally {
             boundaries.pop();
-            LAST_BOOKKEEPING = promiseIds.size() + ownPromises.size() + promisesById.size();
+            if (handler != null) { if (b.prevForHandler != null) openByHandler.put(handler, b.prevForHandler); else openByHandler.remove(handler); }
+            LAST_BOOKKEEPING = promisesById.size();
             // The pool lives as long as some boundary is open. Context close waits for every
             // polyglot thread, so idle carriers must not outlive the last perform.
             if (boundaries.isEmpty()) releaseIdleCarriers();
@@ -316,6 +414,7 @@ public final class TaskMachine {
      */
     private Task dispatch(Boundary b) {
         while (true) {
+            drainInbox(b);
             wakeParked(b);                             // first: a task that just yielded is back in the ready set BEFORE drive picks
             if (!b.ready.isEmpty()) {
                 Task next = pick(b);
@@ -327,7 +426,7 @@ public final class TaskMachine {
                 if (b.parked.isEmpty()) { finish(b); return null; }
                 if (!b.abandoning && b.teardownRounds++ < TEARDOWN_ROUNDS) {
                     Object cancelled = parkCancelled(scopeTeardown());
-                    for (Task t : b.parked) { t.deliver = cancelled; t.state = RUNNABLE; b.ready.addLast(t); }
+                    for (Task t : new ArrayList<>(b.parked)) deliver(b, t, cancelled);
                     b.parked.clear();
                     continue;
                 }
@@ -353,7 +452,7 @@ public final class TaskMachine {
      *  A carrier left parked would outlive the perform — and context close waits for it. */
     private void abandonParked(Boundary b) {
         b.abandoning = true;
-        for (Task t : b.parked) { t.deliver = ABANDON; t.state = RUNNABLE; b.ready.addLast(t); }
+        for (Task t : new ArrayList<>(b.parked)) deliver(b, t, ABANDON);
         b.parked.clear();
     }
 
@@ -451,9 +550,7 @@ public final class TaskMachine {
     @TruffleBoundary
     public Object park(ParkRequest request) {
         Task t = CURRENT.get();
-        if (t == null) throw new MezzeGuestException(
-            "cont.park outside a cooperative task: a park needs a cont-capable `perform` to be driven by"
-            + " (a callback running on a foreign thread cannot park yet)");
+        if (t == null) return parkForeign(request);
         Boundary b = t.owner;
         if (b.abandoning) throw new BoundaryAbandoned();   // a task that swallowed its abandonment and parked again
         t.parkedOn = request;
@@ -468,6 +565,36 @@ public final class TaskMachine {
         Object d = t.deliver;
         t.deliver = null;
         t.parkedOn = null;
+        if (d == ABANDON) throw new BoundaryAbandoned();
+        return d;
+    }
+
+    /**
+     * `cont.park` on a thread the machine does not drive — a Loom task, an HTTP handler, a
+     * polyglot callback — that is running under a cont-capable perform (the handler is in its
+     * chain). The park is posted to that boundary's inbox and this thread blocks until the
+     * machine delivers the outcome; the boundary's own tasks keep taking turns meanwhile, and the
+     * scheduler step evaluates this park's wait set like any other (under this thread's chain).
+     * The foreign thread is concurrent with the carriers by nature — it already was.
+     */
+    private Object parkForeign(ParkRequest request) {
+        Boundary b = boundaryOfForeignThread();
+        if (b == null) throw new MezzeGuestException(
+            "cont.park outside a cooperative task: a park needs a cont-capable `perform` (one whose "
+            + "performer mentions `cont`) somewhere above it on this thread");
+        ForeignPark fp = new ForeignPark(request, HandlerChainRegistry.snapshotHandlerChainEntries());
+        b.inbox.add(fp);
+        long deadline = 0;
+        Object d;
+        while ((d = fp.deliver) == null) {
+            if (closing) throw new MachineClosed();
+            if (spinNanos > 0) {
+                long now = System.nanoTime();
+                if (deadline == 0) deadline = now + spinNanos;
+                if (now < deadline) { Thread.onSpinWait(); continue; }
+            }
+            LockSupport.park(fp);
+        }
         if (d == ABANDON) throw new BoundaryAbandoned();
         return d;
     }
@@ -495,12 +622,10 @@ public final class TaskMachine {
         boolean any = false;
         for (int i = 0; i < b.parked.size(); ) {
             Task t = b.parked.get(i);
-            int which = readyIndexUnderChain(t);
+            int which = needsChain(t.parkedOn) ? readyIndexUnderChain(t) : readyIndex(t.parkedOn);
             if (which >= 0) {
                 b.parked.remove(i);
-                t.deliver = parkReady(which);
-                t.state = RUNNABLE;
-                b.ready.addLast(t);
+                deliver(b, t, parkReady(which));
                 any = true;
             } else {
                 i++;
@@ -510,6 +635,7 @@ public final class TaskMachine {
     }
 
     private int readyIndex(ParkRequest pr) {
+        if (pr.on instanceof java.util.function.BooleanSupplier host) return host.getAsBoolean() ? 0 : -1;   // javaWait
         if (!(pr.on instanceof MezzeVariant on)) throw new IllegalStateException("ParkOn is not a variant: " + pr.on);
         int tag = on.getTag();
         if (tag == tagImmediately()) return 0;          // yield_now: ready on the next turn, nothing to evaluate
@@ -531,6 +657,11 @@ public final class TaskMachine {
         return -1;
     }
 
+    /** Only predicates run Mezze code and need the parker's handlers installed. */
+    private static boolean needsChain(ParkRequest pr) {
+        return pr.on instanceof MezzeVariant on && on.getTag() != tagImmediately() && on.getTag() != tagOnPromises();
+    }
+
     private int readyIndexUnderChain(Task t) {
         Object[] prev = HandlerChainRegistry.installTaskChain(t.chain);
         try { return readyIndex(t.parkedOn); } finally { HandlerChainRegistry.restoreTaskChain(prev); }
@@ -539,12 +670,13 @@ public final class TaskMachine {
     private void blockOrDeadlock(Boundary b) {
         boolean external = false;
         for (Task t : b.parked) {
+            if (t.parkedOn.on instanceof java.util.function.BooleanSupplier) { external = true; continue; }   // a host wait: someone outside settles it
             if (t.parkedOn.on instanceof MezzeVariant on && on.getTag() == tagOnPromises()) {
                 Object payload = on.getPayloadFieldByName("ids");
                 int n = seqSize(payload);
                 for (int i = 0; i < n; i++) {
                     MezzePromise p = promisesById.get(asLong(seqAt(payload, i)));
-                    if (p != null && !p.isDone() && !ownPromises.containsKey(p)) external = true;
+                    if (p != null && !p.isDone() && !p.machineOwned) external = true;
                 }
             }
         }
@@ -561,6 +693,7 @@ public final class TaskMachine {
     }
 
     private static String describe(ParkRequest pr) {
+        if (pr.on instanceof java.util.function.BooleanSupplier) return "a host-level wait";
         if (pr.on instanceof MezzeVariant on) {
             String c = on.getConstructorName();
             if (c.equals("Immediately")) return c;

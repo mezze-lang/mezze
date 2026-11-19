@@ -1005,6 +1005,26 @@ interpreter 8253/8253 (incl. testTiming), cli 357/357. NATIVE IMAGE VERIFIED: `:
 1151, fan-out 418, seq fold with await 1213 (no JIT warm-up curve to hide behind; the spin bound is
 computed at run time, not image build time).
 
+**Foreign threads and host waits, 2026-11-19 (second pass).** Two more "regardless of handler"
+cases, each from a failing test in `ForeignThreadParkTest`: (1) a thread the machine does not drive — a
+LoomAsync task, an HTTP handler, a polyglot callback — calls `cont.park` (or `spawn_task`) under a
+cont-capable perform: it finds its boundary through ITS OWN handler chain (the handler record the perform
+pushed is, by identity, the record in every chain snapshot beneath it; `openByHandler`), posts the park
+or the spawn to the boundary's inbox and blocks on its own thread; the scheduler step drains the inbox,
+evaluates the foreign park's wait set like any other and delivers the outcome by unparking that thread.
+(2) a HOST-LEVEL wait on a carrier — a LoomAsync `await`, `sleep`, `park`/`park_until` backoff — used
+to block the thread that holds the baton, so every other task of the boundary stalled behind it (seen
+as a hang: a body awaiting a Loom promise whose Loom task was parked on the body's own boundary).
+`MezzePromise.await`, the timed await, `sleep` and the backoff loops now ask `TaskMachine.onCarrier()`
+and, on a carrier, park the TASK on the condition (`javaWait(BooleanSupplier)`) — the step re-checks it
+like a predicate, the other tasks run, and the deadlock verdict treats it as external. Promise
+bookkeeping moved from identity maps onto the promise (`machineId`, `machineOwned`).
+Measured after this pass (contloop 2M, JVM, ns/elem): yield_now 39, park-True 73, spawn+await 773,
+folds with await 771–792, fan-out 178, LoomAsync spawn+await 8531. Gates: typechecker 5502/5502,
+interpreter 8257/8257, cli 357/357; `ForeignThreadParkTest` 4/4 (a Loom task parking on an outer
+cont-capable performer, several at once while the body runs, a Loom task awaiting a Coop promise, a Loom
+task spawning a cooperative task on the outer boundary).
+
 Still owed on the carrier design: the per-spawn cost (spawn+await = 2 handoffs ≈ 300 ns each plus
 ~250 ns of promise/map bookkeeping — the fan-out kernel shows the floor at 216); a foreign-thread
 park (a Mezze callback on a Loom/HTTP thread calling `cont.park` is refused with a clear message —

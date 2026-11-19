@@ -175,6 +175,12 @@ public final class AsyncNatives {
          * (cancel()). Volatile for visibility across threads.
          */
         private volatile java.util.function.Consumer<Object> cancelHook;
+        /** Task-machine bookkeeping, kept here instead of in identity maps (measured: the maps were
+         *  ~5% of a spawn+await). {@code machineId} is minted by the machine that first parked on
+         *  this promise (0 = none); {@code machineOwned} marks a promise the machine's own task
+         *  settles, which is what tells a wait on it from a wait on the outside world. */
+        public long machineId;
+        public boolean machineOwned;
 
         public MezzePromise(Thread executingThread, Semaphore semaphore) {
             this.executingThread = executingThread;
@@ -428,6 +434,13 @@ public final class AsyncNatives {
             // load has none on x86, so this thread could read a stale PENDING after the completer
             // had read a null waiter: nobody unparked and the await hung (bench contsurface kernel
             // 11 at n=6000 hung in ~50% of runs, main and branch alike). setVolatile is a full fence.
+            if (com.mezze.interpreter.nodes.continuation.TaskMachine.onCarrier()) {
+                // On a cooperative carrier a blocking wait would hold the baton: park the TASK instead.
+                com.mezze.interpreter.nodes.continuation.TaskMachine.javaWait(() -> outcome != PENDING_SENTINEL);
+                o = outcome;
+                if (startNanos != 0) recordCompletionTime(System.nanoTime() - startNanos);
+                return getResultOrThrow(o);
+            }
             WAITER.setVolatile(this, Thread.currentThread());
             try {
                 while ((o = outcome) == PENDING_SENTINEL) {
@@ -454,6 +467,12 @@ public final class AsyncNatives {
             }
 
             long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+            if (com.mezze.interpreter.nodes.continuation.TaskMachine.onCarrier()) {
+                com.mezze.interpreter.nodes.continuation.TaskMachine.javaWait(() -> outcome != PENDING_SENTINEL || System.nanoTime() - deadline >= 0);
+                o = outcome;
+                if (o == PENDING_SENTINEL) throw new TimeoutException();
+                return getResultOrThrow(o);
+            }
             // BUG 72: a VOLATILE store, not a release store. The completer does CAS(outcome) then
             // getAcquire(waiter); this side does store(waiter) then load(outcome) — Dekker's pattern,
             // which needs a StoreLoad fence on BOTH sides. A release store followed by an acquire
@@ -1074,6 +1093,10 @@ public final class AsyncNatives {
     @TruffleBoundary
     public static MezzeRecord sleep(MezzeRecord args) {
         long ms = getLong(args, "ms");
+        if (com.mezze.interpreter.nodes.continuation.TaskMachine.onCarrier()) {
+            com.mezze.interpreter.nodes.continuation.TaskMachine.parkNanosCooperatively(Math.max(0L, ms) * 1_000_000L);
+            return MezzeRecord.empty();
+        }
         try {
             Thread.sleep(ms);
             return MezzeRecord.empty();
@@ -1093,6 +1116,7 @@ public final class AsyncNatives {
      */
     @TruffleBoundary
     public static MezzeRecord yieldNow(MezzeRecord args) {
+        if (com.mezze.interpreter.nodes.continuation.TaskMachine.onCarrier()) { com.mezze.interpreter.nodes.continuation.TaskMachine.javaWait(new com.mezze.interpreter.nodes.continuation.TaskMachine.OnceFalse()); return MezzeRecord.empty(); }   // give the other tasks a turn
         Thread.yield();
         return MezzeRecord.empty();
     }
@@ -1136,7 +1160,7 @@ public final class AsyncNatives {
             if (remainingNanos <= 0L) return false;
             // Never sleep past the deadline, or a 1ms backoff would overshoot a
             // sub-millisecond one and report a timeout the caller didn't ask for.
-            LockSupport.parkNanos(Math.min(backoffNanos, remainingNanos));
+            com.mezze.interpreter.nodes.continuation.TaskMachine.parkNanosCooperatively(Math.min(backoffNanos, remainingNanos));
             if (Thread.interrupted()) {
                 Thread.currentThread().interrupt();
                 throw new CancellationException("Park cancelled");
@@ -1153,7 +1177,7 @@ public final class AsyncNatives {
         while (true) {
             Object result = callThunkFunction(predicate, callNode);
             if (result instanceof Boolean b && b) return MezzeRecord.empty();
-            LockSupport.parkNanos(backoffNanos);
+            com.mezze.interpreter.nodes.continuation.TaskMachine.parkNanosCooperatively(backoffNanos);
             if (Thread.interrupted()) {
                 Thread.currentThread().interrupt();
                 throw new CancellationException("Park cancelled");
