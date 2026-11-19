@@ -3161,7 +3161,6 @@ public final class NativeDispatch extends MezzeNode {
         // Simple operations that don't spawn threads use regular HANDLERS
         HANDLERS.put("__native_promise_await", (r, c) -> AsyncNatives.awaitOp(r));
         HANDLERS.put("__native_async_sleep", (r, c) -> AsyncNatives.sleep(r));
-        HANDLERS.put("__native_async_yield_now", (r, c) -> AsyncNatives.yieldNow(r));
         // The task machine (continuations-and-swappable-async): cooperative tasks the
         // runtime owns, driven at a cont-capable perform boundary.
         HANDLERS.put("__native_task_spawn", (r, c) -> com.mezze.interpreter.nodes.builtin.effects.TaskNatives.spawn(r));

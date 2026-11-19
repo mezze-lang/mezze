@@ -93,9 +93,6 @@ class CoopAsyncSchedulerTest {
               ParkReady { which } -> settled_result { p = p }
               ParkCancelled { reason } -> Err { error = AsyncCancelled { reason = reason } },
           cancel = { p, reason } -> CancelNotCancellable,
-          yield_now = {} -> match cont.park { on = OnPredicates { fs = [{} -> True] }, set = WaitDefault } is
-            ParkReady { which } -> {}
-            ParkCancelled { reason } -> {},
           park = { predicate } -> match cont.park { on = OnPredicates { fs = [predicate] }, set = WaitDefault } is
             ParkReady { which } -> {}
             ParkCancelled { reason } -> {},

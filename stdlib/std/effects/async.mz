@@ -123,7 +123,10 @@ pub let sleep: { ms: Int } -> {} <Time> = { ms } ->
   Time.sleep { d = duration_millis { n = ms } }
 
 ## Voluntarily yield the current task's execution slot.
-pub let yield_now: {} -> {} <Async> = {} -> Async.yield_now {}
+## Give the other tasks a turn. Not an op: it is `park` on a condition that already holds,
+## which every performer answers on its next turn (a scheduler re-queues the task behind the
+## others; a thread-per-task performer returns at once).
+pub let yield_now: {} -> {} <Async> = {} -> Async.park { predicate = {} -> True }
 
 ## Suspend until predicate returns True.
 pub let park: { predicate: {} -> Bool <...> } -> {} <Async, ...> = { predicate } ->
@@ -291,7 +294,7 @@ pub type CancelOutcome = |
 pub type ParkOn = |
   OnPromises { ids: [PromiseId] },
   OnPredicates { fs: [{} -> Bool <...>] },
-  Immediately,   ## ready on the machine's next turn — no predicate, no allocation (yield_now)
+  Immediately,   ## ready on the machine's next turn — no predicate, no allocation (a performer's own yield)
 |
 
 ## Which wait set a park joins. Named sets give a scheduler per-primitive
@@ -366,41 +369,6 @@ impl Async for CoopAsync where {
       ParkReady { which } -> settled_result { p = p }
       ParkCancelled { reason } -> Err { error = AsyncCancelled { reason = reason } },
   cancel = { p, reason } -> __native_promise_cancel { p = p, reason = reason },
-  yield_now = {} -> match cont.park { on = Immediately, set = WaitDefault } is
-    ParkReady { which } -> {}
-    ParkCancelled { reason } -> {},
-  park = { predicate } -> match cont.park { on = OnPredicates { fs = [predicate] }, set = WaitDefault } is
-    ParkReady { which } -> {}
-    ParkCancelled { reason } -> {},
-  park_until = { predicate, ms } -> do
-    let deadline = add { i = now {}, d = duration_millis { n = ms } }
-    match cont.park { on = OnPredicates { fs = [predicate, {} -> after { a = now {}, b = deadline }] }, set = WaitDefault } is
-      ParkReady { which } -> which == 0
-      ParkCancelled { reason } -> False,
-}
-
-## The same scheduler with MANY carriers: `carriers = {} -> 0` lets one task run per
-## processor at once (any N > 1 works; a user performer picks its own). Every op is
-## CoopAsync's — the machine still parks, wakes, cancels and tears down the same way,
-## foreign threads still post to its inbox, host-level waits still park the task — but
-## tasks EXECUTE concurrently, so this performer is parallel, not deterministic. Pick
-## `CoopAsync` for a replayable run, `ParallelAsync` for throughput, `LoomAsync` for a
-## thread per task with no scheduler of its own.
-impl Async for ParallelAsync where {
-  carriers = {} -> 0,
-  initialize_scope = {} -> {},
-  finalize_scope = {} -> {},
-  spawn = { f } -> spawn_task { f = f },
-  await = { p } -> match inspect { p = p } is
-    PromiseCompleted { val } -> Ok { val = val }
-    PromiseFailed { err } -> Err { error = err }
-    PromisePending -> match cont.park { on = OnPromises { ids = [promise_id { p = p }] }, set = WaitDefault } is
-      ParkReady { which } -> settled_result { p = p }
-      ParkCancelled { reason } -> Err { error = AsyncCancelled { reason = reason } },
-  cancel = { p, reason } -> __native_promise_cancel { p = p, reason = reason },
-  yield_now = {} -> match cont.park { on = Immediately, set = WaitDefault } is
-    ParkReady { which } -> {}
-    ParkCancelled { reason } -> {},
   park = { predicate } -> match cont.park { on = OnPredicates { fs = [predicate] }, set = WaitDefault } is
     ParkReady { which } -> {}
     ParkCancelled { reason } -> {},
@@ -472,7 +440,6 @@ effect Async where {
   ## could differ in, and `await` always blocked.
   await: { p: Promise 'a } -> Result 'a AsyncError <Async>,
   cancel: { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async>,
-  yield_now: {} -> {} <Async>,
   park: { predicate: {} -> Bool <...> } -> {} <Async>,
   park_until: { predicate: {} -> Bool <...>, ms: Int } -> Bool <Async>
 }
@@ -488,7 +455,6 @@ impl Async for LoomAsync where {
   spawn = { f } -> __native_async_spawn_tracked { f = f, max_concurrent = 0, tracker = scope },
   await = { p } -> __native_promise_await_result { p = p },
   cancel = { p, reason } -> __native_promise_cancel { p = p, reason = reason },
-  yield_now = {} -> __native_async_yield_now {},
   park = { predicate } -> __native_async_park_until { predicate = predicate },
   park_until = { predicate, ms } -> __native_async_park_until_deadline { predicate = predicate, ms = ms },
 }
@@ -505,7 +471,6 @@ impl Async for LoomAsyncWith { max_concurrent: Int } where {
     },
   await = { p } -> __native_promise_await_result { p = p },
   cancel = { p, reason } -> __native_promise_cancel { p = p, reason = reason },
-  yield_now = {} -> __native_async_yield_now {},
   park = { predicate } -> __native_async_park_until { predicate = predicate },
   park_until = { predicate, ms } -> __native_async_park_until_deadline { predicate = predicate, ms = ms },
 }
@@ -517,7 +482,6 @@ impl Async for OSThreadAsync where {
   spawn = { f } -> __native_async_spawn_tracked_os { f = f, pool_size = 0, tracker = scope },
   await = { p } -> __native_promise_await_result { p = p },
   cancel = { p, reason } -> __native_promise_cancel { p = p, reason = reason },
-  yield_now = {} -> __native_async_yield_now {},
   park = { predicate } -> __native_async_park_until { predicate = predicate },
   park_until = { predicate, ms } -> __native_async_park_until_deadline { predicate = predicate, ms = ms },
 }
@@ -530,7 +494,6 @@ impl Async for OSThreadAsyncWith { pool_size: Int } where {
     __native_async_spawn_tracked_os { f = f, pool_size = pool_size, tracker = scope },
   await = { p } -> __native_promise_await_result { p = p },
   cancel = { p, reason } -> __native_promise_cancel { p = p, reason = reason },
-  yield_now = {} -> __native_async_yield_now {},
   park = { predicate } -> __native_async_park_until { predicate = predicate },
   park_until = { predicate, ms } -> __native_async_park_until_deadline { predicate = predicate, ms = ms },
 }

@@ -6,8 +6,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
 /**
- * Phase A of continuations-and-swappable-async: `await`, `cancel`, `yield_now`,
- * `park` and `park_until` are OPS of `effect Async`, no longer plain functions
+ * Phase A of continuations-and-swappable-async: `await`, `cancel`,
+ * `park` and `park_until` are OPS of `effect Async` (`yield_now` is a function over `park`), no longer plain functions
  * straight to natives.
  *
  * Why it matters: `spawn` used to be the sole op, so the four shipped performers
@@ -43,7 +43,6 @@ class AsyncOpsPromotedTest {
             perform LoomAsync in do
               let p = Async.spawn { f = {} -> 42 }
               yield_now {}
-              Async.yield_now {}
               park { predicate = {} -> p.is_done {} }
               let a = result::get_or { result = await { p = p }, def = -1 }
               let b = result::get_or { result = Async.await { p = p }, def = -1 }
@@ -67,7 +66,6 @@ class AsyncOpsPromotedTest {
             PromiseFailed { err } -> Err { error = err }
             PromisePending -> Err { error = AsyncFailed { msg = "sync performer cannot wait" } },
           cancel = { p, reason } -> CancelAlreadyCompleted,
-          yield_now = {} -> {},
           park = { predicate } -> {},
           park_until = { predicate, ms } -> True,
         }

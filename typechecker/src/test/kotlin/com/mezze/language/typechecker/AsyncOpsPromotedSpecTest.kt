@@ -40,7 +40,6 @@ class AsyncOpsPromotedSpecTest : AbilityEffectSpecBase() {
                 PromiseFailed { err } -> Err { error = err }
                 PromisePending -> Err { error = AsyncFailed { msg = "no" } },
               cancel = { p, reason } -> CancelAlreadyCompleted,
-              yield_now = {} -> {},
               park = { predicate } -> {},
               park_until = { predicate, ms } -> True,
             }

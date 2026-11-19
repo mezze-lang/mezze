@@ -1051,25 +1051,6 @@ internal class ImplValidator(
                 recordLiteralBindings = if (scopeType != null) setOf("scope") else emptySet(),
             )
         }
-        // `carriers` — the scheduler's carrier budget, the fourth impl-only field: `{} -> Int`.
-        impl.operations.find { it.name == ScopedEffectConstants.CARRIERS }?.let { carriersOp ->
-            val lambda = carriersOp.implementation as? ParsedLambda ?: throw TypeCheckError(
-                "`carriers` in impl '${impl.performerName}' must be a function `{} -> Int`: how many " +
-                    "carriers may run this performer's tasks at once (0 = one per processor).",
-                carriersOp.loc, code = ErrorCode.T0201_TYPE_MISMATCH,
-            )
-            validateImplOperationBody(
-                lambda = lambda,
-                opName = ScopedEffectConstants.CARRIERS,
-                opLoc = carriersOp.loc,
-                expectedParamType = MezzeType.RecordType(emptyMap()),
-                expectedReturnType = MezzeType.IntType,
-                baseContext = contextWithScope,
-                implLabel = "impl '${impl.performerName}'",
-                validationReason = "Scheduler carriers validation",
-                recordLiteralBindings = if (scopeType != null) setOf("scope") else emptySet(),
-            )
-        }
         for (implOp in impl.operations) {
             if (ScopedEffectConstants.isScopeHook(implOp.name)) {
                 continue

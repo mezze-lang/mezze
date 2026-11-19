@@ -1115,20 +1115,6 @@ public final class AsyncNatives {
         }
     }
 
-    /**
-     * #254 — voluntarily yield the current task's slot back to the
-     * scheduler / OS. On virtual threads, Thread.yield() is a hint to
-     * the JDK scheduler to reschedule; still cheap. Useful in
-     * user-written tight loops that want to be cooperative under a
-     * single-threaded scheduler and want to give cancel-delivery a
-     * chance to land under Loom.
-     */
-    @TruffleBoundary
-    public static MezzeRecord yieldNow(MezzeRecord args) {
-        if (com.mezze.interpreter.nodes.continuation.TaskMachine.onCarrier()) { com.mezze.interpreter.nodes.continuation.TaskMachine.javaWait(new com.mezze.interpreter.nodes.continuation.TaskMachine.OnceFalse()); return MezzeRecord.empty(); }   // give the other tasks a turn
-        Thread.yield();
-        return MezzeRecord.empty();
-    }
 
     /**
      * Park the current task until {@code predicate} returns True.

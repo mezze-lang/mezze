@@ -1083,23 +1083,23 @@ old tuned design / carrier before / carrier now): spawn+await 844 / 788 / 203; s
 410 / 793 / 203; iter map→fold with await 381 / 804 / 215; list fold with await 376 / 790 / 210;
 yield_now 376 / 40 / 40; park-True ~400 / 73 / 75; fan-out 197 / 173 / 176.
 
-**Parallelism in userland, 2026-11-19 (sixth pass) — the carrier budget.** A performer may set the
-FOURTH impl-only field, `carriers = {} -> N` (beside `initialize_scope`, `finalize_scope`, `drive`):
-up to N carriers run its tasks AT ONCE; `0` means one per processor; absent means one — the
-deterministic machine CoopAsync is. The stdlib ships `ParallelAsync` = CoopAsync's ops +
-`carriers = {} -> 0`, and a user performer picks its own budget the same way (`impl Async for Two
-where { carriers = {} -> 2, … }`), so parallelism is policy in Mezze like everything else here.
-Mechanism: a boundary with a budget above one has a `ReentrantLock`; `park`, `spawn`, `cancel`, the
-task-end step and the scheduler step take it; the single-carrier path never does (its lock is null, so
-yield_now stays at 40 ns). The step fills every free slot (`running < budget`), returns at once when
-others are still running, and only the LAST carrier to park or end evaluates the idle/deadlock
-verdict (which releases the lock around its park so a foreign cancel or spawn never waits on it).
-`drive` still picks, under the lock, in order; `drive` with a budget above one is a parallel
-scheduler, not a deterministic one, and the doc says so. Everything built this week still holds under
-a budget: foreign parks and spawns through the inbox, host-level waits parking the task, the inline
-child (it occupies the parent's slot), abandon and teardown. `ParallelAsyncTest` (timing-tagged):
-four 80 ms sleeps overlap under ParallelAsync and run in turn under CoopAsync; a user performer with
-`carriers = {} -> 2` overlaps two; two hundred yielding tasks sum the same under both.
+**The carrier budget — built, measured, PULLED, 2026-11-19.** A sixth pass added `carriers = {} -> N`
+as a fourth impl-only field so an `Async` performer could run its tasks on N carriers at once
+(`ParallelAsync`; a user performer with `carriers = {} -> 2`; four 80 ms sleeps in 81 ms vs 321; gates
+green; native verified). It is pulled the same day on the user's call, following Eio: fibers in a domain
+are cooperative and single-threaded, and parallel work goes through a separate capability
+(`Domain_manager`). Mezze keeps the same line — `Async` performers schedule and wait, `LoomAsync` runs a
+thread per task, and data parallelism is the `Parallel` effect — so parallel execution has one home,
+not two. The code is in commit `0775877cb` if the line ever moves.
+
+**Five ops, 2026-11-19 (Koka's lesson: few typed primitives).** `yield_now` is no longer an op: it is
+`Async.park { predicate = {} -> True }`, which every performer answers on its next turn — a scheduler
+re-queues the task behind the others (it costs a predicate evaluation, ~75 ns against 40 for the
+machine's `Immediately`, which stays available to a performer's own ops), a thread-per-task performer
+returns at once. A custom performer now implements `spawn`, `await`, `cancel`, `park`, `park_until` and
+the two scope hooks. `park_until` stays an op so the performer, not the caller, performs `Time` — Koka's
+`async` effect owns `wait`/`timeout` the same way; ZIO and Eio put the clock in the type or pass it as a
+value instead, and that trade was weighed and declined (see the `Time` discussion above).
 
 Still owed on the carrier design: the handoff cost when the inline child does NOT apply (two carriers
 waiting on each other, ~300 ns each; the fan-out kernel is that shape at 176 ns per element); a foreign-thread
