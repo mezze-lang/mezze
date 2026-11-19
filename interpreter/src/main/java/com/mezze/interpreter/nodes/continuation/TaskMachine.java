@@ -178,10 +178,17 @@ public final class TaskMachine {
         final java.util.concurrent.ConcurrentLinkedQueue<Object> inbox = new java.util.concurrent.ConcurrentLinkedQueue<>();   // ForeignPark | Task (a foreign spawn)
         final MezzeRecord handler;
         Boundary prevForHandler;
+        /** How many carriers may run at once. 1 (CoopAsync): the single-active discipline, no lock.
+         *  N > 1 (`carriers = {} -> N` on the performer): up to N tasks run concurrently and the
+         *  boundary's bookkeeping is taken under {@link #lock}. */
+        final int budget;
+        final java.util.concurrent.locks.ReentrantLock lock;
+        int running;
         /** The carrier idling in {@link #blockOrDeadlock}, to be woken by a settling promise or a
          *  foreign post instead of waiting out the fallback. */
         volatile Thread idler;
-        Boundary(MezzeFunction drive, MezzeRecord handler) { this.handler = handler; this.drive = drive; this.runQueue = new RunQueue(this); this.entryThread = Thread.currentThread(); }
+        Boundary(MezzeFunction drive, MezzeRecord handler, int budget) {
+            this.handler = handler; this.budget = budget; this.lock = budget > 1 ? new java.util.concurrent.locks.ReentrantLock() : null; this.drive = drive; this.runQueue = new RunQueue(this); this.entryThread = Thread.currentThread(); }
     }
 
     /** A pooled virtual thread that runs one task at a time. */
@@ -263,7 +270,7 @@ public final class TaskMachine {
         p.machineTask = t;
         p.setCancelHook(reason -> cancelParked(t, reason));
         if (foreign) { b.inbox.add(t); wakeIdler(b); } // a Loom task / HTTP handler spawning under this boundary: the step queues it
-        else b.ready.addLast(t);
+        else { lockB(b); try { b.ready.addLast(t); } finally { unlockB(b); } }
         return p;
     }
 
@@ -314,9 +321,16 @@ public final class TaskMachine {
     }
 
     private void cancelParked(Task t, Object reason) {
-        if (t.state != PARKED || t.owner == null) return;
-        t.owner.parked.remove(t);
-        deliver(t.owner, t, parkCancelled(reason));
+        Boundary b = t.owner;
+        if (b == null) return;
+        lockB(b);
+        try {
+            if (t.state != PARKED) return;
+            b.parked.remove(t);
+            deliver(b, t, parkCancelled(reason));
+        } finally {
+            unlockB(b);
+        }
     }
 
     /** A parked task gets its outcome: the machine's own tasks become runnable and receive it on
@@ -385,11 +399,15 @@ public final class TaskMachine {
      * spawns until the body is done, tear the scope down, and return the body's result (or
      * rethrow its failure — an `abort` included — on the driver, where the handle is).
      */
+    private static void lockB(Boundary b) { if (b.lock != null) b.lock.lock(); }
+    private static void unlockB(Boundary b) { if (b.lock != null) b.lock.unlock(); }
+
     @TruffleBoundary
     public Object runBoundary(MezzeFunction bodyThunk, MezzeRecord handler) {
-        Boundary b = new Boundary(driveOf(handler), handler);
+        Boundary b = new Boundary(driveOf(handler), handler, carriersOf(handler));
         boundaries.push(b);
         if (handler != null) b.prevForHandler = openByHandler.put(handler, b);
+        if (b.budget > 1) parallelOpen++;
         try {
             Task body = new Task(nextTaskId.getAndIncrement(), bodyThunk, null);
             body.machine = this;
@@ -397,7 +415,8 @@ public final class TaskMachine {
             body.chain = HandlerChainRegistry.snapshotHandlerChainEntries();
             body.scope = HandlerChainRegistry.lookupScopeVar();
             b.body = body;
-            give(body);                                // the body's carrier takes it from here
+            lockB(b);
+            try { give(body); } finally { unlockB(b); }   // the body's carrier takes it from here
             while (!b.finished) {
                 if (closing) throw new MachineClosed();
                 LockSupport.park(b);
@@ -405,6 +424,7 @@ public final class TaskMachine {
             if (b.failure != null) sneakyThrow(b.failure);
             return body.result;
         } finally {
+            if (b.budget > 1) parallelOpen--;
             boundaries.pop();
             if (handler != null) { if (b.prevForHandler != null) openByHandler.put(handler, b.prevForHandler); else openByHandler.remove(handler); }
             LAST_BOOKKEEPING = promisesById.size();
@@ -416,8 +436,8 @@ public final class TaskMachine {
 
     private void releaseIdleCarriers() {
         Carrier c;
-        while ((c = idle.pollFirst()) != null) {
-            allCarriers.remove(c);
+        while ((c = poolTake()) != null) {
+            if (parallelOpen == 0) allCarriers.remove(c); else synchronized (poolLock) { allCarriers.remove(c); }
             c.assigned = POISON;
             LockSupport.unpark(c.thread);
         }
@@ -431,14 +451,29 @@ public final class TaskMachine {
      * baton, or null when the boundary finished.
      */
     private Task dispatch(Boundary b) {
+        return dispatch(b, null);
+    }
+
+    /**
+     * The scheduler step. The caller holds {@link Boundary#lock} when the boundary is parallel.
+     * {@code self}: the task of the carrier running the step (a parker), so a self re-pick is
+     * reported and that carrier returns at once instead of waiting for its own turn.
+     */
+    private Task dispatch(Boundary b, Task self) {
+        Task last = null;
         while (true) {
             drainInbox(b);
             wakeParked(b);                             // first: a task that just yielded is back in the ready set BEFORE drive picks
-            if (!b.ready.isEmpty()) {
+            if (!b.ready.isEmpty() && b.running < b.budget) {
                 Task next = pick(b);
                 give(next);
+                if (next == self) return next;
+                last = next;
+                if (b.budget > 1) continue;            // parallel: fill every free slot
                 return next;
             }
+            if (last != null) return last;
+            if (b.running > 0) return null;            // parallel: others are running; the next one to park or end steps again
             boolean bodyEnded = b.body.state == DONE || b.body.state == FAILED;
             if (bodyEnded) {
                 if (b.parked.isEmpty()) { finish(b); return null; }
@@ -491,6 +526,18 @@ public final class TaskMachine {
         LockSupport.unpark(b.entryThread);
     }
 
+    /** The performer's carrier budget: `carriers = {} -> N`. Absent: 1 (the plain cooperative
+     *  machine). 0 spelled explicitly: one per processor. */
+    private static int carriersOf(MezzeRecord handler) {
+        if (handler == null) return 1;
+        Object c = handler.getField(com.mezze.language.ast.ScopedEffectConstants.CARRIERS);
+        if (!(c instanceof MezzeFunction f)) return 1;
+        Object n = callWith(f, MezzeRecord.empty());
+        long v = n instanceof Long l ? l : 1;
+        if (v == 0) v = Runtime.getRuntime().availableProcessors();
+        return (int) Math.max(1, v);
+    }
+
     private static MezzeFunction driveOf(MezzeRecord handler) {
         if (handler == null) return null;
         Object d = handler.getField(com.mezze.language.ast.ScopedEffectConstants.DRIVE);
@@ -515,10 +562,11 @@ public final class TaskMachine {
      *  caller does not wait; the task's carrier runs until it parks or ends and then dispatches. */
     private void give(Task t) {
         t.state = RUNNING;
+        t.owner.running++;
         Carrier c = t.carrier;
         if (c == null) {
-            c = idle.pollFirst();
-            if (c == null) { if (env == null) env = com.mezze.interpreter.runtime.MezzeContext.get(null).getEnv(); c = new Carrier(env); c.thread.start(); }
+            c = poolTake();
+            if (c == null) { if (env == null) env = com.mezze.interpreter.runtime.MezzeContext.get(null).getEnv(); c = newCarrier(); }
             t.carrier = c;
             t.turn = TURN_TASK;
             c.assigned = t;
@@ -553,17 +601,45 @@ public final class TaskMachine {
         if (t.promise != null) {
             if (t.state == DONE) t.promise.complete(t.result); else t.promise.fail(t.failure);
             forget(t.promise);
-        } else if (t.state == FAILED && b.failure == null) {
-            b.failure = t.failure;                     // the body's failure is the perform's, rethrown on the entry thread
         }
-        idle.addFirst(mine);                           // LIFO, so dispatch hands THIS carrier the next fresh task: no thread switch at all
-        Object[] bodyChain = HandlerChainRegistry.installTaskChain(b.body.chain);   // the step's Mezze calls (drive) see the boundary's handlers
+        lockB(b);
         try {
-            dispatch(b);
+            if (t.promise == null && t.state == FAILED && b.failure == null) {
+                b.failure = t.failure;                 // the body's failure is the perform's, rethrown on the entry thread
+            }
+            b.running--;
+            poolPut(mine);                             // LIFO, so dispatch hands THIS carrier the next fresh task: no thread switch at all
+            Object[] bodyChain = HandlerChainRegistry.installTaskChain(b.body.chain);   // the step's Mezze calls (drive) see the boundary's handlers
+            try {
+                dispatch(b);
+            } finally {
+                HandlerChainRegistry.restoreTaskChain(bodyChain);
+                CURRENT.remove();
+            }
         } finally {
-            HandlerChainRegistry.restoreTaskChain(bodyChain);
-            CURRENT.remove();
+            unlockB(b);
         }
+    }
+
+    // The carrier pool is shared by every boundary of the machine. Under the single-active
+    // discipline one thread touches it at a time; while a parallel boundary is open, pool
+    // operations take poolLock.
+    private volatile int parallelOpen;
+    private final Object poolLock = new Object();
+    private void poolPut(Carrier c) {
+        if (parallelOpen == 0) { idle.addFirst(c); return; }
+        synchronized (poolLock) { idle.addFirst(c); }
+    }
+    private Carrier poolTake() {
+        if (parallelOpen == 0) return idle.pollFirst();
+        synchronized (poolLock) { return idle.pollFirst(); }
+    }
+    private Carrier newCarrier() {
+        Carrier c;
+        if (parallelOpen == 0) c = new Carrier(env);
+        else synchronized (poolLock) { c = new Carrier(env); }
+        c.thread.start();
+        return c;
     }
 
     /**
@@ -576,7 +652,9 @@ public final class TaskMachine {
         if (t == null) return parkForeign(request);
         Boundary b = t.owner;
         if (b.abandoning) throw new BoundaryAbandoned();   // a task that swallowed its abandonment and parked again
-        Task child = inlineChild(b, request);
+        Task child;
+        lockB(b);
+        try { child = inlineChild(b, request); } finally { unlockB(b); }
         if (child != null) {
             // Zero handoffs: the awaited task runs on THIS carrier, nested above the awaiter. The
             // awaiter could not have run before it anyway (it waits for exactly this task), and a
@@ -590,10 +668,16 @@ public final class TaskMachine {
         t.parkedOn = request;
         t.state = PARKED;
         t.turn = TURN_DRIVER;
-        b.parked.add(t);
-        Object[] prev = HandlerChainRegistry.installTaskChain(b.body.chain);
         Task next;
-        try { next = dispatch(b); } finally { HandlerChainRegistry.restoreTaskChain(prev); }
+        lockB(b);
+        try {
+            b.running--;
+            b.parked.add(t);
+            Object[] prev = HandlerChainRegistry.installTaskChain(b.body.chain);
+            try { next = dispatch(b, t); } finally { HandlerChainRegistry.restoreTaskChain(prev); }
+        } finally {
+            unlockB(b);
+        }
         if (next != t) awaitTurn(t, TURN_TASK, this);   // someone else holds the baton: wait for it to come back
         // next == t: woken at once (yield_now, a settled promise) — no park, no handoff
         Object d = t.deliver;
@@ -786,7 +870,8 @@ public final class TaskMachine {
                 if (!settled && b.inbox.isEmpty()) {
                     long wait = 1_000_000L;
                     if (nearest != Long.MAX_VALUE) wait = Math.max(1_000L, Math.min(wait, nearest - System.nanoTime()));
-                    LockSupport.parkNanos(this, wait);
+                    unlockB(b);                        // a foreign cancel or spawn must not wait on the idle park
+                    try { LockSupport.parkNanos(this, wait); } finally { lockB(b); }
                 }
             } finally {
                 b.idler = null;

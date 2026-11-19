@@ -52,6 +52,13 @@ object ScopedEffectConstants {
      */
     const val DRIVE = "drive"
     const val DRIVE_RUNNABLE = "runnable"
+    /**
+     * The fourth impl-only field: how many carriers may run this performer's tasks AT ONCE —
+     * `carriers = {} -> 4`. Absent: one (the deterministic cooperative machine). `0`: one per
+     * processor. With more than one, `drive` still picks, under the boundary's lock, but tasks
+     * execute concurrently, so a scheduler written this way is parallel, not deterministic.
+     */
+    const val CARRIERS = "carriers"
     /** Field name carried by `abort` and `resume` records. */
     const val VAL_FIELD = "val"
 
@@ -62,7 +69,7 @@ object ScopedEffectConstants {
      * them from a handler's op list, showing only the real operations.
      */
     fun isScopeHook(name: String): Boolean =
-        name == INITIALIZE_SCOPE || name == FINALIZE_SCOPE || name == DRIVE
+        name == INITIALIZE_SCOPE || name == FINALIZE_SCOPE || name == DRIVE || name == CARRIERS
 }
 
 /**

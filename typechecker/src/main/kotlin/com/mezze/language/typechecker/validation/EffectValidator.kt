@@ -100,7 +100,7 @@ class EffectValidator(
             )
         }
 
-        val scopedEffectNames = setOf(ScopedEffectConstants.INITIALIZE_SCOPE, ScopedEffectConstants.FINALIZE_SCOPE, ScopedEffectConstants.DRIVE)
+        val scopedEffectNames = setOf(ScopedEffectConstants.INITIALIZE_SCOPE, ScopedEffectConstants.FINALIZE_SCOPE, ScopedEffectConstants.DRIVE, ScopedEffectConstants.CARRIERS)
         val extraOps = (implementedOps - requiredOps) - scopedEffectNames
         if (extraOps.isNotEmpty()) {
             val extra = extraOps.joinToString(", ")

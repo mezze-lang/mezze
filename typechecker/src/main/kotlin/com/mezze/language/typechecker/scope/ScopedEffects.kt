@@ -37,6 +37,7 @@ fun detectScopedEffectMembers(operations: List<ParsedPerformerOp>): ScopedEffect
             ScopedEffectConstants.INITIALIZE_SCOPE -> initializeScope = operation
             ScopedEffectConstants.FINALIZE_SCOPE -> finalizeScope = operation
             ScopedEffectConstants.DRIVE -> {}   // the scheduler's selector: impl-only, not an op
+            ScopedEffectConstants.CARRIERS -> {}   // the scheduler's carrier budget: impl-only, not an op
             else -> regularOperations.add(operation)
         }
     }

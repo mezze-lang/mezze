@@ -379,6 +379,38 @@ impl Async for CoopAsync where {
       ParkCancelled { reason } -> False,
 }
 
+## The same scheduler with MANY carriers: `carriers = {} -> 0` lets one task run per
+## processor at once (any N > 1 works; a user performer picks its own). Every op is
+## CoopAsync's — the machine still parks, wakes, cancels and tears down the same way,
+## foreign threads still post to its inbox, host-level waits still park the task — but
+## tasks EXECUTE concurrently, so this performer is parallel, not deterministic. Pick
+## `CoopAsync` for a replayable run, `ParallelAsync` for throughput, `LoomAsync` for a
+## thread per task with no scheduler of its own.
+impl Async for ParallelAsync where {
+  carriers = {} -> 0,
+  initialize_scope = {} -> {},
+  finalize_scope = {} -> {},
+  spawn = { f } -> spawn_task { f = f },
+  await = { p } -> match inspect { p = p } is
+    PromiseCompleted { val } -> Ok { val = val }
+    PromiseFailed { err } -> Err { error = err }
+    PromisePending -> match cont.park { on = OnPromises { ids = [promise_id { p = p }] }, set = WaitDefault } is
+      ParkReady { which } -> settled_result { p = p }
+      ParkCancelled { reason } -> Err { error = AsyncCancelled { reason = reason } },
+  cancel = { p, reason } -> __native_promise_cancel { p = p, reason = reason },
+  yield_now = {} -> match cont.park { on = Immediately, set = WaitDefault } is
+    ParkReady { which } -> {}
+    ParkCancelled { reason } -> {},
+  park = { predicate } -> match cont.park { on = OnPredicates { fs = [predicate] }, set = WaitDefault } is
+    ParkReady { which } -> {}
+    ParkCancelled { reason } -> {},
+  park_until = { predicate, ms } -> do
+    let deadline = add { i = now {}, d = duration_millis { n = ms } }
+    match cont.park { on = OnPredicates { fs = [predicate, {} -> after { a = now {}, b = deadline }] }, set = WaitDefault } is
+      ParkReady { which } -> which == 0
+      ParkCancelled { reason } -> False,
+}
+
 ## How `scoped_with` decides when to stop waiting for its children.
 ##
 ## - `OnFailure`    — wait for everyone; bail early on the first failure

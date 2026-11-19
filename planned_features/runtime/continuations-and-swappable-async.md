@@ -1083,6 +1083,24 @@ old tuned design / carrier before / carrier now): spawn+await 844 / 788 / 203; s
 410 / 793 / 203; iter map→fold with await 381 / 804 / 215; list fold with await 376 / 790 / 210;
 yield_now 376 / 40 / 40; park-True ~400 / 73 / 75; fan-out 197 / 173 / 176.
 
+**Parallelism in userland, 2026-11-19 (sixth pass) — the carrier budget.** A performer may set the
+FOURTH impl-only field, `carriers = {} -> N` (beside `initialize_scope`, `finalize_scope`, `drive`):
+up to N carriers run its tasks AT ONCE; `0` means one per processor; absent means one — the
+deterministic machine CoopAsync is. The stdlib ships `ParallelAsync` = CoopAsync's ops +
+`carriers = {} -> 0`, and a user performer picks its own budget the same way (`impl Async for Two
+where { carriers = {} -> 2, … }`), so parallelism is policy in Mezze like everything else here.
+Mechanism: a boundary with a budget above one has a `ReentrantLock`; `park`, `spawn`, `cancel`, the
+task-end step and the scheduler step take it; the single-carrier path never does (its lock is null, so
+yield_now stays at 40 ns). The step fills every free slot (`running < budget`), returns at once when
+others are still running, and only the LAST carrier to park or end evaluates the idle/deadlock
+verdict (which releases the lock around its park so a foreign cancel or spawn never waits on it).
+`drive` still picks, under the lock, in order; `drive` with a budget above one is a parallel
+scheduler, not a deterministic one, and the doc says so. Everything built this week still holds under
+a budget: foreign parks and spawns through the inbox, host-level waits parking the task, the inline
+child (it occupies the parent's slot), abandon and teardown. `ParallelAsyncTest` (timing-tagged):
+four 80 ms sleeps overlap under ParallelAsync and run in turn under CoopAsync; a user performer with
+`carriers = {} -> 2` overlaps two; two hundred yielding tasks sum the same under both.
+
 Still owed on the carrier design: the handoff cost when the inline child does NOT apply (two carriers
 waiting on each other, ~300 ns each; the fan-out kernel is that shape at 176 ns per element); a foreign-thread
 park (a Mezze callback on a Loom/HTTP thread calling `cont.park` is refused with a clear message —

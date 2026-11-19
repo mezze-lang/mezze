@@ -25,38 +25,9 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 import com.oracle.truffle.api.nodes.IndirectCallNode;
 
 /**
- * A RESUMABLE pull view over the same descriptor tree the push walk uses.
- *
- * `IterNatives.walkElements` is a push driver: it calls a consumer once per
- * element and, since the early-exit fix, can be told to STOP. It still cannot
- * be RESUMED from the middle, and two things need exactly that:
- *
- *   - A lazily-yielded output. `map_concurrent` has to hand an element
- *     downstream and come back for the next one later, which a push walk
- *     cannot express — it owns the loop.
- *   - `zip`. The push walk MATERIALISES both sides and indexes them, so
- *     zipping anything endless exhausts memory. With a cursor per side it is
- *     two `next()` calls and a pair, holding nothing.
- *
- * Why this is a second mechanism rather than a replacement: the push walk is
- * the fast path. It fuses, keeps its loop variables in registers and allocates
- * nothing per element, and the measured numbers in
- * `bench/cases/concurrent_map_compare` rest on it. A cursor allocates a frame
- * per stage and checks state per element. So the push walk stays the default
- * for every existing sink, and a cursor is created only where suspension is
- * the requirement. Converting everything to pull would be the textbook move
- * and would make the common case slower.
- *
- * Exhaustion is the {@link #END} sentinel rather than null, because a Mezze
- * iterator may legitimately yield null-ish host values, and rather than a
- * `hasNext`/`next` pair, which would force every stage to compute an element
- * before being asked whether one exists — wrong when computing it performs an
- * effect.
- *
- * NOT thread-safe, by construction. A cursor is mutable position, and the
- * handler chain a guest callback needs is thread-local; sharing one across
- * threads would be the cross-thread handler bug this interpreter already has
- * an assumption guarding.
+ * A pull view over an iter descriptor: `next()` yields the next element or {@link #END}. This is
+ * the `iter::cursor` surface and the HTTP streaming reader. A callback that parks blocks its carrier
+ * inside `next()`; the cursor never sees a suspension (the carrier machine).
  */
 public abstract class IterCursor {
     /** `{ fst, snd }`, hoisted: this was allocated per call. Names from
@@ -76,14 +47,6 @@ public abstract class IterCursor {
 
     /** Continue after {@link #next} returned a suspension: {@code v} is what the
      *  suspended callback finally returned. Same contract as {@code next}. */
-    public Object resume(Object v) {
-        throw new IllegalStateException(getClass().getSimpleName() + " is not suspended");
-    }
-
-    /** Always false since the carrier machine: a callback that parks blocks its carrier and the
-     *  cursor never sees a suspension. The pending/resume plumbing below is dead and kept only until
-     *  the cursor is rewritten without it. */
-    static boolean susp(Object x) { return false; }
     private static final Object CONTINUE = new Object();
 
     // ==================== construction ====================
@@ -253,7 +216,6 @@ public abstract class IterCursor {
         private final Call step;
         private Object state;
         private boolean done;
-        private boolean pending;
         Unfold(Object initialState, MezzeFunction stepFn, IndirectCallNode callNode) {
             this.state = initialState;
             this.step = new Call(stepFn, callNode);
@@ -262,18 +224,10 @@ public abstract class IterCursor {
         public Object next() {
             while (!done) {
                 Object r = step.onState(state);
-                if (susp(r)) { pending = true; return r; }
                 Object out = decide((MezzeVariant) r);
                 if (out != CONTINUE) return out;
             }
             return END;
-        }
-        @Override
-        public Object resume(Object v) {
-            if (!pending) return super.resume(v);
-            pending = false;
-            Object out = decide((MezzeVariant) v);
-            return out != CONTINUE ? out : next();
         }
         private Object decide(MezzeVariant s) {
             int tag = s.getTag();
@@ -299,24 +253,15 @@ public abstract class IterCursor {
     private static final class Map extends IterCursor {
         private final IterCursor src;
         private final Call f;
-        private int pending;   // 0 none, 1 src, 2 f
         Map(IterCursor src, MezzeFunction fn, IndirectCallNode callNode) {
             this.src = src;
             this.f = new Call(fn, callNode);
         }
         @Override
         public Object next() { return after(src.next()); }
-        @Override
-        public Object resume(Object v) {
-            if (pending == 1) { pending = 0; return after(src.resume(v)); }
-            if (pending == 2) { pending = 0; return v; }
-            return super.resume(v);
-        }
         private Object after(Object x) {
-            if (susp(x)) { pending = 1; return x; }
             if (x == END) return END;
             Object r = f.on(x);
-            if (susp(r)) pending = 2;
             return r;
         }
     }
@@ -324,30 +269,16 @@ public abstract class IterCursor {
     private static final class Filter extends IterCursor {
         private final IterCursor src;
         private final Call p;
-        private int pending;   // 0 none, 1 src, 2 p
-        private Object pendingX;
         Filter(IterCursor src, MezzeFunction pred, IndirectCallNode callNode) {
             this.src = src;
             this.p = new Call(pred, callNode);
         }
         @Override
         public Object next() { return scan(src.next()); }
-        @Override
-        public Object resume(Object v) {
-            if (pending == 1) { pending = 0; return scan(src.resume(v)); }
-            if (pending == 2) {
-                pending = 0;
-                Object x = pendingX; pendingX = null;
-                return truthy(v) ? x : scan(src.next());
-            }
-            return super.resume(v);
-        }
         private Object scan(Object x) {
             while (true) {
-                if (susp(x)) { pending = 1; return x; }
                 if (x == END) return END;
                 Object r = p.on(x);
-                if (susp(r)) { pending = 2; pendingX = x; return r; }
                 if (truthy(r)) return x;
                 x = src.next();
             }
@@ -366,10 +297,7 @@ public abstract class IterCursor {
             if (remaining <= 0) return END;
             return after(src.next());
         }
-        @Override
-        public Object resume(Object v) { return after(src.resume(v)); }
         private Object after(Object x) {
-            if (susp(x)) return x;
             if (x == END) { remaining = 0; return END; }
             remaining--;
             return x;
@@ -385,11 +313,8 @@ public abstract class IterCursor {
         }
         @Override
         public Object next() { return skipThen(src.next()); }
-        @Override
-        public Object resume(Object v) { return skipThen(src.resume(v)); }
         private Object skipThen(Object x) {
             while (true) {
-                if (susp(x)) return x;
                 if (toSkip <= 0) return x;
                 if (x == END) { toSkip = 0; return END; }
                 toSkip--;
@@ -402,8 +327,6 @@ public abstract class IterCursor {
         private final IterCursor src;
         private final Call p;
         private boolean done;
-        private int pending;   // 0 none, 1 src, 2 p
-        private Object pendingX;
         TakeWhile(IterCursor src, MezzeFunction pred, IndirectCallNode callNode) {
             this.src = src;
             this.p = new Call(pred, callNode);
@@ -413,22 +336,9 @@ public abstract class IterCursor {
             if (done) return END;
             return after(src.next());
         }
-        @Override
-        public Object resume(Object v) {
-            if (pending == 1) { pending = 0; return after(src.resume(v)); }
-            if (pending == 2) {
-                pending = 0;
-                Object x = pendingX; pendingX = null;
-                if (!truthy(v)) { done = true; return END; }
-                return x;
-            }
-            return super.resume(v);
-        }
         private Object after(Object x) {
-            if (susp(x)) { pending = 1; return x; }
             if (x == END) { done = true; return END; }
             Object r = p.on(x);
-            if (susp(r)) { pending = 2; pendingX = x; return r; }
             if (!truthy(r)) { done = true; return END; }
             return x;
         }
@@ -438,31 +348,16 @@ public abstract class IterCursor {
         private final IterCursor src;
         private final Call p;
         private boolean dropping = true;
-        private int pending;   // 0 none, 1 src, 2 p
-        private Object pendingX;
         DropWhile(IterCursor src, MezzeFunction pred, IndirectCallNode callNode) {
             this.src = src;
             this.p = new Call(pred, callNode);
         }
         @Override
         public Object next() { return scan(src.next()); }
-        @Override
-        public Object resume(Object v) {
-            if (pending == 1) { pending = 0; return scan(src.resume(v)); }
-            if (pending == 2) {
-                pending = 0;
-                Object x = pendingX; pendingX = null;
-                if (!truthy(v)) { dropping = false; return x; }
-                return scan(src.next());
-            }
-            return super.resume(v);
-        }
         private Object scan(Object x) {
             while (true) {
-                if (susp(x)) { pending = 1; return x; }
                 if (!dropping || x == END) return x;
                 Object r = p.on(x);
-                if (susp(r)) { pending = 2; pendingX = x; return r; }
                 if (!truthy(r)) { dropping = false; return x; }
                 x = src.next();
             }
@@ -475,10 +370,8 @@ public abstract class IterCursor {
         Enumerate(IterCursor src) { this.src = src; }
         @Override
         public Object next() { return after(src.next()); }
-        @Override
-        public Object resume(Object v) { return after(src.resume(v)); }
         private Object after(Object x) {
-            if (susp(x) || x == END) return x;
+            if (x == END) return x;
             return MezzeRecord.fromFields(new String[]{"i", "val"}, new Object[]{idx++, x});
         }
     }
@@ -496,13 +389,8 @@ public abstract class IterCursor {
             if (onFirst) return afterFirst(first.next());
             return second.next();
         }
-        @Override
-        public Object resume(Object v) {
-            if (onFirst) return afterFirst(first.resume(v));
-            return second.resume(v);
-        }
         private Object afterFirst(Object x) {
-            if (susp(x) || x != END) return x;
+            if (x != END) return x;
             onFirst = false;
             return second.next();
         }
@@ -518,7 +406,6 @@ public abstract class IterCursor {
     private static final class Zip extends IterCursor {
         private final IterCursor first;
         private final IterCursor second;
-        private int pending;   // 0 none, 1 first, 2 second
         private Object pendingA;
         Zip(IterCursor first, IterCursor second) {
             this.first = first;
@@ -526,20 +413,12 @@ public abstract class IterCursor {
         }
         @Override
         public Object next() { return afterA(first.next()); }
-        @Override
-        public Object resume(Object v) {
-            if (pending == 1) { pending = 0; return afterA(first.resume(v)); }
-            if (pending == 2) { pending = 0; return afterB(second.resume(v)); }
-            return super.resume(v);
-        }
         private Object afterA(Object a) {
-            if (susp(a)) { pending = 1; return a; }
             if (a == END) return END;
             pendingA = a;
             return afterB(second.next());
         }
         private Object afterB(Object b) {
-            if (susp(b)) { pending = 2; return b; }
             Object a = pendingA; pendingA = null;
             if (b == END) return END;
             return MezzeRecord.fromFields(FIELD_FST_SND, new Object[]{a, b});
@@ -551,7 +430,6 @@ public abstract class IterCursor {
         private final Call f;
         private final IndirectCallNode callNode;
         private IterCursor inner;
-        private int pending;   // 0 none, 1 inner, 2 outer, 3 f
         FlatMap(IterCursor outer, MezzeFunction fn, IndirectCallNode callNode) {
             this.outer = outer;
             this.f = new Call(fn, callNode);
@@ -562,26 +440,14 @@ public abstract class IterCursor {
             if (inner != null) return afterInner(inner.next());
             return afterOuter(outer.next());
         }
-        @Override
-        public Object resume(Object v) {
-            switch (pending) {
-                case 1: pending = 0; return afterInner(inner.resume(v));
-                case 2: pending = 0; return afterOuter(outer.resume(v));
-                case 3: pending = 0; inner = IterCursor.of((MezzeIter) v, callNode); return afterInner(inner.next());
-                default: return super.resume(v);
-            }
-        }
         private Object afterInner(Object x) {
-            if (susp(x)) { pending = 1; return x; }
             if (x != END) return x;
             inner = null;
             return afterOuter(outer.next());
         }
         private Object afterOuter(Object o) {
-            if (susp(o)) { pending = 2; return o; }
             if (o == END) return END;
             Object it = f.on(o);
-            if (susp(it)) { pending = 3; return it; }
             inner = IterCursor.of((MezzeIter) it, callNode);
             return afterInner(inner.next());
         }

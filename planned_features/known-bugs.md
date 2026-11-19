@@ -8469,7 +8469,9 @@ compilation costs warm-up, not peak (measured beside it). `MEZZE_ENGINE_OPTS` ca
 OPEN upstream: a first-tier compiled yield-bearing BDSL root whose branch profile was one-sided takes
 the untaken branch instead of deoptimising; needs a Truffle-level minimal repro.
 
-## BUG 78 — OPEN 2026-11-19 (flake, text not captured): one uncaught exception on a ForkJoinPool worker at the end of the idle-wake probe, 1 run in 17
+## BUG 78 — OPEN 2026-11-19, NOT REPRODUCED in 72 further runs: one uncaught exception on a ForkJoinPool worker at the end of the idle-wake probe, 1 run in 17
+
+**2026-11-19, later:** 60 more runs with stderr captured per run, plus 12 earlier: 0 reproductions. Kept open as a watch item; the capture loop (`idle` scratch project, stderr to a file per run) is the repro harness.
 
 The probe (200 × a `perform LoomAsync in await (Async.spawn { sleep 2 ms })` under an outer `CoopAsync`,
 scratch project `idle`) printed `Exception in thread "ForkJoinPool-1-worker-3"` once, interleaved
