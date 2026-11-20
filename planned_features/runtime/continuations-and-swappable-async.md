@@ -1209,6 +1209,22 @@ bytes); GC is not the spawn cost (1.5 s of pauses in 191 s under Serial; G1 slow
 152, fan-out 200; ping-pong 2.2–2.4 us. Gates: typechecker 5502/5502, interpreter 8260/8260 (incl.
 testTiming), cli 357/357.
 
+**The spawn-at-scale knee is Truffle's thread registry, 2026-11-20.** Spawning and parking N tasks is
+superlinear: 10k in ~1 s, 100k in 81 s (191 s before raw carriers), 300k not finished in 10 minutes.
+GC is not it (1.5 s of pauses in 191 s). Two profiles, one per way of making a carrier, name the same
+thing: `PolyglotContextImpl` keeps a `WeakHashMap` of every live thread and WALKS IT on every new
+thread — `checkAllThreadAccesses` when a polyglot thread is built, `collectDeadThreads` (a `Thread
+.isAlive()` per entry) when any other thread first enters the context (`enterThreadChanged`,
+gated only by "new thread" and "not a polyglot thread"). The n-th carrier therefore costs n steps
+however it is made, and N parked tasks cost N²/2 steps to create. A parked task is a live thread by
+construction, so the machine cannot avoid the count; a task that completes without parking reuses a
+pooled carrier and never pays it; `LoomAsync` pays it on every spawn, since every Loom task is a new
+polyglot thread (measured: 10k Loom tasks spawned in 1.0 s, 30k in 5.8 s — the same superlinear curve). The JDK's own virtual threads do not have this cost; it is
+Truffle's per-context thread bookkeeping, worth an upstream issue (amortise the walk by map size, or
+keep a live-count). Documented knee: tens of thousands of SIMULTANEOUSLY parked tasks spawn in
+seconds; a hundred thousand in about a minute and a half; plan a connection-per-task server's ramp-up
+accordingly, exactly as one would under LoomAsync today.
+
 Still owed on the carrier design: the handoff cost when the inline child does NOT apply (two carriers
 waiting on each other, ~300 ns each; the fan-out kernel is that shape at 176 ns per element); a foreign-thread
 park (a Mezze callback on a Loom/HTTP thread calling `cont.park` is refused with a clear message —
