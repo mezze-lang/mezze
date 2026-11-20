@@ -8,7 +8,7 @@
 # Run:  mez build --native && ./.build/server_smoke-native
 
 use std::effects::log::{ println, Console }
-use std::effects::http::{ Request, Response, request, format_error, body_str, with_query, ToQuery, Method, HttpClient, SimpleHttpClient, HttpServer, HelidonHttpServerWith, ServerConfig, route, otherwise, Matched, FromQuery, BadInput }
+use std::effects::http::{ Request, Response, request, format_error, body_str, with_query, ToQuery, Method, HttpClient, SimpleHttpClient, HttpDownload, SimpleHttpDownload, default_http_config, HttpServer, HelidonHttpServerWith, ServerConfig, route, routes, otherwise, Matched, FromQuery, BadInput, sse, sse_event, SseEvent, events }
 use std::collections::map
 use std::collections::bytes
 use std::int
@@ -24,8 +24,13 @@ let reply: { code: Int, text: Str, url: Str } -> Response = { code, text, url } 
 let not_found: { req: Request } -> Response = { req } ->
     reply { code = 404, text = "nope", url = req.url }
 
+# Server-Sent Events both ways: the route streams two events; `events` folds them on the client.
+let ticks = route { method = Get, path = "/ticks", handler = { m } -> sse { f = { send } -> do
+    send { ev = sse_event { data = "tick" } }
+    send { ev = { data = "tock", event = Some { val = "named" }, id = None } } } }
+
 let app = otherwise {
-    routes = route { method = Get, path = "/hello/:name", handler = { m } -> do
+    routes = routes { of = [ticks, route { method = Get, path = "/hello/:name", handler = { m } -> do
         let who = m.param_or { name = "name", default = "?" }
         let q: Result { times: Int } BadInput = m.query_as {}
         match q is
@@ -35,7 +40,7 @@ let app = otherwise {
                 url = m.req.url,
             }
             Err { error = e } -> reply { code = 400, text = e.message, url = m.req.url }
-    },
+    }] },
     fallback = not_found,
 }
 
@@ -50,7 +55,7 @@ let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2, stream
 
 let main = {} -> perform Console in
     perform HelidonHttpServerWith { config = any_port } in
-        perform SimpleHttpClient in do
+        perform SimpleHttpClient in perform SimpleHttpDownload in do
             let h = match HttpServer.serve { handler = app } is
               Ok { val = hh } -> hh
               Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
@@ -61,5 +66,13 @@ let main = {} -> perform Console in
                     .url,
             }
             let missed = fetch { url = "$(base)/nothing" }
+            let streamed = match events {
+                req = request { url = "$(base)/ticks" }, config = default_http_config,
+                init = "", f = { acc, ev } -> "$(acc)[$(match ev.event is
+                    Some { val } -> val
+                    None -> "-"):$(ev.data)]",
+            } is
+                Ok { val } -> val
+                Err { error = e } -> format_error { err = e }
             h.stop {}
-            println { msg = "server-smoke: port>0=$(if h.port > 0 then "yes" else "no") hit=$(hit) missed=$(missed)" }
+            println { msg = "server-smoke: port>0=$(if h.port > 0 then "yes" else "no") hit=$(hit) missed=$(missed) sse=$(streamed)" }

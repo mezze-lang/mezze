@@ -704,6 +704,111 @@ pub let response_file
     }
 
 
+# ─── Server-Sent Events ─────────────────────────────────────────────────
+
+## One Server-Sent Event: `data` (may span lines), an optional `event` name and `id`.
+pub type SseEvent = { data: Str, event: Option Str, id: Option Str }
+
+## An event carrying only `data`.
+pub let sse_event: { data: Str } -> SseEvent = { data } -> { data = data, event = None, id = None }
+
+## The wire form of one event: `event:`/`id:` lines if set, one `data:` line per line of data, then a blank line.
+pub let sse_format: { ev: SseEvent } -> Str = { ev } -> do
+  let name = match ev.event is
+    Some { val = n } -> "event: $(n)\n"
+    None -> ""
+  let ident = match ev.id is
+    Some { val = i } -> "id: $(i)\n"
+    None -> ""
+  let data = seq::fold { xs = str::split { s = ev.data, delimiter = "\n" }, init = "", f = { acc, x } -> "$(acc)data: $(x)\n" }
+  "$(name)$(ident)$(data)\n"
+
+# `send` writes through a native sink. Live, every event is flushed to the connection as `f` runs on
+# the connection thread (handlers installed); with no connection (mock router, tests) the sink
+# buffers and the events become the body, so the same handler is testable without a port.
+# The sink behind `send`: live (writes to the connection) or buffering (no connection).
+newtype SseSink = __NativeSseSink
+
+## Answer a `text/event-stream` response: `f` runs for the life of the connection and emits with `send`.
+## With no live connection the events are collected into the response body instead.
+pub let sse: { f: { send: { ev: SseEvent } -> {} } -> {} <...> } -> Response <...> = { f } -> do
+  let sink: SseSink = __native_http_sse_begin {}
+  f { send = { ev } -> __native_http_sse_send { sink = sink, text = sse_format { ev = ev } } }
+  let collected = __native_http_sse_end { sink = sink }
+  {
+    status = 200,
+    headers = map::insert { m = map::empty {}, k = "content-type", v = "text/event-stream" },
+    body = bytes::from_str { s = collected },
+    url = "",
+    chunks = None,
+  }
+
+
+## Parse one event block (the lines between two blank lines): `data:` lines join with newlines,
+## `event:`/`id:` set the fields, comment lines (`:`) and unknown fields are ignored.
+pub let sse_parse: { block: Str } -> SseEvent = { block } -> do
+  let parsed = seq::fold {
+    xs = str::split { s = block, delimiter = "\n" },
+    init = { data = None, event = None, id = None },
+    f = { acc, x } -> do
+      let line = if str::ends_with { s = x, suffix = "\r" } then str::substring { s = x, start = 0, end = str::size { s = x } - 1 } else x
+      if str::starts_with { s = line, prefix = "data:" } then do
+          let v = sse_field_value { line = line, prefix = "data:" }
+          { data = Some { val = match acc.data is
+              Some { val = d } -> "$(d)\n$(v)"
+              None -> v },
+            event = acc.event, id = acc.id }
+        else if str::starts_with { s = line, prefix = "event:" } then
+          { data = acc.data, event = Some { val = sse_field_value { line = line, prefix = "event:" } }, id = acc.id }
+        else if str::starts_with { s = line, prefix = "id:" } then
+          { data = acc.data, event = acc.event, id = Some { val = sse_field_value { line = line, prefix = "id:" } } }
+        else acc
+  }
+  { data = match parsed.data is
+      Some { val = d } -> d
+      None -> "",
+    event = parsed.event, id = parsed.id }
+
+# The value after `field:`; one leading space is part of the syntax, not the value.
+let sse_field_value: { line: Str, prefix: Str } -> Str = { line, prefix } -> do
+  let rest = str::substring { s = line, start = str::size { s = prefix }, end = str::size { s = line } }
+  if str::starts_with { s = rest, prefix = " " } then str::substring { s = rest, start = 1, end = str::size { s = rest } } else rest
+
+# Events are split on the BYTES ("\n\n"), and only a complete block is decoded, so a chunk boundary
+# inside a multi-byte character cannot corrupt an event. `buf` is the unfinished tail.
+let sse_fold_blocks
+  : { buf: Bytes, acc: 'acc, f: { acc: 'acc, ev: SseEvent } -> 'acc <...> } -> { buf: Bytes, acc: 'acc } <...>
+  = { buf, acc, f } -> match bytes::index_of { b = buf, pattern = bytes::from_str { s = "\n\n" } } is
+    None -> { buf = buf, acc = acc }
+    Some { val = i } -> do
+      let block = match bytes::to_str { b = bytes::slice { b = buf, start = 0, end = i } } is
+        Ok { val = t } -> t
+        Err { error = _ } -> ""
+      sse_fold_blocks { buf = bytes::drop { b = buf, n = i + 2 }, acc = f { acc = acc, ev = sse_parse { block = block } }, f = f }
+
+## Fold `f` over the events of a `text/event-stream` response as they arrive; stop early with
+## `std::effects::early_return`. Streams through `HttpDownload`, so its handler must be in scope.
+pub let events
+  : { req: Request, config: HttpConfig, init: 'acc, f: { acc: 'acc, ev: SseEvent } -> 'acc <...> }
+  -> Result 'acc HttpError <HttpDownload, ...>
+  = { req, config, init, f } -> with_download {
+    req = with_header { req = req, k = "accept", v = "text/event-stream" },
+    config = config,
+    f = { resp, reader } -> do
+      let final = chunks {
+        reader = reader,
+        chunk_bytes = 65536,
+        init = { buf = bytes::empty {}, acc = init },
+        f = { acc, x } -> sse_fold_blocks { buf = bytes::concat { b1 = acc.buf, b2 = x }, acc = acc.acc, f = f },
+      }
+      # a last event the server never terminated with a blank line still counts
+      let tail = match bytes::to_str { b = final.buf } is
+        Ok { val = t } -> str::trim { s = t }
+        Err { error = _ } -> ""
+      if tail == "" then final.acc else f { acc = final.acc, ev = sse_parse { block = tail } }
+  }
+
+
 # ─── Mock rules, chained ──────────────────────────────────────────────
 # A chain reads WHICH requests, then WHAT comes back; a hand-built `MockRule` grows with `Response`.
 

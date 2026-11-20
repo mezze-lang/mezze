@@ -28,6 +28,22 @@ public final class SingleElemSetStorage implements SetStorage {
         return Objects.equals(element, elem);
     }
 
+    /**
+     * Membership for a key whose type is KNOWN, with no virtual {@code equals}
+     * or {@code hashCode}. This is what the compiled inline lookup calls: a
+     * virtual call on an unknown Object there lets native-image's analysis
+     * follow every override in the image — the DAP tool's record types reach
+     * blocklisted reflection — and the whole image build fails. String is final
+     * and Long unboxes, so these two stay inside the compiled code.
+     */
+    public boolean holds(long x) {
+        return element instanceof Long l && l == x;
+    }
+
+    public boolean holds(String x) {
+        return element instanceof String e && e.equals(x);
+    }
+
     @Override
     public SetStorage add(Object elem) {
         if (Objects.equals(element, elem)) {

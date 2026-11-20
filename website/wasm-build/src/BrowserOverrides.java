@@ -64,6 +64,10 @@ public final class BrowserOverrides {
 
         // --- HTTP client (bridged to sync XHR in install()) ----------------
         "__native_http_request", "__native_http_client_",
+
+        // --- Server-Sent Events sink: no connection ever exists here, so `sse { f }`
+        //     buffers the events into the response body (the mock-router shape) --
+        "__native_http_sse_",
     };
 
     /**
@@ -82,6 +86,7 @@ public final class BrowserOverrides {
         {"__native_jvm_",         "Jvm"},
         {"__native_polyglot_",    "Polyglot"},
         {"__native_http_server_", "HelidonHttpServer"},
+        {"__native_http_stream_", "SimpleHttpDownload (streamed download)"},
         {"__native_time_",        "SystemTime.sleep"},
         {"__native_async_",       "LoomAsync"},
         {"__native_loom_",        "LoomAsync"},

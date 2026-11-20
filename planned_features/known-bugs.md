@@ -8209,3 +8209,48 @@ now expects T0210, `SuspendedValueNeverObservableTest`, `RuntimeEffectValidation
 `IterCursorTest`, `HttpStreamed*Test` rewritten to the fold shape.
 Gates: typechecker 5480/0, interpreter 7631/0 + 556/0 timing, cli 360/0,
 langservice 86/0, lsp 135/0, formatter 187/0; website 126/0 against a rebuilt WASM.
+
+## BUG 63 — FIXED 2026-11-20: `installNative` died on 59 Truffle blocklist violations, all through the inline set lookup
+
+`./gradlew :cli:installNative` failed with "Blocklisted methods are reachable for
+runtime compilation". Every one of the 59 traces shared one `com.mezze` frame:
+`InlineMapContainsKey.doSet` → `MezzeSet.containsDirect(Object)`, which calls
+`hashCode()`/`Objects.equals()` on an UNKNOWN key inside PE-inlined code. The
+runtime-compilation analysis then follows every override in the image, and the
+DAP tool's record types (`ExceptionDetails.hashCode` → JSON → `toString` →
+annotation reflection → `HashMap`) are blocklisted. Broken since the perf commit
+202411d73 (2026-11-07); invisible to the JVM suite.
+
+Fix: typed fast paths. `doSetLong(long)` / `doSetString(String)` guard on
+`hasDirectProbe()` and compare concretely (`SingleElemSetStorage.holds(long|String)`);
+every other key type takes the `@TruffleBoundary` `SetNatives.contains`. Int and
+Str keys keep the measured 1.33x. Rule: never a virtual `hashCode`/`equals` on an
+unknown Object inside a PE-inlined op. Tests: `SetDirectProbeTest`.
+
+## BUG 64 — FIXED 2026-11-20: every native app died at its first `perform Console` — the embedded app carried no stdlib performers
+
+`mez build --native` of ANY program failed at run time with
+`Handler not found for: 5a2943c9…` — `Console`'s performer hash — while the same
+`.jar` ran on the JVM and `mez dev` was fine.
+
+A native binary strips the stdlib snapshot (`NativeBuildPath`, since 1afce7056) and
+relies on the embedded closure. `TypedModuleEmitter.importedPerformers` skips every
+module in `PrecompiledStdlib.stdlibModuleHashes`, trusting the snapshot to supply
+their performers. Until 06f364604 that set was the ~20 prelude-reachable modules,
+and `std::effects::log` was NOT among them (users import it), so `Console` was
+compiled INTO each app by accident. With the whole stdlib precompiled, the emitter
+rightly skips them all — and `embedded-app.meta`'s `performerRecords` was EMPTY.
+The JVM jar still ships `stdlib-snapshot.cbor`, which is why only AOT failed.
+
+Fix: `NativeBuildPath.finalizeClosure` answers an `EmbeddedClosure(functions,
+performerRecords)`. Stdlib performer records whose hash the closure references
+(`HandleIR.handlerHash` is in `collectReferencedHashes`) are embedded FROM THE
+SNAPSHOT together with their op functions, to a fixpoint — never re-lowered in the
+app (the context-sensitive-lowering trap the snapshot closed). The jar path uses the
+same list. `MezzeContext.inflatePerformerRecord` now raises a MezzeInternalError
+naming the missing op instead of returning null into "Handler not found".
+Tests: `EmbeddedAppCarriesStdlibPerformersTest`; `just native-server-test` (the
+fixture now also streams Server-Sent Events both ways).
+Gates for the batch (SSE + BUG 63 + BUG 64): datastructures 808/0, interpreter 7640/0 +
+556/0 timing, cli 362/0, typechecker 5480/0, langservice 86/0, lsp 135/0, formatter 187/0;
+website 126/0 on a rebuilt WASM; `just native-server-test` green.

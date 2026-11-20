@@ -545,11 +545,24 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return com.mezze.interpreter.nodes.builtin.collections.MapNatives.containsKey(m, k);
         }
 
+        // The direct probe is PE-inlined, so it must not call `hashCode`/`equals`
+        // on an unknown Object: native-image's runtime-compilation analysis then
+        // follows every override in the image, and the DAP tool's record types
+        // reach blocklisted reflection — 59 violations, all through this site,
+        // and no native `mez` at all. Int and Str keys (the hot ones) compare
+        // concretely; every other key type takes the boundary.
+        @Specialization(guards = "s.hasDirectProbe()")
+        public static boolean doSetLong(com.mezze.datastructures.set.MezzeSet<?> s, long x) {
+            return s.containsDirectLong(x);
+        }
+
+        @Specialization(guards = "s.hasDirectProbe()")
+        public static boolean doSetString(com.mezze.datastructures.set.MezzeSet<?> s, String x) {
+            return s.containsDirectString(x);
+        }
+
         @Specialization
         public static boolean doSet(com.mezze.datastructures.set.MezzeSet<?> s, Object x) {
-            if (s.hasDirectProbe()) {
-                return s.containsDirect(x);
-            }
             return com.mezze.interpreter.nodes.builtin.collections.SetNatives.contains(s, x);
         }
     }

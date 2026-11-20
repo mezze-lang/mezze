@@ -419,6 +419,7 @@ public final class HttpServerNatives {
      *  installs its own chain rather than inheriting the first one's. */
     private static final ThreadLocal<HandlerChainEntry[]> INSTALLED_CHAIN = new ThreadLocal<>();
 
+
     /**
      * Run the guest handler on the calling Helidon thread.
      *
@@ -456,17 +457,33 @@ public final class HttpServerNatives {
 
         Object prev = truffleCtx.enter(null);
         Reply reply;
+        boolean streamedItself;
         try {
             if (INSTALLED_CHAIN.get() != chain) {
                 if (scope != null) HandlerChainRegistry.restoreScopeVar(scope);
                 if (chain.length > 0) HandlerChainRegistry.installHandlerChainEntries(chain);
                 INSTALLED_CHAIN.set(chain);
             }
-            reply = runHandler(handler, req, streamBodies);
+            // Offer this connection to `sse { f }`: starting the stream sends the
+            // status and headers and hands back the body stream to flush events into.
+            SseNatives.enter(() -> {
+                res.status(200);
+                res.header("content-type", "text/event-stream");
+                res.header("cache-control", "no-cache");
+                return res.outputStream();
+            });
+            try {
+                reply = runHandler(handler, req, streamBodies);
+            } finally {
+                streamedItself = SseNatives.leave();
+            }
         } finally {
             truffleCtx.leave(null, prev);
             inFlight.release();
         }
+        // An SSE handler wrote status, headers and body itself while it ran, and
+        // closed the stream when it returned (or raised): nothing is left to send.
+        if (streamedItself) return;
         res.status(reply.status());
         for (Map.Entry<String, String> h : reply.headers().entrySet()) {
             res.header(h.getKey(), h.getValue());
