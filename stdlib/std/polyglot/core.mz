@@ -116,6 +116,19 @@ effect Polyglot having 'f where {
   box_null:      { lang: Str }                      -> 'f <Polyglot>,
   box_list:      { elems: ['f], lang: Str }         -> 'f <Polyglot>,
   box_dict:      { keys: ['f], vals: ['f], lang: Str } -> 'f <Polyglot>,
+  ## A Mezze FUNCTION handed to the guest as a callable. It crosses BY REFERENCE —
+  ## the guest holds it and calls it POSITIONALLY; each argument arrives as a foreign
+  ## of `lang` (decode it with `.int{}` / `.str{}` like any other foreign), and the
+  ## result crosses back as a value. The function's row is EMPTY on purpose: the guest
+  ## calls from whatever thread it likes, OUTSIDE every `perform`, so the function may
+  ## do nothing that needs a handler — completing a promise is the model use. Arity is
+  ## the guest's contract: a call with the wrong count is the GUEST's arity error,
+  ## raised to the guest, never into Mezze. `box_fn` is the variadic form: every
+  ## argument in one `args` list. A provider wraps the arities its interop has.
+  box_fn0:       { f: {} -> 'r, lang: Str }                 -> 'f <Polyglot>,
+  box_fn1:       { f: { x: 'f } -> 'r, lang: Str }          -> 'f <Polyglot>,
+  box_fn2:       { f: { a: 'f, b: 'f } -> 'r, lang: Str }   -> 'f <Polyglot>,
+  box_fn:        { f: { args: ['f] } -> 'r, lang: Str }     -> 'f <Polyglot>,
   ## Bulk numeric WRITE: a whole `[Int]`/`[Float]` → a guest array in ONE crossing
   ## (counterpart of `to_int_seq`/`to_float_seq`). Skips the N per-element `box_int`/
   ## `box_float` crossings a `box_list` of wrapped foreigns would cost.
@@ -185,6 +198,10 @@ impl Polyglot for Runtime having 'f = 'g where {
   box_null      = { lang }           -> __native_polyglot_box_null      { lang = lang },
   box_list      = { elems, lang }    -> __native_polyglot_box_list      { elems = elems, lang = lang },
   box_dict      = { keys, vals, lang } -> __native_polyglot_box_dict    { keys = keys, vals = vals, lang = lang },
+  box_fn0       = { f, lang }        -> __native_polyglot_box_fn        { f = f, lang = lang, arity = 0 },
+  box_fn1       = { f, lang }        -> __native_polyglot_box_fn        { f = f, lang = lang, arity = 1 },
+  box_fn2       = { f, lang }        -> __native_polyglot_box_fn        { f = f, lang = lang, arity = 2 },
+  box_fn        = { f, lang }        -> __native_polyglot_box_fn        { f = f, lang = lang, arity = 0 - 1 },
   box_int_seq   = { vals, lang }     -> __native_polyglot_box_int_seq   { vals = vals, lang = lang },
   box_float_seq = { vals, lang }     -> __native_polyglot_box_float_seq { vals = vals, lang = lang },
   box_str_seq   = { vals, lang }     -> __native_polyglot_box_str_seq   { vals = vals, lang = lang },

@@ -1236,6 +1236,33 @@ fixed both tests itself — a `fail` op annotated `-> 'a` where the body returns
 alias-vs-newtype example; both classes pass on main. Merging main into this branch resolves them; it
 is the user's call, like everything that touches main.
 
+**The guest callback bridge, 2026-11-20 (user decisions: no uniform function API; each provider
+exposes what its interop has).** A Mezze function crosses to a guest BY REFERENCE as an interop
+executable (`GuestCallable`): the guest holds it and sends `execute`; each positional argument arrives
+in Mezze as a FOREIGN of that language (decoded with `.int{}`/`.str{}` like any other foreign — the
+runtime never guesses a type it cannot see), the result crosses back as a value. Arity is the GUEST's
+contract: a fixed-arity callable rejects a wrong count with an interop `ArityException` raised to the
+guest (Java's future fails, JS's `catch` sees it, Python gets a TypeError caught into the errored
+foreign), never a Mezze runtime error. The effect rule is the TYPE, not a checker: the function's row
+is EMPTY in every signature, so a callback that performs `Console` is a type error at the call site;
+completing a promise (`promise_from`'s `complete`, pure) is the model use.
+
+One core mechanism, four `Polyglot` ops (`box_fn0/1/2`, variadic `box_fn`), one native
+(`__native_polyglot_box_fn { f, lang, arity }`), and per-provider surfaces shaped by the interop:
+`std::polyglot::jvm` has `from_fn0/from_fn/from_fn2` ("becomes whichever functional interface the Java
+parameter asks for", host access already permits guest implementations via `allowAllAccess`); `mezze-js`
+has variadic `js_fn` plus `js_fn1/js_fn2`; `mezze-python` has `py_fn` (positional only — the interop
+call carries no kwargs) plus `py_fn1/py_fn2`; `mezze-wasm` gets nothing of the kind — functions enter
+Wasm as IMPORTS at instantiation, numbers only. Verified in-tree (`JvmCallbackBridgeTest`, 7): Supplier
+on a ForkJoin thread, Function/BiFunction/Comparator with foreign arguments, Java's callback thread
+completing a promise awaited under CoopAsync (the reactor shape, no Mezze-side thread), wrong arity as
+Java's error, effectful callback rejected by the typechecker.
+
+Pitfall for providers: GraalJS has no event loop — a `then` callback is a JOB run when the stack
+empties at the end of the call that resolved the promise, so a JS reactor pumps by calling into JS;
+Python's `asyncio` loop runs only where someone runs it. A Java thread's FIRST callback enters the
+runtime once (the thread-registry walk above), so callback pools are free and thread-per-event is not.
+
 Still owed on the carrier design: the handoff cost when the inline child does NOT apply (two carriers
 waiting on each other, ~300 ns each; the fan-out kernel is that shape at 176 ns per element); a foreign-thread
 park (a Mezze callback on a Loom/HTTP thread calling `cont.park` is refused with a clear message —

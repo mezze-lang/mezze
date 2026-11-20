@@ -6,6 +6,7 @@ import com.mezze.interpreter.runtime.MezzeContext;
 import com.mezze.interpreter.runtime.MezzePolyglotSupport;
 import com.mezze.interpreter.runtime.NativeTypeMismatchException;
 import com.mezze.interpreter.values.MezzeForeign;
+import com.mezze.interpreter.values.MezzeFunction;
 import com.mezze.interpreter.values.MezzeNull;
 import com.mezze.interpreter.values.MezzeRecord;
 import com.mezze.interpreter.values.MezzeVariant;
@@ -1217,6 +1218,23 @@ public final class PolyglotNatives {
      * pure Mezze code (the same reason {@code hash_entries} drains here rather than
      * exposing {@code iter}/{@code next}).
      */
+    /**
+     * `box_fn*`: wrap a Mezze function as a guest-callable foreign of {@code lang}.
+     * See {@link GuestCallable} for the crossing rules (reference out, values per
+     * call, arity owned by the guest, empty effect row owned by the type).
+     */
+    @TruffleBoundary
+    public static MezzeForeign boxFn(MezzeRecord args, String lang) {
+        Object f = args.getField("f");
+        if (!(f instanceof MezzeFunction fn)) {
+            throw new NativeTypeMismatchException("box_fn expects a Mezze function in `f`, got "
+                + (f == null ? "nothing" : f.getClass().getSimpleName()));
+        }
+        Object a = args.getField("arity");
+        int arity = a instanceof Long l ? (int) (long) l : -1;
+        return new MezzeForeign(new GuestCallable(fn, lang, arity), lang);
+    }
+
     @TruffleBoundary
     public static MezzeVariant toSeq(MezzeRecord args) {
         MezzeForeign f = asForeign(args);

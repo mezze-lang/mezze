@@ -152,6 +152,28 @@ pub let from_str:   { val: Str   } -> JvmForeign = { val } ->
   __native_polyglot_box_str   { val = val, lang = "jvm" }
 pub let from_bool:  { val: Bool  } -> JvmForeign = { val } ->
   __native_polyglot_box_bool  { val = val, lang = "jvm" }
+
+## A Mezze function as a Java callback. Java's interop is FUNCTIONAL INTERFACES —
+## `Runnable`, `Supplier`, `Consumer`, `Function`, `BiFunction`, … — so a Mezze
+## function becomes whichever one the Java parameter asks for, by arity: `from_fn0`
+## for the no-argument shapes, `from_fn` for one argument, `from_fn2` for two. Each
+## argument arrives as a `JvmForeign` (decode with `.int{}` / `.str{}`); the result
+## crosses back as a value. Java calls from ITS thread — a ForkJoin worker, a Netty
+## event loop — outside every `perform`, so the function's row is EMPTY: nothing
+## that needs a handler. Completing a promise is the model use:
+##
+##   let p = promise_from { setup = { complete, fail, on_cancel } -> do
+##     future.method { name = "thenAccept", args = [ from_fn { f = { x } -> complete { val = x } } ] }
+##     {} }
+##
+## A thread that calls back for the first time enters the runtime once (a per-thread
+## registration); a callback POOL is free, a thread-per-event library is not.
+pub let from_fn0: { f: {} -> 'r } -> JvmForeign = { f } ->
+  __native_polyglot_box_fn { f = f, lang = "jvm", arity = 0 }
+pub let from_fn:  { f: { x: JvmForeign } -> 'r } -> JvmForeign = { f } ->
+  __native_polyglot_box_fn { f = f, lang = "jvm", arity = 1 }
+pub let from_fn2: { f: { a: JvmForeign, b: JvmForeign } -> 'r } -> JvmForeign = { f } ->
+  __native_polyglot_box_fn { f = f, lang = "jvm", arity = 2 }
 pub let null_val:   {}            -> JvmForeign = {} ->
   __native_polyglot_box_null  { lang = "jvm" }
 

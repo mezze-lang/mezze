@@ -4742,6 +4742,11 @@ public final class NativeDispatch extends MezzeNode {
             (r, c) -> PolyglotNatives.makeList(r, PolyglotNatives.getString(r, "lang")));
         putPolyglotValueOp("__native_polyglot_box_dict",
             (r, c) -> PolyglotNatives.makeDict(r, PolyglotNatives.getString(r, "lang")));
+        // A Mezze FUNCTION handed to the guest as a callable (GuestCallable): crosses by
+        // reference, its arguments and result by value per call. `arity` is the fixed
+        // positional count the guest must honour, or -1 for a variadic `{ args }`.
+        putPolyglotValueOp("__native_polyglot_box_fn",
+            (r, c) -> PolyglotNatives.boxFn(r, PolyglotNatives.getString(r, "lang")));
         // Bulk numeric WRITE: a whole [Int]/[Float] → guest array in ONE crossing
         // (counterpart of to_int_seq/to_float_seq). Raw scalars, no per-element box.
         putPolyglotValueOp("__native_polyglot_box_int_seq",
