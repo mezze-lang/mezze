@@ -1225,6 +1225,17 @@ keep a live-count). Documented knee: tens of thousands of SIMULTANEOUSLY parked 
 seconds; a hundred thousand in about a minute and a half; plan a connection-per-task server's ramp-up
 accordingly, exactly as one would under LoomAsync today.
 
+**Native image re-verified after passes seven to thirteen, 2026-11-20.** `:cli:nativeCompile` builds; a
+`mez build --native` of the park kernels, the ping-pong and the idle probe all run: yield_now 128 ns,
+park-True 110, spawn+await 268, seq fold with await 285, fan-out 331 (200k elements), ping-pong 3.0 us
+per round trip, the idle probe's 200 host-level awaits of a 2 ms sleep in 431 ms. Native runs the same
+code paths as the JIT at two to three times the cost per park, as before. The editor suites
+(`:langservice:test` 86, `:lsp:test` 135) ran on this branch for the first time: one failure each, both
+inherited: the branch never touched either test, and main's single commit since the fork (06f364604)
+fixed both tests itself — a `fail` op annotated `-> 'a` where the body returns the error type, and an
+alias-vs-newtype example; both classes pass on main. Merging main into this branch resolves them; it
+is the user's call, like everything that touches main.
+
 Still owed on the carrier design: the handoff cost when the inline child does NOT apply (two carriers
 waiting on each other, ~300 ns each; the fan-out kernel is that shape at 176 ns per element); a foreign-thread
 park (a Mezze callback on a Loom/HTTP thread calling `cont.park` is refused with a clear message —
