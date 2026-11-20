@@ -8507,3 +8507,98 @@ outcome for index 0 is shared, the spawn-site diagnostic is resolved lazily, the
 primitive-keyed, and a task switch reads the thread-local once. Still open: a park costs ~400 ns
 against a target in the low hundreds; the remaining structure is two yields (frame materialisation
 and a continuation per root) and two resumes per park plus the machine's per-run bookkeeping.
+## BUG 62 — FIXED 2026-11-20: an `Iter` built inside a `perform` ran its effects AFTER the scope ended — `<suspended <hash>>` reached stdout
+
+```mezze
+let main = {} -> perform Console in do
+  let it = perform Ticker in map { it = from_seq { xs = [1, 2] }, f = { x } -> Tick.tick {} }
+  for_each { it = it, f = { x } -> println { msg = x } }
+```
+
+ACCEPTED, and printed `<suspended <3e20febf…>>` twice. `map` does not run `f`; it
+stores it for a later pull. But its signature `… f: {x} -> 'b <...> } -> Iter 'b <...>`
+charged `f`'s row to the `map` CALL, so `perform Ticker` "handled" Tick and the
+returned `Iter Str` carried no trace of it. The pull in `for_each` then ran Tick
+with no handler; the runtime answered a suspension (its lazy-effects model) and
+interpolation rendered it. Five stdlib sources had the same shape
+(`lines_of`, `watch_events`, download `chunks_of`, `response_file`'s body,
+`map_concurrent_lazy`); BUG 28's notes had already observed that `unfold`
+"attributes a step's effects to the construction site".
+
+**Decision (user):** an effect belongs to the ARROW that performs it, never to a
+data type — so there is no honest row for a lazy stage's callback. Stage and
+source callbacks (`map`, `filter`, `flat_map`, `take_while`, `drop_while`,
+`unfold`) are now PURE; sink callbacks (`for_each`, `fold`, `any`, …) keep
+`<...>` because they run during the call. An effectful lazy source is a
+FUNCTION taking the consumer as a fold: `lines { handle, chunk_bytes, init, f }`,
+`with_lines`, `watch`, `chunks { reader, chunk_bytes, init, f }`,
+`fold_concurrent_ordered { it, f, max_in_flight, init, step }`; `with_download`
+hands `f` the `reader`. `response_file` reads its handle through
+`__native_fs_stream_read` (local or memfs handle; raises on failure) because the
+body is drained on the server thread with no handler chain. Early stop is the
+consumer's `return` (`std::effects::early_return`). Rejected: a row on `Iter`
+(`Iter 'a <e>`), a `Stream` type, `Emit`-handler operators, `Continue/Stop`.
+
+**Second hole, same root:** a WRITTEN bare `<...>` with no callback to carry
+from is a wildcard — `let g: {} -> Int <...> = {} -> Tick.tick {}` emitted
+`g : {} -> Int`, and an annotated `{} -> Thunk Str <*>` over
+`type Thunk 'a = { run: {} -> 'a <...> }` dropped Tick from the field (inference
+alone tracked it). Now T0210 "nothing to carry from", with record/newtype/variant
+aliases expanded and the returned type compared against the inferred one.
+
+**Runtime backstop:** a `MezzeSuspend` reaching string interpolation,
+`to_str`/`to_dbg`, or the program's result is I0004 naming the operation
+(`MezzeSuspend.observedAsValue`), never text. `MezzeLanguage` used to keep the
+suspension at the top level "so the user sees it explicitly".
+
+Tests: `IterStageCallbacksArePureTest` (typechecker, 10), `BareOpenRowOnADeclSpecTest`
+now expects T0210, `SuspendedValueNeverObservableTest`, `RuntimeEffectValidationTest`
+(5 tests flipped from "returns MezzeSuspend" to "fails loudly"), `IterSourcesTest`,
+`IterCursorTest`, `HttpStreamed*Test` rewritten to the fold shape.
+Gates: typechecker 5480/0, interpreter 7631/0 + 556/0 timing, cli 360/0,
+langservice 86/0, lsp 135/0, formatter 187/0; website 126/0 against a rebuilt WASM.
+
+## BUG 63 — FIXED 2026-11-20: `installNative` died on 59 Truffle blocklist violations, all through the inline set lookup
+
+`./gradlew :cli:installNative` failed with "Blocklisted methods are reachable for
+runtime compilation". Every one of the 59 traces shared one `com.mezze` frame:
+`InlineMapContainsKey.doSet` → `MezzeSet.containsDirect(Object)`, which calls
+`hashCode()`/`Objects.equals()` on an UNKNOWN key inside PE-inlined code. The
+runtime-compilation analysis then follows every override in the image, and the
+DAP tool's record types (`ExceptionDetails.hashCode` → JSON → `toString` →
+annotation reflection → `HashMap`) are blocklisted. Broken since the perf commit
+202411d73 (2026-11-07); invisible to the JVM suite.
+
+Fix: typed fast paths. `doSetLong(long)` / `doSetString(String)` guard on
+`hasDirectProbe()` and compare concretely (`SingleElemSetStorage.holds(long|String)`);
+every other key type takes the `@TruffleBoundary` `SetNatives.contains`. Int and
+Str keys keep the measured 1.33x. Rule: never a virtual `hashCode`/`equals` on an
+unknown Object inside a PE-inlined op. Tests: `SetDirectProbeTest`.
+
+## BUG 64 — FIXED 2026-11-20: every native app died at its first `perform Console` — the embedded app carried no stdlib performers
+
+`mez build --native` of ANY program failed at run time with
+`Handler not found for: 5a2943c9…` — `Console`'s performer hash — while the same
+`.jar` ran on the JVM and `mez dev` was fine.
+
+A native binary strips the stdlib snapshot (`NativeBuildPath`, since 1afce7056) and
+relies on the embedded closure. `TypedModuleEmitter.importedPerformers` skips every
+module in `PrecompiledStdlib.stdlibModuleHashes`, trusting the snapshot to supply
+their performers. Until 06f364604 that set was the ~20 prelude-reachable modules,
+and `std::effects::log` was NOT among them (users import it), so `Console` was
+compiled INTO each app by accident. With the whole stdlib precompiled, the emitter
+rightly skips them all — and `embedded-app.meta`'s `performerRecords` was EMPTY.
+The JVM jar still ships `stdlib-snapshot.cbor`, which is why only AOT failed.
+
+Fix: `NativeBuildPath.finalizeClosure` answers an `EmbeddedClosure(functions,
+performerRecords)`. Stdlib performer records whose hash the closure references
+(`HandleIR.handlerHash` is in `collectReferencedHashes`) are embedded FROM THE
+SNAPSHOT together with their op functions, to a fixpoint — never re-lowered in the
+app (the context-sensitive-lowering trap the snapshot closed). The jar path uses the
+same list. `MezzeContext.inflatePerformerRecord` now raises a MezzeInternalError
+naming the missing op instead of returning null into "Handler not found".
+Tests: `EmbeddedAppCarriesStdlibPerformersTest`; `just native-server-test` (the
+fixture now also streams Server-Sent Events both ways).
+Gates for the batch (SSE + BUG 63 + BUG 64): datastructures 808/0, interpreter 7640/0 +
+556/0 timing, cli 362/0, typechecker 5480/0, langservice 86/0, lsp 135/0, formatter 187/0;
+website 126/0 on a rebuilt WASM; `just native-server-test` green.

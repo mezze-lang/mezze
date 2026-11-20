@@ -104,6 +104,15 @@ class TypedASTCompiler(
      */
     internal val preloweredDictMethods: Map<Hash, Set<String>> = emptyMap(),
     /**
+     * Prelowered non-lambda lets (`pub let toggle_bool = toggle`), lowered as
+     * zero-param THUNKS returning the aliased function. A call site must never
+     * `CallDirect` one with an argument record (#389) — `populateHashToParamNames`
+     * learns a USER module's thunks from its decls, a prelowered module's only from
+     * here. Measured once `std::effects::mutation` was in the snapshot:
+     * `toggle_bool { b = b }` ran `toggle` zero times.
+     */
+    internal val preloweredThunkHashes: Set<Hash> = emptySet(),
+    /**
      * Final module substitution — used to refresh stale VarType on TypedVar
      * nodes whose type field was captured before the outer scope solved the
      * relevant TyVar (e.g. `<-` desugar binds the payload before the
@@ -375,7 +384,7 @@ class TypedASTCompiler(
      * the class-arg tuple) from the per-site decoder DecodeTargetResolver picked,
      * even when the from_json receiver stayed a bare var (nested generic callback).
      */
-    private val decodeImplByOpHash = mutableMapOf<Hash, TypedAbilityImpl>()
+    internal val decodeImplByOpHash = mutableMapOf<Hash, TypedAbilityImpl>()
 
     /**
      * An ability op's own DECLARED arrow, by op hash — kept so a call site can
@@ -442,13 +451,20 @@ class TypedASTCompiler(
      *   Each gets compiled to a FunctionIR alongside the originals — same
      *   path, just with concrete types and no dict params. Empty list →
      *   mono is off.
+     * @param implOpsOwnedBy When set, only the operations of impls whose hash is
+     *   in this set are compiled as standalone functions; `abilityImpls` stays
+     *   the full resolution index. The stdlib precompile passes each module's
+     *   own impls, so every op is lowered exactly once, by the module that
+     *   declares it, in that module's context. Null (user compile) keeps the
+     *   old behaviour: every impl op not already prelowered is compiled here.
      */
     fun compile(
         module: TypedModule,
         additionalModules: List<TypedModule> = emptyList(),
         additionalPerformers: List<TypedPerformerDecl> = emptyList(),
         monoSpecializations: List<com.mezze.language.typechecker.mono.Monomorphizer.Specialization> = emptyList(),
-        isStdlibCompilation: Boolean = false
+        isStdlibCompilation: Boolean = false,
+        implOpsOwnedBy: Set<Hash>? = null,
     ): CompileResult {
         extractedFunctions.clear()
         performerRecords.clear()
@@ -521,6 +537,7 @@ class TypedASTCompiler(
         // These are needed for method calls like list.length, result.map, etc.
         val compiledOpHashes = compiledHashes.toMutableSet()
         for (impl in abilityImpls) {
+            if (implOpsOwnedBy != null && impl.hash !in implOpsOwnedBy) continue
             for ((opName, opBody) in impl.operations) {
                 val opHash = computeOpHash(impl.hash, opName)
                 if (opHash in compiledOpHashes || opHash in stdlibHashes) continue
@@ -1680,18 +1697,10 @@ class TypedASTCompiler(
             // the type variable wasn't fully substituted but only one impl exists),
             // and if that fails, try arg-based resolution (concrete types in the arg
             // record can pin the ability's type parameter — see #346).
-            // A return-driven codec ability (`Decode 'config 'a for 'in`): its impl is
-            // chosen by the TARGET type, which the receiver cannot tell (every
-            // generated decoder has receiver `Json`). When the enclosing function
-            // holds this method's dict, that dict IS the choice — go through it even
-            // though the receiver is typed.
-            // The same holds for a decode ENTRY op, which this test's
-            // `decodeImplByOpHash` (derived decoders only) excludes — the
-            // measured cost of leaving it out is in [entryOpDictIsHeld].
-            val viaEnclosingDecodeDict = receiverType !is VarType &&
-                ((enclosingDictSlot(methodName, null) != null &&
-                    abilityOpIndex[methodName]?.any { decodeImplByOpHash.containsKey(it.opHash) } == true) ||
-                    entryOpDictIsHeld(methodName, receiverType, (fn as? TypedFieldAccess)?.abilityHash?.hex))
+            // A return-driven codec op on a typed receiver goes through the
+            // dictionary the frame holds — see [heldDictRoutesConcreteReceiver].
+            val nodeAbility = (fn as? TypedFieldAccess)?.abilityHash
+            val viaEnclosingDecodeDict = heldDictRoutesConcreteReceiver(methodName, receiverType, nodeAbility)
             // BUG 9 / C.2: pass the ability the node carries. Inside a mono spec the
             // receiver becomes concrete, so this concrete path runs — and without the
             // ability it picks whichever impl of that operation name was registered
@@ -2690,11 +2699,15 @@ class TypedASTCompiler(
                 }
             }
 
-            // 2. From concrete types; see `resolveDictOp` for the order.
+            // 2. From concrete types; see `resolveDictOp` for the order. A resolved
+            // op whose OWN dictionaries this site cannot all supply is no answer
+            // while the caller holds the slot — see [dictedRefIsComplete].
             val opHash = resolveDictOp(
                 dictMethod, methodOwnType, keyAbilityHash, constraintTypes, concreteTypes,
                 methodOwnTuple)
-            if (opHash != null) {
+            val callerHolds = currentParamNames.indexOf(callerSlot) >= 0 ||
+                currentCaptureNames.containsKey(callerSlot)
+            if (opHash != null && (!callerHolds || dictedRefIsComplete(opHash, constraintTypes + concreteTypes))) {
                 // refToDictedOp wraps the resolved op when IT needs its own dicts —
                 // e.g. `sort { xs = [[P]] }`: sort's Ord dict is the seq Ord op
                 // (comparing [P]'s), which needs its own element dict (`Ord P`).
@@ -3796,7 +3809,7 @@ class TypedASTCompiler(
 
     /** Element-first expansion: for each container type, its element precedes it, so
      *  dict resolution prefers the ELEMENT impl over the container impl. */
-    private fun elementFirst(types: List<MezzeType>): List<MezzeType> = types.flatMap { t ->
+    internal fun elementFirst(types: List<MezzeType>): List<MezzeType> = types.flatMap { t ->
         val e = containerElementType(t)
         if (e != null && e !is VarType) listOf(e, t) else listOf(t)
     }
@@ -4695,6 +4708,8 @@ class TypedASTCompiler(
     private fun populateHashToParamNames(modules: List<TypedModule>) {
         hashToParamNames.clear()
         nonLambdaUserLetHashes.clear()
+        // A thunk is a thunk wherever it was compiled — see [preloweredThunkHashes].
+        nonLambdaUserLetHashes.addAll(preloweredThunkHashes)
 
         // User decls — only TypedLetDecl whose value is a TypedLambda has a callable
         // shape that scalar-ABI can target. Non-lambda lets are zero-param thunks.
@@ -4756,6 +4771,10 @@ class TypedASTCompiler(
         }
 
         for ((hash, fnIR) in preloweredFunctions) {
+            // A thunk's `paramNames` is empty, which is not "a callable with no
+            // parameters": registering it would let a call site pick the scalar
+            // ABI for the thunk and hand its argument record to nothing.
+            if (hash in preloweredThunkHashes) continue
             hashToParamNames[hash] = fnIR.paramNames
         }
     }

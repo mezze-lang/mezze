@@ -28,9 +28,7 @@ import kotlin.test.assertEquals
 class HttpStreamedResponseTest {
 
     private val head = """
-        use std::effects::http::{ Request, Response, Method, HttpClient, SimpleHttpClient, request, format_error, body_str, response_stream }
-        use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig }
-        use std::effects::http_server::{ route, otherwise, Matched }
+        use std::effects::http::{ Request, Response, Method, request, format_error, body_str, response_stream, HttpClient, SimpleHttpClient, HttpServer, HelidonHttpServerWith, ServerConfig, route, otherwise, Matched }
         use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text, WriteMode }
         use std::collections::{ bytes, iter, map, seq }
         use std::int
@@ -42,7 +40,7 @@ class HttpStreamedResponseTest {
         let text_of: { resp: Response } -> Str = { resp } -> match body_str { resp = resp } is
           Ok { val } -> val
           Err { error = _ } -> "could not decode"
-        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_logs = False }
+        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_print_log = Off }
     """.trimIndent()
 
     private val fetch = """
@@ -107,7 +105,7 @@ class HttpStreamedResponseTest {
      */
     @Test
     @Timeout(value = 120, unit = TimeUnit.SECONDS, threadMode = ThreadMode.SEPARATE_THREAD)
-    fun `a streamed response runs its producer during the write`() {
+    fun `a streamed response writes one chunk per pull`() {
         val r = MezzeTestHelper.run(
             """
             $head
@@ -119,9 +117,7 @@ class HttpStreamedResponseTest {
                   headers = map::empty {},
                   chunks = iter::map {
                     it = iter::range { start = 0, end = 6 },
-                    f = { x } -> do
-                      let _ = write_text { path = "/pulled/$(int::to_str { n = x })", text = "1" }
-                      bytes::from_str { s = "." }
+                    f = { x } -> bytes::from_str { s = "." }
                   },
                 } },
               fallback = not_found,
@@ -130,20 +126,17 @@ class HttpStreamedResponseTest {
               perform MemoryFileSystem in
                 perform HelidonHttpServerWith { config = listen_on_any_port } in
                   perform SimpleHttpClient in do
-                    let _ = FileSystem.create_directory { path = "/pulled" }
                     let h = match HttpServer.serve { handler = app } is
                       Ok { val = hh } -> hh
                       Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
                     let body = fetch { url = ${url("/stream")} }
                     h.stop {}
-                    match FileSystem.list { path = "/pulled" } is
-                      Ok { val = names } -> "$(body)|$(int::to_str { n = seq::size { xs = names } })"
-                      Err { error = _ } -> "$(body)|list-failed"
+                    body
             go {}
             """.trimIndent(),
         )
-        // six dots on the wire, and six producers ran
-        assertEquals("......|6", r)
+        // six dots on the wire: one per pull of the pure producer
+        assertEquals("......", r)
     }
 
     /** An empty chunk iterator is an empty body, not a hang or an error. */

@@ -107,22 +107,22 @@ describe('import completion', () => {
 
   test('filters by the path typed so far', async () => {
     await runtime()
-    const got = labels('use std::effects::h|')
+    const got = labels('use std::effects::l|')
     assert.ok(got.length > 0)
-    assert.ok(got.every((l) => l.startsWith('std::effects::h')), `got ${got}`)
+    assert.ok(got.every((l) => l.startsWith('std::effects::l')), `got ${got}`)
   })
 
   test('replaces the whole path, not just the last word', async () => {
     await runtime()
-    // Accepting `std::effects::http` after `use std::eff` must not leave
-    // `use std::std::effects::http` — the item carries its own range.
+    // Accepting `std::effects::log` after `use std::eff` must not leave
+    // `use std::std::effects::log` — the item carries its own range.
     const [text, line, col] = at('use std::eff|')
     const items = globalThis.completeMezze(text, line, col)
-    const pick = items.find((c) => c.label === 'std::effects::http')
-    assert.ok(pick, 'std::effects::http not offered')
+    const pick = items.find((c) => c.label === 'std::effects::log')
+    assert.ok(pick, 'std::effects::log not offered')
     assert.ok(pick.edit, 'no replacement range on the item')
     const before = text.slice(0, pick.edit.startCol)
-    assert.equal(before + pick.label, 'use std::effects::http')
+    assert.equal(before + pick.label, 'use std::effects::log')
   })
 })
 

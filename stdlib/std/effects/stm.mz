@@ -6,10 +6,9 @@ use std::effects::async::{ Async, park, wait_on }
 ## Transactional variable -- can only be read/written inside STM transactions.
 pub newtype TVar 'a = __NativeTVar
 
-## Structural hash, paired with the `Eq` below.
-## `Eq` and `Hash` are written together or not at all: a hash container
-## buckets by one and compares by the other, so a value whose hash
-## disagrees with its equality is silently kept twice.
+# `Eq` and `Hash` are written together or not at all: a hash disagreeing with
+# equality makes hash containers keep a value twice.
+## Structural hash, paired with the type's `Eq`.
 impl Hash for TVar 'a where {
   hash: { it: TVar 'a } -> Int = { it } -> structural_hash { it = it }
 }
@@ -27,8 +26,7 @@ impl TVar 'a where {
   ensure = { it } -> STM.ensure { var = it },
   deref = { it } -> deref { var = it },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
+  # dot-chain parity: inherent method for every receiver-taking free function.
   transfer = { it, to, amount } -> transfer { from = it, to = to, amount = amount },
   transfer_or_wait = { it, to, amount } -> transfer_or_wait { from = it, to = to, amount = amount },
 }
@@ -111,9 +109,7 @@ impl STM for SequentialSTM where {
 
 ## Run a transaction atomically with OptimisticSTM.
 pub let atomically: { f: {} -> 'a <STM> } -> 'a <Async, ...> = { f } -> do
-  # STM.retry / STM.check-false abort the perform and set a flag; park
-  # via Async so the carrier yields to other tasks, then re-run the whole
-  # transaction.
+  # retry/check-false abort the perform and set a flag; park via Async, then re-run the transaction.
   let result = perform OptimisticSTM in __native_stm_atomic { f = f }
   match __native_stm_check_and_clear_retry_flag {} is
     True -> do
@@ -154,14 +150,12 @@ pub let read_all: { vars: [TVar 'a] } -> ['a] <STM> = { vars } ->
 pub let write_all: { pairs: [{ var: TVar 'a, val: 'a }] } -> {} <STM> = { pairs } ->
   __native_stm_write_all { pairs = pairs }
 
-## Blocking transactional variable (can be empty or full).
-## Useful for synchronization, one-shot events, and locks.
+## Blocking transactional variable that is either empty or full; useful for events and locks.
 pub newtype TMVar 'a = TVar (Option 'a)
 
-## Structural hash, paired with the `Eq` below.
-## `Eq` and `Hash` are written together or not at all: a hash container
-## buckets by one and compares by the other, so a value whose hash
-## disagrees with its equality is silently kept twice.
+# `Eq` and `Hash` are written together or not at all: a hash disagreeing with
+# equality makes hash containers keep a value twice.
+## Structural hash, paired with the type's `Eq`.
 impl Hash for TMVar 'a where {
   hash: { it: TMVar 'a } -> Int = { it } -> structural_hash { it = it }
 }
@@ -180,8 +174,7 @@ impl TMVar 'a where {
   swap = { it, val } -> swap_tmvar { var = it, val = val },
   is_empty = { it } -> is_empty_tmvar { var = it },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
+  # dot-chain parity: inherent method for every receiver-taking free function.
   take_tmvar = { it } -> take_tmvar { var = it },
   put_tmvar = { it, val } -> put_tmvar { var = it, val = val },
   read_tmvar = { it } -> read_tmvar { var = it },
@@ -275,10 +268,9 @@ pub let is_empty_tmvar: { var: TMVar 'a } -> Bool <STM> = { var } -> do
 ## Unbounded transactional FIFO queue.
 pub newtype TQueue 'a = TVar { read: List 'a, write: List 'a }
 
-## Structural hash, paired with the `Eq` below.
-## `Eq` and `Hash` are written together or not at all: a hash container
-## buckets by one and compares by the other, so a value whose hash
-## disagrees with its equality is silently kept twice.
+# `Eq` and `Hash` are written together or not at all: a hash disagreeing with
+# equality makes hash containers keep a value twice.
+## Structural hash, paired with the type's `Eq`.
 impl Hash for TQueue 'a where {
   hash: { it: TQueue 'a } -> Int = { it } -> structural_hash { it = it }
 }
@@ -296,8 +288,7 @@ impl TQueue 'a where {
   is_empty = { it } -> is_empty_tqueue { q = it },
   size = { it } -> size_tqueue { q = it },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
+  # dot-chain parity: inherent method for every receiver-taking free function.
   write_tqueue = { it, val } -> write_tqueue { q = it, val = val },
   read_tqueue = { it } -> read_tqueue { q = it },
   try_read_tqueue = { it } -> try_read_tqueue { q = it },
@@ -425,10 +416,9 @@ pub let size_tqueue: { q: TQueue 'a } -> Int <STM> = { q } -> do
 ## Bounded transactional FIFO queue that blocks on write when full.
 pub newtype TBQueue 'a = TVar { read: List 'a, write: List 'a, size: Int, capacity: Int }
 
-## Structural hash, paired with the `Eq` below.
-## `Eq` and `Hash` are written together or not at all: a hash container
-## buckets by one and compares by the other, so a value whose hash
-## disagrees with its equality is silently kept twice.
+# `Eq` and `Hash` are written together or not at all: a hash disagreeing with
+# equality makes hash containers keep a value twice.
+## Structural hash, paired with the type's `Eq`.
 impl Hash for TBQueue 'a where {
   hash: { it: TBQueue 'a } -> Int = { it } -> structural_hash { it = it }
 }
@@ -449,8 +439,7 @@ impl TBQueue 'a where {
   size = { it } -> size_tbqueue { q = it },
   capacity = { it } -> capacity_tbqueue { q = it },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
+  # dot-chain parity: inherent method for every receiver-taking free function.
   write_tbqueue = { it, val } -> write_tbqueue { q = it, val = val },
   read_tbqueue = { it } -> read_tbqueue { q = it },
   try_read_tbqueue = { it } -> try_read_tbqueue { q = it },

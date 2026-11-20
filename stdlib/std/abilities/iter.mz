@@ -1,17 +1,5 @@
-## Iterable — the universal iteration entry point.
-##
-## Any type that implements `Iterable` gains `.to_iter{}` which returns
-## an `Iter 'elem`. All Iter combinators (filter, map, fold, to_seq, …)
-## are then available via dot-chaining.
-##
-## For linear types (List, Deque) the impl is trivial. For non-linear
-## types (trees, graphs) the impl delegates to `iter::unfold`. For
-## effectful producers (file handles, HTTP streams) effects propagate
-## through `<...>` on `to_iter`.
-##
-## Collections with fused HOFs (Seq, List, Set, SortedSet, Deque) keep
-## their direct methods — `Iterable` is for cross-collection pipelines
-## and types without built-in fusion.
+## Iterable — `.to_iter {}` yields an `Iter 'elem`, giving every Iter combinator.
+## Effects of an effectful producer propagate through `<...>` on `to_iter`.
 
 ability Iterable for 'c having 'elem where {
   to_iter: { it: 'c } -> Iter 'elem <...>

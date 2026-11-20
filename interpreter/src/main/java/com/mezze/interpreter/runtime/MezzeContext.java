@@ -529,7 +529,17 @@ public final class MezzeContext {
                     opFunc = com.mezze.interpreter.values.MezzeFunction.create(ct, opHash.getHex());
                 }
             }
-            if (opFunc == null) return null;
+            if (opFunc == null) {
+                // Never answer "Handler not found": the performer IS declared. What is
+                // missing is one of its op FUNCTIONS — in a native image, a function
+                // the embedded stdlib set does not carry (the JVM launcher would have
+                // fetched it from the runtime store). Name it, so the build can be fixed.
+                throw new com.mezze.interpreter.runtime.MezzeInternalError(
+                    "Performer " + info.performerHash.getHex().substring(0, 16) + "… declares op `"
+                        + opNames[i] + "` (function " + opHash.getHex().substring(0, 16)
+                        + "…), but this runtime has no compiled function for it: the embedded "
+                        + "stdlib set is incomplete. Rebuild the toolchain; if it persists, report it.");
+            }
             opValues[i] = opFunc;
         }
         var locations = new com.mezze.interpreter.values.MezzeRecord.FieldLocation[opCount];

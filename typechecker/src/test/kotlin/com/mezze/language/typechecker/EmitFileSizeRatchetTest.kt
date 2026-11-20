@@ -281,6 +281,16 @@ class EmitFileSizeRatchetTest {
             // 5050 -> 5057: BUG 43 (a mono clone of a non-lambda let is a thunk, set where
             // the specs are registered) and four `evidenceNativeForm` entries — the
             // group_by family, BUG 50 old series. Table rows belong in the table.
+            // 5057 -> 5076: the whole stdlib is lowered into the snapshot (not the
+            // ~20 modules the prelude reaches), and three lowerings that had only
+            // ever run inside USER programs ran in stdlib mode for the first time.
+            // THE DECISIONS WENT TO `DictEvidence.kt` (`heldDictRoutesConcreteReceiver`,
+            // `dictedRefIsComplete`), and the concrete-receiver gate that lived here
+            // moved out with them (-36). What grew here is call-site plumbing only:
+            // `preloweredThunkHashes` — a prelowered alias (`toggle_bool = toggle`)
+            // is a thunk the call site must not CallDirect, and only this class
+            // holds the thunk set; and `injectDictFields` reading the caller's slot
+            // before accepting a rebuilt dictionary that cannot carry its own.
             // 5057 -> 5060: C1 of continuations — every call site threads its callee's
             // `maySuspend` verdict (computed in SuspendSites.kt) into the node it emits.
             // The threading has to sit at the emit sites; the rule lives in its own file.
@@ -294,7 +304,8 @@ class EmitFileSizeRatchetTest {
             // 5068 -> 5070: C4 — `maySuspend = bodyMaySuspend(…)` stamped on the two FunctionIR
             // constructions (functions and the effect-op wrappers); the rule is in SuspendSites.kt.
             // 5070 -> 5071: V0513 method spelling — `consumePending(targetHash)` in emitCallDirect.
-            C + "TypedASTCompiler.kt" to 5071,   // was 5,580 before the split
+            // merged 2026-11-20 (main's stdlib lowering + continuations C1–C4/V0513): 5084.
+            C + "TypedASTCompiler.kt" to 5084,   // was 5,580 before the split
             // +42 for `contextRowWithBodyAssocTypes`: an INLINE lambda was stamped
             // with the row from the pushed CONTEXT, so a callback's associated
             // type was the CALLEE's variable rather than what the body threw, and

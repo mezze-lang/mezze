@@ -90,26 +90,21 @@ class DeepPropagationCostTest {
 
     @Test
     @Timeout(value = 900, unit = TimeUnit.SECONDS)
-    void parkCostByDepth() throws Exception {
-        // The 1000-deep chain is 1000 interpreter frames before the leaf yields:
-        // on the JVM's default thread stack that sits at the edge, and two more
-        // operations on the bytecode root tipped it over (StackOverflowError,
-        // 2026-11-17). The measurement is ns per level, not the default stack
-        // size, so it runs on a thread with room to spare.
-        Throwable[] failed = new Throwable[1];
-        Thread t = new Thread(null, () -> {
-            try { parkCostByDepthBody(); } catch (Throwable e) { failed[0] = e; }
-        }, "deep-propagation", 256L << 20);
-        t.start();
-        t.join();
-        if (failed[0] != null) {
-            if (failed[0] instanceof Exception e) throw e;
-            if (failed[0] instanceof Error e) throw e;
-            throw new RuntimeException(failed[0]);
-        }
+    void parkCostByDepth() throws Throwable {
+        // 1000 nested effectful frames recurse on the Java stack — several JVM
+        // frames per Mezze level — which overflows a default test-thread stack
+        // before a single park is timed. Run on a thread sized for the depth this
+        // test exists to measure.
+        Throwable[] failure = new Throwable[1];
+        Thread deep = new Thread(null, () -> {
+            try { measureParkCostByDepth(); } catch (Throwable t) { failure[0] = t; }
+        }, "deep-propagation", 512L * 1024 * 1024);
+        deep.start();
+        deep.join();
+        if (failure[0] != null) throw failure[0];
     }
 
-    private void parkCostByDepthBody() {
+    private static void measureParkCostByDepth() {
         try (Context context = Context.newBuilder("mezze")
                 .allowExperimentalOptions(true).allowAllAccess(true).build()) {
             context.enter();

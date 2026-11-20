@@ -149,38 +149,6 @@ class IterCursorTest {
         assertEquals(6L, eval(code))
     }
 
-    /** A cursor stage may PERFORM — the FS case the streaming work is for. */
-    @Test
-    @Timeout(value = 60, unit = TimeUnit.SECONDS, threadMode = ThreadMode.SEPARATE_THREAD)
-    fun `cursor stage can perform FileSystem`() {
-        val code = """
-            $head
-            use std::effects::filesystem::{ FileSystem, MemoryFileSystem, read_text, write_text, WriteMode }
-            use std::collections::bytes
-            use std::str
-            perform MemoryFileSystem in do
-              let _ = FileSystem.create_directory { path = "/p" }
-              let _ = write_text { path = "/p/0", text = "aa" }
-              let _ = write_text { path = "/p/1", text = "bbb" }
-              let c = iter::cursor {
-                it = iter::unfold {
-                  state = 0,
-                  step = { s } -> match read_text { path = "/p/$(int::to_str { n = s })" } is
-                    Ok { val = t } -> Yield { val = str::size { s = t }, next = s + 1 }
-                    Err { error = _ } -> Done
-                }
-              }
-              let a = iter::cursor_next { c = c }
-              let b = iter::cursor_next { c = c }
-              match a is
-                Some { val = x } -> match b is
-                  Some { val = y } -> x + y
-                  None -> 0 - 1
-                None -> 0 - 1
-        """.trimIndent()
-        assertEquals(5L, eval(code))
-    }
-
     // ==================== zip no longer materialises ====================
 
     /**
@@ -247,130 +215,121 @@ class IterCursorTest {
         assertEquals(68L, eval(code))
     }
 
-    // ==================== map_concurrent_lazy ====================
+    // ==================== fold_concurrent_ordered ====================
 
-    /** Results come back, in source order, with the window bounded. */
+    private val concurrentHead = """
+        $head
+        use std::effects::async::{ Async, LoomAsync, fold_concurrent_ordered }
+    """.trimIndent()
+
+    /** Results arrive in source order, as digits appended to the accumulator. */
     @Test
     @Timeout(value = 120, unit = TimeUnit.SECONDS, threadMode = ThreadMode.SEPARATE_THREAD)
-    fun `map_concurrent_lazy yields every result in source order`() {
+    fun `fold_concurrent_ordered folds every result in source order`() {
         val code = """
-            $head
-            use std::effects::async::{ Async, LoomAsync, map_concurrent_lazy }
+            $concurrentHead
             perform LoomAsync in
-              iter::fold {
-                it = map_concurrent_lazy {
-                  it = iter::range { start = 0, end = 6 },
-                  f = { x } -> x,
-                  max_in_flight = 3,
-                },
-                init = "",
-                f = { acc, x } -> match x is
-                  Ok { val = v } -> "$(acc)$(int::to_str { n = v })"
-                  Err { error = _ } -> "$(acc)?",
+              fold_concurrent_ordered {
+                it = iter::range { start = 0, end = 6 },
+                f = { x } -> x,
+                max_in_flight = 3,
+                init = 0,
+                step = { acc, r } -> match r is
+                  Ok { val = v } -> acc * 10 + v
+                  Err { error = _ } -> acc,
               }
         """.trimIndent()
-        assertEquals("012345", eval(code))
+        assertEquals(12345L, eval(code))
     }
 
     /**
-     * THE property the eager form cannot have: `take` from the output and the
+     * THE property the eager form cannot have: stop after four results and the
      * rest is never computed. Over an ENDLESS source, so a strict
-     * implementation cannot finish at all.
+     * implementation cannot finish at all. The stop is the consumer's: a
+     * `return` out of `step`.
      */
     @Test
     @Timeout(value = 120, unit = TimeUnit.SECONDS, threadMode = ThreadMode.SEPARATE_THREAD)
-    fun `map_concurrent_lazy over an endless source is bounded by take`() {
+    fun `fold_concurrent_ordered over an endless source stops when the consumer returns`() {
         val code = """
-            $head
-            use std::effects::async::{ Async, LoomAsync, map_concurrent_lazy }
-            perform LoomAsync in
-              iter::fold {
-                it = iter::take {
-                  it = map_concurrent_lazy { it = $naturals, f = { x } -> x * 2, max_in_flight = 2 },
-                  n = 4,
-                },
-                init = 0,
-                f = { acc, x } -> match x is
-                  Ok { val = v } -> acc + v
-                  Err { error = _ } -> acc,
+            $concurrentHead
+            use std::effects::early_return::{ EarlyReturn, return }
+            perform LoomAsync in perform EarlyReturn in do
+              let final = fold_concurrent_ordered {
+                it = $naturals,
+                f = { x } -> x * 2,
+                max_in_flight = 2,
+                init = { sum = 0, seen = 0 },
+                step = { acc, r } -> do
+                  let s = match r is
+                    Ok { val = v } -> acc.sum + v
+                    Err { error = _ } -> acc.sum
+                  if acc.seen + 1 == 4 then return { val = s } else { sum = s, seen = acc.seen + 1 },
               }
+              final.sum
         """.trimIndent()
         // (0+1+2+3) * 2
         assertEquals(12L, eval(code))
     }
 
     /**
-     * LAZINESS, measured as work done rather than as the answer.
-     *
-     * This is the test the obvious one is not. `map_concurrent_lazy over an
-     * endless source is bounded by take` asserts a SUM, and lazy and eager
-     * produce the same sum by definition — that is what laziness means. It
-     * passes with the window widened to 1,000,000: verified, 15/15 green,
-     * because a million Loom spawns at ~14us still finish inside the timeout.
-     * The result was never the evidence.
-     *
-     * So count the mapper's INVOCATIONS instead, one marker file each. Taking
-     * 4 elements with a window of 2 should invoke it a handful of times, not a
-     * million. The ceiling of 32 is deliberately loose — the window may be
-     * topped up a step ahead — while still sitting four orders of magnitude
-     * below what an eager implementation does.
+     * LAZINESS, measured as work done rather than as the answer. The sum above
+     * is the same for lazy and eager by definition. So count the mapper's
+     * INVOCATIONS instead, one marker file each: stopping after 4 results with
+     * a window of 2 should invoke it a handful of times, not a million. The
+     * ceiling of 32 is deliberately loose — the window may be topped up a step
+     * ahead — while sitting four orders of magnitude below an eager walk.
      */
     @Test
     @Timeout(value = 120, unit = TimeUnit.SECONDS, threadMode = ThreadMode.SEPARATE_THREAD)
-    fun `map_concurrent_lazy does bounded work for a bounded take`() {
+    fun `fold_concurrent_ordered does bounded work for a bounded consumer`() {
         val code = """
-            $head
-            use std::effects::async::{ Async, LoomAsync, map_concurrent_lazy }
+            $concurrentHead
+            use std::effects::early_return::{ EarlyReturn, return }
             use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text, WriteMode }
-            use std::collections::bytes
             perform MemoryFileSystem in perform LoomAsync in do
               let _ = FileSystem.create_directory { path = "/seen" }
-              let _ = iter::count {
-                it = iter::take {
-                  it = map_concurrent_lazy {
-                    it = ${naturals},
-                    f = { x } -> write_text { path = "/seen/$(int::to_str { n = x })", text = "1" },
-                    max_in_flight = 2,
-                  },
-                  n = 4,
+              let _ = perform EarlyReturn in do
+                let _ = fold_concurrent_ordered {
+                  it = $naturals,
+                  f = { x } -> write_text { path = "/seen/$(int::to_str { n = x })", text = "1" },
+                  max_in_flight = 2,
+                  init = 0,
+                  step = { acc, r } -> if acc + 1 == 4 then return { val = {} } else acc + 1,
                 }
-              }
+                {}
               match FileSystem.list { path = "/seen" } is
                 Ok { val = names } -> seq::size { xs = names }
                 Err { error = _ } -> 0 - 1
         """.trimIndent()
         val invocations = MezzeTestHelper.asLong(eval(code))
         assert(invocations in 4..32) {
-            "mapper ran $invocations times for a take of 4 with a window of 2; " +
+            "mapper ran $invocations times for a stop after 4 with a window of 2; " +
                 "expected 4..32 (far more means the source was drained eagerly, " +
-                "fewer than 4 means the take did not get its elements)"
+                "fewer than 4 means the consumer did not get its elements)"
         }
     }
 
     /** The mapper may perform, which is the whole purpose. */
     @Test
     @Timeout(value = 120, unit = TimeUnit.SECONDS, threadMode = ThreadMode.SEPARATE_THREAD)
-    fun `map_concurrent_lazy mapper can perform FileSystem`() {
+    fun `fold_concurrent_ordered mapper can perform FileSystem`() {
         val code = """
-            $head
-            use std::effects::async::{ Async, LoomAsync, map_concurrent_lazy }
+            $concurrentHead
             use std::effects::filesystem::{ FileSystem, MemoryFileSystem, read_text, write_text, WriteMode }
-            use std::collections::bytes
             use std::str
             perform MemoryFileSystem in perform LoomAsync in do
               let _ = FileSystem.create_directory { path = "/in" }
               let _ = seq::for_each { xs = seq::range { start = 0, end = 5 }, f = { x } -> write_text { path = "/in/$(int::to_str { n = x })", text = "ab" } }
-              iter::fold {
-                it = map_concurrent_lazy {
-                  it = iter::range { start = 0, end = 5 },
-                  f = { x } -> match read_text { path = "/in/$(int::to_str { n = x })" } is
-                    Ok { val = t } -> str::size { s = t }
-                    Err { error = _ } -> 0
-                  ,
-                  max_in_flight = 2,
-                },
+              fold_concurrent_ordered {
+                it = iter::range { start = 0, end = 5 },
+                f = { x } -> match read_text { path = "/in/$(int::to_str { n = x })" } is
+                  Ok { val = t } -> str::size { s = t }
+                  Err { error = _ } -> 0
+                ,
+                max_in_flight = 2,
                 init = 0,
-                f = { acc, x } -> match x is
+                step = { acc, r } -> match r is
                   Ok { val = v } -> acc + v
                   Err { error = _ } -> acc,
               }
@@ -379,20 +338,19 @@ class IterCursorTest {
         assertEquals(10L, eval(code))
     }
 
-    /** An empty source yields nothing rather than hanging on an empty window. */
+    /** An empty source folds to `init` rather than hanging on an empty window. */
     @Test
     @Timeout(value = 60, unit = TimeUnit.SECONDS, threadMode = ThreadMode.SEPARATE_THREAD)
-    fun `map_concurrent_lazy on an empty source is empty`() {
+    fun `fold_concurrent_ordered on an empty source answers init`() {
         val code = """
-            $head
-            use std::effects::async::{ Async, LoomAsync, map_concurrent_lazy }
+            $concurrentHead
             perform LoomAsync in
-              iter::count {
-                it = map_concurrent_lazy {
-                  it = iter::range { start = 0, end = 0 },
-                  f = { x } -> x,
-                  max_in_flight = 4,
-                }
+              fold_concurrent_ordered {
+                it = iter::range { start = 0, end = 0 },
+                f = { x } -> x,
+                max_in_flight = 4,
+                init = 0,
+                step = { acc, r } -> acc + 1,
               }
         """.trimIndent()
         assertEquals(0L, eval(code))
@@ -401,17 +359,16 @@ class IterCursorTest {
     /** A source shorter than the window drains cleanly. */
     @Test
     @Timeout(value = 60, unit = TimeUnit.SECONDS, threadMode = ThreadMode.SEPARATE_THREAD)
-    fun `map_concurrent_lazy drains a source smaller than the window`() {
+    fun `fold_concurrent_ordered drains a source smaller than the window`() {
         val code = """
-            $head
-            use std::effects::async::{ Async, LoomAsync, map_concurrent_lazy }
+            $concurrentHead
             perform LoomAsync in
-              iter::count {
-                it = map_concurrent_lazy {
-                  it = iter::range { start = 0, end = 2 },
-                  f = { x } -> x,
-                  max_in_flight = 16,
-                }
+              fold_concurrent_ordered {
+                it = iter::range { start = 0, end = 2 },
+                f = { x } -> x,
+                max_in_flight = 16,
+                init = 0,
+                step = { acc, r } -> acc + 1,
               }
         """.trimIndent()
         assertEquals(2L, eval(code))

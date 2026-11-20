@@ -4,10 +4,8 @@ use std::effects::async::{ Async, park, wait_on }
 ## Counting semaphore for limiting concurrent access.
 pub newtype Semaphore = __NativeSemaphore
 
-## Structural hash, paired with the `Eq` below.
-## `Eq` and `Hash` are written together or not at all: a hash container
-## buckets by one and compares by the other, so a value whose hash
-## disagrees with its equality is silently kept twice.
+# `Eq` and `Hash` are written together or not at all: a hash that disagrees
+# with equality makes a hash container keep a value twice.
 impl Hash for Semaphore where {
   hash: { it: Semaphore } -> Int = { it } -> structural_hash { it = it }
 }
@@ -27,8 +25,7 @@ impl Semaphore where {
   available = { it } -> available { sem = it },
   with_permit = { it, f } -> with_permit { sem = it, f = f },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
+  # dot-chain parity: so `x.op {}` works for every receiver-taking free function.
   acquire_async = { it } -> acquire_async { sem = it },
   acquire_n_async = { it, permits } -> acquire_n_async { sem = it, permits = permits },
 }

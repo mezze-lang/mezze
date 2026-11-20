@@ -258,6 +258,25 @@ public final class MezzeSuspend implements TruffleObject {
         return value instanceof MezzeSuspend;
     }
 
+    /**
+     * A suspension is runtime plumbing: something a later {@code perform}
+     * forces, never a value a program can see. Reaching a place that OBSERVES
+     * it (text rendering, the program's final result) means an effect ran with
+     * no handler installed, which a well-typed program cannot do: the type
+     * checker accepted something it should have refused. So it is an internal
+     * error (I0004), never output.
+     */
+    @TruffleBoundary
+    public com.mezze.interpreter.runtime.MezzeInternalError observedAsValue(String where) {
+        String op = computation != null ? computation.getOperationName() : null;
+        String what = op != null
+            ? "Effect operation `" + op + "` ran with no handler in scope"
+            : "An effect ran with no handler in scope";
+        return new com.mezze.interpreter.runtime.MezzeInternalError(
+            what + ", and its suspended result reached " + where
+                + ". The type checker should have refused this program.");
+    }
+
     @Override
     @TruffleBoundary
     public String toString() {

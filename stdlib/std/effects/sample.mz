@@ -5,25 +5,10 @@ use std::nat::{ Nat }
 use std::int
 use std::collections::seq
 
-## Where a generated value's choices come from — and NOTHING about types.
-##
-## `Arbitrary` says how a value of a given type is assembled, and which values of
-## that type are interesting: that `0`, `1` and `-1` matter for an `Int`, that the
-## empty string matters for a `Str`. All of that is knowledge ABOUT a type, so it
-## lives with the type. This effect only answers "give me a number below N", which
-## is the same question whatever is being built.
-##
-## ## One draw, and why it is `bound` rather than `min`/`max`
-##
-## Every generated value of every type bottoms out in `choose`, so a whole
-## generation is a sequence of Ints — which is what makes a run recordable and
-## replayable without any per-type machinery.
-##
-## The draw is `[0, bound)` rather than `[min, max]` so that **0 is always the
-## simplest answer**. That ordering is the entire basis of shrinking: a shrinker
-## walks the recorded sequence pushing choices toward zero and replays it. With a
-## `min`/`max` primitive there is no canonical simplest value and that ordering has
-## nothing to stand on. `int_between` is an ordinary function on top.
+# Arbitrary owns per-type knowledge; this effect only answers "a number below N".
+# `[0, bound)` makes a generation a replayable Int sequence with 0 simplest: the basis of shrinking.
+## Where a generated value's choices come from: a recordable sequence of `[0, bound)` draws.
+## 0 is always the simplest answer, which is what shrinking pushes choices toward.
 effect Sample where {
   ## A non-negative Int below `bound`. 0 is the simplest answer.
   choose: { bound: Int } -> Int <Sample>,
@@ -33,64 +18,35 @@ effect Sample where {
   resize: { n: Nat, call: {} -> 'a <Sample, ...> } -> 'a <Sample>
 }
 
-## A recipe for an `'a` — the thing you CALL to get one.
-##
-## Deferred and re-runnable, which is the whole point: `g {}` twice gives two
-## values, where a plain `'a` would be one frozen value. Because the draws are
-## ambient, this needs no generator data type and no threaded seed — it is just a
-## thunk, and every combinator below is an ordinary function.
-##
-## `Arbitrary.arbitrary` is the canonical generator for a type. Anything you
-## write by hand is another one, and you pass it explicitly where you want it.
-##
-## Written out as `{} -> 'a <Sample>` at every use rather than hidden behind a
-## `Sampler 'a` alias. An alias whose target is a function type with a NAMED
-## effect reads as if it had none — `{} -> Sampler Str <Other>` shows one row
-## where there are two — and the row cannot be moved to the use site either,
-## because a row needs an arrow to own it and `Sampler Str` is not one. So the
-## alias is gone and T0219 refuses the form.
+# A generator for 'a is a thunk `{} -> 'a <Sample>`: re-runnable, no data type or threaded seed.
+# Written out at each use, not aliased: an alias hides the named effect row (T0219 refuses it).
 
-## The default budget.
-##
-## Small on purpose. A sample exists to be READ, and a 40-element list nested four
-## deep is not read, it is scrolled past.
+## The default budget. Small on purpose: a sample exists to be read.
 pub let default_size: Nat = 5n
 
-## Every knob a sampling performer takes, in ONE record.
-##
-## - `size` — the budget for collection length and recursion depth. A recursive
-##   type halves it per level, so a tree is at most about `log2(size) + 1` deep.
-## - `enumerate` — how many LEADING choices [CoveringSampleWith] steers before
-##   drawing randomly. Ignored by the purely random performers.
-##
-## One record rather than one `…With` performer per combination of knobs: a new
-## knob is a new field, not a new set of performers. `resize` passes it down with
-## only `size` changed, so a nested draw keeps every other setting.
+# One record rather than one `…With` performer per combination of knobs: a new
+# knob is a new field, not a new set of performers.
+## Every knob a sampling performer takes: `size` (length/depth budget, halved per recursive level)
+## and `enumerate` (leading choices [CoveringSampleWith] steers; ignored by random performers).
 pub type SampleConfig = { size: Nat, enumerate: Nat }
 
 ## The defaults the plain performers use.
 pub let default_config: SampleConfig = { size = default_size, enumerate = 12n }
 
-## Entropy from whatever `Random` handler is installed above.
-##
-## `Random` is RAISED OUT, not handled, so the caller chooses: a seeded stream for a
-## reproducible run, real entropy, or a recorded one. [SeededSample] makes that choice
-## for you in the common case.
+## Entropy from whatever `Random` handler is installed above (raised out, not handled).
+## Use [SeededSample] for a reproducible run.
 impl Sample for RandomSample where {
-  ## `bound <= 1` has exactly one legal answer, and asking `random_int` for a range
-  ## of `[0, -1]` would be asking it for something that does not exist.
+  # `bound <= 1` has exactly one legal answer, and asking `random_int` for a range
+  # of `[0, -1]` would be asking it for something that does not exist.
   choose = { bound } -> if bound <= 1 then 0 else random_int { min = 0, max = bound - 1 },
   size = {} -> default_size,
   resize = { n, call } ->
     perform RandomSampleWith { config = { size = n, enumerate = default_config.enumerate } } in call {},
 }
 
-## `RandomSample` with a budget you choose.
-##
-## Note `resize` installs THIS performer rather than recursing into itself, which is
-## what lets a nested draw inherit a lowered budget without touching the `Random`
-## handler above it. Re-installing entropy per level would reset the stream and every
-## subtree would come out identical.
+# `resize` installs this performer so nested draws inherit a lowered budget without resetting
+# the Random stream (a reset would make every subtree identical).
+## `RandomSample` with a [SampleConfig] you choose.
 impl Sample for RandomSampleWith { config: SampleConfig } where {
   choose = { bound } -> if bound <= 1 then 0 else random_int { min = 0, max = bound - 1 },
   size = {} -> config.size,
@@ -98,51 +54,19 @@ impl Sample for RandomSampleWith { config: SampleConfig } where {
     perform RandomSampleWith { config = { size = n, enumerate = config.enumerate } } in call {},
 }
 
+# A performer, not a `with_seed` function: the function didn't compose (effects in its callback
+# escaped the handler). It owns the stream rather than raising Random because a performer
+# handles exactly ONE effect (V0701), so one scope can't be both Sample and Random.
 ## A seeded stream: the same seed gives the same values.
-##
-##     perform SeededSample { seed = 7 } in do
-##       let xs: [Int] = Arbitrary.arbitrary {}
-##       …
-##
-## ## Why a PERFORMER, and not a `with_seed { seed, call }` function
-##
-## Choosing where entropy comes from is exactly what an effect handler is for, so a
-## function taking a `call` thunk was the wrong shape twice over.
-##
-## It did not compose. `perform Console in with_seed { call = {} -> … println … }`
-## typechecks and prints NOTHING: the `Log` performed inside the callback has already
-## left the `perform` body by the time the handler is installed, so the handler never
-## sees it. A performer has no such shape — `perform Console in perform SeededSample
-## { seed = 7 } in <body>` nests the way every other effect does, and the body is the
-## body.
-##
-## And it was redundant. The function's whole content was two nested `perform`s,
-## which the caller can write — so it bought no late binding, only an extra calling
-## convention to learn. Its own comment said as much, having already replaced an
-## earlier generator effect on that reasoning; the simplification went one step too
-## far and took composition with it.
-##
-## ## Why this one OWNS the stream instead of raising `Random`
-##
-## [RandomSample] below takes its entropy from whatever `Random` handler is installed
-## above it. That is the composable choice and why it stays. A SEEDED run cannot be
-## written that way in one `perform`: a performer handles exactly ONE effect (V0701),
-## so a single scope cannot be both the `Sample` performer and the `Random` handler
-## the old function paired it with. This one therefore reads the seeded stream
-## directly — no more privileged than what `impl Random for SeededRandom` does with
-## the same natives, because discharging an effect with a real side effect is what a
-## performer IS.
+## e.g. `perform SeededSample { seed = 7 } in …`
 impl Sample for SeededSample { seed: Int } where {
-  ## The stream resets ONCE, at scope entry. That is the whole reason the old
-  ## function installed `SeededRandom` around the entire generation rather than per
-  ## draw: a reset per draw hands back the same number every time, which is a
-  ## generator that looks like it works and produces constants.
+  # Reset ONCE at scope entry: a reset per draw would return the same number every time.
   initialize_scope = {} -> do
     __native_reset_seeded_random { seed = seed }
     {},
   finalize_scope = {} -> {},
-  ## `bound <= 1` has exactly one legal answer, and asking for a range of `[0, -1]`
-  ## would be asking for something that does not exist.
+  # `bound <= 1` has exactly one legal answer, and asking for a range of `[0, -1]`
+  # would be asking for something that does not exist.
   choose = { bound } ->
     if bound <= 1 then 0
     else __native_seeded_random_int { seed = seed, min = 0, max = bound - 1 },
@@ -151,14 +75,9 @@ impl Sample for SeededSample { seed: Int } where {
     perform SeededSampleWith { seed = seed, config = { size = n, enumerate = default_config.enumerate } } in call {},
 }
 
-## The same stream with a [SampleConfig] you choose.
-##
-## Deliberately has NO `initialize_scope`: `resize` installs this performer, so
-## re-entering must CONTINUE the stream. A reset here would fire per nested draw and
-## every subtree would come out identical — the exact failure the entry reset above
-## is careful to do only once. The stream is keyed by seed and lives outside any
-## scope (`SEEDED_RANDOMS` in `RandomNatives`), so continuing is simply what happens
-## when nothing resets it.
+# Deliberately no `initialize_scope`: `resize` re-installs this, so re-entry must CONTINUE the
+# seed-keyed stream; a reset per nested draw would make every subtree identical.
+## The same seeded stream with a [SampleConfig] you choose.
 impl Sample for SeededSampleWith { seed: Int, config: SampleConfig } where {
   choose = { bound } ->
     if bound <= 1 then 0
@@ -168,49 +87,13 @@ impl Sample for SeededSampleWith { seed: Int, config: SampleConfig } where {
     perform SeededSampleWith { seed = seed, config = { size = n, enumerate = config.enumerate } } in call {},
 }
 
-## A seeded stream whose LEADING choices are enumerated rather than guessed, so a
-## set of rows covers the shapes instead of stumbling on them.
-##
-##     perform CoveringSample { seed = 7, run = 3 } in do
-##       let x: Shape = Arbitrary.arbitrary {}
-##       …
-##
-## ## Why this belongs here and not in `Arbitrary`
-##
-## Every generated value bottoms out in `choose` — the premise of this whole
-## effect — and a derived variant picks its constructor by bisecting over `Bool`
-## draws, which are `choose { bound = 2 }`. So WHICH SHAPE comes out is decided by
-## the first few choices, and steering those steers which `match` arm or `if`
-## branch the code under test takes. Nothing type-specific is involved, so nothing
-## type-specific is needed: this is a draw strategy, which is what a `Sample`
-## performer IS.
-##
-## ## Why blind draws are not enough
-##
-## The derivation weights an EMPTY constructor at one in eight, so an arm reachable
-## only through one shows up in about an eighth of rows — and nesting compounds it:
-## five `Option` fields come out all-empty one time in 32768. A run that never
-## reached an arm looks exactly like a run that reached it and found nothing wrong.
-##
-## ## How `run` is used
-##
-## The row index is decomposed into mixed-radix digits, consuming each `bound` as
-## it arrives, so no bound has to be known in advance. Row 0 has nothing to
-## decompose and is an ordinary random row; later rows walk the combinations of the
-## leading choices. Past a fixed depth, or once the digits run out, draws come from
-## the seeded stream — deep payloads are what random draws are good at, and
-## enumerating them would only make every row share a long prefix.
-##
-## `resize` hands off to [CoveringSampleAt] rather than to itself: a nested draw
-## must CONTINUE the row, and re-entering this performer would restart the
-## enumeration at position 0 and make every subtree identical — the same trap
-## [SeededSampleWith]'s own note describes. It used to hand off to the SEEDED
-## performer, which continued the row but stopped covering it: once containers
-## drew their elements through `resize`, no element was enumerated at all.
+# A draw strategy, so it lives here: the first few choices decide which constructor/branch comes out.
+# `resize` hands off to [CoveringSampleAt] so nested draws continue (and keep covering) the row.
+## A seeded stream whose LEADING choices are enumerated, so a set of rows covers the shapes.
+## `run` is the row index (mixed-radix digits over the leading choices); row 0 is plain random.
+## Past a fixed depth, or once the digits run out, draws come from the seeded stream.
 impl Sample for CoveringSample { seed: Int, run: Int } where {
-  ## Resets the enumeration position and the seeded stream once, at entry, for the
-  ## reason [SeededSample] gives: a reset per draw hands back the same answer every
-  ## time, which is a generator that looks like it works and produces constants.
+  # Resets the enumeration and seeded stream once, at entry, as [SeededSample] does.
   initialize_scope = {} -> do
     __native_reset_covering_sample { seed = seed, run = run, depth = default_config.enumerate }
     {},
@@ -223,12 +106,10 @@ impl Sample for CoveringSample { seed: Int, run: Int } where {
     perform CoveringSampleAt { seed = seed, config = { size = n, enumerate = default_config.enumerate } } in call {},
 }
 
+# `resize` hands off to [CoveringSampleAt] carrying the SAME config with only
+# `size` lowered, so a nested draw continues the row — and its enumeration.
 ## [CoveringSample] with a [SampleConfig] you choose — `enumerate` sets how many
-## leading choices are steered, `size` the budget.
-##
-## `resize` hands off to [CoveringSampleAt] carrying the SAME config with only
-## `size` lowered, so a nested draw continues the row — and its enumeration —
-## with your settings.
+## leading choices are steered, `size` the budget. Nested draws keep your settings.
 impl Sample for CoveringSampleWith { seed: Int, run: Int, config: SampleConfig } where {
   initialize_scope = {} -> do
     __native_reset_covering_sample { seed = seed, run = run, depth = config.enumerate }
@@ -242,10 +123,9 @@ impl Sample for CoveringSampleWith { seed: Int, run: Int, config: SampleConfig }
     perform CoveringSampleAt { seed = seed, config = { size = n, enumerate = config.enumerate } } in call {},
 }
 
-## A covering run CONTINUED inside a resized draw: no `initialize_scope`, so the
-## enumeration carries on from where the enclosing draw left it, only the size
-## lowered. Not for direct use — [CoveringSample] or [CoveringSampleWith] start a
-## row; this is what their `resize` installs.
+# No `initialize_scope`, so the enumeration carries on from where the enclosing
+# draw left it, only the size lowered.
+## A covering run continued inside a resized draw; installed by `resize`, not for direct use.
 impl Sample for CoveringSampleAt { seed: Int, config: SampleConfig } where {
   choose = { bound } ->
     if bound <= 1 then 0
@@ -265,10 +145,10 @@ pub let size: {} -> Nat <Sample> = {} -> Sample.size {}
 pub let resize: { n: Nat, call: {} -> 'a <Sample, ...> } -> 'a <Sample> = { n, call } ->
   Sample.resize { n = n, call = call }
 
-## A scripted operation's next value: `values` in call order, repeating from the
-## start once used up. `key` names the row and `op` the operation, so each has its
-## own position. What `mez sample` hands a performer it generates for an effect
-## nothing handles — every value the function sees is one the row drew and shows.
+# This is what `mez sample` hands a performer it generates for an effect nothing
+# handles — every value the function sees is one the row drew and shows.
+## A scripted operation's next value: `values` in call order, repeating once used up.
+## Position is tracked per row `key` and operation `op`.
 pub let scripted: { values: ['a], key: Int, op: Int } -> 'a = { values, key, op } ->
   __native_scripted_next { values = values, key = key, op = op }
 
@@ -278,40 +158,22 @@ pub let scripted: { values: ['a], key: Int, op: Int } -> 'a = { values, key, op 
 pub let int_between: { min: Int, max: Int } -> Int <Sample> = { min, max } ->
   min + Sample.choose { bound = (max - min) + 1 }
 
-## One element of `xs`. `def` is returned only for an empty `xs`, which is a
-## generator that cannot produce anything and is the caller's mistake, not a case
-## worth making every call site unwrap an Option for.
+# `def`, not Option: an empty `xs` is the caller's mistake, not worth unwrapping everywhere.
 ## Pick one element of `xs` at random, or `def` when it is empty.
 pub let one_of: { xs: ['a], def: 'a } -> 'a <Sample> = { xs, def } ->
   match seq::get { xs = xs, i = Sample.choose { bound = seq::size { xs = xs } } } is
     Some { val } -> val
     None -> def
 
-## A list of `g`, with a length drawn from `[0, size]`.
-##
-## The empty list is in range on purpose: it is the case most code forgets, the
-## same reason the empty string leads `Arbitrary for Str`.
-##
-## The length comes from the size BUDGET rather than a fixed bound, and the
-## elements are drawn at HALF of it, through `resize` — the rule a recursive type
-## already follows. Without the halving a list of lists multiplied out: one
-## `[[[Int]]]` at size 100 held 127 746 ints. It costs an element's own reach
-## nothing that matters: a property check's sizes run high enough that elements
-## still get their extremes (`std::property.max_check_size`).
+# Elements draw at half the budget: without halving, one `[[[Int]]]` at size 100 held 127 746 ints.
+## A list of `g`, length drawn from `[0, size]` (empty included); elements drawn at half the size.
 pub let list_of: { g: {} -> 'a <Sample> } -> ['a] <Sample> = { g } -> do
   let budget = Sample.size {}
   let n = Sample.choose { bound = int::from_nat { n = budget } + 1 }
   Sample.resize { n = budget / 2n, call = {} -> seq::map { xs = seq::range { start = 0, end = n }, f = { x } -> g {} } }
 
-## One of `choices`, each picked in proportion to its `weight`.
-##
-## For "mostly valid, occasionally pathological" — the distribution a hand-written
-## generator usually wants and the one a uniform pick cannot express. A non-positive
-## weight is simply never selected, which is a useful way to disable a case without
-## deleting it.
-##
-## `def` covers an empty or all-zero-weight `choices`: a generator with nothing to
-## choose from, the caller's mistake, and not worth an Option at every call site.
+## One of `choices`, picked in proportion to `weight`; a non-positive weight is never selected.
+## Returns `def` when `choices` is empty or all weights are zero.
 pub let frequency: { choices: [{ weight: Int, gen: {} -> 'a <Sample> }], def: 'a } -> 'a <Sample> =
   { choices, def } -> do
     let total = seq::fold { xs = choices, init = 0, f = { acc, x } -> acc + int::max { l = x.weight, r = 0 } }

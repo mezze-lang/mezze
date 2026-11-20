@@ -317,8 +317,9 @@ class BuildCommand {
             // Reachable IR, comptime folded, chains canonicalized — see
             // NativeBuildPath.finalizeClosure for why the fold belongs here and
             // not earlier.
-            val closure = NativeBuildPath.finalizeClosure(loweredFunctions, performerRecords, codebase)
-            if (timing) System.err.println("[${ms()}ms] runtime closure (${closure.size} fns)")
+            val embedded = NativeBuildPath.finalizeClosure(loweredFunctions, performerRecords, codebase)
+            val closure = embedded.functions
+            if (timing) System.err.println("[${ms()}ms] runtime closure (${closure.size} fns, ${embedded.performerRecords.size} performers)")
 
             // 6. Create runnable JAR — clones mezze-runtime.jar (slim
             //    interpreter + Truffle, no parser/typechecker/CLI/LSP),
@@ -331,7 +332,7 @@ class BuildCommand {
                 entryHash = entryHash.hex,
                 entryName = appConfig.entry,
                 closure = closure,
-                performerRecords = performerRecords,
+                performerRecords = embedded.performerRecords,
             )
             if (timing) System.err.println("[${ms()}ms] standalone JAR packed")
 

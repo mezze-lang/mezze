@@ -62,7 +62,7 @@ class HttpStageDTest {
     @Test
     fun `with_query appends single string param`() {
         val result = eval("""
-            use std::effects::http::{request}
+            use std::effects::http::{ request }
 
             let r = request { url = "https://api.acme.com/search" }
               .with_query { params = { q = "hello" } }
@@ -76,7 +76,7 @@ class HttpStageDTest {
         // An Int field renders as an Int: no stringify at the call site, and no
         // wrapper constructor to say which kind of value it is either.
         val result = eval("""
-            use std::effects::http::{request}
+            use std::effects::http::{ request }
 
             let r = request { url = "https://api.acme.com/items" }
               .with_query { params = { page = 42 } }
@@ -89,7 +89,7 @@ class HttpStageDTest {
     fun `with_query list value renders as a repeated key`() {
         // A sequence field expands to one key=value fragment per element.
         val result = eval("""
-            use std::effects::http::{request}
+            use std::effects::http::{ request }
 
             let r = request { url = "https://api.acme.com/items" }
               .with_query { params = { tags = ["a", "b"] } }
@@ -101,7 +101,7 @@ class HttpStageDTest {
     @Test
     fun `with_query percent-encodes special characters`() {
         val result = eval("""
-            use std::effects::http::{request}
+            use std::effects::http::{ request }
 
             let r = request { url = "https://api.acme.com/s" }
               .with_query { params = { q = "a b&c" } }
@@ -113,7 +113,7 @@ class HttpStageDTest {
     @Test
     fun `with_query empty params is a no-op`() {
         val result = eval("""
-            use std::effects::http::{request}
+            use std::effects::http::{ request }
 
             let r = request { url = "https://api.acme.com/x" }
               .with_query { params = {} }
@@ -125,7 +125,7 @@ class HttpStageDTest {
     @Test
     fun `with_query uses ampersand when URL already has a query string`() {
         val result = eval("""
-            use std::effects::http::{request}
+            use std::effects::http::{ request }
 
             let r = request { url = "https://api.acme.com/x?lang=en" }
               .with_query { params = { page = 2 } }
@@ -141,7 +141,7 @@ class HttpStageDTest {
     @Test
     fun `ensure_ok passes through 2xx responses`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request, ensure_ok}
+            use std::effects::http::{ Response, Method, request, ensure_ok, HttpClient, MockHttpClient, MockRule, UrlPattern, mock_rules }
             use std::collections::map
             use std::collections::bytes
 
@@ -150,9 +150,9 @@ class HttpStageDTest {
                 url = "",
                 chunks = None,
               }
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
-            ]
+            ] }
             perform MockHttpClient { rules = rules } in do
               let resp = request { url = "http://test.com/x" }.send {}
               match ensure_ok { resp = resp } is
@@ -168,7 +168,7 @@ class HttpStageDTest {
         // injects the request URL into the Ok-wrapped Response so
         // downstream code can identify the source.
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{ Response, Method, request, HttpClient, MockHttpClient, MockRule, UrlPattern, mock_rules }
             use std::collections::map
             use std::collections::bytes
 
@@ -177,9 +177,9 @@ class HttpStageDTest {
                 url = "",
                 chunks = None,
               }
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
-            ]
+            ] }
             perform MockHttpClient { rules = rules } in do
               let resp = request { url = "http://test.com/users/42" }.send {}
               match resp is
@@ -192,7 +192,7 @@ class HttpStageDTest {
     @Test
     fun `ensure_ok promotes 404 to HttpRequestFailed`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, HttpError, Method, request, ensure_ok}
+            use std::effects::http::{ Response, HttpError, Method, request, ensure_ok, HttpClient, MockHttpClient, MockRule, UrlPattern, mock_rules }
             use std::collections::map
             use std::collections::bytes
 
@@ -201,9 +201,9 @@ class HttpStageDTest {
                 url = "",
                 chunks = None,
               }
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
-            ]
+            ] }
             perform MockHttpClient { rules = rules } in do
               let resp = request { url = "http://test.com/x" }.send {}
               match ensure_ok { resp = resp } is
@@ -221,7 +221,7 @@ class HttpStageDTest {
         // ensure_ok can build a HttpRequestFailed { url, ... } that identifies
         // the source. Verifies #179-followup.
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, HttpError, Method, request, ensure_ok}
+            use std::effects::http::{ Response, HttpError, Method, request, ensure_ok, HttpClient, MockHttpClient, MockRule, UrlPattern, mock_rules }
             use std::collections::map
             use std::collections::bytes
 
@@ -230,9 +230,9 @@ class HttpStageDTest {
                 url = "",
                 chunks = None,
               }
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
-            ]
+            ] }
             perform MockHttpClient { rules = rules } in do
               let resp = request { url = "http://test.com/api/v2/users/42" }.send {}
               match ensure_ok { resp = resp } is
@@ -247,11 +247,11 @@ class HttpStageDTest {
     @Test
     fun `ensure_ok preserves existing Err`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request, ensure_ok}
+            use std::effects::http::{ HttpError, Method, request, ensure_ok, HttpClient, MockHttpClient, MockRule, UrlPattern, mock_rules }
 
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" }, response = Err { error = HttpCancelled } }
-            ]
+            ] }
             perform MockHttpClient { rules = rules } in do
               let resp = request { url = "http://test.com/x" }.send {}
               match ensure_ok { resp = resp } is
@@ -266,7 +266,7 @@ class HttpStageDTest {
     @Test
     fun `Response ensure_ok method on Ok value`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{ Response, Method, request, HttpClient, MockHttpClient, MockRule, UrlPattern, mock_rules }
             use std::collections::map
             use std::collections::bytes
 
@@ -275,9 +275,9 @@ class HttpStageDTest {
                 url = "",
                 chunks = None,
               }
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
-            ]
+            ] }
             perform MockHttpClient { rules = rules } in do
               let resp = request { url = "http://test.com/x" }.send {}
               match resp is
@@ -298,7 +298,7 @@ class HttpStageDTest {
     @Test
     fun `retry returns immediately on first Ok`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request, retry}
+            use std::effects::http::{ Response, Method, request, HttpClient, MockHttpClient, MockRule, UrlPattern, retry, mock_rules }
             use std::effects::async::{ LoomAsync }
             use std::effects::time::{Time, SystemTime}
             use std::collections::map
@@ -309,9 +309,9 @@ class HttpStageDTest {
                 url = "",
                 chunks = None,
               }
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
-            ]
+            ] }
             perform SystemTime in perform LoomAsync in
               perform MockHttpClient { rules = rules } in do
                 let req = request { url = "http://test.com/x" }
@@ -326,13 +326,13 @@ class HttpStageDTest {
     @Test
     fun `retry stops on non-retryable Err`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request, retry}
+            use std::effects::http::{ HttpError, Method, request, HttpClient, MockHttpClient, MockRule, UrlPattern, retry, mock_rules }
             use std::effects::async::{ LoomAsync }
             use std::effects::time::{Time, SystemTime}
 
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" }, response = Err { error = HttpInvalidUrl { url = "x", reason = "bad" } } }
-            ]
+            ] }
             perform SystemTime in perform LoomAsync in
               perform MockHttpClient { rules = rules } in do
                 let req = request { url = "http://test.com/x" }
@@ -349,13 +349,13 @@ class HttpStageDTest {
     @Test
     fun `retry exhausts attempts on persistent retryable Err`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, HttpError, Method, request, retry}
+            use std::effects::http::{ HttpError, Method, request, HttpClient, MockHttpClient, MockRule, UrlPattern, retry, mock_rules }
             use std::effects::async::{ LoomAsync }
             use std::effects::time::{Time, SystemTime}
 
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" }, response = Err { error = HttpTimeout { url = "x", ms = 100 } } }
-            ]
+            ] }
             perform SystemTime in perform LoomAsync in
               perform MockHttpClient { rules = rules } in do
                 let req = request { url = "http://test.com/x" }

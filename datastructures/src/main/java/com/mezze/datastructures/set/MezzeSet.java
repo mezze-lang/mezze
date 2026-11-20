@@ -234,6 +234,24 @@ public final class MezzeSet<A> implements TruffleObject, Iterable<A> {
     }
 
     /**
+     * {@link #containsDirect} for a Long key, without a virtual {@code equals}
+     * or {@code hashCode}: only the storages {@link #hasDirectProbe} names are
+     * probed, and {@link SingleElemSetStorage#holds(long)} compares concretely.
+     * Safe inside compiled code (see there); the caller routes every other
+     * key type and storage through the {@code @TruffleBoundary} native.
+     */
+    public boolean containsDirectLong(long x) {
+        if (storage instanceof SingleElemSetStorage s) return s.holds(x);
+        return false; // EmptySetStorage is the only other direct-probe storage
+    }
+
+    /** The String twin of {@link #containsDirectLong}. */
+    public boolean containsDirectString(String x) {
+        if (storage instanceof SingleElemSetStorage s) return s.holds(x);
+        return false;
+    }
+
+    /**
      * Returns true if the element is present.
      */
     public boolean contains(A elem) {

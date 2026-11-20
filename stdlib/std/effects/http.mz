@@ -1,43 +1,39 @@
+# pub use, not use: ToQuery's blanket impl must be in scope at every call site
+# that adds a query parameter.
+
 use std::codec::json::{ Json, to_str, parse_str, FromJson, JsonC }
 use std::collections::iter
 use std::effects::filesystem::{ FileStreaming, FsError }
-use std::codec::core::{ DecodeError as CodecDecodeError, Decode }
-# pub use, not use: ToQuery's blanket impl must be in scope at every call site
-# that adds a query parameter.
-pub use std::codec::query::{ ToQuery }
+use std::codec::core::{ DecodeError, Decode }
+pub use std::codec::query::{ ToQuery, FromQuery }
 use std::collections::map
 use std::collections::seq
 use std::collections::bytes
 use std::str
 use std::int
 use std::bool
+use std::effects::log::{ LogLevel }
 use std::result::{ flat_map, map_err }
-use std::effects::exception::{ throw }
-
+use std::effects::exception::{ throw, ExceptionToResult }
+use std::effects::async::{ Async, par_map, sleep }
+use std::effects::time::{ Time }
+use std::codec::url::{ url_decode_component }
 ## HTTP request methods.
 pub type Method = | Get, Post, Put, Delete, Patch, Head, Options |
 
-## HTTP client configuration.
-pub type HttpConfig = {
-  timeout_ms: Int,
-  connect_timeout_ms: Int,
-  follow_redirects: Bool,
-  max_redirects: Int,
-  verify_ssl: Bool,
-  auto_decompress: Bool,
-  keep_alive: Bool,
-}
-
-## Sensible defaults for HTTP configuration.
-pub let default_http_config: HttpConfig = {
-  timeout_ms = 30000,
-  connect_timeout_ms = 10000,
-  follow_redirects = True,
-  max_redirects = 10,
-  verify_ssl = True,
-  auto_decompress = True,
-  keep_alive = True,
-}
+# The native logging switch speaks these names. Shared by the server and the
+# client so both honor the same vocabulary.
+## Maps a `LogLevel` to its plain level name (`"off"`, `"error"`, `"warn"`,
+## `"info"`, `"debug"`, `"trace"`).
+pub let helidon_log_level_name: { level: LogLevel } -> Str = { level } ->
+  match level is
+    Off -> "off"
+    Error -> "error"
+    Warn -> "warn"
+    Info -> "info"
+    Debug -> "debug"
+    Trace -> "trace"
+    _ -> "info"
 
 ## An HTTP request. A body is either buffered (`body`) or streamed (`chunks`),
 ## never both; `body_bytes` reads it either way.
@@ -74,139 +70,6 @@ pub type HttpError = |
   HttpCancelled,
 |
 
-## URL pattern for mock matching.
-pub type UrlPattern = | Glob { pattern: Str } |
-
-## A mock rule matching methods and URL pattern to a canned response.
-pub type MockRule = {
-  methods: [Method],
-  url: UrlPattern,
-  response: Result Response HttpError,
-}
-
-## HTTP client effect.
-effect HttpClient where {
-  ## Send an HTTP request with the given config.
-  request: { req: Request, config: HttpConfig } -> Result Response HttpError <HttpClient>
-}
-
-## Connection-pooling HTTP client (scoped -- creates/closes client per handler).
-impl HttpClient for PooledHttpClient where {
-  initialize_scope = {} -> do
-    let client = __native_http_client_create { config = default_http_config }
-    { client = client },
-  finalize_scope = {} -> do
-    __native_http_client_close { client = scope.client }
-    {},
-  request = { req, config } ->
-    __native_http_request { req = req, config = config, client = scope.client },
-}
-
-## Connection-pooling HTTP client whose `overrides` win over any per-request config.
-impl HttpClient for PooledHttpClientWith { overrides: HttpConfig } where {
-  initialize_scope = {} -> do
-    let client = __native_http_client_create { config = overrides }
-    { client = client },
-  finalize_scope = {} -> do
-    __native_http_client_close { client = scope.client }
-    {},
-  request = { req, config } ->
-    __native_http_request { req = req, config = overrides, client = scope.client },
-}
-
-## Simple HTTP client that creates a new connection per request.
-impl HttpClient for SimpleHttpClient where {
-  request = { req, config } -> do
-    let client = __native_http_client_create { config = config }
-    let result = __native_http_request { req = req, config = config, client = client }
-    __native_http_client_close { client = client }
-    result
-}
-
-## Simple HTTP client with a fixed config override. See
-## `PooledHttpClientWith` for why the field is `overrides`.
-impl HttpClient for SimpleHttpClientWith { overrides: HttpConfig } where {
-  request = { req, config } -> do
-    let client = __native_http_client_create { config = overrides }
-    let result = __native_http_request { req = req, config = overrides, client = client }
-    __native_http_client_close { client = client }
-    result
-}
-
-## Mock HTTP client for testing with canned responses.
-impl HttpClient for MockHttpClient { rules: [MockRule] } where {
-  request = { req, config } -> __native_http_mock_request { req = req, rules = rules }
-}
-
-## A response whose body is still on the wire. Opaque; owns a live connection
-## that must be closed — `with_download` closes it for you.
-pub newtype Download = __NativeDownload
-
-## What `open` answers: the status and headers, with the body still unread.
-pub type OpenDownload = {
-  status: Int,
-  headers: Map Str Str,
-  reader: Download,
-}
-
-## Downloading a response body a chunk at a time. Separate from `HttpClient`
-## because it holds a connection open across operations. `close` is required;
-## `with_download` closes for you.
-effect HttpDownload where {
-  open: { req: Request, config: HttpConfig } -> Result OpenDownload HttpError <HttpDownload>,
-  read_chunk: { reader: Download, max_bytes: Int } -> Result Bytes HttpError <HttpDownload>,
-  close: { reader: Download } -> Result {} HttpError <HttpDownload>,
-}
-
-## Downloads over a real socket, one connection per download.
-impl HttpDownload for SimpleHttpDownload where {
-  open = { req, config } -> __native_http_stream_open { req = req, config = config },
-  read_chunk = { reader, max_bytes } ->
-    __native_http_stream_read { reader = reader, max_bytes = max_bytes },
-  close = { reader } -> __native_http_stream_close { reader = reader },
-}
-
-## A download's chunks, lazily. Takes the reader, not a request, so stopping
-## early does not leak the connection.
-pub let chunks_of
-  : { reader: Download, chunk_bytes: Int } -> Iter Bytes <HttpDownload, ...>
-  = { reader, chunk_bytes } -> iter::unfold {
-    state = {},
-    step = { s } -> match HttpDownload.read_chunk { reader = reader, max_bytes = chunk_bytes } is
-      Err { error = _ } -> Done
-      Ok { val = b } -> if bytes::size { b = b } == 0 then Done
-        else Yield { val = b, next = {} }
-  }
-
-## A response whose body streams, with the connection closed for you. The
-## callback's `Response` has `chunks` filled and `body` empty; read inside the
-## callback — do not return the chunks, as they yield nothing once closed.
-##
-##   with_download { req = request { url = u }, config = default_http_config,
-##     f = { resp } -> match resp.chunks is
-##       Some { val = cs } -> iter::fold { it = cs, init = 0,
-##         f = { acc, x } -> acc + bytes::size { b = x } }
-##       None -> 0 }
-pub let with_download
-  : { req: Request, config: HttpConfig, f: { resp: Response } -> 'a <...> }
-  -> Result 'a HttpError <HttpDownload, ...>
-  = { req, config, f } -> match HttpDownload.open { req = req, config = config } is
-    Err { error } -> Err { error = error }
-    Ok { val = d } -> do
-      let resp = {
-        status = d.status,
-        headers = d.headers,
-        body = bytes::empty {},
-        url = req.url,
-        chunks = Some { val = chunks_of { reader = d.reader, chunk_bytes = 65536 } },
-      }
-      let out = f { resp = resp }
-      # close surfaces a part-way read failure the chunks iterator cannot carry
-      # (a dead connection arrives as Done, not an error).
-      match HttpDownload.close { reader = d.reader } is
-        Err { error } -> Err { error = error }
-        Ok { val = _ } -> Ok { val = out }
-
 ## Build a minimal request with method and URL.
 pub let make_request: { method: Method, url: Str } -> Request = { method, url } ->
   {
@@ -218,8 +81,9 @@ pub let make_request: { method: Method, url: Str } -> Request = { method, url } 
     chunks = None,
   }
 
-## Build a fully specified request (used by Client's verb shortcuts); the
-## explicit Request return type keeps cross-module chain dispatch working.
+# Used by Client's verb shortcuts; the explicit Request return type keeps
+# cross-module chain dispatch working.
+## Build a fully specified request.
 pub let make_full_request
   : { method: Method, url: Str, headers: Map Str Str, body: Option Bytes, timeout_ms: Option Int }
   -> Request
@@ -236,7 +100,7 @@ pub let make_full_request
 ## The request's whole body: a buffered one as-is, a streamed one walked and
 ## collected (single-shot — a second call sees an exhausted stream and answers
 ## empty). A handler that genuinely streams should walk `chunks` instead.
-pub let body_bytes: { req: Request } -> Bytes <...> = { req } -> match req.body is
+pub let body_bytes: { req: Request } -> Bytes = { req } -> match req.body is
   Some { val } -> val
   None -> match req.chunks is
     None -> bytes::empty {}
@@ -259,8 +123,6 @@ pub let with_header: { req: Request, k: Str, v: Str } -> Request = { req, k, v }
   }
 
 ## Merge headers into a request. Names are matched case-insensitively.
-##
-##   req.with_headers { headers = map::of { of = [{ k = "x-trace", v = "abc" }] } }
 pub let with_headers: { req: Request, headers: Map Str Str } -> Request = { req, headers } ->
   {
     method = req.method,
@@ -305,19 +167,15 @@ pub let with_content_type: { req: Request, content_type: Str } -> Request = { re
 pub let with_accept: { req: Request, accept: Str } -> Request = { req, accept } ->
   with_header { req = req, k = "Accept", v = accept }
 
-## An authentication scheme. `with_auth` renders it to the right header;
-## the `with_bearer` / `with_basic` / `with_api_key` shortcuts build the
-## common cases so callers rarely construct the variant by hand.
+## An authentication scheme, rendered by `with_auth`; `with_bearer` /
+## `with_basic` / `with_api_key` are shortcuts.
 pub type Auth =
   | Bearer { token: Str },
     Basic { username: Str, password: Str },
     ApiKey { name: Str, val: Str } |
 
-## Render an `Auth` to its header name and value.
-##
-## `Bearer` and `Basic` set `Authorization`; `ApiKey` sets a custom header
-## (e.g. `X-API-Key`). `Basic` base64-encodes `username:password` via the
-## bytes codec.
+## Render an `Auth` to a header: `Bearer`/`Basic` set `Authorization` (Basic
+## base64-encodes `username:password`); `ApiKey` sets its named header.
 pub let auth_header: { auth: Auth } -> { k: Str, v: Str } = { auth } ->
   match auth is
     Bearer { token } ->
@@ -358,7 +216,7 @@ pub let body_str: { resp: Response } -> Result Str HttpError = { resp } ->
   }
 
 ## Decode the response body as JSON.
-pub let body_json: { resp: Response } -> Result Json CodecDecodeError = { resp } -> do
+pub let body_json: { resp: Response } -> Result Json DecodeError = { resp } -> do
   match bytes::to_str { b = resp.body } is
     Ok { val } -> match parse_str { s = val } is
       Ok { val = j } -> Ok { val = j }
@@ -378,7 +236,6 @@ pub let body_json: { resp: Response } -> Result Json CodecDecodeError = { resp }
         found = None,
       },
     }
-
 
 ## Check if response status is 2xx.
 pub let is_success: { resp: Response } -> Bool = { resp } -> resp.status >= 200 && resp.status < 300
@@ -412,17 +269,10 @@ pub let get_content_length: { resp: Response } -> Option Int = { resp } -> match
   Some { val } -> int::from_str { s = val }
   None -> None
 
-
-## Build a fresh GET request for a URL (no headers, no body, default timeout).
-## Configure with `req.with_*` methods, then `req.send {}`:
-##
-##   request { url = "https://api.acme.com/users" }
-##     .with_method { val = Post }
-##     .with_json   { val = my_json }
-##     .send {}
+## A fresh GET request for `url` (no headers or body); chain `.with_*` then `.send {}`.
 pub let request: { url: Str } -> Request = { url } -> make_request { method = Get, url = url }
 
-## Body setter — wrap raw bytes (already encoded).
+## Set a UTF-8 text body.
 pub let with_text: { req: Request, val: Str } -> Request = { req, val } ->
   with_body { req = req, body = bytes::from_str { s = val } }
 
@@ -433,7 +283,7 @@ pub let with_json: { req: Request, val: Json } -> Request = { req, val } -> do
   let r = with_body { req = req, body = body_bytes }
   with_content_type { req = r, content_type = "application/json" }
 
-## Method setter — alias of with_method.
+## Set the request's method.
 pub let with_method: { req: Request, val: Method } -> Request = { req, val } ->
   {
     method = val,
@@ -444,12 +294,9 @@ pub let with_method: { req: Request, val: Method } -> Request = { req, val } ->
     chunks = req.chunks,
   }
 
-## Append `?k1=v1&…` (or `&…` if the URL already has a query) from any value the
-## query codec can encode — in practice a record. Keys and values are
-## percent-encoded; a value that encodes to nothing is a no-op.
-##
-##   req.with_query { params = { page = 2, tags = ["a", "b"] } }
-##   -- ?page=2&tags=a&tags=b
+## Append a query string encoded from `params` (usually a record), percent-encoding keys and values.
+## Uses `&` if the URL already has a query; a value that encodes to nothing is a no-op.
+##   `{ page = 2, tags = ["a", "b"] }` gives `?page=2&tags=a&tags=b`
 pub let with_query: { req: Request, params: 'a } with ToQuery 'a -> Request = { req, params } -> do
   let qs = params.query_string {}
   if str::is_empty { s = qs } then req else do
@@ -463,12 +310,8 @@ pub let with_query: { req: Request, params: 'a } with ToQuery 'a -> Request = { 
       chunks = req.chunks,
     }
 
-## Promote a non-2xx Response to an HttpError. Used to short-circuit
-## chains that want to treat any failure (transport OR status) as an
-## error in one shape.
-##
-##   request { url }.send {}.then { ... } -- needs uniform Err on 4xx/5xx
-##   ensure_ok { resp = req.send {} }
+## Turn a non-2xx Response into `HttpRequestFailed`, so transport and status
+## failures share one `Err` shape.
 pub let ensure_ok
   : { resp: Result Response HttpError }
   -> Result Response HttpError
@@ -483,11 +326,8 @@ pub let ensure_ok
         error = HttpRequestFailed { url = val.url, status = val.status, body = body_text },
       }
 
-
-## Impl Request gives the chainable surface. Every method is a thin
-## delegator to a free function above — the impl block is just an
-## ergonomic wrapper. Method calls return new Requests (immutable
-## builder).
+# Thin delegators to this module's free functions.
+## The chainable surface for `Request`; each call returns a new Request.
 impl Request where {
   with_method = { it: 'it, val: Method } -> with_method { req = it, val = val },
   with_url = { it: 'it, val: Str } ->
@@ -513,22 +353,18 @@ impl Request where {
   with_api_key = { it: 'it, name: Str, val: Str } -> with_api_key { req = it, name = name, val = val },
   with_content_type = { it: 'it, val: Str } -> with_content_type { req = it, content_type = val },
   with_accept = { it: 'it, val: Str } -> with_accept { req = it, accept = val },
-  ## Terminal — perform the request via the ambient HttpClient handler.
-  send = { it } -> HttpClient.request { req = it, config = default_http_config },
-  ## Terminal for a handler rather than a client — apply this request to it.
-  ##
-  ##   post_request { url = "/users" }.with_text { val = "ada" }.to { app = app }
+  ## Apply this request to a handler `app` instead of sending it (for tests).
   to = { it: 'it, app: { req: Request } -> Response <...> } -> app { req = it },
-  ## Terminal with config override.
-  send_with = { it: 'it, config: HttpConfig } -> HttpClient.request { req = it, config = config },
 
-  retry = { it, max_attempts, backoff_ms } -> retry { req = it, max_attempts = max_attempts, backoff_ms = backoff_ms },
+  ## Send this request through the ambient `HttpClient` handler.
+  send = { it } -> HttpClient.request { req = it, config = default_http_config },
+  ## Send with explicit client settings (timeouts, redirects, logging).
+  send_with = { it, config: HttpConfig } -> HttpClient.request { req = it, config = config },
+  ## Send, retrying a retryable failure up to `max_attempts` times with `backoff_ms` between tries.
+  retry = { it, max_attempts: Int, backoff_ms: Int } -> retry { req = it, max_attempts = max_attempts, backoff_ms = backoff_ms },
 }
 
-## Impl Response gives chainable decoders + predicates + header lookup.
-## Direct field access (resp.status, resp.body, resp.headers) still
-## works for raw projection — the impl methods only add operations
-## that aren't just field reads.
+## Chainable decoders, predicates, header lookup and builders for `Response`.
 impl Response where {
   ## Decode body as UTF-8 string.
   text = { it } -> body_str { resp = it },
@@ -540,11 +376,7 @@ impl Response where {
   is_redirect = { it } -> is_redirect { resp = it },
   is_client_err = { it } -> is_client_error { resp = it },
   is_server_err = { it } -> is_server_error { resp = it },
-  ## Promote a non-2xx status to an Err on a bare Response. Most callers
-  ## want the `Result Response HttpError`-shaped variant — use the free
-  ## `ensure_ok` function for that. This method is useful when you
-  ## already have an unwrapped Response (e.g. from `match resp is Ok ...`)
-  ## and want a Result back without re-wrapping.
+  ## `ensure_ok` for an already-unwrapped Response: non-2xx becomes an Err.
   ensure_ok = { it } -> ensure_ok { resp = Ok { val = it } },
   ## Case-insensitive header lookup.
   header = { it: 'it, name: Str } -> get_header { resp = it, name = name },
@@ -653,237 +485,6 @@ pub let or_throw
     Ok { val } -> val
     Err { error } -> throw { error = error.into_error_response {} }
 
-## A reusable HTTP client value. Bind a service's base URL, default
-## headers (auth, accept, etc.), and default timeout once — derive
-## requests from it for each call.
-##
-##   let api = client { base_url = "https://api.acme.com" }
-##     .with_bearer  { token = token }
-##     .with_timeout { ms = 30000 }
-##   let user = api.get { path = "/users/42" }.send {}
-pub type Client = {
-  base_url: Str,
-  default_headers: Map Str Str,
-  default_timeout_ms: Int,
-}
-
-## Build a fresh Client. Empty base URL means use absolute URLs in
-## each request.
-pub let client: { base_url: Str } -> Client = { base_url } ->
-  {
-    base_url = base_url,
-    default_headers = map::empty {},
-    default_timeout_ms = 30000,
-  }
-
-## Build a Client with no base URL — every request uses an absolute URL.
-pub let no_base_client: {} -> Client = {} -> client { base_url = "" }
-
-## Join base_url + path. If path is absolute (starts with http:// or
-## https://) it overrides base_url; otherwise base_url + path with
-## one slash between.
-let join_url: { base: Str, path: Str } -> Str = { base, path } -> if str::starts_with { s = path, prefix = "http://" } || str::starts_with { s = path, prefix = "https://" } then path else if str::is_empty { s = base } then path else if str::ends_with { s = base, suffix = "/" } && str::starts_with { s = path, prefix = "/" } then str::concat {
-  l = base,
-  r = str::substring { s = path, start = 1, end = str::size { s = path } },
-} else if str::ends_with { s = base, suffix = "/" } || str::starts_with { s = path, prefix = "/" } then str::concat { l = base, r = path } else str::concat { l = str::concat { l = base, r = "/" }, r = path }
-
-## Impl Client gives configuration + verb shortcuts. Each verb method
-## produces a Request pre-filled with the client's defaults (headers,
-## timeout, base_url + path).
-impl Client where {
-  ## Configuration setters.
-  with_base_url = { it: 'it, val: Str } ->
-    {
-      base_url = val,
-      default_headers = it.default_headers,
-      default_timeout_ms = it.default_timeout_ms,
-    },
-  with_default_header = { it: 'it, k: Str, v: Str } ->
-    {
-      base_url = it.base_url,
-      default_headers = map::insert { m = it.default_headers, k = str::to_lower { s = k }, v = v },
-      default_timeout_ms = it.default_timeout_ms,
-    },
-  with_default_headers = { it: 'it, headers: Map Str Str } ->
-    {
-      base_url = it.base_url,
-      default_headers = map::merge { m1 = it.default_headers, m2 = headers },
-      default_timeout_ms = it.default_timeout_ms,
-    },
-  with_default_timeout = { it: 'it, ms: Int } ->
-    {
-      base_url = it.base_url,
-      default_headers = it.default_headers,
-      default_timeout_ms = ms,
-    },
-  ## Convenience: set a typed `Auth` in default_headers so every derived
-  ## request carries it. `Bearer`/`Basic` set `Authorization`; `ApiKey`
-  ## sets its own header name.
-  with_auth = { it: 'it, auth: Auth } -> do
-    let h = auth_header { auth = auth }
-    {
-      base_url = it.base_url,
-      default_headers = map::insert { m = it.default_headers, k = h.k, v = h.v },
-      default_timeout_ms = it.default_timeout_ms,
-    },
-  ## Verb shortcuts — return a Request pre-filled with the client's defaults.
-  get = { it: 'it, path: Str } ->
-    make_full_request {
-      method = Get,
-      url = join_url { base = it.base_url, path = path },
-      headers = it.default_headers,
-      body = None,
-      timeout_ms = Some { val = it.default_timeout_ms },
-    },
-  post = { it: 'it, path: Str } ->
-    make_full_request {
-      method = Post,
-      url = join_url { base = it.base_url, path = path },
-      headers = it.default_headers,
-      body = None,
-      timeout_ms = Some { val = it.default_timeout_ms },
-    },
-  put = { it: 'it, path: Str } ->
-    make_full_request {
-      method = Put,
-      url = join_url { base = it.base_url, path = path },
-      headers = it.default_headers,
-      body = None,
-      timeout_ms = Some { val = it.default_timeout_ms },
-    },
-  delete = { it: 'it, path: Str } ->
-    make_full_request {
-      method = Delete,
-      url = join_url { base = it.base_url, path = path },
-      headers = it.default_headers,
-      body = None,
-      timeout_ms = Some { val = it.default_timeout_ms },
-    },
-  patch = { it: 'it, path: Str } ->
-    make_full_request {
-      method = Patch,
-      url = join_url { base = it.base_url, path = path },
-      headers = it.default_headers,
-      body = None,
-      timeout_ms = Some { val = it.default_timeout_ms },
-    },
-  head = { it: 'it, path: Str } ->
-    make_full_request {
-      method = Head,
-      url = join_url { base = it.base_url, path = path },
-      headers = it.default_headers,
-      body = None,
-      timeout_ms = Some { val = it.default_timeout_ms },
-    },
-  options = { it: 'it, path: Str } ->
-    make_full_request {
-      method = Options,
-      url = join_url { base = it.base_url, path = path },
-      headers = it.default_headers,
-      body = None,
-      timeout_ms = Some { val = it.default_timeout_ms },
-    },
-  ## Verb-free request builder — set method later via .with_method.
-  request = { it: 'it, path: Str } ->
-    make_full_request {
-      method = Get,
-      url = join_url { base = it.base_url, path = path },
-      headers = it.default_headers,
-      body = None,
-      timeout_ms = Some { val = it.default_timeout_ms },
-    },
-}
-
-use std::effects::async::{ Async, par_map, sleep }
-use std::effects::time::{ Time }
-
-## Internal: retry loop. Self-recursive — kept top-level because Mezze
-## doesn't bind nested `let` names to themselves.
-let retry_loop
-  : { req: Request, attempt: Int, max_attempts: Int, backoff_ms: Int }
-  -> Result Response HttpError <HttpClient, Async, Time>
-  = { req, attempt, max_attempts, backoff_ms } -> do
-    let resp = HttpClient.request { req = req, config = default_http_config }
-    match resp is
-      Ok { val } -> resp
-      Err { error } -> if attempt >= max_attempts || (is_retryable { err = error }).not {} then resp else do
-        sleep { ms = backoff_ms }
-        retry_loop {
-          req = req,
-          attempt = attempt + 1,
-          max_attempts = max_attempts,
-          backoff_ms = backoff_ms,
-        }
-
-
-## Send a Request with retry on transient failures. A failure is
-## considered retryable when `is_retryable { err }` returns True —
-## namely HttpConnectionFailed, HttpTimeout, and 5xx HttpRequestFailed (see the
-## predicate below). Sleeps `backoff_ms` between attempts.
-##
-##   request { url = "https://api.acme.com/users/42" }
-##     .with_bearer { token = "xyz" }
-##     .send {}
-##     -- becomes:
-##   retry { req = request{...}.with_bearer{...}, max_attempts = 3, backoff_ms = 250 }
-##
-## Returns the first Ok or the last Err. `max_attempts` includes the
-## initial attempt — `max_attempts = 1` is a single shot with no retry.
-pub let retry
-  : { req: Request, max_attempts: Int, backoff_ms: Int }
-  -> Result Response HttpError <HttpClient, Async, Time>
-  = { req, max_attempts, backoff_ms } ->
-    retry_loop {
-      req = req,
-      attempt = 1,
-      max_attempts = max_attempts,
-      backoff_ms = backoff_ms,
-    }
-
-## Fetch multiple URLs concurrently, returning one Result per URL (each spawn's
-## failure collapsed to a `HttpConnectionFailed`).
-pub let fetch_all: { urls: [Str] } -> [Result Response HttpError] <HttpClient, Async> = { urls } ->
-  seq::map {
-    xs = par_map { xs = urls, f = { x } -> request { url = x }.send {} },
-    f = { x } -> match x is
-      Ok { val = inner } -> inner
-      Err { error = e } -> Err {
-        error = HttpConnectionFailed { url = "<spawn>", reason = "async task failed" },
-      }
-,
-  }
-
-## Fetch multiple URLs concurrently, failing on the first error.
-pub let fetch_all_ok: { urls: [Str] } -> Result [Response] HttpError <HttpClient, Async> = { urls } ->
-  do
-    let results = fetch_all { urls = urls }
-    collect_results { results = results }
-
-let collect_results: { results: [Result 'a 'e] } -> Result ['a] 'e = { results } ->
-  do
-    let len = seq::size { xs = results }
-    collect_results_loop {
-      results = results,
-      idx = 0,
-      len = len,
-      acc = [],
-    }
-
-let collect_results_loop
-  : { results: [Result 'a 'e], idx: Int, len: Int, acc: ['a] }
-  -> Result ['a] 'e
-  = { results, idx, len, acc } -> if idx >= len then Ok { val = acc } else match seq::get { xs = results, i = idx } is
-    Some { val } -> match val is
-      Ok { val = v } -> collect_results_loop {
-        results = results,
-        idx = idx + 1,
-        len = len,
-        acc = seq::add { xs = acc, x = v },
-      }
-      Err { error } -> Err { error = error }
-    None -> Ok { val = acc }
-
-
 ## Format an HttpError as a human-readable string.
 pub let format_error: { err: HttpError } -> Str = { err } -> match err is
   HttpConnectionFailed { url, reason } -> str::concat {
@@ -922,7 +523,6 @@ pub let format_error: { err: HttpError } -> Str = { err } -> match err is
   }
   HttpCancelled -> "Request was cancelled"
 
-
 ## Check if an HTTP error is retryable (connection/timeout/5xx).
 pub let is_retryable: { err: HttpError } -> Bool = { err } -> match err is
   HttpConnectionFailed { url, reason } -> True
@@ -934,14 +534,12 @@ pub let is_retryable: { err: HttpError } -> Bool = { err } -> match err is
   HttpEncodeError { url, message } -> False
   HttpCancelled -> False
 
-
 ## Check if the error is a client-side issue (4xx / bad input).
 pub let is_client_issue: { err: HttpError } -> Bool = { err } -> match err is
   HttpInvalidUrl { url, reason } -> True
   HttpEncodeError { url, message } -> True
   HttpRequestFailed { url, status, body } -> status >= 400 && status < 500
   _ -> False
-
 
 ## Check if the error is a server-side issue (5xx / network).
 pub let is_server_issue: { err: HttpError } -> Bool = { err } -> match err is
@@ -1055,9 +653,7 @@ pub let not_found: { body: Str } -> Response = { body } ->
 pub let server_error: { body: Str } -> Response = { body } ->
   response_status { code = 500, body = body }
 
-## A redirect. 302 by default — `redirect_with` takes the code for a 301
-## or a 307, so the common case needs no number and the uncommon one is
-## still one call.
+## A 302 redirect; use `redirect_with` for 301/307.
 pub let redirect: { to: Str } -> Response = { to } ->
   redirect_with { to = to, code = 302 }
 
@@ -1071,10 +667,8 @@ pub let redirect_with: { to: Str, code: Int } -> Response = { to, code } ->
     chunks = None,
   }
 
-## A response whose body is streamed from an iterator of chunks: the server
-## pulls one `Bytes` at a time and writes it straight to the socket, so peak
-## heap is one chunk. The iterator is walked once, as the response goes out.
-## Only the server honours `chunks`; mock and client responses are whole bodies.
+## A response whose body streams from `chunks`, walked once as it is written
+## (peak heap one chunk). Only the server honours `chunks`.
 pub let response_stream
   : { status: Int, headers: Map Str Str, chunks: Iter Bytes } -> Response
   = { status, headers, chunks } ->
@@ -1086,13 +680,14 @@ pub let response_stream
       chunks = Some { val = chunks },
     }
 
-
-## A 200 whose body streams a file from disk, a chunk at a time, without reading
-## it into memory. `chunk_bytes` is the read size. Holds a `FileStreaming`
-## handle for the life of the response, so it is not closed here.
+# The body is drained later, on the server thread, with no handler in scope — so the chunk source
+# reads the handle through a native, never through `FileStreaming`. A read failure RAISES at the
+# drain (BUG 28: `Done` there would look like a complete body); the server aborts the connection.
+## A 200 whose body streams a file from disk, a chunk at a time, without reading it into memory.
+## `chunk_bytes` is the read size. The open handle is read natively while the response is written.
 pub let response_file
   : { path: Str, chunk_bytes: Int }
-  -> Result Response FsError <FileStreaming, Exception having 'error = FsError>
+  -> Result Response FsError <FileStreaming>
   = { path, chunk_bytes } -> match FileStreaming.open { path = path, mode = Read } is
     Err { error } -> Err { error = error }
     Ok { val = h } -> Ok {
@@ -1101,72 +696,652 @@ pub let response_file
         headers = map::empty {},
         chunks = iter::unfold {
           state = {},
-          # a failed read throws rather than ending the stream — Done would
-          # signal a complete body and silently truncate the download
-          step = { s } -> match FileStreaming.read_chunk { handle = h, max_bytes = chunk_bytes } is
-            Err { error } -> throw { error = error }
-            Ok { val = b } -> if bytes::size { b = b } == 0 then Done
-              else Yield { val = b, next = {} }
+          step = { s } -> do
+            let b = __native_fs_stream_read { handle = h, max_bytes = chunk_bytes }
+            if bytes::size { b = b } == 0 then Done else Yield { val = b, next = {} }
         },
       },
     }
 
 
-# ─── Mock rules, chained ──────────────────────────────────────────────
-#
-# A hand-built `MockRule` is a nested literal with a `Response` inside it, and
-# the `Response` has five fields:
-#
-#     { methods = [Get], url = Glob { pattern = "**" },
-#       response = Ok { val = {
-#         status = 200, headers = map::empty {}, body = bytes::from_str { s = "ok" },
-#         url = "", chunks = None,
-#       } } }
-#
-# Six lines to say "a GET returns 200 ok", and every field added to `Response`
-# makes it longer — `chunks` did exactly that. The chain says the same thing in
-# one line and reads in the order you think of it: WHICH requests, then WHAT
-# comes back.
-#
-#     mock { url = "**" }.get {}.text { body = "ok" }
-#     mock { url = "/users/*" }.post {}.status { code = 201 }.json { body = payload }
-#     mock { url = "**" }.times_out { ms = 30 }
-#
-# Every step answers a `MockRule`, so there is no terminal call to forget and a
-# half-built rule is still a usable one. `mock` on its own matches ANY method
-# and returns an empty 200.
+# ─── Server-Sent Events ─────────────────────────────────────────────────
 
-## Start a rule matching any method whose URL matches the glob `url`.
-##
-## `*` matches within a path segment and `**` across segments, as
-## `UrlPattern.Glob` defines. Narrow it with `.get {}` and friends; shape the
-## reply with `.status`, `.text`, `.json`, `.raw`, `.header`; or replace the
-## reply with a transport failure using `.fails`, `.times_out`,
-## `.unreachable`.
-pub let mock: { url: Str } -> MockRule = { url } ->
+## One Server-Sent Event: `data` (may span lines), an optional `event` name and `id`.
+pub type SseEvent = { data: Str, event: Option Str, id: Option Str }
+
+## An event carrying only `data`.
+pub let sse_event: { data: Str } -> SseEvent = { data } -> { data = data, event = None, id = None }
+
+## The wire form of one event: `event:`/`id:` lines if set, one `data:` line per line of data, then a blank line.
+pub let sse_format: { ev: SseEvent } -> Str = { ev } -> do
+  let name = match ev.event is
+    Some { val = n } -> "event: $(n)\n"
+    None -> ""
+  let ident = match ev.id is
+    Some { val = i } -> "id: $(i)\n"
+    None -> ""
+  let data = seq::fold { xs = str::split { s = ev.data, delimiter = "\n" }, init = "", f = { acc, x } -> "$(acc)data: $(x)\n" }
+  "$(name)$(ident)$(data)\n"
+
+# `send` writes through a native sink. Live, every event is flushed to the connection as `f` runs on
+# the connection thread (handlers installed); with no connection (mock router, tests) the sink
+# buffers and the events become the body, so the same handler is testable without a port.
+# The sink behind `send`: live (writes to the connection) or buffering (no connection).
+newtype SseSink = __NativeSseSink
+
+## Answer a `text/event-stream` response: `f` runs for the life of the connection and emits with `send`.
+## With no live connection the events are collected into the response body instead.
+pub let sse: { f: { send: { ev: SseEvent } -> {} } -> {} <...> } -> Response <...> = { f } -> do
+  let sink: SseSink = __native_http_sse_begin {}
+  f { send = { ev } -> __native_http_sse_send { sink = sink, text = sse_format { ev = ev } } }
+  let collected = __native_http_sse_end { sink = sink }
+  {
+    status = 200,
+    headers = map::insert { m = map::empty {}, k = "content-type", v = "text/event-stream" },
+    body = bytes::from_str { s = collected },
+    url = "",
+    chunks = None,
+  }
+
+
+## Parse one event block (the lines between two blank lines): `data:` lines join with newlines,
+## `event:`/`id:` set the fields, comment lines (`:`) and unknown fields are ignored.
+pub let sse_parse: { block: Str } -> SseEvent = { block } -> do
+  let parsed = seq::fold {
+    xs = str::split { s = block, delimiter = "\n" },
+    init = { data = None, event = None, id = None },
+    f = { acc, x } -> do
+      let line = if str::ends_with { s = x, suffix = "\r" } then str::substring { s = x, start = 0, end = str::size { s = x } - 1 } else x
+      if str::starts_with { s = line, prefix = "data:" } then do
+          let v = sse_field_value { line = line, prefix = "data:" }
+          { data = Some { val = match acc.data is
+              Some { val = d } -> "$(d)\n$(v)"
+              None -> v },
+            event = acc.event, id = acc.id }
+        else if str::starts_with { s = line, prefix = "event:" } then
+          { data = acc.data, event = Some { val = sse_field_value { line = line, prefix = "event:" } }, id = acc.id }
+        else if str::starts_with { s = line, prefix = "id:" } then
+          { data = acc.data, event = acc.event, id = Some { val = sse_field_value { line = line, prefix = "id:" } } }
+        else acc
+  }
+  { data = match parsed.data is
+      Some { val = d } -> d
+      None -> "",
+    event = parsed.event, id = parsed.id }
+
+# The value after `field:`; one leading space is part of the syntax, not the value.
+let sse_field_value: { line: Str, prefix: Str } -> Str = { line, prefix } -> do
+  let rest = str::substring { s = line, start = str::size { s = prefix }, end = str::size { s = line } }
+  if str::starts_with { s = rest, prefix = " " } then str::substring { s = rest, start = 1, end = str::size { s = rest } } else rest
+
+# Events are split on the BYTES ("\n\n"), and only a complete block is decoded, so a chunk boundary
+# inside a multi-byte character cannot corrupt an event. `buf` is the unfinished tail.
+let sse_fold_blocks
+  : { buf: Bytes, acc: 'acc, f: { acc: 'acc, ev: SseEvent } -> 'acc <...> } -> { buf: Bytes, acc: 'acc } <...>
+  = { buf, acc, f } -> match bytes::index_of { b = buf, pattern = bytes::from_str { s = "\n\n" } } is
+    None -> { buf = buf, acc = acc }
+    Some { val = i } -> do
+      let block = match bytes::to_str { b = bytes::slice { b = buf, start = 0, end = i } } is
+        Ok { val = t } -> t
+        Err { error = _ } -> ""
+      sse_fold_blocks { buf = bytes::drop { b = buf, n = i + 2 }, acc = f { acc = acc, ev = sse_parse { block = block } }, f = f }
+
+## Fold `f` over the events of a `text/event-stream` response as they arrive; stop early with
+## `std::effects::early_return`. Streams through `HttpDownload`, so its handler must be in scope.
+pub let events
+  : { req: Request, config: HttpConfig, init: 'acc, f: { acc: 'acc, ev: SseEvent } -> 'acc <...> }
+  -> Result 'acc HttpError <HttpDownload, ...>
+  = { req, config, init, f } -> with_download {
+    req = with_header { req = req, k = "accept", v = "text/event-stream" },
+    config = config,
+    f = { resp, reader } -> do
+      let final = chunks {
+        reader = reader,
+        chunk_bytes = 65536,
+        init = { buf = bytes::empty {}, acc = init },
+        f = { acc, x } -> sse_fold_blocks { buf = bytes::concat { b1 = acc.buf, b2 = x }, acc = acc.acc, f = f },
+      }
+      # a last event the server never terminated with a blank line still counts
+      let tail = match bytes::to_str { b = final.buf } is
+        Ok { val = t } -> str::trim { s = t }
+        Err { error = _ } -> ""
+      if tail == "" then final.acc else f { acc = final.acc, ev = sse_parse { block = tail } }
+  }
+
+
+# ─── Mock rules, chained ──────────────────────────────────────────────
+# A chain reads WHICH requests, then WHAT comes back; a hand-built `MockRule` grows with `Response`.
+
+## Decode the Ok Response body as UTF-8; return `def` on any Err or decode
+## failure.
+pub let text_or: { resp: Result Response HttpError, def: Str } -> Str = { resp, def } ->
+  match resp is
+    Ok { val } -> match body_str { resp = val } is
+      Ok { val = s } -> s
+      Err { error = _ } -> def
+    Err { error = _ } -> def
+
+## Decode the Ok Response body as JSON; return `def` on any Err OR a
+## decode failure.
+pub let json_or: { resp: Result Response HttpError, def: Json } -> Json = { resp, def } ->
+  match resp is
+    Ok { val } -> match body_json { resp = val } is
+      Ok { val = j } -> j
+      Err { error = _ } -> def
+    Err { error = _ } -> def
+
+## Run `f` on the Ok Response (for its effects); a no-op on Err.
+pub let on_ok
+  : { resp: Result Response HttpError, f: { resp: Response } -> {} <...> }
+  -> {} <...>
+  = { resp, f } -> match resp is
+    Ok { val } -> f { resp = val }
+    Err { error = _ } -> {}
+
+## Run `f` on the Err (for its effects); a no-op on Ok.
+pub let on_err
+  : { resp: Result Response HttpError, f: { err: HttpError } -> {} <...> }
+  -> {} <...>
+  = { resp, f } -> match resp is
+    Ok { val } -> {}
+    Err { error } -> f { err = error }
+
+## Decode the Ok Response body as UTF-8, keeping the `Result`: an `Err`
+## passes through, invalid UTF-8 becomes `HttpDecodeError`.
+pub let text_result: { resp: Result Response HttpError } -> Result Str HttpError = { resp } ->
+  flat_map { result = resp, f = { val } -> body_str { resp = val } }
+
+## Decode the Ok Response body as raw `Json`, keeping the `Result`: an `Err`
+## passes through, invalid JSON becomes `HttpDecodeError`.
+pub let json_result: { resp: Result Response HttpError } -> Result Json HttpError = { resp } ->
+  match resp is
+    Ok { val } -> match body_json { resp = val } is
+      Ok { val = j } -> Ok { val = j }
+      Err { error = e } -> Err { error = HttpDecodeError { url = val.url, message = e.message } }
+    Err { error } -> Err { error = error }
+
+## Decode the Ok Response body into the type the use site asks for, keeping the `Result`.
+## An `Err` passes through; a mismatch becomes `HttpDecodeError`.
+pub let from_json_result: { resp: Result Response HttpError } with FromJson 'a Str -> Result 'a HttpError = { resp } ->
+  match resp is
+    Err { error } -> Err { error = error }
+    Ok { val } -> match body_str { resp = val } is
+      Err { error } -> Err { error = error }
+      Ok { val = s } -> match s.from_json {} is
+        Ok { val = d } -> Ok { val = d }
+        Err { error } -> Err { error = HttpDecodeError { url = val.url, message = error.message } }
+
+## Chainable finishers on the `Result Response HttpError` from `.send {}`. The
+## generic `impl Result 'a 'e` (map/get_or/…) still applies to every other Result.
+impl Result Response HttpError where {
+  text_or = { it: 'it, def: Str } -> text_or { resp = it, def = def },
+  json_or = { it: 'it, def: Json } -> json_or { resp = it, def = def },
+  on_ok = { it, f } -> on_ok { resp = it, f = f },
+  on_err = { it, f } -> on_err { resp = it, f = f },
+
+  # Decoders that KEEP the Result, unlike the `*_or` finishers.
+  text = { it } -> text_result { resp = it },
+  json = { it } -> json_result { resp = it },
+  from_json = { it } -> from_json_result { resp = it },
+
+  ensure_ok = { it } -> ensure_ok { resp = it },
+}
+
+
+# ─── Client ────────────────────────────────────────────────────────────────
+## HTTP client configuration.
+pub type HttpConfig = {
+  timeout_ms: Int,
+  connect_timeout_ms: Int,
+  follow_redirects: Bool,
+  max_redirects: Int,
+  verify_ssl: Bool,
+  auto_decompress: Bool,
+  keep_alive: Bool,
+  ## How much of the underlying Helidon WebClient's own JUL logging to surface,
+  ## as a `LogLevel`. `Off` (the default) is silent; `Info`+ shows the client's
+  ## internal logs. Separate from the program's own `Log` effect.
+  helidon_print_log: LogLevel,
+}
+
+## Sensible defaults for HTTP configuration. Silent (`Off`) by default.
+pub let default_http_config: HttpConfig = {
+  timeout_ms = 30000,
+  connect_timeout_ms = 10000,
+  follow_redirects = True,
+  max_redirects = 10,
+  verify_ssl = True,
+  auto_decompress = True,
+  keep_alive = True,
+  helidon_print_log = Off,
+}
+
+## URL pattern for mock matching.
+pub type UrlPattern = | Glob { pattern: Str } |
+
+## A mock rule matching methods and URL pattern to a canned response.
+pub type MockRule = {
+  methods: [Method],
+  url: UrlPattern,
+  response: Result Response HttpError,
+}
+
+## HTTP client effect.
+effect HttpClient where {
+  ## Send an HTTP request with the given config.
+  request: { req: Request, config: HttpConfig } -> Result Response HttpError <HttpClient>
+}
+
+## Connection-pooling HTTP client (scoped -- creates/closes client per handler).
+impl HttpClient for PooledHttpClient where {
+  initialize_scope = {} -> do
+    let client = __native_http_client_create {
+      config = default_http_config,
+      helidon_log_level = helidon_log_level_name { level = default_http_config.helidon_print_log },
+    }
+    { client = client },
+  finalize_scope = {} -> do
+    __native_http_client_close { client = scope.client }
+    {},
+  request = { req, config } ->
+    __native_http_request { req = req, config = config, client = scope.client },
+}
+
+## Connection-pooling HTTP client whose `overrides` win over any per-request config.
+impl HttpClient for PooledHttpClientWith { overrides: HttpConfig } where {
+  initialize_scope = {} -> do
+    let client = __native_http_client_create {
+      config = overrides,
+      helidon_log_level = helidon_log_level_name { level = overrides.helidon_print_log },
+    }
+    { client = client },
+  finalize_scope = {} -> do
+    __native_http_client_close { client = scope.client }
+    {},
+  request = { req, config } ->
+    __native_http_request { req = req, config = overrides, client = scope.client },
+}
+
+## Simple HTTP client that creates a new connection per request.
+impl HttpClient for SimpleHttpClient where {
+  request = { req, config } -> do
+    let client = __native_http_client_create {
+      config = config,
+      helidon_log_level = helidon_log_level_name { level = config.helidon_print_log },
+    }
+    let result = __native_http_request { req = req, config = config, client = client }
+    __native_http_client_close { client = client }
+    result
+}
+
+# See `PooledHttpClientWith` for why the field is `overrides`.
+## Simple HTTP client with a fixed config override.
+impl HttpClient for SimpleHttpClientWith { overrides: HttpConfig } where {
+  request = { req, config } -> do
+    let client = __native_http_client_create {
+      config = overrides,
+      helidon_log_level = helidon_log_level_name { level = overrides.helidon_print_log },
+    }
+    let result = __native_http_request { req = req, config = overrides, client = client }
+    __native_http_client_close { client = client }
+    result
+}
+
+## Mock client answering from `rules` (any `mock_*` builder or a
+## `mock_http_rules {}` chain), in order; no match is `Err(HttpConnectionFailed)`.
+## Needs no network.
+impl HttpClient for MockHttpClient { rules: MockRules } where {
+  request = { req, config } -> mock_answer { req = req, rules = mock_rules_of { rs = rules } }
+}
+
+# The mock, in Mezze rather than a native: matching is ordinary data work, and a
+# native here was invisible to the browser build, which refused it as a host call.
+let mock_answer: { req: Request, rules: [MockRule] } -> Result Response HttpError = { req, rules } ->
+  match seq::find { xs = rules, p = { x } -> mock_rule_matches { rule = x, req = req } } is
+    Some { val } -> match val.response is
+      Ok { val = r } -> Ok { val = { status = r.status, headers = r.headers, body = r.body, url = req.url, chunks = None } }
+      Err { error } -> Err { error = error }
+    None -> Err { error = HttpConnectionFailed {
+      url = req.url,
+      reason = "No mock rule matched for $(mock_method_name { m = req.method }) $(req.url)",
+    } }
+
+let mock_rule_matches: { rule: MockRule, req: Request } -> Bool = { rule, req } -> do
+  let method_ok = seq::is_empty { xs = rule.methods } || seq::any { xs = rule.methods, p = { x } -> x == req.method }
+  let url_ok = match rule.url is
+    Glob { pattern } -> mock_glob_matches { pattern = pattern, url = req.url }
+  method_ok && url_ok
+
+# A glob over the URL's PATH (scheme and host removed, query dropped); `*` and
+# `**` alone match every URL. `*` stays within a path segment, `**` spans any
+# number of segments (zero included).
+let mock_glob_matches: { pattern: Str, url: Str } -> Bool = { pattern, url } ->
+  if pattern == "*" || pattern == "**" then True
+  else mock_segments_match {
+    ps = str::split { s = pattern, delimiter = "/" },
+    us = str::split { s = mock_path_of { url = url }, delimiter = "/" },
+  }
+
+let mock_segments_match: { ps: [Str], us: [Str] } -> Bool = { ps, us } ->
+  match seq::head { xs = ps } is
+    None -> seq::is_empty { xs = us }
+    Some { val = p } ->
+      if p == "**" then do
+        let skip_none = mock_segments_match { ps = seq::tail { xs = ps }, us = us }
+        skip_none || (if seq::is_empty { xs = us } then False else mock_segments_match { ps = ps, us = seq::tail { xs = us } })
+      else match seq::head { xs = us } is
+        None -> False
+        Some { val = u } -> str::glob_match { pattern = p, s = u } && mock_segments_match { ps = seq::tail { xs = ps }, us = seq::tail { xs = us } }
+
+let mock_path_of: { url: Str } -> Str = { url } ->
+  match str::index_of { s = url, sub = "://" } is
+    None -> url
+    Some { val = scheme_end } -> do
+      let rest = str::substring { s = url, start = scheme_end + 3, end = str::size { s = url } }
+      match str::index_of { s = rest, sub = "/" } is
+        None -> "/"
+        Some { val = slash } -> do
+          let path = str::substring { s = rest, start = slash, end = str::size { s = rest } }
+          match str::index_of { s = path, sub = "?" } is
+            None -> path
+            Some { val = q } -> str::substring { s = path, start = 0, end = q }
+
+let mock_method_name: { m: Method } -> Str = { m } -> match m is
+  Get -> "Get"
+  Post -> "Post"
+  Put -> "Put"
+  Delete -> "Delete"
+  Patch -> "Patch"
+  Head -> "Head"
+  Options -> "Options"
+
+## A response whose body is still on the wire. Opaque; owns a live connection
+## that must be closed — `with_download` closes it for you.
+pub newtype Download = __NativeDownload
+
+## What `open` answers: the status and headers, with the body still unread.
+pub type OpenDownload = {
+  status: Int,
+  headers: Map Str Str,
+  reader: Download,
+}
+
+## Downloading a response body a chunk at a time. Separate from `HttpClient`
+## because it holds a connection open across operations. `close` is required;
+## `with_download` closes for you.
+effect HttpDownload where {
+  open: { req: Request, config: HttpConfig } -> Result OpenDownload HttpError <HttpDownload>,
+  read_chunk: { reader: Download, max_bytes: Int } -> Result Bytes HttpError <HttpDownload>,
+  close: { reader: Download } -> Result {} HttpError <HttpDownload>,
+}
+
+## Downloads over a real socket, one connection per download.
+impl HttpDownload for SimpleHttpDownload where {
+  open = { req, config } -> __native_http_stream_open { req = req, config = config },
+  read_chunk = { reader, max_bytes } ->
+    __native_http_stream_read { reader = reader, max_bytes = max_bytes },
+  close = { reader } -> __native_http_stream_close { reader = reader },
+}
+
+## Fold `f` over a download's chunks, reading `chunk_bytes` at a time; ends at EOF or on any read error.
+## Takes the reader, not a request, so stopping early (`std::effects::early_return`) does not leak the connection.
+pub let chunks
+  : { reader: Download, chunk_bytes: Int, init: 'acc, f: { acc: 'acc, x: Bytes } -> 'acc <...> }
+  -> 'acc <HttpDownload, ...>
+  = { reader, chunk_bytes, init, f } -> match HttpDownload.read_chunk { reader = reader, max_bytes = chunk_bytes } is
+    Err { error = _ } -> init
+    Ok { val = b } -> if bytes::size { b = b } == 0 then init
+      else chunks { reader = reader, chunk_bytes = chunk_bytes, init = f { acc = init, x = b }, f = f }
+
+## Open a streamed download, run `f` on its head and reader, then close the connection.
+## The `Response` has status and headers only; fold the body inside `f` with `chunks { reader, ... }`.
+pub let with_download
+  : { req: Request, config: HttpConfig, f: { resp: Response, reader: Download } -> 'a <...> }
+  -> Result 'a HttpError <HttpDownload, ...>
+  = { req, config, f } -> match HttpDownload.open { req = req, config = config } is
+    Err { error } -> Err { error = error }
+    Ok { val = d } -> do
+      let resp = {
+        status = d.status,
+        headers = d.headers,
+        body = bytes::empty {},
+        url = req.url,
+        chunks = None,
+      }
+      let out = f { resp = resp, reader = d.reader }
+      # close surfaces a part-way read failure `chunks` cannot carry (a dead connection ends the walk).
+      match HttpDownload.close { reader = d.reader } is
+        Err { error } -> Err { error = error }
+        Ok { val = _ } -> Ok { val = out }
+
+## A reusable client: a base URL, default headers and timeout, from which
+## each call derives a request, e.g. `api.get { path = "/users/42" }.send {}`.
+pub type Client = {
+  base_url: Str,
+  default_headers: Map Str Str,
+  default_timeout_ms: Int,
+}
+
+## Build a fresh Client. Empty base URL means use absolute URLs in
+## each request.
+pub let client: { base_url: Str } -> Client = { base_url } ->
+  {
+    base_url = base_url,
+    default_headers = map::empty {},
+    default_timeout_ms = 30000,
+  }
+
+## Build a Client with no base URL — every request uses an absolute URL.
+pub let no_base_client: {} -> Client = {} -> client { base_url = "" }
+
+## Join base and path with one slash; an absolute `http(s)://` path wins.
+let join_url: { base: Str, path: Str } -> Str = { base, path } -> if str::starts_with { s = path, prefix = "http://" } || str::starts_with { s = path, prefix = "https://" } then path else if str::is_empty { s = base } then path else if str::ends_with { s = base, suffix = "/" } && str::starts_with { s = path, prefix = "/" } then str::concat {
+  l = base,
+  r = str::substring { s = path, start = 1, end = str::size { s = path } },
+} else if str::ends_with { s = base, suffix = "/" } || str::starts_with { s = path, prefix = "/" } then str::concat { l = base, r = path } else str::concat { l = str::concat { l = base, r = "/" }, r = path }
+
+## Configuration setters and verb shortcuts; each verb returns a Request
+## pre-filled with the client's base URL, headers and timeout.
+impl Client where {
+  # Configuration setters.
+  with_base_url = { it: 'it, val: Str } ->
+    {
+      base_url = val,
+      default_headers = it.default_headers,
+      default_timeout_ms = it.default_timeout_ms,
+    },
+  with_default_header = { it: 'it, k: Str, v: Str } ->
+    {
+      base_url = it.base_url,
+      default_headers = map::insert { m = it.default_headers, k = str::to_lower { s = k }, v = v },
+      default_timeout_ms = it.default_timeout_ms,
+    },
+  with_default_headers = { it: 'it, headers: Map Str Str } ->
+    {
+      base_url = it.base_url,
+      default_headers = map::merge { m1 = it.default_headers, m2 = headers },
+      default_timeout_ms = it.default_timeout_ms,
+    },
+  with_default_timeout = { it: 'it, ms: Int } ->
+    {
+      base_url = it.base_url,
+      default_headers = it.default_headers,
+      default_timeout_ms = ms,
+    },
+  ## Add an `Auth` header to the defaults, so every derived request carries it.
+  with_auth = { it: 'it, auth: Auth } -> do
+    let h = auth_header { auth = auth }
+    {
+      base_url = it.base_url,
+      default_headers = map::insert { m = it.default_headers, k = h.k, v = h.v },
+      default_timeout_ms = it.default_timeout_ms,
+    },
+  # Verb shortcuts — return a Request pre-filled with the client's defaults.
+  get = { it: 'it, path: Str } ->
+    make_full_request {
+      method = Get,
+      url = join_url { base = it.base_url, path = path },
+      headers = it.default_headers,
+      body = None,
+      timeout_ms = Some { val = it.default_timeout_ms },
+    },
+  post = { it: 'it, path: Str } ->
+    make_full_request {
+      method = Post,
+      url = join_url { base = it.base_url, path = path },
+      headers = it.default_headers,
+      body = None,
+      timeout_ms = Some { val = it.default_timeout_ms },
+    },
+  put = { it: 'it, path: Str } ->
+    make_full_request {
+      method = Put,
+      url = join_url { base = it.base_url, path = path },
+      headers = it.default_headers,
+      body = None,
+      timeout_ms = Some { val = it.default_timeout_ms },
+    },
+  delete = { it: 'it, path: Str } ->
+    make_full_request {
+      method = Delete,
+      url = join_url { base = it.base_url, path = path },
+      headers = it.default_headers,
+      body = None,
+      timeout_ms = Some { val = it.default_timeout_ms },
+    },
+  patch = { it: 'it, path: Str } ->
+    make_full_request {
+      method = Patch,
+      url = join_url { base = it.base_url, path = path },
+      headers = it.default_headers,
+      body = None,
+      timeout_ms = Some { val = it.default_timeout_ms },
+    },
+  head = { it: 'it, path: Str } ->
+    make_full_request {
+      method = Head,
+      url = join_url { base = it.base_url, path = path },
+      headers = it.default_headers,
+      body = None,
+      timeout_ms = Some { val = it.default_timeout_ms },
+    },
+  options = { it: 'it, path: Str } ->
+    make_full_request {
+      method = Options,
+      url = join_url { base = it.base_url, path = path },
+      headers = it.default_headers,
+      body = None,
+      timeout_ms = Some { val = it.default_timeout_ms },
+    },
+  ## Verb-free request builder — set method later via .with_method.
+  request = { it: 'it, path: Str } ->
+    make_full_request {
+      method = Get,
+      url = join_url { base = it.base_url, path = path },
+      headers = it.default_headers,
+      body = None,
+      timeout_ms = Some { val = it.default_timeout_ms },
+    },
+}
+
+# Internal: retry loop. Self-recursive — kept top-level because Mezze
+# doesn't bind nested `let` names to themselves.
+let retry_loop
+  : { req: Request, attempt: Int, max_attempts: Int, backoff_ms: Int }
+  -> Result Response HttpError <HttpClient, Async, Time>
+  = { req, attempt, max_attempts, backoff_ms } -> do
+    let resp = HttpClient.request { req = req, config = default_http_config }
+    match resp is
+      Ok { val } -> resp
+      Err { error } -> if attempt >= max_attempts || (is_retryable { err = error }).not {} then resp else do
+        sleep { ms = backoff_ms }
+        retry_loop {
+          req = req,
+          attempt = attempt + 1,
+          max_attempts = max_attempts,
+          backoff_ms = backoff_ms,
+        }
+
+## Send a Request, retrying `is_retryable` failures (connection, timeout, 5xx)
+## with `backoff_ms` between tries. Returns the first Ok or the last Err;
+## `max_attempts` counts the first try (1 = no retry).
+pub let retry
+  : { req: Request, max_attempts: Int, backoff_ms: Int }
+  -> Result Response HttpError <HttpClient, Async, Time>
+  = { req, max_attempts, backoff_ms } ->
+    retry_loop {
+      req = req,
+      attempt = 1,
+      max_attempts = max_attempts,
+      backoff_ms = backoff_ms,
+    }
+
+## Fetch multiple URLs concurrently, returning one Result per URL (each spawn's
+## failure collapsed to a `HttpConnectionFailed`).
+pub let fetch_all: { urls: [Str] } -> [Result Response HttpError] <HttpClient, Async> = { urls } ->
+  seq::map {
+    xs = par_map { xs = urls, f = { x } -> request { url = x }.send {} },
+    f = { x } -> match x is
+      Ok { val = inner } -> inner
+      Err { error = e } -> Err {
+        error = HttpConnectionFailed { url = "<spawn>", reason = "async task failed" },
+      }
+,
+  }
+
+## Fetch multiple URLs concurrently, failing on the first error.
+pub let fetch_all_ok: { urls: [Str] } -> Result [Response] HttpError <HttpClient, Async> = { urls } ->
+  do
+    let results = fetch_all { urls = urls }
+    collect_results { results = results }
+
+let collect_results: { results: [Result 'a 'e] } -> Result ['a] 'e = { results } ->
+  do
+    let len = seq::size { xs = results }
+    collect_results_loop {
+      results = results,
+      idx = 0,
+      len = len,
+      acc = [],
+    }
+
+let collect_results_loop
+  : { results: [Result 'a 'e], idx: Int, len: Int, acc: ['a] }
+  -> Result ['a] 'e
+  = { results, idx, len, acc } -> if idx >= len then Ok { val = acc } else match seq::get { xs = results, i = idx } is
+    Some { val } -> match val is
+      Ok { val = v } -> collect_results_loop {
+        results = results,
+        idx = idx + 1,
+        len = len,
+        acc = seq::add { xs = acc, x = v },
+      }
+      Err { error } -> Err { error = error }
+    None -> Ok { val = acc }
+
+# Any-method route on the URL PATH glob (`/users/*`, `**/users`, `**` = all);
+# the building block `MockRules` adds.
+let mock_http_rule: { url: Str } -> MockRule = { url } ->
   {
     methods = [],
     url = Glob { pattern = url },
     response = Ok { val = response_status { code = 200, body = "" } },
   }
 
-
+# Used by the chain so `.status` can keep the body and `.text` can keep the
+# status, rather than each one resetting the other.
 ## The response a rule currently answers with, or a bare 200 if the rule is
-## set to fail. Used by the chain so `.status` can keep the body and `.text`
-## can keep the status, rather than each one resetting the other.
+## set to fail.
 let mock_response_of: { rule: MockRule } -> Response = { rule } ->
   match rule.response is
     Ok { val } -> val
     Err { error = _ } -> response_status { code = 200, body = "" }
 
-
 let mock_with_response: { rule: MockRule, resp: Response } -> MockRule = { rule, resp } ->
   { methods = rule.methods, url = rule.url, response = Ok { val = resp } }
 
-
 let mock_with_methods: { rule: MockRule, methods: [Method] } -> MockRule = { rule, methods } ->
   { methods = methods, url = rule.url, response = rule.response }
-
 
 impl MockRule where {
   ## Restrict to one method, replacing any previous restriction
@@ -1181,7 +1356,7 @@ impl MockRule where {
   ## Match any of several methods.
   for_methods = { it: 'it, methods: [Method] } ->
     mock_with_methods { rule = it, methods = methods },
-  ## Match every method — the default a bare `mock` starts with.
+  ## Match every method — the default a bare `mock_http_rule` starts with.
   any_method = { it: 'it } -> mock_with_methods { rule = it, methods = [] },
 
   ## Set the status, keeping the body and headers.
@@ -1246,132 +1421,839 @@ impl MockRule where {
       response = Err { error = HttpConnectionFailed { url = "", reason = reason } } },
 }
 
+## The routes a `MockHttpClient` answers from; every `mock_*` builder returns one.
+## Verbs (`.get`, `.any`, …) ADD a route; shapers (`.status`, `.json`, …) refine the last one.
+## First match wins; no match is `Err(HttpConnectionFailed)` unless `.otherwise` adds a catch-all.
+pub newtype MockRules = { rules: [MockRule] }
 
-## A rule: any GET matching `url` returns a 200 text `body`.
-pub let mock_get: { url: Str, body: Str } -> MockRule = { url, body } ->
-  mock { url = url }.get {}.text { body = body }
+pub let mock_http_rules: {} -> MockRules = {} -> do
+  let none: [MockRule] = []
+  MockRules.({ rules = none })
 
-## A rule: any POST matching `url` returns a 201 text `body`.
-pub let mock_post: { url: Str, body: Str } -> MockRule = { url, body } ->
-  mock { url = url }.post {}.status { code = 201 }.text { body = body }
+let mock_rules_of: { rs: MockRules } -> [MockRule] = { rs } ->
+  match rs is
+    MockRules.(v) -> v.rules
 
-## A rule: any PUT matching `url` returns a 200 text `body`.
-pub let mock_put: { url: Str, body: Str } -> MockRule = { url, body } ->
-  mock { url = url }.put {}.text { body = body }
+let mock_rules_add: { rs: MockRules, rule: MockRule } -> MockRules = { rs, rule } ->
+  MockRules.({ rules = seq::push { xs = mock_rules_of { rs = rs }, x = rule } })
 
-## A rule: any DELETE matching `url` returns a 200 text `body`.
-pub let mock_delete: { url: Str, body: Str } -> MockRule = { url, body } ->
-  mock { url = url }.delete {}.text { body = body }
+## Apply `f` to the route added last — or to a fresh catch-all when none was.
+let mock_rules_shape_last: { rs: MockRules, f: { r: MockRule } -> MockRule } -> MockRules = { rs, f } -> do
+  let xs = mock_rules_of { rs = rs }
+  match seq::last { xs = xs } is
+    Some { val } -> MockRules.({ rules = seq::push { xs = seq::init { xs = xs }, x = f { r = val } } })
+    None -> MockRules.({ rules = [f { r = mock_http_rule { url = "**" } }] })
 
-## A rule: any GET matching `url` returns a 200 JSON `body`
+impl MockRules where {
+  ## Add a route for one method and URL glob.
+  get = { it: 'it, url: Str } -> mock_rules_add { rs = it, rule = mock_http_rule { url = url }.get {} },
+  post = { it: 'it, url: Str } -> mock_rules_add { rs = it, rule = mock_http_rule { url = url }.post {} },
+  put = { it: 'it, url: Str } -> mock_rules_add { rs = it, rule = mock_http_rule { url = url }.put {} },
+  delete = { it: 'it, url: Str } -> mock_rules_add { rs = it, rule = mock_http_rule { url = url }.delete {} },
+  patch = { it: 'it, url: Str } -> mock_rules_add { rs = it, rule = mock_http_rule { url = url }.patch {} },
+  head = { it: 'it, url: Str } -> mock_rules_add { rs = it, rule = mock_http_rule { url = url }.head {} },
+  options = { it: 'it, url: Str } -> mock_rules_add { rs = it, rule = mock_http_rule { url = url }.options {} },
+  ## Add a route for any method.
+  any = { it: 'it, url: Str } -> mock_rules_add { rs = it, rule = mock_http_rule { url = url } },
+
+  ## Narrow the last route to several methods.
+  methods = { it: 'it, methods: [Method] } ->
+    mock_rules_shape_last { rs = it, f = { r: MockRule } -> r.for_methods { methods = methods } },
+  ## Shape the last route's reply — see the same names on `MockRule`.
+  status = { it: 'it, code: Int } ->
+    mock_rules_shape_last { rs = it, f = { r: MockRule } -> r.status { code = code } },
+  text = { it: 'it, body: Str } ->
+    mock_rules_shape_last { rs = it, f = { r: MockRule } -> r.text { body = body } },
+  json = { it: 'it, body: Json } ->
+    mock_rules_shape_last { rs = it, f = { r: MockRule } -> r.json { body = body } },
+  raw = { it: 'it, body: Bytes } ->
+    mock_rules_shape_last { rs = it, f = { r: MockRule } -> r.raw { body = body } },
+  header = { it: 'it, k: Str, v: Str } ->
+    mock_rules_shape_last { rs = it, f = { r: MockRule } -> r.header { k = k, v = v } },
+  fails = { it: 'it, error: HttpError } ->
+    mock_rules_shape_last { rs = it, f = { r: MockRule } -> r.fails { error = error } },
+  times_out = { it: 'it, ms: Int } ->
+    mock_rules_shape_last { rs = it, f = { r: MockRule } -> r.times_out { ms = ms } },
+  unreachable = { it: 'it, reason: Str } ->
+    mock_rules_shape_last { rs = it, f = { r: MockRule } -> r.unreachable { reason = reason } },
+
+  ## A catch-all route, answering everything no earlier route matched.
+  otherwise = { it: 'it, status: Int, body: Str } ->
+    mock_rules_add { rs = it, rule = mock_http_rule { url = "**" }.status { code = status }.text { body = body } },
+}
+
+## A mock from hand-built `MockRule` records, tried in order — for a rule the
+## builders cannot express. Prefer `mock_get` and friends or `mock_http_rules`.
+pub let mock_rules: { of: [MockRule] } -> MockRules = { of } -> MockRules.({ rules = of })
+
+## Several mocks as one, their routes in order — `mocks { of = [a, b] }` tries
+## every route of `a` before any of `b`.
+pub let mocks: { of: [MockRules] } -> MockRules = { of } ->
+  MockRules.({ rules = seq::flat_map { xs = of, f = { x } -> mock_rules_of { rs = x } } })
+
+## A mock answering every request with `status` and `body`.
+pub let mock_otherwise: { status: Int, body: Str } -> MockRules = { status, body } ->
+  mock_http_rules {}.otherwise { status = status, body = body }
+
+## A mock: any GET matching `url` returns a 200 text `body`.
+pub let mock_get: { url: Str, body: Str } -> MockRules = { url, body } ->
+  mock_http_rules {}.get { url = url }.text { body = body }
+
+## A mock: any POST matching `url` returns a 201 text `body`.
+pub let mock_post: { url: Str, body: Str } -> MockRules = { url, body } ->
+  mock_http_rules {}.post { url = url }.status { code = 201 }.text { body = body }
+
+## A mock: any PUT matching `url` returns a 200 text `body`.
+pub let mock_put: { url: Str, body: Str } -> MockRules = { url, body } ->
+  mock_http_rules {}.put { url = url }.text { body = body }
+
+## A mock: any DELETE matching `url` returns a 200 text `body`.
+pub let mock_delete: { url: Str, body: Str } -> MockRules = { url, body } ->
+  mock_http_rules {}.delete { url = url }.text { body = body }
+
+## A mock: any GET matching `url` returns a 200 JSON `body`
 ## (`Content-Type: application/json`).
-pub let mock_json: { url: Str, body: Json } -> MockRule = { url, body } ->
-  mock { url = url }.get {}.json { body = body }
+pub let mock_json: { url: Str, body: Json } -> MockRules = { url, body } ->
+  mock_http_rules {}.get { url = url }.json { body = body }
 
-## A rule: any of `methods` matching `url` returns `code` with a text `body`.
-## The general form — the verb helpers above are shorthands for it.
+## A mock: any of `methods` matching `url` returns `code` with a text `body`.
+## The general form — `mock_get`, `mock_post` and the other verb helpers are shorthands for it.
 pub let mock_status
   : { url: Str, methods: [Method], code: Int, body: Str }
-  -> MockRule
+  -> MockRules
   = { url, methods, code, body } ->
-    mock { url = url }.for_methods { methods = methods }.status { code = code }.text { body = body }
-
-## Decode the Ok Response body as UTF-8; return `def` on any Err or decode
-## failure.
-pub let text_or: { resp: Result Response HttpError, def: Str } -> Str = { resp, def } ->
-  match resp is
-    Ok { val } -> match body_str { resp = val } is
-      Ok { val = s } -> s
-      Err { error = _ } -> def
-    Err { error = _ } -> def
+    mock_http_rules {}.any { url = url }.methods { methods = methods }.status { code = code }.text { body = body }
 
 
-## Decode the Ok Response body as JSON; return `def` on any Err OR a
-## decode failure.
-pub let json_or: { resp: Result Response HttpError, def: Json } -> Json = { resp, def } ->
-  match resp is
-    Ok { val } -> match body_json { resp = val } is
-      Ok { val = j } -> j
-      Err { error = _ } -> def
-    Err { error = _ } -> def
+# ─── Server ────────────────────────────────────────────────────────────────
+#  One op, `serve`; routing is pure code folding a table into one handler, so the effect never grows.
+#  The handler row `<...>` is load-bearing: Mock leaves `<Async>` for the test to discharge.
+## A running server. `stop` shuts it down; `port` is the bound port (useful
+## after binding port 0).
+pub type ServerHandle = {
+  stop: {} -> {},
+  port: Int,
+}
 
+## Why a server could not start. `StartFailed` carries the raw reason for any
+## failure not covered by the first three.
+pub type ServerError = |
+  AddressInUse { host: Str, port: Int },
+  PermissionDenied { host: Str, port: Int },
+  AddressNotAvailable { host: Str, port: Int },
+  StartFailed { host: Str, port: Int, reason: Str },
+|
 
-## Run `f` on the Ok Response (for its effects); a no-op on Err.
-pub let on_ok
-  : { resp: Result Response HttpError, f: { resp: Response } -> {} <...> }
-  -> {} <...>
-  = { resp, f } -> match resp is
-    Ok { val } -> f { resp = val }
-    Err { error = _ } -> {}
+## Run a handler as a server: `Ok` with the handle, or `Err` with a
+## `ServerError` when the socket cannot bind.
+effect HttpServer where {
+  serve: { handler: { req: Request } -> Response <...> } -> Result ServerHandle ServerError <HttpServer>
+}
 
+## A server that never binds a socket: `stop` is a no-op and `port` is 0.
+## The handler is NOT called — a test calls it directly. Installs no async
+## performer, so a handler's `<Async>` escapes to the test.
+impl HttpServer for MockHttpServer where {
+  serve = { handler } -> Ok { val = { stop = {} -> {}, port = 0 } }
+}
 
-## Run `f` on the Err (for its effects); a no-op on Ok.
-pub let on_err
-  : { resp: Result Response HttpError, f: { err: HttpError } -> {} <...> }
-  -> {} <...>
-  = { resp, f } -> match resp is
-    Ok { val } -> {}
-    Err { error } -> f { err = error }
+## Build a `Request` for a handler without a server — the test seam for
+## routers and handlers.
+pub let incoming: { method: Method, url: Str } -> Request = { method, url } -> {
+  method = method,
+  url = url,
+  headers = map::empty {},
+  body = None,
+  timeout_ms = None,
+  chunks = None,
+}
 
+## `incoming` with a STREAMED body, to test a streaming handler without a
+## socket. `chunks` sets the chunk boundaries — test more than one chunk.
+pub let incoming_streamed
+  : { method: Method, url: Str, chunks: Iter Bytes }
+  -> Request
+  = { method, url, chunks } -> {
+    method = method,
+    url = url,
+    headers = map::empty {},
+    body = None,
+    timeout_ms = None,
+    chunks = Some { val = chunks },
+  }
 
-## Decode the Ok Response body as UTF-8, staying inside `Result`. Unlike
-## `text_or` (which needs a `def` and collapses to a bare `Str`), this keeps
-## the error channel: a network `Err` passes through unchanged, and a body that
-## is not valid UTF-8 becomes an `HttpError.HttpDecodeError`. So the whole fetch is
-## still one `Result Str HttpError` to `match` or chain on.
-##
-##   request { url }.send {}.text {}    # Result Str HttpError
-pub let text_result: { resp: Result Response HttpError } -> Result Str HttpError = { resp } ->
-  flat_map { result = resp, f = { val } -> body_str { resp = val } }
+## `incoming` for a GET, which is most of what tests want.
+pub let get_request: { url: Str } -> Request = { url } ->
+  incoming { method = Get, url = url }
 
+# each returns a plain Request, so the request chain (.with_text, .to, …) carries on
+## `incoming` for each remaining method.
+pub let post_request: { url: Str } -> Request = { url } ->
+  incoming { method = Post, url = url }
+pub let put_request: { url: Str } -> Request = { url } ->
+  incoming { method = Put, url = url }
+pub let delete_request: { url: Str } -> Request = { url } ->
+  incoming { method = Delete, url = url }
+pub let patch_request: { url: Str } -> Request = { url } ->
+  incoming { method = Patch, url = url }
+pub let head_request: { url: Str } -> Request = { url } ->
+  incoming { method = Head, url = url }
+pub let options_request: { url: Str } -> Request = { url } ->
+  incoming { method = Options, url = url }
 
-## Decode the Ok Response body as JSON, staying inside `Result`. A network `Err`
-## passes through; a body that is not valid JSON becomes an
-## `HttpError.HttpDecodeError`. Returns a raw `Json` value — use `.decode {}` to go
-## straight to a typed value.
-##
-##   request { url }.send {}.json {}    # Result Json HttpError
-pub let json_result: { resp: Result Response HttpError } -> Result Json HttpError = { resp } ->
-  match resp is
-    Ok { val } -> match body_json { resp = val } is
-      Ok { val = j } -> Ok { val = j }
-      Err { error = e } -> Err { error = HttpDecodeError { url = val.url, message = e.message } }
-    Err { error } -> Err { error = error }
+# ── A server that binds a socket ────────────────────────────────────────────
 
+# Streaming is server-wide, not per-request (e.g. by Content-Length): a
+# threshold rule would make a `body`-only handler silently see `None` exactly
+# for the large uploads.
+## Settings for a real server. `port = 0` lets the OS choose; `workers = 0` is a sensible default.
+## `stream_bodies` hands handlers `chunks` instead of `body`.
+## `helidon_print_log`: the embedded server's own logging (`Info` shows the banner).
+pub type ServerConfig = {
+  port: Int,
+  host: Str,
+  workers: Int,
+  stream_bodies: Bool,
+  helidon_print_log: LogLevel,
+}
 
-## Decode the Ok Response body straight into a typed value via `from_json`,
-## staying inside `Result`. The target type is inferred from the use site (the
-## same target-directed decode as `body.from_json {}`), so no schema is
-## declared. A network `Err` passes through; JSON that does not fit the inferred
-## shape becomes an `HttpError.HttpDecodeError`. This is the typed counterpart to
-## `.json {}` and the `Result`-keeping counterpart to `json_or`.
-##
-##   let user: Result { name: Str } HttpError =
-##     request { url }.send {}.from_json {}
-pub let from_json_result: { resp: Result Response HttpError } with FromJson 'a Str -> Result 'a HttpError = { resp } ->
-  match resp is
-    Err { error } -> Err { error = error }
-    Ok { val } -> match body_str { resp = val } is
+## Port 8080 on loopback (not `0.0.0.0` — network exposure is your call),
+## default workers, no streaming, Helidon logging off.
+pub let default_server_config: ServerConfig = {
+  port = 8080,
+  host = "127.0.0.1",
+  workers = 0,
+  stream_bodies = False,
+  helidon_print_log = Off,
+}
+
+# ── Streamed request bodies ─────────────────────────────────────────────────
+
+## An opaque, SINGLE-SHOT reader over one request's body: a second walk of
+## the same `chunks` sees the first's leftovers. It outlives the handler, so
+## passing a request's `chunks` on as the response's streams without buffering.
+pub newtype BodyReader = __NativeBodyReader
+
+## Bytes per read (64 KiB) — the peak memory cost of a streamed upload.
+let chunk_bytes: Int = 65536
+
+# Written in Mezze because `unfold`'s step must be a Mezze fn. Unlike
+# `response_file` (Err -> Done), errors throw: a vanished client must not look
+# like a finished upload.
+## The reader as an `Iter Bytes`, pulled a chunk at a time.
+## A read error THROWS rather than ending the iterator.
+let chunks_of_reader: { reader: BodyReader } -> Iter Bytes = { reader } ->
+  iter::unfold {
+    state = {},
+    step = { s } -> do
+      let b = __native_http_request_read_chunk { reader = reader, max_bytes = chunk_bytes }
+      if bytes::size { b = b } == 0 then Done else Yield { val = b, next = {} }
+  }
+
+# The native always passes `reader` (`None` unless streaming), so one wrapper
+# inside `start_socket` serves both; `serve`'s type is unchanged.
+## Give the request its `chunks` when the server handed over a reader.
+let attach_reader: { req: Request, reader: Option BodyReader } -> Request = { req, reader } ->
+  match reader is
+    None -> req
+    Some { val = r } -> { ...req, chunks = Some { val = chunks_of_reader { reader = r } } }
+
+## Bind the socket, start the workers, hand back the handle.
+let start_socket
+  : { handler: { req: Request } -> Response <...>, config: ServerConfig }
+  -> Result ServerHandle ServerError
+  = { handler, config } -> do
+    let wrapped = { req, reader } -> handler { req = attach_reader { req = req, reader = reader } }
+    # The native speaks a plain level name; the tag is mezze-side only.
+    let log_level = helidon_log_level_name { level = config.helidon_print_log }
+    match __native_http_server_start {
+      handler = wrapped,
+      port = config.port,
+      host = config.host,
+      workers = config.workers,
+      stream_bodies = config.stream_bodies,
+      helidon_log_level = log_level,
+    } is
+      Ok { val = s } -> Ok { val = {
+        stop = {} -> __native_http_server_stop { server = s },
+        port = __native_http_server_port { server = s },
+      } }
       Err { error } -> Err { error = error }
-      Ok { val = s } -> match s.from_json {} is
-        Ok { val = d } -> Ok { val = d }
-        Err { error } -> Err { error = HttpDecodeError { url = val.url, message = error.message } }
 
+# The worker thread is owned by Truffle.
+## A server on a real socket, backed by Helidon. Handlers run on worker
+## threads with the performers in force at `serve` (`Time`, `Log`, …).
+impl HttpServer for HelidonHttpServer where {
+  serve = { handler } -> start_socket { handler = handler, config = default_server_config },
+}
 
-## Chainable finishers on the `Result Response HttpError` from `.send {}`. The
-## generic `impl Result 'a 'e` (map/get_or/…) still applies to every other Result.
-impl Result Response HttpError where {
-  text_or = { it: 'it, def: Str } -> text_or { resp = it, def = def },
-  json_or = { it: 'it, def: Json } -> json_or { resp = it, def = def },
-  on_ok = { it, f } -> on_ok { resp = it, f = f },
-  on_err = { it, f } -> on_err { resp = it, f = f },
+## `HelidonHttpServer` with a config. `port = 0` is what a test wants.
+impl HttpServer for HelidonHttpServerWith { config: ServerConfig } where {
+  serve = { handler } -> start_socket { handler = handler, config = config },
+}
 
-  ## Body decoders that KEEP the Result (error channel preserved), as opposed to
-  ## the `*_or` finishers that collapse to a bare value. `.from_json {}` is
-  ## target-directed — the type it decodes into is inferred from the use site.
-  text = { it } -> text_result { resp = it },
-  json = { it } -> json_result { resp = it },
-  from_json = { it } -> from_json_result { resp = it },
+## Block until `on` returns, then stop the server. `on` is any shutdown
+## trigger: `{ } -> ctrl_c {}` (std::effects::signal), a timer, a flag. Use
+## `ImmediateSignal` so a test does not block.
+pub let with_graceful_shutdown
+  : { server: ServerHandle, on: {} -> {} <...> } -> {} <...>
+  = { server, on } -> do
+    on {}
+    server.stop {}
 
-  ensure_ok = { it } -> ensure_ok { resp = it },
+## Method form of `with_graceful_shutdown`, so a handle chains.
+impl ServerHandle where {
+  with_graceful_shutdown = { it: 'it, on: {} -> {} <...> } ->
+    with_graceful_shutdown { server = it, on = on },
+}
+
+# Routing — pure code folding a route table into the `{ req } -> Response`
+# `serve` takes; test by calling it with a `Request`. A `:name` segment matches
+# any one segment and binds it.
+
+## What a matched route hands its handler: the request, plus the path
+## parameters the pattern bound.
+pub type Matched = {
+  req: Request,
+  params: Map Str Str,
+}
+
+## A route table. The row on `run` is open, so the handlers a table carries may
+## perform effects even though the routing around them performs none.
+pub type Routes = {
+  run: { req: Request } -> Option Response <...>,
+}
+
+## Split a path into segments, dropping the empty pieces a leading or trailing
+## slash produces, so `/users/7/` and `users/7` agree.
+pub let segments: { path: Str } -> [Str] = { path } ->
+  seq::filter { xs = str::split { s = path, delimiter = "/" }, p = { x } -> x != "" }
+
+## Drop a query string, if there is one.
+let strip_query: { s: Str } -> Str = { s } ->
+  match str::index_of { s = s, sub = "?" } is
+    None -> s
+    Some { val = q } -> str::substring { s = s, start = 0, end = q }
+
+## The path of an authority-relative remainder: everything from its first
+## slash. A URL with no path at all (`https://host`) means the root.
+let slash_onward: { s: Str } -> Str = { s } ->
+  match str::index_of { s = s, sub = "/" } is
+    None -> "/"
+    Some { val = j } -> str::substring { s = s, start = j, end = str::size { s = s } }
+
+## Drop a `scheme://authority` prefix, if there is one.
+let strip_authority: { s: Str } -> Str = { s } ->
+  match str::index_of { s = s, sub = "://" } is
+    None -> s
+    Some { val = i } ->
+      slash_onward { s = str::substring { s = s, start = i + 3, end = str::size { s = s } } }
+
+## The path part of a request target: no scheme, authority or query. Both
+## `/users/7?page=2` (server) and `https://host/users/7` (client) give
+## `/users/7`, so one route table serves both sides.
+pub let path_of: { url: Str } -> Str = { url } ->
+  strip_query { s = strip_authority { s = url } }
+
+## The raw (percent-encoded, `&`-joined) query string, or `""` if none.
+pub let query_of: { url: Str } -> Str = { url } ->
+  match str::index_of { s = url, sub = "?" } is
+    None -> ""
+    Some { val = q } -> str::substring { s = url, start = q + 1, end = str::size { s = url } }
+
+## Match a pattern against a path, returning the bound `:name` parameters, or
+## `None` if the segment counts or a literal segment differ.
+pub let match_path: { pattern: Str, path: Str } -> Option (Map Str Str) = { pattern, path } ->
+  match_prepared { pat = prepare { pattern = pattern }, url = path }
+
+## A pattern taken apart once, when the route table is built. `literal` is the
+## slash-trimmed form, present only when the pattern binds no `:name` — then
+## matching is one string comparison rather than a per-segment walk.
+let prepare: { pattern: Str } -> { segs: [Str], literal: Option Str } = { pattern } -> do
+  let segs = segments { path = pattern }
+  let binds = seq::any { xs = segs, p = { x } -> str::starts_with { s = x, prefix = ":" } }
+  {
+    segs = segs,
+    literal = if binds then None else Some { val = trim_slashes { s = pattern } },
+  }
+
+## Drop one leading and one trailing `/`, so `/users` and `users/` agree the way
+## `segments` makes them agree. `"/"` trims to `""`, which is the root's zero
+## segments.
+let trim_slashes: { s: Str } -> Str = { s } -> do
+  let n = str::size { s = s }
+  let start = if str::starts_with { s = s, prefix = "/" } then 1 else 0
+  let end = if n > start then (if str::ends_with { s = s, suffix = "/" } then n - 1 else n) else n
+  str::substring { s = s, start = start, end = end }
+
+let match_prepared
+  : { pat: { segs: [Str], literal: Option Str }, url: Str }
+  -> Option (Map Str Str)
+  = { pat, url } -> do
+    let path = path_of { url = url }
+    match pat.literal is
+      None -> match_on_path { ps = pat.segs, path = path }
+      Some { val = lit } ->
+        # `//` in the path makes a string comparison disagree with `segments`
+        # (which drops empty pieces), so that case takes the segment path
+        if str::contains { s = path, substring = "//" } then
+          match_on_path { ps = pat.segs, path = path }
+        else
+          if trim_slashes { s = path } == lit then Some { val = map::empty {} } else None
+
+# `route` splits its pattern once at build time; `prepare`'s `literal` also skips
+# the per-request path split, which is where the cost was.
+## Bind a prepared pattern's segments against an already-extracted path.
+let match_on_path: { ps: [Str], path: Str } -> Option (Map Str Str) = { ps, path } -> do
+  let xs = segments { path = path }
+  if seq::size { xs = ps } != seq::size { xs = xs } then None
+  else
+    # zip + fold lazily over pattern and path together, keeping only the bindings
+    iter::fold {
+      it = iter::zip {
+        a = iter::from_seq { xs = ps },
+        b = iter::from_seq { xs = xs },
+      },
+      init = Some { val = map::empty {} },
+      f = { acc, x } -> match acc is
+        None -> None
+        Some { val = bound } ->
+          if str::starts_with { s = x.fst, prefix = ":" } then
+            Some { val = map::insert {
+              m = bound,
+              k = str::substring { s = x.fst, start = 1, end = str::size { s = x.fst } },
+              v = x.snd,
+            } }
+          else
+            if x.fst == x.snd then Some { val = bound } else None
+    }
+
+## One route: a method, a path pattern, and a handler that receives the bound
+## parameters.
+pub let route: { method: Method, path: Str, handler: { m: Matched } -> Response <...> } -> Routes =
+  { method, path, handler } -> do
+    # taken apart once here, not on every request
+    let pat = prepare { pattern = path }
+    {
+      run = { req } ->
+        if req.method != method then None
+        else match match_prepared { pat = pat, url = req.url } is
+          None -> None
+          Some { val = params } ->
+            Some { val = handler { m = { req = req, params = params } } },
+    }
+
+## Route one method and path to a handler, converting whatever it answers (a
+## `Str`, `Json`, `Response`, or `Result`) via `IntoResponse`.
+pub let on_method
+  : { method: Method, path: Str, handler: { m: Matched } -> 'r <...> }
+  with IntoResponse 'r
+  -> Routes
+  =
+  { method, path, handler } ->
+    route {
+      method = method,
+      path = path,
+      handler = { m } -> do
+        let answer = handler { m = m }
+        answer.into_response {},
+    }
+
+## Route a GET at `path`.
+pub let on_get: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Get, path = path, handler = handler }
+
+## Route a POST at `path`.
+pub let on_post: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Post, path = path, handler = handler }
+
+## Route a PUT at `path`.
+pub let on_put: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Put, path = path, handler = handler }
+
+## Route a PATCH at `path`.
+pub let on_patch: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Patch, path = path, handler = handler }
+
+## Route a DELETE at `path`.
+pub let on_delete: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Delete, path = path, handler = handler }
+
+## Route a HEAD at `path`.
+pub let on_head: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Head, path = path, handler = handler }
+
+## Route a OPTIONS at `path`.
+pub let on_options: { path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> Routes =
+  { path, handler } -> on_method { method = Options, path = path, handler = handler }
+
+## Adapt a handler that may THROW a Response into one answering a Response.
+pub let catching
+  : { handler: { m: Matched } -> 'r <Exception having 'error = Response, ...> }
+  with IntoResponse 'r
+  -> { m: Matched } -> Response <...>
+  =
+  { handler } -> { m } -> do
+    let outcome = perform ExceptionToResult in do
+      let answered = handler { m = m }
+      Ok { val = answered.into_response {} }
+    match outcome is
+      Ok { val } -> val
+      Err { error } -> error
+
+## Like `catching`, for a handler that throws its OWN error type, converted
+## via `IntoErrorResponse`. A record-typed error does not dispatch yet; throw a
+## `Str`, or a `Response` through `catching`.
+pub let catching_any
+  : { handler: { m: Matched } -> 'r <Exception having 'error = 'e, ...> }
+  with IntoResponse 'r, IntoErrorResponse 'e
+  -> { m: Matched } -> Response <...>
+  =
+  { handler } -> { m } -> do
+    let outcome = perform ExceptionToResult in do
+      let answered = handler { m = m }
+      Ok { val = answered.into_response {} }
+    match outcome is
+      Ok { val } -> val
+      Err { error } -> error.into_error_response {}
+
+## One route in a group: a method, a full path, and a Response-answering handler.
+pub type RouteEntry = {
+  method: Method,
+  path: Str,
+  handler: { m: Matched } -> Response <...>,
+}
+
+## A path prefix and its routes — a table, not yet a handler. Close it with
+## `handler` (404 on no match) or `otherwise` before passing it to `serve`.
+pub newtype RouteGroup = { prefix: Str, entries: [RouteEntry] }
+
+## An empty router whose routes are prefixed by `path` (`""` for none). Chain
+## `.get` / `.post` / … and close with `.otherwise` or `.handler`.
+pub let router: { path: Str } -> RouteGroup = { path } ->
+  RouteGroup.({ prefix = path, entries = [] })
+
+let group_inner: { g: RouteGroup } -> { prefix: Str, entries: [RouteEntry] } = { g } ->
+  match g is
+    RouteGroup.(v) -> v
+
+# every entry folded into one table, first added winning
+let fold_entries: { g: RouteGroup } -> Routes = { g } ->
+  seq::fold {
+    xs = group_inner { g = g }.entries,
+    init = { run = { req } -> None },
+    f = { acc, x } -> or_else {
+      a = acc,
+      b = route { method = x.method, path = x.path, handler = x.handler },
+    },
+  }
+
+# Join a prefix and a path with exactly one slash between them, so "/users" and
+# "/:id" give "/users/:id" and "/users" with "" stays "/users".
+let join_prefix: { prefix: Str, path: Str } -> Str = { prefix, path } ->
+  if str::is_empty { s = prefix } then path
+  else if str::is_empty { s = path } then prefix
+  else if str::ends_with { s = prefix, suffix = "/" } && str::starts_with { s = path, prefix = "/" }
+  then str::concat {
+    l = prefix,
+    r = str::substring { s = path, start = 1, end = str::size { s = path } },
+  }
+  else if str::ends_with { s = prefix, suffix = "/" } || str::starts_with { s = path, prefix = "/" }
+  then str::concat { l = prefix, r = path }
+  else str::concat { l = str::concat { l = prefix, r = "/" }, r = path }
+
+let group_add
+  : { g: RouteGroup, method: Method, path: Str, handler: { m: Matched } -> Response <...> }
+  -> RouteGroup
+  =
+  { g, method, path, handler } -> do
+    let inner = group_inner { g = g }
+    RouteGroup.({
+      prefix = inner.prefix,
+      entries = seq::push {
+        xs = inner.entries,
+        x = {
+          method = method,
+          path = join_prefix { prefix = inner.prefix, path = path },
+          handler = handler,
+        },
+      },
+    })
+
+impl RouteGroup where {
+  ## Append a GET under this group's prefix, answering whatever the handler returns.
+  get: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Get,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
+  ## Append a POST under this group's prefix, answering whatever the handler returns.
+  post: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Post,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
+  ## Append a PUT under this group's prefix, answering whatever the handler returns.
+  put: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Put,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
+  ## Append a PATCH under this group's prefix, answering whatever the handler returns.
+  patch: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Patch,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
+  ## Append a DELETE under this group's prefix, answering whatever the handler returns.
+  delete: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Delete,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
+  ## Append a HEAD under this group's prefix, answering whatever the handler returns.
+  head: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Head,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
+  ## Append an OPTIONS under this group's prefix, answering whatever the handler returns.
+  options: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
+    { it, path, handler } -> group_add {
+      g = it,
+      method = Options,
+      path = path,
+      handler = { m } -> do
+        let answered = handler { m = m }
+        answered.into_response {},
+    },
+
+  ## Mount another group's routes under this group's prefix.
+  nest = { it: 'it, group: RouteGroup } -> do
+    let outer = group_inner { g = it }
+    let child = group_inner { g = group }
+    RouteGroup.({
+      prefix = outer.prefix,
+      entries = seq::concat {
+        xs = outer.entries,
+        ys = seq::map {
+          xs = child.entries,
+          f = { x } -> {
+            method = x.method,
+            path = join_prefix { prefix = outer.prefix, path = x.path },
+            handler = x.handler,
+          },
+        },
+      },
+    }),
+
+  ## Fold this group into a route table. First added wins.
+  table = { it: 'it } -> fold_entries { g = it },
+
+  ## Close the group, answering anything unmatched with 404.
+  handler = { it: 'it } ->
+    otherwise { routes = fold_entries { g = it }, fallback = { req } -> not_found { body = "no route matched" } },
+
+  ## Close the group with a fallback, producing the handler `serve` takes. The
+  ## fallback answers with anything `IntoResponse`: a `Str`, a `{ status, body }`
+  ## record, or a full `Response`.
+  otherwise: { it: 'it, fallback: { req: Request } -> 'r <...> } with IntoResponse 'r
+    -> { req: Request } -> Response <...> =
+    { it, fallback } -> otherwise {
+      routes = fold_entries { g = it },
+      fallback = { req } -> do
+        let answered = fallback { req = req }
+        answered.into_response {},
+    },
+}
+
+## Fold a list of routes into one table; the first to match wins.
+pub let routes: { of: [Routes] } -> Routes = { of } ->
+  seq::fold {
+    xs = of,
+    init = { run = { req } -> None },
+    f = { acc, x } -> or_else { a = acc, b = x },
+  }
+
+## Try `a`, then `b`. First match wins, so declaration order is the priority.
+pub let or_else: { a: Routes, b: Routes } -> Routes = { a, b } -> {
+  run = { req } -> match a.run { req = req } is
+    Some { val } -> Some { val = val }
+    None -> b.run { req = req },
+}
+
+## Close the table into the handler `serve` takes; unmatched requests go to
+## `fallback`.
+pub let otherwise
+  : { routes: Routes, fallback: { req: Request } -> Response <...> }
+  -> { req: Request } -> Response <...>
+  =
+  { routes, fallback } -> { req } -> match routes.run { req = req } is
+    Some { val } -> val
+    None -> fallback { req = req }
+
+## Parse a request target's query into its parameters. Repeated keys collect
+## (`?tags=a&tags=b` gives `tags` two values); a fragment with no `=` is a key
+## with one empty value (`?debug`). Keys and values are percent-decoded.
+pub let query_params: { url: Str } -> Map Str [Str] = { url } ->
+  iter::fold {
+    it = iter::filter {
+      it = iter::from_seq { xs = str::split { s = query_of { url = url }, delimiter = "&" } },
+      p = { x } -> x != "",
+    },
+    init = map::empty {},
+    f = { acc, x } -> do
+      let cut = str::index_of { s = x, sub = "=" }
+      let k = match cut is
+        None -> url_decode_component { s = x }
+        Some { val = i } -> url_decode_component { s = str::substring { s = x, start = 0, end = i } }
+      let v = match cut is
+        None -> ""
+        Some { val = i } ->
+          url_decode_component { s = str::substring { s = x, start = i + 1, end = str::size { s = x } } }
+      let prior = match map::get { m = acc, k = k } is
+        Some { val } -> val
+        None -> []
+      map::insert { m = acc, k = k, v = seq::push { xs = prior, x = v } },
+  }
+
+## Every value a query gave for `name`, in order; `[]` if absent.
+pub let query_all: { url: Str, name: Str } -> [Str] = { url, name } ->
+  match map::get { m = query_params { url = url }, k = name } is
+    Some { val } -> val
+    None -> []
+
+## The FIRST value a query gave for `name` (repeats are not an error).
+pub let query_param: { url: Str, name: Str } -> Option Str = { url, name } ->
+  seq::first { xs = query_all { url = url, name = name } }
+
+## What the request carried where something else was wanted — the failure a
+## handler meets when it decodes a path parameter or a query.
+pub type BadInput = {
+  at: [Str],
+  message: Str,
+  expected: Str,
+  found: Option Str,
+}
+
+let bad_input_of: { e: DecodeError, at: [Str] } -> BadInput = { e, at } -> {
+  at = if seq::is_empty { xs = e.path } then at else e.path,
+  message = e.message,
+  expected = e.expected,
+  found = e.found,
+}
+
+## 400, naming where, what was wanted and what arrived.
+impl IntoErrorResponse for BadInput where {
+  into_error_response = { it } -> do
+    let where_ = if seq::is_empty { xs = it.at } then ""
+      else str::concat { l = str::join { strings = it.at, separator = "." }, r = ": " }
+    let got = match it.found is
+      Some { val } -> str::concat { l = ", found ", r = val }
+      None -> ""
+    response_status {
+      code = 400,
+      body = str::concat {
+        l = where_,
+        r = str::concat { l = str::concat { l = "expected ", r = it.expected }, r = got },
+      },
+    },
+}
+
+## The query, decoded into whatever the use site asks for — the mirror of the
+## client's `with_query`, target-directed from the annotation at the use site.
+pub let query_decoded = { url: Str } ->
+  match query_of { url = url }.from_query {} is
+    Ok { val } -> Ok { val = val }
+    Err { error = e } -> Err { error = bad_input_of { e = e, at = [] } }
+
+## One value (e.g. a path parameter), decoded into whatever the use site asks
+## for — Int, Bool, a newtype, anything with a QueryC decoder.
+pub let one_decoded = { v: Str, at: [Str] } ->
+  match [{ k = "", v = v }].from_query {} is
+    Ok { val } -> Ok { val = val }
+    Err { error = e } -> Err { error = bad_input_of { e = e, at = at } }
+
+## The error for a name the route never bound.
+let no_such_param: { name: Str } -> BadInput = { name } -> {
+  at = [name],
+  message = "the route bound no parameter by this name",
+  expected = "a path parameter the pattern declares",
+  found = None,
+}
+
+impl Routes where {
+  ## Try this table, then `b`. First match wins.
+  or_else = { it: 'it, b: Routes } -> or_else { a = it, b = b },
+
+  ## Close the table with a fallback, producing the handler `serve` takes.
+  otherwise = { it: 'it, fallback: { req: Request } -> Response <...> } ->
+    otherwise { routes = it, fallback = fallback },
+}
+
+impl Matched where {
+  ## A bound path parameter, if the pattern bound one by that name.
+  param = { it: 'it, name: Str } -> map::get { m = it.params, k = name },
+  ## The first value the query gave for `name`.
+  query = { it: 'it, name: Str } -> query_param { url = it.req.url, name = name },
+  ## The first value the query gave for `name`, or `default`.
+  query_or = { it: 'it, name: Str, default: Str } ->
+    match query_param { url = it.req.url, name = name } is
+      Some { val } -> val
+      None -> default,
+  ## Every value the query gave for `name`.
+  query_all = { it: 'it, name: Str } -> query_all { url = it.req.url, name = name },
+  ## The query, decoded into whatever the use site asks for.
+  query_as = { it } -> query_decoded { url = it.req.url },
+  ## A bound path parameter, decoded into whatever the use site asks for.
+  ## Errs with `BadInput` if it does not decode or the route bound no such name.
+  param_as = { it: 'it, name: Str } -> match map::get { m = it.params, k = name } is
+    Some { val } -> one_decoded { v = val, at = [name] }
+    None -> Err { error = no_such_param { name = name } },
+
+  ## A bound path parameter, or `default` when the pattern bound none.
+  param_or = { it: 'it, name: Str, default: Str } ->
+    match map::get { m = it.params, k = name } is
+      Some { val } -> val
+      None -> default,
+  ## A 200 carrying `text`, with the request's own url echoed back.
+  ok = { it: 'it, text: Str } -> {
+    status = 200,
+    headers = map::empty {},
+    body = bytes::from_str { s = text },
+    url = it.req.url,
+    chunks = None,
+  },
+  ## Any status carrying `text`.
+  reply = { it: 'it, status: Int, text: Str } -> {
+    status = status,
+    headers = map::empty {},
+    body = bytes::from_str { s = text },
+    url = it.req.url,
+    chunks = None,
+  },
 }

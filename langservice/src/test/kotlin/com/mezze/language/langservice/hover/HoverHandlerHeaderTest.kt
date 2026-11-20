@@ -64,7 +64,7 @@ class HoverHandlerHeaderTest {
         val hover = hoverOverImpl(
             """
             effect Fail having 'error where {
-              fail: { error: 'error } -> 'a <Fail>
+              fail: { error: 'error } -> 'error <Fail>
             }
 
             impl Fail for FailToStr having 'error = Str where {

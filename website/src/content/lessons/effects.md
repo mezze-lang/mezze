@@ -12,7 +12,7 @@ And every disappointment has somewhere to go. `from_json` returns a `Result`: te
 
 <!--mezze-editor
 use std::effects::log::{ Console, println }
-use std::effects::http::{ SimpleHttpClient, MockHttpClient, mock_get, request }
+use std::effects::http::{ request, SimpleHttpClient, MockHttpClient, mock_get }
 use std::codec::json::{ FromJson, ToJson }
 
 # Asks Open Food Facts what a barcode is. Its type
@@ -36,7 +36,7 @@ let main = {} -> perform Console in do
 
   # The same function, from a fixture. The encoder is inferred too, from `reply`-s shape.
   let product = { product = { product_name = "Pitted Black Olives (mock)" } }
-  let rules = [ mock_get { body = product.to_json_str {}, url = "*" } ]
+  let rules = mock_get { body = product.to_json_str {}, url = "*" }
   perform MockHttpClient { rules = rules } in
     println { msg = name_of { body = lookup { code } } }
 -->

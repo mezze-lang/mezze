@@ -74,6 +74,29 @@ public class SetDirectProbeTest {
     }
 
     /** Two to 32 longs is the primitive `long[]`; above it, the trie. */
+    /**
+     * The typed probes the compiled inline lookup uses — no virtual
+     * {@code equals}/{@code hashCode}, so native-image's analysis cannot wander
+     * into other overrides — agree with {@code contains} on the two direct
+     * storages, and answer false for a key of the other type.
+     */
+    @Test
+    public void theTypedProbesAgreeOnDirectStorages() {
+        MezzeSet<Object> empty = MezzeSet.empty();
+        assertFalse(empty.containsDirectLong(1L));
+        assertFalse(empty.containsDirectString("a"));
+
+        MezzeSet<Object> one = of(7L);
+        assertTrue(one.containsDirectLong(7L));
+        assertFalse(one.containsDirectLong(8L));
+        assertFalse(one.containsDirectString("7"));
+
+        MezzeSet<Object> word = of("b");
+        assertTrue(word.containsDirectString("b"));
+        assertFalse(word.containsDirectString("z"));
+        assertFalse(word.containsDirectLong(1L));
+    }
+
     @Test
     public void acrossTheLongStoragePromotions() {
         for (int n : new int[]{2, 8, 32, 33, 100}) {

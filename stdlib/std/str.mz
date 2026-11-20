@@ -9,10 +9,7 @@ impl Into Bytes for Str where {
   into = { it } -> bytes::from_str { s = it }
 }
 
-## Structural hash, paired with the `Eq` below.
-## `Eq` and `Hash` are written together or not at all: a hash container
-## buckets by one and compares by the other, so a value whose hash
-## disagrees with its equality is silently kept twice.
+# `Eq` and `Hash` go together or not at all: a hash disagreeing with equality duplicates entries.
 
 
 impl Ord for Str where {
@@ -55,8 +52,7 @@ impl Str where {
   to_kebab_case = { it } -> to_kebab_case { s = it },
   to_screaming_snake_case = { it } -> to_screaming_snake_case { s = it },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
+  # dot-chain parity: `x.op {}` for every receiver-taking free function not covered by an ability.
   concat = { it, r } -> concat { l = it, r = r },
 }
 
@@ -97,7 +93,6 @@ pub let contains: { s: Str, substring: Str } -> Bool = { s, substring } ->
   __native_string_contains { s = s, substring = substring }
 
 ## Repeat the string n times. `n <= 0` gives the empty string.
-#
 pub let repeat: { s: Str, n: Int } -> Str = { s, n } ->
   __native_string_repeat { s = s, n = n }
 

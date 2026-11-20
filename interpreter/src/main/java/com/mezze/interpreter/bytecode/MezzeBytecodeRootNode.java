@@ -550,18 +550,25 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
             return com.mezze.interpreter.nodes.builtin.collections.MapNatives.containsKey(m, k);
         }
 
-        /** BUG 73: `containsDirect` hashes and compares ARBITRARY elements (`Object.hashCode`,
-         *  `Objects.equals`); reached from partially-evaluated code, that let native-image's
-         *  runtime-compilation analysis follow every hashCode/equals in the image — ThreadLocal,
-         *  zipfs, DateFormatSymbols — into the Truffle blocklist, failing `:cli:nativeCompile` on
-         *  main and branch alike. The probe stays a direct Java call (no NativeDispatch record),
-         *  behind one boundary. */
+        // The direct probe is PE-inlined, so it must not call `hashCode`/`equals`
+        // on an unknown Object: native-image's runtime-compilation analysis then
+        // follows every override in the image, and the DAP tool's record types
+        // reach blocklisted reflection — 59 violations, all through this site,
+        // and no native `mez` at all. Int and Str keys (the hot ones) compare
+        // concretely; every other key type takes the boundary.
+        @Specialization(guards = "s.hasDirectProbe()")
+        public static boolean doSetLong(com.mezze.datastructures.set.MezzeSet<?> s, long x) {
+            return s.containsDirectLong(x);
+        }
+
+        @Specialization(guards = "s.hasDirectProbe()")
+        public static boolean doSetString(com.mezze.datastructures.set.MezzeSet<?> s, String x) {
+            return s.containsDirectString(x);
+        }
+
         @Specialization
         @TruffleBoundary
         public static boolean doSet(com.mezze.datastructures.set.MezzeSet<?> s, Object x) {
-            if (s.hasDirectProbe()) {
-                return s.containsDirect(x);
-            }
             return com.mezze.interpreter.nodes.builtin.collections.SetNatives.contains(s, x);
         }
     }
@@ -7506,6 +7513,14 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * chunks. Non-string expression values go through
      * {@link String#valueOf(Object)}.
      */
+    /** Text of a non-`Str` interpolated value. A suspended effect is never
+     *  text: it means an effect ran unhandled, see {@link com.mezze.interpreter.values.MezzeSuspend#observedAsValue}. */
+    @TruffleBoundary
+    private static String interpolationText(Object value) {
+        if (value instanceof com.mezze.interpreter.values.MezzeSuspend s) throw s.observedAsValue("string interpolation");
+        return String.valueOf(value);
+    }
+
     /**
      * {@link #buildInterpolatedString} for exactly one value, with no array to
      * read it out of. Same three routes and the same reasons; see there.
@@ -7529,7 +7544,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         for (String p : parts) if (p != null) estimate += p.length();
         StringBuilder sb = new StringBuilder(estimate);
         for (String p : parts) {
-            if (p == null) sb.append(String.valueOf(value));
+            if (p == null) sb.append(interpolationText(value));
             else sb.append(p);
         }
         return sb.toString();
@@ -7592,7 +7607,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         int exprIdx = 0;
         for (String p : parts) {
             if (p == null) {
-                sb.append(String.valueOf(exprValues[exprIdx++]));
+                sb.append(interpolationText(exprValues[exprIdx++]));
             } else {
                 sb.append(p);
             }

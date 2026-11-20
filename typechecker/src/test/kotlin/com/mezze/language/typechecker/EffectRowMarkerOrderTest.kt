@@ -71,7 +71,8 @@ class EffectRowMarkerOrderTest {
 
     /** THE case: the spelling the printer emits now parses. */
     @Test fun `an open tail followed by the handled marker parses`() {
-        assertNull(err("let go: {} -> Int <..., *> = {} -> perform Ticker in Tick.tick {}"))
+        // A bare tail needs a callback to carry from (T0210 otherwise), so `f` is one.
+        assertNull(err("let go: { f: {} -> Int <...> } -> Int <..., *> = { f } -> perform Ticker in f {} + Tick.tick {}"))
     }
 
     /** With a named effect in front of both. */

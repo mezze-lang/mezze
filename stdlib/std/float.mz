@@ -63,20 +63,12 @@ impl NumMod Nat for Float having 'out = Float where {
   mod = { it, r } -> it % from_nat { n = r }
 }
 
-## Structural hash, paired with the `Eq` below.
-## `Eq` and `Hash` are written together or not at all: a hash container
-## buckets by one and compares by the other, so a value whose hash
-## disagrees with its equality is silently kept twice.
+# `Eq` and `Hash` go together or not at all: a hash/equality mismatch silently keeps duplicates.
 
 
-## IEEE comparison, unchanged: every comparison involving NaN is False, in both
-## directions, so `NaN <= NaN` is False too. `float::is_nan` is the test.
-##
-## SORTING IS A SEPARATE RULE: `seq::sort` places NaN LAST, by a total order, so
-## that one NaN cannot reorder the values around it. These operators are not
-## that order and are not meant to be — a NaN check on every float comparison
-## would cost more than it is worth. The consequence to know about is that
-## `min`, `max` and `is_sorted` go through here, so they can answer NaN.
+# Not the total order `seq::sort` uses (NaN last): a NaN check per comparison costs too much.
+## IEEE comparison: any comparison involving NaN is False (even `NaN <= NaN`).
+## `min`, `max` and `is_sorted` use these, so they can answer NaN; `seq::sort` puts NaN last.
 impl Ord for Float where {
   lt = { it, r } -> __native_float_lt { l = it, r = r },
   le = { it, r } -> __native_float_le { l = it, r = r },

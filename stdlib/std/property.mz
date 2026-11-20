@@ -1,26 +1,9 @@
-## Property checks over generated inputs, with shrinking.
-##
-##     use std::property::{ check }
-##     use std::abilities::arbitrary::{ Arbitrary }
-##
-##     check { gen = { } -> Arbitrary.arbitrary {}, holds = { x } -> x * 2 >= x, runs = 100, seed = 7 }
-##
-## On the first input that fails, the input is SHRUNK to a simpler one that still
-## fails, so the report is a small counterexample rather than whatever a random
-## draw happened to produce.
-##
-## ## How shrinking works, and why it needs nothing per type
-##
-## Every generated value bottoms out in `Sample.choose`, and 0 is always the
-## simplest draw — the premise of the `Sample` effect. So a run IS its sequence of
-## draws, and a simpler input is a simpler sequence replayed: a shorter one, or one
-## with a draw zeroed, halved or decremented. Any change that still fails is kept.
-## That works for any type `Arbitrary` can generate, with no shrinker written for it.
-##
-## A replayed draw is clamped below its bound and is 0 past the end of the
-## sequence, and what was ANSWERED is what is kept — so a sequence is always
-## canonical, and each kept step is strictly simpler (shorter, or smaller in
-## order). Shrinking cannot cycle, and stops after a fixed number of steps anyway.
+## Property checks over generated inputs; a failing input is shrunk to a small counterexample.
+## e.g. `check { gen = { } -> Arbitrary.arbitrary {}, holds = { x } -> x * 2 >= x, runs = 100, seed = 7 }`
+
+# Shrinking needs nothing per type: a run IS its `Sample.choose` draws (0 = simplest), so a simpler
+# input is a simpler draw sequence replayed. Replays are clamped and canonical and each kept step is
+# strictly simpler, so shrinking cannot cycle (and is capped at [max_shrinks] anyway).
 
 use std::int
 use std::nat::{ Nat }
@@ -33,13 +16,8 @@ pub type Verdict 'a = | PropPassed { runs: Int }, PropFailed { input: 'a, origin
 ## The most simplifications a failure is given.
 pub let max_shrinks = 500
 
-## The size budget of a check's LAST run. Runs grow from 0 to this, as in
-## QuickCheck: early inputs are small and readable, and the later ones reach every
-## type's extremes — `int_max`, the hostile strings — which `Arbitrary` keeps for
-## sizes from `stress_size` up. Twice the stress size twice over, because a
-## container draws its elements at half its own size: an `Int` inside a list
-## reaches its extremes from run size 100, an `Int` inside a list of lists from 200. So a check still hunts overflows, just not on
-## every other run, and a sample (which stays at the default size) reads normally.
+# 4x `stress_size`: containers draw elements at half size, so nested Ints still reach extremes late.
+## The size of a check's LAST run; run sizes grow from 0 to this, so early inputs stay small.
 pub let max_check_size: Int = 200
 
 ## The size of run `i` of `runs`: evenly from 0 to [max_check_size].
@@ -89,15 +67,12 @@ impl Sample for ReplayAt { draws: [Int], key: Int, size: Nat } where {
   resize = { n, call } -> perform ReplayAt { draws = draws, key = key, size = n } in call {},
 }
 
-## Check that `holds` is true of `runs` inputs drawn by `gen`, the i-th from
-## `seed + i`. On the first that fails, shrink it.
+## Check `holds` on `runs` inputs drawn by `gen` (the i-th seeded `seed + i`); shrink the first failure.
 pub let check: { gen: {} -> 'a <Sample>, holds: { x: 'a } -> Bool, runs: Int, seed: Int } -> Verdict 'a <*> =
   { gen, holds, runs, seed } -> run_from { gen = gen, holds = holds, runs = runs, seed = seed, i = 0 }
 
-## [check], but first on each of `first`, in order: the values already known to
-## matter — one per branch of the code under test, say, as `mez sample` pins its
-## leading rows. A failure among them is reported as given, unshrunk: it was
-## chosen, not drawn, so there are no draws to simplify. A pass counts them.
+## [check], but first on each of `first`, in order (e.g. one value per branch under test).
+## A failure among `first` is reported unshrunk; a pass counts them in `runs`.
 pub let check_from: { first: ['a], gen: {} -> 'a <Sample>, holds: { x: 'a } -> Bool, runs: Int, seed: Int } -> Verdict 'a <*> =
   { first, gen, holds, runs, seed } -> first_then_draw { first = first, gen = gen, holds = holds, runs = runs, seed = seed, i = 0 }
 
@@ -118,9 +93,7 @@ let run_from: { gen: {} -> 'a <Sample>, holds: { x: 'a } -> Bool, runs: Int, see
       let size = size_of_run { i = i, runs = runs }
       let x = perform Recording { seed = seed + i, key = 0, size = size } in gen {}
       if holds { x = x } then run_from { gen = gen, holds = holds, runs = runs, seed = seed, i = i + 1 }
-      ## Shrinking replays at the SAME size: the size shapes how draws are read
-      ## (a length's range, a magnitude's width), so the draws only mean the
-      ## failing input under the size they were made at.
+      # Shrink at the SAME size: draws only mean the failing input under the size they were made at.
       else shrink { gen = gen, holds = holds, size = size, draws = __native_draw_log { key = 0 }, best = x, original = x, steps = 0 }
 
 ## Keep taking the first simpler sequence that still fails, until none does.
@@ -131,8 +104,8 @@ let shrink: { gen: {} -> 'a <Sample>, holds: { x: 'a } -> Bool, size: Nat, draws
       Some { val } -> shrink { gen = gen, holds = holds, size = size, draws = val.draws, best = val.x, original = original, steps = steps + 1 }
       None -> PropFailed { input = best, original = original, shrinks = steps }
 
-## The first candidate whose replay still fails AND is strictly simpler than
-## `current` — the second condition is what makes shrinking terminate.
+## The first candidate whose replay still fails AND is strictly simpler than `current`.
+## Requiring "strictly simpler" is what makes shrinking terminate.
 let simpler_failure: { gen: {} -> 'a <Sample>, holds: { x: 'a } -> Bool, size: Nat, current: [Int], candidates: [[Int]], i: Int } -> Option { draws: [Int], x: 'a } <*> =
   { gen, holds, size, current, candidates, i } ->
     match __native_seq_get { xs = candidates, i = i } is

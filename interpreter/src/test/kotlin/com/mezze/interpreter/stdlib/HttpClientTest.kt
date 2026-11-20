@@ -37,8 +37,7 @@ class HttpClientTest {
      * distinguishes the two, which is why these two tests want a socket.
      */
     private val slowServer = """
-        use std::effects::http::{ HttpClient, PooledHttpClientWith, SimpleHttpClientWith, Request, Response, default_http_config, request, format_error }
-        use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig }
+        use std::effects::http::{ Request, Response, request, format_error, HttpClient, PooledHttpClientWith, SimpleHttpClientWith, default_http_config, HttpServer, HelidonHttpServerWith, ServerConfig }
         use std::effects::time::{ Time, SystemTime }
         use std::datetime::{ duration_millis }
         use std::collections::map
@@ -51,7 +50,7 @@ class HttpClientTest {
  chunks = None,
 }
 
-        let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2, stream_bodies = False, helidon_logs = False }
+        let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2, stream_bodies = False, helidon_print_log = Off }
         let impatient = { ...default_http_config, timeout_ms = 60 }
     """.trimIndent()
 
@@ -62,7 +61,7 @@ class HttpClientTest {
     @Test
     fun `PooledHttpClient is a valid implementation`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, request}
+            use std::effects::http::{ Response, Method, request, HttpClient, MockHttpClient, MockRule, UrlPattern, mock_rules }
             use std::collections::map
             use std::collections::bytes
 
@@ -74,9 +73,9 @@ class HttpClientTest {
                 chunks = None,
               }
 
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [], url = Glob { pattern = "**" }, response = Ok { val = mock_response } }
-            ]
+            ] }
 
             perform MockHttpClient { rules = rules } in do
                 let resp = request { url = "http://test.com/api" }.send {}
@@ -129,14 +128,12 @@ class HttpClientTest {
      * than one that is not offered.
      */
     private val redirectServer = """
-        use std::effects::http::{ HttpClient, PooledHttpClientWith, Request, Response, default_http_config, request, format_error, Method }
-        use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig }
-        use std::effects::http_server::{ route, or_else, otherwise, path_of }
+        use std::effects::http::{ Request, Response, request, format_error, Method, HttpClient, PooledHttpClientWith, default_http_config, HttpServer, HelidonHttpServerWith, ServerConfig, route, or_else, otherwise, path_of }
         use std::collections::map
         use std::collections::bytes
         use std::int
 
-        let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2, stream_bodies = False, helidon_logs = False }
+        let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2, stream_bodies = False, helidon_print_log = Off }
 
         let text_of: { resp: Response } -> Str = { resp } -> match bytes::to_str { b = resp.body } is
           Ok { val } -> val
@@ -224,7 +221,7 @@ class HttpClientTest {
         // `{ ...default_http_config, verify_ssl = False }` evaluates to, which
         // is worth pinning because every custom config is written that way.
         val result = eval("""
-            use std::effects::http::{HttpClient, default_http_config}
+            use std::effects::http::{ HttpClient, default_http_config }
 
             let insecure_config = { ...default_http_config, verify_ssl = False }
             if insecure_config.verify_ssl then 1 else 0
@@ -235,7 +232,7 @@ class HttpClientTest {
     @Test
     fun `an HttpConfig spread turns follow_redirects off`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, default_http_config}
+            use std::effects::http::{ HttpClient, default_http_config }
 
             let no_redirect_config = { ...default_http_config, follow_redirects = False, max_redirects = 0 }
             if no_redirect_config.follow_redirects then 1 else 0
@@ -252,7 +249,7 @@ class HttpClientTest {
     @Test
     fun `SimpleHttpClient is a valid implementation`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, UrlPattern, Response, Method, Request, HttpConfig}
+            use std::effects::http::{ Response, Method, Request, HttpClient, MockHttpClient, MockRule, UrlPattern, HttpConfig, mock_rules }
             use std::collections::map
             use std::collections::bytes
 
@@ -264,9 +261,9 @@ class HttpClientTest {
                 chunks = None,
               }
 
-            let rules: [MockRule] = [
+            let rules = mock_rules { of = [
                 { methods = [Post], url = Glob { pattern = "/create" }, response = Ok { val = mock_response } }
-            ]
+            ] }
 
             perform MockHttpClient { rules = rules } in do
                 let req: Request = {
@@ -284,7 +281,8 @@ class HttpClientTest {
                     max_redirects = 10,
                     verify_ssl = True,
                     auto_decompress = True,
-                    keep_alive = True
+                    keep_alive = True,
+                    helidon_print_log = Off
                 }
                 let resp = HttpClient.request { req = req, config = config }
                 match resp is
@@ -327,7 +325,7 @@ class HttpClientTest {
     @Test
     fun `default_http_config has correct defaults`() {
         val result = eval("""
-            use std::effects::http::{default_http_config}
+            use std::effects::http::{ default_http_config }
 
             default_http_config.timeout_ms
         """)
@@ -337,7 +335,7 @@ class HttpClientTest {
     @Test
     fun `config spread preserves other fields`() {
         val result = eval("""
-            use std::effects::http::{default_http_config}
+            use std::effects::http::{ default_http_config }
 
             let custom = { ...default_http_config, timeout_ms = 5000 }
             if custom.verify_ssl then custom.timeout_ms else -1
@@ -348,7 +346,7 @@ class HttpClientTest {
     @Test
     fun `config can override multiple fields`() {
         val result = eval("""
-            use std::effects::http::{default_http_config}
+            use std::effects::http::{ default_http_config }
 
             let custom = {
                 ...default_http_config,
@@ -372,9 +370,9 @@ class HttpClientTest {
     @Test
     fun `MockHttpClient with empty rules returns error`() {
         val result = eval("""
-            use std::effects::http::{HttpClient, MockHttpClient, MockRule, request}
+            use std::effects::http::{ request, HttpClient, MockHttpClient, MockRule, mock_http_rules }
 
-            let rules: [MockRule] = []
+            let rules = mock_http_rules {}
 
             perform MockHttpClient { rules = rules } in do
                 let resp = request { url = "http://test.com/api" }.send {}

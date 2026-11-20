@@ -1,11 +1,11 @@
 ## Logical AND. Desugars the `&&` operator.
 ability LogicalAnd for 'a where {
-  ## Logical conjunction of it and r.
+  ## Logical conjunction.
   and: { it: 'a, r: 'a } -> 'a
 }
 
 ## Logical OR. Desugars the `||` operator.
 ability LogicalOr for 'a where {
-  ## Logical disjunction of it and r.
+  ## Logical disjunction.
   or: { it: 'a, r: 'a } -> 'a
 }

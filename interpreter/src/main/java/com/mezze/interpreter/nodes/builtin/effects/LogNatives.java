@@ -9,13 +9,10 @@ import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
  * Native implementations for Log effect operations.
  *
  * Operations:
- * - console_print: Raw output (no level prefix)
- * - console_println: Raw output with newline
- * - log_info: [INFO] prefix
- * - log_warn: [WARN] prefix
- * - log_error: [ERROR] prefix to stderr
- * - log_debug: [DEBUG] prefix
- * - log_trace: [TRACE] prefix
+ * - console_print / console_println: raw output to stdout (the `Console`
+ *   handler formats in-guest, then calls these).
+ * - jvm_log: emit a record into java.util.logging under a named logger (the
+ *   `JvmLogger` handler), so guest logs share the host's logging pipeline.
  */
 public final class LogNatives {
 
@@ -35,38 +32,26 @@ public final class LogNatives {
         return MezzeRecord.empty();
     }
 
+    /**
+     * Emit a record into the JVM logger (java.util.logging) under the given
+     * logger name, so the guest `Log` effect can share one pipeline with the
+     * host and JVM libraries (Helidon &c.) — governed by the host's own
+     * logging config (destination, rotation, format). Level names match the
+     * Helidon knob's vocabulary; an unknown name falls back to INFO.
+     */
     @TruffleBoundary
-    public static Object logInfo(MezzeRecord args) {
+    public static Object jvmLog(MezzeRecord args) {
+        String logger = getString(args, "logger");
+        String level = getString(args, "level");
         String msg = getString(args, "msg");
-        System.out.println("[INFO] " + msg);
-        return MezzeRecord.empty();
-    }
-
-    @TruffleBoundary
-    public static Object logWarn(MezzeRecord args) {
-        String msg = getString(args, "msg");
-        System.out.println("[WARN] " + msg);
-        return MezzeRecord.empty();
-    }
-
-    @TruffleBoundary
-    public static Object logError(MezzeRecord args) {
-        String msg = getString(args, "msg");
-        System.err.println("[ERROR] " + msg);
-        return MezzeRecord.empty();
-    }
-
-    @TruffleBoundary
-    public static Object logDebug(MezzeRecord args) {
-        String msg = getString(args, "msg");
-        System.out.println("[DEBUG] " + msg);
-        return MezzeRecord.empty();
-    }
-
-    @TruffleBoundary
-    public static Object logTrace(MezzeRecord args) {
-        String msg = getString(args, "msg");
-        System.out.println("[TRACE] " + msg);
+        java.util.logging.Level jul = switch (level) {
+            case "error" -> java.util.logging.Level.SEVERE;
+            case "warn"  -> java.util.logging.Level.WARNING;
+            case "debug" -> java.util.logging.Level.FINE;
+            case "trace" -> java.util.logging.Level.FINEST;
+            default      -> java.util.logging.Level.INFO;
+        };
+        java.util.logging.Logger.getLogger(logger).log(jul, msg);
         return MezzeRecord.empty();
     }
 

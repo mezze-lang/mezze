@@ -10,11 +10,7 @@ impl Default for Bytes where {
   default = {} -> empty {}
 }
 
-## Structural equality for byte sequences.
-## Structural hash, paired with the `Eq` below.
-## `Eq` and `Hash` are written together or not at all: a hash container
-## buckets by one and compares by the other, so a value whose hash
-## disagrees with its equality is silently kept twice.
+# `Eq` and `Hash` go together or not at all: a hash/equality mismatch silently keeps duplicates.
 
 
 ## Lexicographic ordering for byte sequences.
@@ -126,8 +122,7 @@ impl Bytes where {
   to_hex = { it } -> to_hex { b = it },
   to_base64 = { it } -> to_base64 { b = it },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
+  # dot-chain parity: every receiver-taking free function is also a method.
   repeat = { it, n } -> repeat { b = it, n = n },
   index_of = { it, pattern } -> index_of { b = it, pattern = pattern },
   starts_with = { it, prefix } -> starts_with { b = it, prefix = prefix },
@@ -135,14 +130,8 @@ impl Bytes where {
 }
 
 
-## Bytes joins the SEVEN other collections that can enter an `Iter` pipeline.
-## It was the odd one out: without this, `bytes` had to be spelled
-## `iter::from_seq { xs = bytes::to_seq { b = it } }` by hand, while every
-## other collection answers `.to_iter {}`.
-##
-## Routed through `to_seq` exactly as Set, SortedSet, Deque, Map and SortedMap
-## are — `iter::from_seq` is the fused source, so a pipeline from here gets the
-## same treatment as one from a sequence.
+# Routed through `to_seq` like Set/Map/Deque: `iter::from_seq` is the fused source.
+## Start an `Iter` pipeline over the bytes; each element is an Int (0-255).
 impl Iterable for Bytes having 'elem = Int where {
   to_iter = { it } -> iter::from_seq { xs = to_seq { b = it } }
 }

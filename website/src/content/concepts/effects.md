@@ -33,7 +33,7 @@ raises it again to its caller, until something handles it.
 
 <!--mezze-editor
 use std::effects::log::{ Console, println }
-use std::effects::http::{ MockHttpClient, mock_get, request }
+use std::effects::http::{ request, MockHttpClient, mock_get }
 
 # fetch reaches the network. Its arrow says so: <HttpClient>.
 let fetch = { url } -> request { url }.send {}.text_or { def = "offline" }
@@ -44,7 +44,7 @@ let outer = {} -> inner {}
 
 # perform handles the computation, and the arrow gains a *.
 let handled = {} ->
-  perform MockHttpClient { rules = [mock_get { body = "sunny", url = "*" }] } in inner {}
+  perform MockHttpClient { rules = mock_get { body = "sunny", url = "*" } } in inner {}
 
 let main = {} -> perform Console in println { msg = handled {} }
 -->
@@ -65,7 +65,7 @@ A bare value does nothing, so handing one to `perform` is a compile error:
 
 <!--mezze-code
 let page = fetch { url = "https://example.com" }
-perform MockHttpClient { rules = [] } in page      # V0510
+perform MockHttpClient { rules = mock_http_rules {} } in page      # V0510
 -->
 
 By the time `page` exists the request has already happened and the effect has
@@ -101,7 +101,7 @@ and the star appears the moment anything has been handled at all.
 
 <!--mezze-editor
 use std::effects::log::{ Console, println }
-use std::effects::http::{ MockHttpClient, mock_get, request }
+use std::effects::http::{ request, MockHttpClient, mock_get }
 use std::effects::filesystem::{ MemoryFileSystem, write_text }
 use std::effects::time::{ SystemTime, now }
 
@@ -115,7 +115,7 @@ let snapshot = { url } -> do
 
 let all_three = { url } ->
   # <*>                        nothing outstanding: every effect is handled
-  perform MockHttpClient { rules = [mock_get { body = "sunny", url = "*" }] } in
+  perform MockHttpClient { rules = mock_get { body = "sunny", url = "*" } } in
     # <Http, *>                Time and FileSystem settled, Http still to go
     perform SystemTime in
       # <Http, Time, *>        only FileSystem settled so far
@@ -154,7 +154,7 @@ then writes what it got carries both:
 
 <!--mezze-editor
 use std::effects::log::{ Console, println }
-use std::effects::http::{ MockHttpClient, mock_get, request }
+use std::effects::http::{ request, MockHttpClient, mock_get }
 use std::effects::filesystem::{ MemoryFileSystem, write_text, read_text_or }
 
 # Two effects on one arrow: it fetches, then writes what it got.
@@ -164,7 +164,7 @@ let cache = { url, path } -> do
   body
 
 let main = {} -> perform Console, MemoryFileSystem in
-  perform MockHttpClient { rules = [mock_get { body = "sunny", url = "*" }] } in do
+  perform MockHttpClient { rules = mock_get { body = "sunny", url = "*" } } in do
     cache { url = "https://x.dev/weather", path = "weather.txt" }
     println { msg = read_text_or { path = "weather.txt", def = "nothing" } }
 -->
@@ -231,7 +231,7 @@ function stays usable with both pure and effectful callbacks.
 
 <!--mezze-editor
 use std::effects::log::{ Console, println }
-use std::effects::http::{ MockHttpClient, mock_get, request }
+use std::effects::http::{ request, MockHttpClient, mock_get }
 
 # apply performs nothing itself. Its row is whatever f's row is.
 pub let apply: { x: Int, f: { v: Int } -> Int <...> } -> Int <...> = { x, f } -> f { v = x }
@@ -249,7 +249,7 @@ let fetched = {} -> apply { x = 2, f = { v } -> do
 
 let main = {} -> perform Console in do
   println { msg = doubled {}.to_str {} }
-  println { msg = perform MockHttpClient { rules = [mock_get { body = "b", url = "*" }] } in
+  println { msg = perform MockHttpClient { rules = mock_get { body = "b", url = "*" } } in
     fetched {}.to_str {} }
 -->
 

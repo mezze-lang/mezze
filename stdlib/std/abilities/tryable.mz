@@ -1,25 +1,9 @@
 use std::effects::exception::{ Exception }
 
-## Ability for types that can be unwrapped-or-short-circuited via `.try {}`.
-##
-## Implementing `Tryable` lets a value be unwrapped by calling `it.try {}`
-## inside a `perform ExceptionToResult` scope: `try` extracts the success
-## value, or throws via `Exception.throw` on failure. The enclosing
-## `ExceptionToResult` handler folds that throw back into an `Err`, so a
-## sequence of `.try {}` calls reads top-to-bottom and short-circuits on the
-## first failure.
-##
-## Standard impls live in `std::result` (for `Result 'a 'e`, throws the raw
-## error) and `std::option` (for `Option 'a`, throws a synthetic `NoneOpt`
-## variant). Custom failure types can implement `Tryable` to participate.
+## Types `.try {}` can unwrap, short-circuiting on failure via `Exception.throw`.
+## Use inside `perform ExceptionToResult`, which turns the throw into an `Err`.
 #{ missing: "`.try {}` unwraps `Option`, `Result`, or any type with an `impl Tryable`." }
 ability Tryable for 'm having 'inner where {
-  ## Extract the success value, throwing on failure.
-  ##
-  ## On success (`Ok {val}`, `Some {val}`, etc.), return the inner value.
-  ## On failure, call `Exception.throw` with whatever value the surrounding
-  ## `ExceptionToResult` handler should turn into `Err`. The receiver's
-  ## evaluation can have any effect; those effects flow into the surrounding
-  ## expression's effect row independently of `try`'s `<Exception>`.
+  ## Return the success value, or `Exception.throw` the failure.
   try: { it: 'm } -> 'inner <Exception>
 }

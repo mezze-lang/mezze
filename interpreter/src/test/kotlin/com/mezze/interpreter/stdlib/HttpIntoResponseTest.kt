@@ -19,13 +19,9 @@ import kotlin.test.assertTrue
 class HttpIntoResponseTest {
 
     private val head = """
-        use std::effects::http::{ Request, Response, created, no_content, not_found, bad_request, server_error, redirect, redirect_with, response_ok_text, response_json, response_stream, Method }
-        use std::effects::http::{ HttpError, IntoResponse, IntoErrorResponse, or_throw }
+        use std::effects::http::{ Request, Response, created, no_content, not_found, bad_request, server_error, redirect, redirect_with, response_ok_text, response_json, response_stream, Method, HttpError, IntoResponse, IntoErrorResponse, or_throw, get_request, on_get, on_post, on_put, on_delete, router, catching, Matched, Routes, routes, otherwise, or_else }
         use std::effects::exception::{ ExceptionToResult, unwrap, throw }
-        use std::effects::http::{ HttpError, IntoResponse, IntoErrorResponse }
         use std::effects::exception::{ ExceptionToResult, unwrap }
-        use std::effects::http_server::{ get_request }
-        use std::effects::http_server::{ on_get, on_post, on_put, on_delete, router, catching, Matched, Routes, routes, otherwise, or_else }
         use std::codec::json::{ Json }
         use std::collections::map
         use std::collections::bytes
@@ -1241,7 +1237,7 @@ class HttpIntoResponseTest {
         // the `router {}.get {}.otherwise {}` builder (`router`, not `group`).
         val r = run(
             """
-            use std::effects::http_server::{ incoming }
+            use std::effects::http::{ incoming }
             let app = router { path = "" }
               .get { path = "/made", handler = { m } -> { status = 201, body = "made" } }
               .get { path = "/hi",   handler = { m } -> "hello" }

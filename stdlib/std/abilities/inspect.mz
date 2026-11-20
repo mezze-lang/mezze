@@ -1,5 +1,5 @@
-## Debug string representation. Auto-derived by the compiler for all types.
-## Used for string interpolation: "value is $(x)" calls x.to_dbg {}.
+## Debug string representation; auto-derived for all types.
+## String interpolation `"$(x)"` calls `x.to_dbg {}`.
 ability Inspect for 'a where {
   ## Convert to a human-readable debug string.
   to_dbg: { it: 'a } -> Str

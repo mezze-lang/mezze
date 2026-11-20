@@ -14,9 +14,7 @@ import kotlin.test.assertEquals
 class HttpRouterChainTest {
 
     private val head = """
-        use std::effects::http::{ Request, Response, Method }
-        use std::effects::http_server::{ HttpServer, MockHttpServer, incoming, get_request }
-        use std::effects::http_server::{ route, Matched, Routes }
+        use std::effects::http::{ Request, Response, Method, HttpServer, MockHttpServer, incoming, get_request, route, Matched, Routes }
         use std::collections::map
         use std::collections::bytes
         use std::int

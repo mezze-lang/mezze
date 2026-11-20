@@ -109,8 +109,8 @@ object NativeBuildPath {
         }
         val outBinary = File(outputDir, outputName)
         outputDir.mkdirs()
-        val closure = finalizeClosure(loweredFunctions, performerRecords, codebase)
-        val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryHash, entryName, performerRecords)
+        val embedded = finalizeClosure(loweredFunctions, performerRecords, codebase)
+        val (fnBytes, metaBytes) = packEmbeddedAppCbor(embedded.functions, appName, entryHash, entryName, embedded.performerRecords)
         shell.copyTo(outBinary, overwrite = true)
         outBinary.setExecutable(true, false)
         appendCborTrailer(outBinary, fnBytes, metaBytes)
@@ -234,9 +234,10 @@ object NativeBuildPath {
         // (content-addressed, deterministic) for the native-image cache key.
         // Hashing the jar bytes directly is non-determ because JarEntry stamps
         // with current time.
-        val closure = finalizeClosure(loweredFunctions, performerRecords, codebase)
-        if (timing) System.err.println("[${relativeTime()}ms] native: closure computed (${closure.size} fns)")
-        val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryHash, entryName, performerRecords)
+        val embedded = finalizeClosure(loweredFunctions, performerRecords, codebase)
+        val closure = embedded.functions
+        if (timing) System.err.println("[${relativeTime()}ms] native: closure computed (${closure.size} fns, ${embedded.performerRecords.size} performers)")
+        val (fnBytes, metaBytes) = packEmbeddedAppCbor(closure, appName, entryHash, entryName, embedded.performerRecords)
 
         // Native-image cache: hash everything that determines the produced
         // binary; on cache hit, copy the prior binary and skip the 70s
@@ -621,17 +622,72 @@ object NativeBuildPath {
          * about it. Null only where there is no project store to answer from.
          */
         codebase: com.mezze.language.comptime.CodebaseHost?,
-    ): List<FunctionIR> {
-        val rawClosure = computeReachableClosure(loweredFunctions)
+    ): EmbeddedClosure {
+        val (stdlibPerformers, opFunctions) = stdlibPerformersPerformedBy(loweredFunctions, performerRecords)
+        val allPerformers = performerRecords + stdlibPerformers
+        val rawClosure = computeReachableClosure(loweredFunctions + opFunctions)
         val folded = try {
-            ComptimeHost.reduce(rawClosure, performerRecords, codebase)
+            ComptimeHost.reduce(rawClosure, allPerformers, codebase)
         } catch (e: com.mezze.language.comptime.ComptimeReduction.ComptimeFailure) {
             println(e.message)
             kotlin.system.exitProcess(4)
         }
         val closureMap = folded.associateBy { it.hash }
         val canonicalized = com.mezze.language.truffleir.ChainCanonicalizer.canonicalize(closureMap)
-        return folded.map { canonicalized[it.hash] ?: it }
+        return EmbeddedClosure(folded.map { canonicalized[it.hash] ?: it }, allPerformers)
+    }
+
+    /** What an embedded app carries: its reachable functions, and every performer record the runtime must register. */
+    data class EmbeddedClosure(val functions: List<FunctionIR>, val performerRecords: List<Array<String>>)
+
+    /**
+     * The stdlib performers [seed] installs (`perform P in …`), as the snapshot
+     * holds them: the record the runtime registers, and the op functions it
+     * inflates the record from.
+     *
+     * A native binary carries no stdlib snapshot (see the resource strip list
+     * below), so an app must embed every performer it performs. Before the
+     * whole-stdlib snapshot, a module the prelude did not reach — `std::effects::log`,
+     * so `Console` — was compiled INTO each app and came along by accident; with
+     * every module precompiled, the emitter rightly skips them all and nothing
+     * carried them. These are the snapshot's own records, lowered once by their
+     * owner module: re-lowering them in the app's compile is exactly the
+     * context-sensitive-lowering trap that snapshot closed.
+     *
+     * Iterated to a fixpoint, because an op body may itself perform another
+     * stdlib performer. A performer the app declares itself is left alone.
+     */
+    private fun stdlibPerformersPerformedBy(
+        seed: List<FunctionIR>,
+        own: List<Array<String>>,
+    ): Pair<List<Array<String>>, List<FunctionIR>> {
+        val stdlibFns = com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions
+        val candidates = com.mezze.language.typechecker.PrecompiledStdlib.preloweredPerformerRecords
+        val taken = own.mapTo(HashSet()) { it[0] }
+        val records = ArrayList<Array<String>>()
+        val opFunctions = ArrayList<FunctionIR>()
+        var frontier = seed
+        while (frontier.isNotEmpty()) {
+            val referenced = com.mezze.language.stdlib.FunctionIRReachability.collectReferencedHashes(frontier)
+            val found = candidates.filter { rec ->
+                rec[0] !in taken && com.mezze.language.typedast.Hash(rec[0]) in referenced
+            }
+            if (found.isEmpty()) break
+            val newOps = ArrayList<FunctionIR>()
+            for (rec in found) {
+                taken.add(rec[0])
+                records.add(rec)
+                // [performerHash, effectHash, opHash0, opName0, opHash1, opName1, …]
+                var i = 2
+                while (i + 1 < rec.size) {
+                    stdlibFns[com.mezze.language.typedast.Hash(rec[i])]?.let { newOps.add(it) }
+                    i += 2
+                }
+            }
+            opFunctions.addAll(newOps)
+            frontier = newOps
+        }
+        return records to opFunctions
     }
 
     fun computeReachableClosure(

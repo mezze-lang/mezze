@@ -18,15 +18,8 @@ use std::collections::nonemptylist
 use std::collections::bytes
 use std::str
 
-## A type that can be generated. Says HOW a value is assembled — structure — so
-## the compiler derives it for records and non-recursive variants like `Eq`; a
-## derived impl performs only `<Sample>`, leaving the sampler to decide seeded
-## vs live entropy. Containers are written (below) and newtypes must opt in,
-## since generation has a domain question the representation cannot answer
-## (`newtype Email = Str` does not want arbitrary strings).
-##
-## Dispatch is on the RETURN type: `arbitrary {}` takes no arguments, so the
-## call site's expected type selects the impl and must be pinned.
+## A type that can be generated; derived for records and non-recursive variants, opt-in for newtypes.
+## Dispatch is on the return type, so the call site's expected type must be pinned.
 ability Arbitrary for 'a where {
   arbitrary: {} -> 'a <Sample>
 }
@@ -36,37 +29,33 @@ pub let arbitrary: {} with Arbitrary 'a -> 'a <Sample> = {} -> Arbitrary.arbitra
 
 ## The size from which draws include each type's extremes.
 pub let stress_size: Int = 50
-## How often a draw comes from a type's special table, at and above [stress_size]…
+## How often a draw comes from a type's special table, at and above `stress_size`.
 pub let stress_percent: Int = 50
-## …and below it, where the table holds only the readable specials.
+## How often a draw comes from the readable specials below `stress_size`.
 pub let everyday_percent: Int = 25
 
-## The Int range bounds (`int_min`'s literal is `0 - max - 1`, since the lexer
-## has no literal one past the largest positive).
+# `int_min`'s literal is `0 - max - 1`, since the lexer has no literal one past
+# the largest positive.
+## The Int range bounds.
 pub let int_max: Int = 9223372036854775807
 pub let int_min: Int = 0 - 9223372036854775807 - 1
 
 let current_size: {} -> Int <Sample> = {} -> int::from_nat { n = Sample.size {} }
 let at_stress: {} -> Bool <Sample> = {} -> current_size {} >= stress_size
 
-## The table when the draw is HIGH: draw 0 takes the wide random branch, so all-zero
-## draws give 0 and a failure found among random values shrinks along its magnitude
-## (std::property). Shrinking only lowers draws, so it cannot cross from the table
-## into the random branch — a failure first met in the table shrinks to the
-## simplest table value that fails.
+## Whether this draw takes the special table; draw 0 takes the random branch so zeros give 0.
 let take_interesting: {} -> Bool <Sample> = {} -> do
   let percent = if at_stress {} then stress_percent else everyday_percent
   choose { bound = 100 } >= 100 - percent
 
-## The widest magnitude, in bits, the current size allows: three per size step —
-## 15 bits (under 33 000) at the default size of 5 — and all 63 from [stress_size].
+## The widest magnitude in bits the current size allows: three per size step, all 63 from `stress_size`.
 let magnitude_bits: {} -> Int <Sample> = {} -> do
   let s = current_size {}
   if s >= stress_size then 63 else int::min { l = 3 * s, r = 62 }
 
+# `choose` draws `[0, bound)` and a 64-bit bound does not fit, so the widest
+# case draws below `int_max` (which is in the stress table).
 ## A non-negative magnitude whose WIDTH is drawn uniformly up to `max_bits`.
-## `choose` draws `[0, bound)` and a full 64-bit bound does not fit, so the widest
-## case draws below `int_max` — whose own value is in the stress table.
 let draw_magnitude: { max_bits: Int } -> Int <Sample> = { max_bits } -> do
   let bits = choose { bound = max_bits + 1 }
   if bits >= 63 then choose { bound = int_max }
@@ -77,9 +66,8 @@ let draw_magnitude: { max_bits: Int } -> Int <Sample> = { max_bits } -> do
 let negate_sometimes: { n: Int } -> Int <Sample> = { n } ->
   if choose { bound = 2 } == 0 then n else 0 - n
 
-## One-character strings for [random_str]. Strings rather than `Char`s because
-## Mezze has no character literal (see `arbitrary_char_from`), and a string is what
-## is being built anyway.
+# Strings, not `Char`s, because Mezze has no character literal.
+## One-character strings for `random_str`.
 let str_readable: [Str] = str::split { s = "a b c d e f g h i j k l m n o p q r s t u v w x y z A B C D E F G H I J K L M N O P Q R S T U V W X Y Z 0 1 2 3 4 5 6 7 8 9", delimiter = " " }
 let str_awkward: [Str] = [" ", "\t", "\n", "\"", "'", "\\", "/", ".", ",", ";", ":", "-", "_", "=", "+", "(", ")", "[", "]", "{", "}", "<", ">", "!", "?", "@", "#", "%", "&", "*", "|", "~", "é", "ü", "ñ", "ß", "Ω", "中", "→"]
 
@@ -90,31 +78,20 @@ let random_str: {} -> Str <Sample> = {} -> do
     if choose { bound = 100 } < 85 then one_of { xs = str_readable, def = "a" } else one_of { xs = str_awkward, def = " " } }
   str::join { strings = pieces, separator = "" }
 
+# The compiler writes the `Int` instance (as for `impl Eq for Int`) and forwards
+# here, since only the stdlib knows which values are interesting. Module-local:
+# the generated impl lands in this module.
 ## The DRAW for an `Int`, with no `impl` around it.
-##
-## The instance is written by the compiler, exactly as `impl Eq for Int` is — a
-## builtin type does not get a hand-written impl in a stdlib file. What the compiler
-## cannot supply is which values are interesting, so that stays here, and the
-## generated impl forwards to this. `impl Eq for Int`'s generated body forwards to
-## `__native_int_eq` for the same reason: the instance is the compiler's, the
-## behaviour is not.
-##
-## Module-local rather than `pub`: the generated impl lands in THIS module, so it
-## needs no export, and `arbitrary {}` is the public way to reach it.
 let arbitrary_int: {} -> Int <Sample> = {} ->
   if take_interesting {}
-    ## Zero first: draw 0 must give the SIMPLEST value, because shrinking a failure
-    ## (std::property) works by pushing draws toward 0. Order is free — `one_of`
-    ## is uniform — so the simplest value goes where the simplest draw lands.
+    # Zero first: draw 0 must give the simplest value, since shrinking pushes draws toward 0.
     then if at_stress {}
       then one_of { xs = [0, 1, 0 - 1, int_min, int_max], def = 0 }
       else one_of { xs = [0, 1, 0 - 1], def = 0 }
-    ## Magnitude-plus-sign reaches ±(2^63 - 2) at full width; the two values it
-    ## cannot produce, `int_min` and `int_max`, are in the stress table.
+    # Magnitude-plus-sign misses only `int_min`/`int_max`, which are in the stress table.
     else negate_sometimes { n = draw_magnitude { max_bits = magnitude_bits {} } }
 
-## A float as `mantissa * 2^exponent` with the exponent over [-60, 60], so the
-## draw spans magnitudes (1e-18 … 1e18), not just a mid-range band. Scaled by size.
+## A float as `mantissa * 2^exponent`, exponent over [-60, 60], scaled by size.
 let arbitrary_float: {} -> Float <Sample> = {} ->
   if take_interesting {}
     then one_of { xs = [0.0, 1.0, 0.0 - 1.0, 0.5, 0.0 - 0.5], def = 0.0 }
@@ -128,9 +105,7 @@ let arbitrary_float: {} -> Float <Sample> = {} ->
 
 let arbitrary_bool: {} -> Bool <Sample> = {} -> choose { bound = 2 } == 1
 
-## `Bytes`: up to `size` of them, each a full 0..255 draw. From [stress_size] the
-## edge bytes — 0, 255 and the sign boundary 127/128 — are drawn on purpose, the
-## same way `int_max` is.
+## `Bytes`: up to `size` full 0..255 draws; from `stress_size`, edge bytes 0/127/128/255 on purpose.
 let arbitrary_bytes: {} -> Bytes <Sample> = {} -> do
   let n = choose { bound = current_size {} + 1 }
   let one = {} ->
@@ -139,22 +114,18 @@ let arbitrary_bytes: {} -> Bytes <Sample> = {} -> do
     else choose { bound = 256 }
   bytes::from_seq { arr = seq::map { xs = seq::range { start = 0, end = n }, f = { x } -> one {} } }
 
-## A rational leaning on the fractions a float cannot hold (thirds, sixths,
-## sevenths) plus the canonical bounds; the random half draws numerator and a
-## non-zero denominator separately, magnitudes near a million to avoid overflow
-## in reduction.
+## A rational favouring fractions a float cannot hold (thirds, sevenths) plus the bounds.
 let arbitrary_frac: {} -> Frac <Sample> = {} ->
   if take_interesting {}
     then one_of { xs = [0//1, 1//1, -1//1, 1//2, -1//2, 1//3, 2//3, 1//6, 22//7], def = 0//1 }
-    ## Sized like `Int`, capped at a million over a thousand at every size.
+    # Sized like `Int`, capped at a million over a thousand at every size.
     else frac::make {
       numerator = negate_sometimes { n = draw_magnitude { max_bits = int::min { l = magnitude_bits {}, r = 20 } } },
       denominator = draw_magnitude { max_bits = int::min { l = magnitude_bits {}, r = 10 } } + 1,
     }
 
-## A Char drawn from the given `letters`/`awkward` alphabets, 85/15 at
-## [stress_size]. The alphabets are passed in because Mezze has no character
-## literal, so the compiler supplies them for the derived impl.
+# The alphabets are passed in because Mezze has no character literal.
+## A Char drawn from the `letters`/`awkward` alphabets, 85/15 at `stress_size`.
 let arbitrary_char_from: { letters: [Char], awkward: [Char], def: Char } -> Char <Sample> =
   { letters, awkward, def } ->
     if at_stress {}
@@ -167,9 +138,7 @@ let arbitrary_char_from: { letters: [Char], awkward: [Char], def: Char } -> Char
       }
       else one_of { xs = letters, def = def }
 
-## A string: readable words and the empty string most of the time, hostile
-## values (quote, newline, non-ASCII, padding) ~15% of the time. Below
-## [stress_size] only the readable part; the hostile set comes in at stress.
+## A string: mostly readable and empty values; ~15% hostile (quote, newline, non-ASCII) at stress.
 let arbitrary_str: {} -> Str <Sample> = {} ->
   if at_stress {} then hostile_str {}
   else frequency {
@@ -184,38 +153,25 @@ let arbitrary_str: {} -> Str <Sample> = {} ->
 let hostile_str: {} -> Str <Sample> = {} -> frequency {
   # `""` first: draw 0 must give the simplest value, since shrinking pushes toward 0
   choices = [
-    ## The boundaries. Cheap to produce, and the ones most code forgets.
+    # The boundaries. Cheap to produce, and the ones most code forgets.
     { weight = 15, gen = {} -> one_of { xs = ["", " ", "a"], def = "" } },
-    ## Short and alphabetic.
+    # Short and alphabetic.
     { weight = 25, gen = {} ->
       one_of { xs = ["alpha", "beta", "gamma", "mezze", "sample", "hello", "world"], def = "" } },
-    ## The hand-picked hostile set.
+    # The hand-picked hostile set.
     { weight = 15, gen = {} ->
       one_of { xs = ["\"", "\n", "\t", "ünïcödé", "  padded  ", "a,b;c"], def = "" } },
-    ## LONG and RANDOM: a table alone never produces either, so the longest string
-    ## a check could see was ten characters and every value was one somebody
-    ## typed. Length up to the size, mostly readable characters with the awkward
-    ## ones mixed IN — a quote in the middle of a word, not only on its own.
+    # Long and random, with awkward characters mixed in: a table alone never produces either.
     { weight = 45, gen = {} -> random_str {} },
   ],
   def = "",
 }
 
-# Containers: written, not derived — a container's identity is a reserved name,
-# so there is no structure to walk. Each draws a sequence sized by the budget
-# (so nesting terminates) and converts it, with the element's own Arbitrary.
+# Containers: hand-written, not derived; each draws a budget-sized sequence and converts it.
 
-## The DRAW for a sequence, named for the same reason the primitive draws above
-## are: the behaviour gets a name of its own and the impl is a thin forward to it.
-##
-## It is also the one shape in the stdlib that exercises S-17 — a CONSTRAINED op
-## forwarding to a CONSTRAINED function, where the callee's dictionary has to be
-## threaded across the hop. That is worth keeping deliberately, because the bug is
-## not reachable from a user module: it needs the stdlib's per-module lowering,
-## where each module gets a fresh compiler and `putIfAbsent` keeps whichever
-## finished first. A user-level repro with its own ability and explicit impls was
-## written and PASSES either way, so inlining this body again would retire the only
-## coverage the fix has. See the task for the measurement.
+# Kept as a named function on purpose: the only coverage of S-17 (a constrained op
+# forwarding to a constrained function across stdlib per-module lowering).
+## The DRAW for a sequence.
 let arbitrary_seq: {} with Arbitrary 'a -> ['a] <Sample> = {} ->
   list_of { g = {} -> Arbitrary.arbitrary {} }
 
@@ -233,10 +189,7 @@ impl Arbitrary for Deque 'a where {
     deque::from_seq { xs = list_of { g = {} -> Arbitrary.arbitrary {} } }
 }
 
-## A drawn sequence may repeat, so the set is usually SHORTER than the draw. That
-## is the correct behaviour rather than a flaw: a `Set` of a two-valued type can
-## only have three inhabitants, and a generator that insisted on a requested length
-## could not produce them.
+## Drawn duplicates collapse, so the set is usually shorter than the draw.
 impl Arbitrary for Set 'a where {
   arbitrary: {} with Arbitrary 'a, Eq 'a, Hash 'a -> Set 'a <Sample> = {} ->
     set::from_seq { xs = list_of { g = {} -> Arbitrary.arbitrary {} } }
@@ -247,8 +200,7 @@ impl Arbitrary for SortedSet 'a where {
     sorted_set::from_seq { xs = list_of { g = {} -> Arbitrary.arbitrary {} } }
 }
 
-# maps fold `insert` over the drawn pairs (no intermediate list); keys
-# deduplicate, so a drawn map is usually smaller than the draw, as with Set
+# Maps fold `insert` over drawn pairs; keys dedupe, so maps are usually smaller than the draw.
 impl Arbitrary for Map 'k 'v where {
   arbitrary: {} with Arbitrary 'k, Arbitrary 'v, Eq 'k, Hash 'k -> Map 'k 'v <Sample> = {} ->
     seq::fold {
@@ -267,11 +219,7 @@ impl Arbitrary for SortedMap 'k 'v where {
     }
 }
 
-## The one container whose emptiness is a TYPE error rather than a value, so it
-## cannot be built from a drawn sequence alone — `from_seq` returns an `Option` and
-## unwrapping it would need an answer for a case the type forbids. Built instead
-## from a guaranteed element, with the drawn sequence consed on top: total by
-## construction, no option to discharge.
+## Built from a guaranteed element plus a drawn sequence, so it is total by construction.
 impl Arbitrary for NonEmptyList 'a where {
   arbitrary: {} with Arbitrary 'a -> NonEmptyList 'a <Sample> = {} ->
     seq::fold {
@@ -281,17 +229,9 @@ impl Arbitrary for NonEmptyList 'a where {
     }
 }
 
-## `Option` and `Result` need no impl here — the compiler derives their instance
-## where used, as for any declared variant, so both constructors are drawn with
-## the deriver's weighting.
+# `Option` and `Result` need no impl: the compiler derives their instance where used.
 
-## `Nat` is a newtype over `Int`, so it does not derive — the stdlib opts it in,
-## exactly as it does for `Embeddable`.
-##
-## A `Nat` cannot go below zero, so its interesting values are the low boundary and
-## a spread upward: there are no negatives to mirror. `nat::from_int` is partial and
-## its `None` arm is unreachable here because the range starts at zero, so the
-## fallback is `0n` rather than a branch that cannot happen.
+## `Nat` is a newtype, so the stdlib opts it in; draws are non-negative only.
 impl Arbitrary for Nat where {
   arbitrary = {} ->
     if take_interesting {}
@@ -300,10 +240,7 @@ impl Arbitrary for Nat where {
           Some { val } -> one_of { xs = [0n, 1n, val], def = 0n }
           None -> 0n
         else one_of { xs = [0n, 1n], def = 0n }
-      ## Matched rather than `get_or`'d so this module does not depend on
-      ## `std::option` — see the note in `sample.mz`'s `one_of`. The `None` arm is
-      ## unreachable because the draw starts at zero, which is why it answers `0n`
-      ## rather than branching on something that cannot happen.
+      # Matched rather than `get_or`'d to avoid depending on `std::option`; `None` is unreachable.
       else match nat::from_int { n = draw_magnitude { max_bits = magnitude_bits {} } } is
         Some { val } -> val
         None -> 0n

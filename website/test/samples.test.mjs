@@ -94,9 +94,19 @@ describe('site samples', () => {
       )
     })
 
+    // A sample on our own pages must RUN on our own pages. The browser denies
+    // host natives (sockets, real files, threads) with "Not supported in the
+    // browser", which is not an ERROR line — so this used to pass, and a mocked
+    // HTTP sample shipped that only printed the denial. A sample that genuinely
+    // needs the host opts out with `# browser-unsupported` on its first line.
+    const hostOnly = /^#\s*browser-unsupported\b/.test(src.split('\n')[0] ?? '')
     test(`${name} runs and prints something`, async () => {
       const out = String(globalThis.runMezze(src) ?? '')
       assert.ok(!/^ERROR:/m.test(out), `${name} failed at runtime:\n${out}`)
+      if (!hostOnly) {
+        assert.ok(!out.includes('Not supported in the browser'),
+          `${name} runs on the page but the browser refuses it:\n${out}`)
+      }
       assert.ok(out.trim().length > 0, `${name} produced no output`)
     })
   }

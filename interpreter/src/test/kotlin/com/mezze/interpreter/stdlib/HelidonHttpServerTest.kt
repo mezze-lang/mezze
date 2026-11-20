@@ -20,9 +20,7 @@ import kotlin.test.assertTrue
 class HelidonHttpServerTest {
 
     private val head = """
-        use std::effects::http::{ Request, Response, Method, HttpClient, SimpleHttpClient, request, format_error, with_text, with_method, body_str }
-        use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig }
-        use std::effects::http_server::{ route, or_else, otherwise, Matched }
+        use std::effects::http::{ Request, Response, Method, request, format_error, with_text, with_method, body_str, HttpClient, SimpleHttpClient, HttpServer, HelidonHttpServerWith, ServerConfig, route, or_else, otherwise, Matched }
         use std::collections::map
         use std::collections::bytes
         use std::int
@@ -41,7 +39,7 @@ class HelidonHttpServerTest {
             Ok { val = s } -> s
             Err { error = _ } -> "could not decode"
           None -> "<empty>"
-        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_logs = False }
+        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_print_log = Off }
         # serve expecting success (these tests bind port 0, which never clashes):
         # unwrap the Result, or hand back a port=-1 handle so a stray failure
         # fails the test loudly rather than silently.
@@ -97,7 +95,7 @@ class HelidonHttpServerTest {
             """
             $head
             $fetch
-            use std::effects::http_server::{ router }
+            use std::effects::http::{ router }
             let app = router { path = "" }
               .get { path = "/ok", handler = { m } -> "ok" }
               .otherwise { fallback = { req } -> { status = 404, body = "nope-bare" } }
@@ -156,7 +154,7 @@ class HelidonHttpServerTest {
             """
             $head
             $fetch
-            let one_at_a_time: ServerConfig = { port = 0, host = "127.0.0.1", workers = 1, stream_bodies = False, helidon_logs = False }
+            let one_at_a_time: ServerConfig = { port = 0, host = "127.0.0.1", workers = 1, stream_bodies = False, helidon_print_log = Off }
             let app = otherwise {
               routes = route { method = Get, path = "/users/:id",
                 handler = { m } -> reply { code = 200, text = m.param_or { name = "id", default = "?" }, url = m.req.url } },
@@ -356,8 +354,7 @@ class HelidonHttpServerTest {
         val r = MezzeTestHelper.run(
             """
             $head
-            use std::effects::http::{ with_query, ToQuery }
-            use std::effects::http_server::{ BadInput }
+            use std::effects::http::{ with_query, ToQuery, BadInput }
             let app = otherwise {
               routes = route { method = Get, path = "/search", handler = { m } -> do
                 let q: Result { q: Str, page: Int } BadInput = m.query_as {}
@@ -397,7 +394,7 @@ class HelidonHttpServerTest {
             $head
             $fetch
             use std::effects::signal::{ ImmediateSignal, ctrl_c }
-            use std::effects::http_server::{ with_graceful_shutdown }
+            use std::effects::http::{ with_graceful_shutdown }
             let app = otherwise {
               routes = route { method = Get, path = "/", handler = { m } -> reply { code = 200, text = "ok", url = m.req.url } },
               fallback = not_found,

@@ -491,9 +491,8 @@ object HoverInfo {
         // solved type is a fully-resolved FunctionType (no leftover tyvars) — a
         // still-polymorphic type means dispatch wasn't pinned yet, so fall back
         // to the generic decl signature below.
-        val specialized = solvedType
-            ?.takeIf { it is MezzeType.FunctionType && !typeHasVar(it) }
-            ?.let { prettyPrintTypeWithAliases(it, state.typeAliases) }
+        val solvedArrow = solvedType as? MezzeType.FunctionType
+        val specialized = solvedArrow?.takeIf { !typeHasVar(it) }
 
         // When the method's OWN solved type is still polymorphic (e.g. `.eq` in a
         // chain, accessed before the call pins dispatch), we can still specialize
@@ -501,6 +500,35 @@ object HoverInfo {
         // type param with the receiver in the generic op annotation.
         val concreteReceiver = receiverType
             ?.takeIf { it !is MezzeType.VarType && !typeHasVar(it) }
+
+        // The signature shown is one ARROW, printed whole, so the effect row is
+        // printed with it. The row comes from the DECLARATION: an ability op's row
+        // is exact and declared (`send: {…} -> … <HttpClient>`), and the call
+        // site's solved method type can reach here with that row still unbound —
+        // `.send {}` hovered as `{} -> Result Response HttpError`, no row, while
+        // the enclosing `let` correctly showed `<HttpClient>`. Specialization
+        // (solved or by receiver) decides the param and return; the row is the
+        // declared one unless the solved arrow already carries one.
+        // The receiver is part of what the reader asks about: `.send` on a request
+        // reads `{ it: Request } -> …`, naming what it works on. The call site's
+        // solved type has the receiver already applied (`{} -> …`), so the
+        // declaration with the receiver substituted is shown whenever that is
+        // fully concrete; the solved type is the fallback for an op whose other
+        // variables only the call site pins.
+        fun shown(declared: MezzeType.FunctionType, receiverTypeParam: String?): String {
+            val row = declared.effects?.takeIf { it.effects.isNotEmpty() || it.effectInstances.isNotEmpty() }
+            val byReceiver = if (concreteReceiver != null && receiverTypeParam != null) declared.copy(
+                paramType = replaceNamedVar(declared.paramType, receiverTypeParam, concreteReceiver),
+                returnType = replaceNamedVar(declared.returnType, receiverTypeParam, concreteReceiver),
+            ).takeIf { !typeHasVar(it) } else null
+            val arrow = when {
+                byReceiver != null -> byReceiver
+                specialized != null ->
+                    if (specialized.effects == null && row != null) specialized.copy(effects = row) else specialized
+                else -> declared
+            }
+            return prettyPrintTypeWithAliases(arrow, state.typeAliases)
+        }
 
         // 1. User-defined / file-level abilities
         val localAbilities = state.parsedModule?.decls?.filterIsInstance<ParsedAbilityDecl>() ?: emptyList()
@@ -520,20 +548,8 @@ object HoverInfo {
                     for (typedAbility in (state.storeAbilityDecls?.invoke() ?: emptyList())) {
                         val typedOp = typedAbility.operations.firstOrNull { it.name == methodName }
                             ?: continue
-                        // Prefer the specialized call-site type; else specialize
-                        // the generic op type by the concrete receiver; else the
-                        // ability decl's generic op signature verbatim.
-                        val rv = typedAbility.receiverTypeParam
-                        val bySig = if (specialized != null) specialized
-                            else if (concreteReceiver != null && rv != null) {
-                                val p = replaceNamedVar(typedOp.paramType, rv, concreteReceiver)
-                                val r = replaceNamedVar(typedOp.returnType, rv, concreteReceiver)
-                                "${prettyPrintTypeWithAliases(p, state.typeAliases)} -> ${prettyPrintTypeWithAliases(r, state.typeAliases)}"
-                            } else {
-                                "${prettyPrintTypeWithAliases(typedOp.paramType, state.typeAliases)} -> " +
-                                    prettyPrintTypeWithAliases(typedOp.returnType, state.typeAliases)
-                            }
-                        return codeBlock("${typedAbility.name}.${typedOp.name} : $bySig")
+                        val declared = MezzeType.FunctionType(typedOp.paramType, typedOp.returnType, typedOp.effects)
+                        return codeBlock("${typedAbility.name}.${typedOp.name} : ${shown(declared, typedAbility.receiverTypeParam)}")
                     }
                 } catch (_: Throwable) { /* store may not be open */ }
             }
@@ -545,8 +561,13 @@ object HoverInfo {
         // dispatch picks one; we don't have that info here, so just show
         // the first match. Listing all could be a follow-up.
         val (ability, op) = candidates.first()
-        val bySig = specialized
-            ?: (concreteReceiver?.let { specializeAbilityOp(op, ability.receiverTypeParam, it, state.typeAliases) })
+        // The op as the one arrow it is, through the one annotation converter.
+        val declared = try {
+            com.mezze.language.typechecker.util.TypeAnnotationConverter.convert(
+                com.mezze.language.parsedast.ParsedFunctionType(op.paramType, op.returnType, op.effects, op.abilityConstraints, op.loc),
+            ) as? MezzeType.FunctionType
+        } catch (_: Exception) { null }
+        val bySig = declared?.let { shown(it, ability.receiverTypeParam) }
             ?: "${formatTypeAnnotation(op.paramType)} -> ${formatTypeAnnotation(op.returnType)}"
         val sig = "${ability.name}.${op.name} : $bySig"
         val doc = op.doc?.takeIf { it.isNotBlank() }?.let { "\n\n$it" } ?: ""
@@ -572,7 +593,7 @@ object HoverInfo {
         val header = "ability ${decl.name}$genericsStr$forClause"
 
         val ops = decl.operations.joinToString("\n") { op ->
-            opLine(op.name, formatTypeAnnotation(op.paramType), formatTypeAnnotation(op.returnType))
+            opLine(op.name, formatTypeAnnotation(op.paramType), formatTypeAnnotation(op.returnType), rowSuffix(op.effects))
         }
 
         val body = if (ops.isNotEmpty()) " where {\n$ops\n}" else ""
@@ -590,7 +611,7 @@ object HoverInfo {
         val header = "effect ${decl.name}"
 
         val ops = decl.operations.joinToString("\n") { op ->
-            opLine(op.name, formatTypeAnnotation(op.paramType), formatTypeAnnotation(op.returnType))
+            opLine(op.name, formatTypeAnnotation(op.paramType), formatTypeAnnotation(op.returnType), rowSuffix(op.effects))
         }
 
         val body = if (ops.isNotEmpty()) " where {\n$ops\n}" else ""
@@ -646,11 +667,23 @@ object HoverInfo {
      * arrow is the one place a reader already expects a break, so put it there
      * and indent the continuation under the parameter.
      */
-    private fun opLine(name: String, param: String, ret: String): String {
-        val oneLine = "  $name: $param -> $ret"
+    private fun opLine(name: String, param: String, ret: String, row: String = ""): String {
+        val oneLine = "  $name: $param -> $ret$row"
         return if (oneLine.length <= OP_LINE_BUDGET) oneLine
-        else "  $name: $param\n      -> $ret"
+        else "  $name: $param\n      -> $ret$row"
     }
+
+    /** An op's declared effect row as the source writes it — ` <A, B>`, ` <A, ...>`
+     *  for an open row — or "" for a pure op. The declaration hover used to drop
+     *  it, so `send: { it: 'a } -> Result Response HttpError` read as pure where
+     *  the source says `<HttpClient>`. */
+    private fun rowSuffix(effects: List<String>, polymorphic: Boolean = false): String {
+        val parts = effects.distinct() + if (polymorphic) listOf("...") else emptyList()
+        return if (parts.isEmpty()) "" else " <" + parts.joinToString(", ") + ">"
+    }
+
+    private fun rowSuffix(row: ParsedEffectRow?): String =
+        if (row == null) "" else rowSuffix(row.effects + row.effectAnnotations.map { it.name }, row.isPolymorphic)
 
     /**
      * The `impl <Effect> for <Handler>` line, as written in the source.

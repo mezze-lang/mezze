@@ -38,17 +38,16 @@ class HttpStreamedDownloadTest {
     private val block = "0123456789abcdefghij".repeat(1000)
 
     private val head = """
-        use std::effects::http::{ Request, Response, Method, HttpClient, SimpleHttpClient, HttpDownload, SimpleHttpDownload, request, format_error, body_str, response_stream, with_download, default_http_config }
-        use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig }
-        use std::effects::http_server::{ route, otherwise, Matched }
+        use std::effects::http::{ Request, Response, Method, request, format_error, body_str, response_stream, HttpClient, SimpleHttpClient, HttpDownload, SimpleHttpDownload, Download, with_download, chunks, default_http_config, HttpServer, HelidonHttpServerWith, ServerConfig, route, otherwise, Matched }
         use std::collections::{ bytes, iter, map, seq }
+        use std::effects::early_return::{ EarlyReturn, return }
         use std::int
 
         let not_found: { req: Request } -> Response = { req } -> {
           status = 404, headers = map::empty {}, body = bytes::from_str { s = "nope" },
           url = req.url, chunks = None,
         }
-        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_logs = False }
+        let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_print_log = Off }
 
         ## A 200 KB body as ten 20 KB chunks, from a seq so the element type is
         ## Bytes throughout — `iter::map` from a range of Int into Bytes hits a
@@ -56,24 +55,19 @@ class HttpStreamedDownloadTest {
         let big_chunks: { b: Bytes } -> Iter Bytes = { b } ->
           iter::from_seq { xs = [b, b, b, b, b, b, b, b, b, b] }
 
-        let total_of: { resp: Response } -> Int = { resp } -> match resp.chunks is
-          None -> 0 - 1
-          Some { val = cs } -> iter::fold {
-            it = cs, init = 0, f = { acc, x } -> acc + bytes::size { b = x },
-          }
+        ## Drain the download through `chunks`; the reads happen inside this call.
+        let total_of: { reader: Download } -> Int <HttpDownload> = { reader } ->
+          chunks { reader = reader, chunk_bytes = 65536, init = 0, f = { acc, x } -> acc + bytes::size { b = x } }
 
-        let first_chunk_of: { resp: Response } -> Int = { resp } -> match resp.chunks is
-          None -> 0 - 1
-          Some { val = cs } -> iter::fold {
-            it = iter::take { it = cs, n = 1 }, init = 0,
-            f = { acc, x } -> acc + bytes::size { b = x },
-          }
+        ## Stop after the first chunk: the consumer returns out of the fold.
+        let first_chunk_of: { reader: Download } -> Int <HttpDownload, *> = { reader } ->
+          perform EarlyReturn in
+            chunks { reader = reader, chunk_bytes = 65536, init = 0 - 1, f = { acc, x } -> return { val = bytes::size { b = x } } }
     """.trimIndent()
 
     /** Serve a streamed 200 KB body, then run `body` against it. */
     private fun overTheWire(expr: String): Any = MezzeTestHelper.run(
-        """
-        $head
+        head + "\n" + """
         let blk: Bytes = bytes::from_str { s = "$block" }
         let app = otherwise {
           routes = route { method = Get, path = "/big", handler = { m } -> response_stream {
@@ -105,7 +99,7 @@ class HttpStreamedDownloadTest {
             overTheWire(
                 """match with_download {
                      req = $urlOfBig, config = default_http_config,
-                     f = { resp } -> total_of { resp = resp },
+                     f = { resp, reader } -> total_of { reader = reader },
                    } is
                      Ok { val = n } -> int::to_str { n = n }
                      Err { error = e } -> format_error { err = e }"""
@@ -126,7 +120,7 @@ class HttpStreamedDownloadTest {
         val n = overTheWire(
             """match with_download {
                  req = $urlOfBig, config = default_http_config,
-                 f = { resp } -> first_chunk_of { resp = resp },
+                 f = { resp, reader } -> first_chunk_of { reader = reader },
                } is
                  Ok { val = n } -> int::to_str { n = n }
                  Err { error = e } -> format_error { err = e }"""
@@ -150,7 +144,7 @@ class HttpStreamedDownloadTest {
             overTheWire(
                 """match with_download {
                      req = $urlOfBig, config = default_http_config,
-                     f = { resp } -> resp.status,
+                     f = { resp, reader } -> resp.status,
                    } is
                      Ok { val = n } -> int::to_str { n = n }
                      Err { error = e } -> format_error { err = e }"""
@@ -159,38 +153,29 @@ class HttpStreamedDownloadTest {
     }
 
     /**
-     * Chunks that ESCAPE the scope yield nothing — pinned as it IS, not as it
-     * ought to be.
+     * A reader that ESCAPES the scope reads nothing.
      *
-     * `read_chunk` does report the closure: it answers a named
-     * `HttpConnectionFailed` saying this download is already closed. But
-     * `chunks_of` ends the stream on any error, because a step can only say
-     * Yield or Done, so the caller sees an empty walk rather than a failure.
-     * `with_lines` claims the stronger property for files; this does not, and
-     * the doc on `with_download` says so instead of implying otherwise.
-     *
-     * What this test is worth: it pins that an escaped iterator does not claim
-     * bytes it never read. A zero is a poor answer; a wrong length would be a
-     * dangerous one.
+     * `read_chunk` reports the closure as a named `HttpConnectionFailed`, and
+     * `chunks` ends the walk on any error, so the caller sees an empty walk
+     * rather than a failure — pinned as it IS, not as it ought to be. What the
+     * test is worth: an escaped reader does not claim bytes it never read. A
+     * zero is a poor answer; a wrong length would be a dangerous one.
      */
     @Test
     @Timeout(value = 120, unit = TimeUnit.SECONDS, threadMode = ThreadMode.SEPARATE_THREAD)
-    fun `chunks escaping the scope yield nothing`() {
+    fun `a reader escaping the scope reads nothing`() {
         val out = overTheWire(
             """match with_download {
                  req = $urlOfBig, config = default_http_config,
-                 f = { resp } -> resp.chunks,
+                 f = { resp, reader } -> reader,
                } is
-                 Ok { val = escaped } -> match escaped is
-                   None -> "no chunks"
-                   Some { val = cs } -> int::to_str { n = iter::fold {
-                     it = cs, init = 0, f = { acc, x } -> acc + bytes::size { b = x } } }
+                 Ok { val = escaped } -> int::to_str { n = total_of { reader = escaped } }
                  Err { error = e } -> format_error { err = e }"""
         ).toString()
         assertEquals(
             "0", out,
-            "an escaped iterator must not claim bytes it never read; the native reports " +
-                "the closure and `chunks_of` turns that into an end, so the fold sees none",
+            "an escaped reader must not claim bytes it never read; the native reports " +
+                "the closure and `chunks` turns that into an end, so nothing is handed out",
         )
     }
 }

@@ -24,7 +24,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 /**
- * The HTTP SERVER natives — the socket half of `std::effects::http_server`.
+ * The HTTP SERVER natives — the socket half of `std::effects::http`.
  *
  * Backed by Helidon WebServer 4 (Níma): the same stack the client half already
  * uses, Loom-native, one virtual thread per connection, no Netty.
@@ -87,22 +87,57 @@ public final class HttpServerNatives {
         new java.util.concurrent.atomic.AtomicBoolean(false);
 
     /**
-     * Apply the `helidon_logs` config switch to the embedded server's logging.
+     * Apply the `helidon_print_log` config level to the embedded server's logging.
      *
      * Helidon logs via JUL straight to stderr — a start failure dumps a full Java
      * trace, and startup prints a banner and the bound socket. A Mezze program
      * speaks in its own output and typed `ServerError`s, so the default is to
-     * show NONE of it; `helidon_logs = True` (or the `MEZZE_HELIDON_LOG` env
-     * escape hatch) shows EVERYTHING. The switch is honored per server start.
+     * show NONE of it (`Off`). The other levels map onto JUL and let a server
+     * choose how loud Helidon is: `Error`→SEVERE, `Warn`→WARNING, `Info`→INFO,
+     * `Debug`→FINE, `Trace`→FINEST. JUL gotcha: a record below the root handler's
+     * level is dropped even when the logger admits it, so for sub-INFO levels we
+     * also open the root handlers. Honored per server start.
+     */
+    /**
+     * Resolve the effective Helidon JUL level: the config's level, unless the
+     * {@code MEZZE_HELIDON_LOG} escape hatch is set — a level name forces it,
+     * anything else (or empty) forces "trace". Shared by server and client so
+     * one env var opens both. Package-visible for {@code IONatives} (the client).
      */
     @TruffleBoundary
-    private static void configureHelidonLogging(boolean showLogs) {
+    static String resolveHelidonLevel(String configLevel) {
+        String env = System.getenv("MEZZE_HELIDON_LOG");
+        if (env == null) return configLevel;
+        String e = env.trim().toLowerCase();
+        return switch (e) {
+            case "off", "error", "warn", "info", "debug", "trace" -> e;
+            default -> "trace";
+        };
+    }
+
+    @TruffleBoundary
+    static void configureHelidonLogging(String level) {
         java.util.logging.Logger helidon = java.util.logging.Logger.getLogger("io.helidon");
-        if (showLogs) {
-            helidon.setLevel(null);  // inherit the default level → records flow
-        } else {
-            helidon.setLevel(java.util.logging.Level.OFF);
-            muteHelidonBootstrapLine();
+        java.util.logging.Level jul;
+        switch (level) {
+            case "off":
+                helidon.setLevel(java.util.logging.Level.OFF);
+                muteHelidonBootstrapLine();
+                return;
+            case "error": jul = java.util.logging.Level.SEVERE; break;
+            case "warn":  jul = java.util.logging.Level.WARNING; break;
+            case "debug": jul = java.util.logging.Level.FINE; break;
+            case "trace": jul = java.util.logging.Level.FINEST; break;
+            case "info":
+            default:      jul = java.util.logging.Level.INFO; break;
+        }
+        helidon.setLevel(jul);
+        // FINE/FINEST records never reach stderr unless the root handler (INFO by
+        // default) is lowered too — raise the ceiling for the debug levels.
+        if (jul.intValue() < java.util.logging.Level.INFO.intValue()) {
+            java.util.logging.Logger root = java.util.logging.Logger.getLogger("");
+            root.setLevel(jul);
+            for (java.util.logging.Handler h : root.getHandlers()) h.setLevel(jul);
         }
     }
 
@@ -235,9 +270,7 @@ public final class HttpServerNatives {
      */
     @TruffleBoundary
     public static Object httpServerStart(MezzeRecord args) {
-        boolean showLogs = getBoolOrDefault(args, "helidon_logs", false)
-            || System.getenv("MEZZE_HELIDON_LOG") != null;
-        configureHelidonLogging(showLogs);
+        configureHelidonLogging(resolveHelidonLevel(getStringOrDefault(args, "helidon_log_level", "off")));
         Object handlerObj = getField(args, "handler");
         if (!(handlerObj instanceof MezzeFunction handler)) {
             throw new NativeTypeMismatchException("Expected 'handler' to be a function");
@@ -386,6 +419,7 @@ public final class HttpServerNatives {
      *  installs its own chain rather than inheriting the first one's. */
     private static final ThreadLocal<HandlerChainEntry[]> INSTALLED_CHAIN = new ThreadLocal<>();
 
+
     /**
      * Run the guest handler on the calling Helidon thread.
      *
@@ -423,17 +457,33 @@ public final class HttpServerNatives {
 
         Object prev = truffleCtx.enter(null);
         Reply reply;
+        boolean streamedItself;
         try {
             if (INSTALLED_CHAIN.get() != chain) {
                 if (scope != null) HandlerChainRegistry.restoreScopeVar(scope);
                 if (chain.length > 0) HandlerChainRegistry.installHandlerChainEntries(chain);
                 INSTALLED_CHAIN.set(chain);
             }
-            reply = runHandler(handler, req, streamBodies);
+            // Offer this connection to `sse { f }`: starting the stream sends the
+            // status and headers and hands back the body stream to flush events into.
+            SseNatives.enter(() -> {
+                res.status(200);
+                res.header("content-type", "text/event-stream");
+                res.header("cache-control", "no-cache");
+                return res.outputStream();
+            });
+            try {
+                reply = runHandler(handler, req, streamBodies);
+            } finally {
+                streamedItself = SseNatives.leave();
+            }
         } finally {
             truffleCtx.leave(null, prev);
             inFlight.release();
         }
+        // An SSE handler wrote status, headers and body itself while it ran, and
+        // closed the stream when it returned (or raised): nothing is left to send.
+        if (streamedItself) return;
         res.status(reply.status());
         for (Map.Entry<String, String> h : reply.headers().entrySet()) {
             res.header(h.getKey(), h.getValue());
@@ -848,5 +898,10 @@ public final class HttpServerNatives {
         Object value = getField(args, fieldName);
         if (value instanceof String s) return s;
         throw new NativeTypeMismatchException("Expected Str for field '" + fieldName + "'");
+    }
+
+    private static String getStringOrDefault(MezzeRecord args, String fieldName, String defaultValue) {
+        Object value = getField(args, fieldName);
+        return value instanceof String s ? s : defaultValue;
     }
 }

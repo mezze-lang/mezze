@@ -30,10 +30,8 @@ import kotlin.test.assertTrue
 class HttpTypedInputTest {
 
     private val head = """
-        use std::effects::http::{ Request, Response, IntoResponse, IntoErrorResponse, or_throw, not_found, body_str }
+        use std::effects::http::{ Request, Response, IntoResponse, IntoErrorResponse, or_throw, not_found, body_str, get_request, router, catching, BadInput }
         use std::effects::exception::{ throw }
-        use std::effects::http_server::{ get_request }
-        use std::effects::http_server::{ router, catching, BadInput }
         use std::str
         use std::int
 

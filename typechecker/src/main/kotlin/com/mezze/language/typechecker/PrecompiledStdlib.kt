@@ -18,6 +18,9 @@ import kotlinx.serialization.cbor.Cbor
 import kotlinx.serialization.decodeFromByteArray
 import kotlinx.serialization.encodeToByteArray
 import java.nio.file.Paths
+import com.mezze.language.typechecker.module.ModuleLoadResult
+import com.mezze.language.typechecker.module.ModuleTypeCheckResult
+import com.mezze.language.truffleir.shapeKey
 
 object PrecompiledStdlib {
 
@@ -67,6 +70,10 @@ object PrecompiledStdlib {
      *  Passed to the user-code TypedASTCompiler so call sites can inject dicts
      *  for pre-compiled stdlib functions. */
     var preloweredDictMethods: Map<Hash, Set<String>> = emptyMap()
+    /** Wall time of each from-source phase, in ms, for the build to print — so a
+     *  slow stdlib compile names its phase instead of its total. Empty on a
+     *  snapshot load. */
+    var phaseTimings: Map<String, Long> = emptyMap()
         private set
 
     var stdlibDependencyGraph: Map<Hash, Set<Hash>> = emptyMap()
@@ -222,6 +229,27 @@ object PrecompiledStdlib {
                 // The cache format doesn't store dict methods, so we prescan here.
                 preloweredDictMethods = prescanDictMethodsFromModules(stdlibTypedModules)
             } else {
+                // The WHOLE stdlib is lowered into the snapshot, not only what the
+                // prelude reaches. Until 2026-11-17 that reachable set was ~20 of 79
+                // modules: `codec/query`, `codec/json`, `db`, `polyglot/jvm` and the
+                // rest were lowered inside each USER program instead, so a lowering
+                // that misbehaved only in stdlib mode (`from_query`'s `.decode`
+                // falling to a field read with no derived decoder in scope) had
+                // never once run here. Typecheck everything first; the lowering
+                // loop below then sees every module.
+                val timings = LinkedHashMap<String, Long>()
+                var phaseStart = System.nanoTime()
+                fun phase(name: String) {
+                    val now = System.nanoTime(); timings[name] = (now - phaseStart) / 1_000_000; phaseStart = now
+                }
+                timings["prelude"] = (phaseStart - initStart) / 1_000_000
+                // Only when BUILDING the snapshot (StdlibPrecompiler sets
+                // force-recompile). A dev or test JVM that compiles the stdlib from
+                // source keeps the prelude-reachable set: the whole stdlib cost it
+                // ~4 s per JVM start (3.2 s -> 7.3 s, measured), which the LSP suite
+                // paid once per class and timed out on. What ships is the snapshot.
+                if (forceRecompile) typeCheckEveryStdlibModule(moduleLoader, moduleTypeChecker)
+                phase("typecheck-all")
                 val allModulesForPrelower = HashMap<Hash, TypedAstModule>(stdlibTypedModules)
                 for ((_, cachedMod) in ModuleTypeChecker.getAllCachedModules()) {
                     val stdlibModule = cachedMod.typedModule
@@ -229,19 +257,32 @@ object PrecompiledStdlib {
                         allModulesForPrelower[stdlibModule.hash] = stdlibModule
                     }
                 }
+                // The shipped typed-module set IS the lowered set, so the derived
+                // tables below (`stdlibAbilityImpls`, `stdlibDeclHashes`,
+                // `stdlibModuleHashes`) describe the same modules the snapshot
+                // carries IR for — the fast-load path already had it this way.
+                if (forceRecompile) stdlibTypedModules = allModulesForPrelower
 
                 val preFunctions = mutableMapOf<Hash, FunctionIR>()
                 val prePerformers = mutableListOf<Array<String>>()
-                // Prescan ALL modules BEFORE lowering any, and seed every
-                // per-module compiler with the result. Lowering is per-module with a
-                // fresh compiler, but `abilityImpls` is every module's impls — so each
-                // module's lowering compiles every impl op, and `putIfAbsent` below
-                // keeps whichever got there first. With only its own module
-                // prescanned, that compiler does not know a callee elsewhere needs a
-                // dictionary and emits the call bare. See S-17.
-                val preDictMethods = prescanDictMethodsFromModules(allModulesForPrelower).toMutableMap()
+                // ONE dictionary-requirement table, complete before any body is
+                // lowered, shared read-only by every per-module compiler. A
+                // function's parameters are `params + sorted dict params`, and a
+                // scalar-ABI call site in module A names module B's callee
+                // parameters from A's own table — so every compiler must hold the
+                // same answer for the same hash, which only a table computed to a
+                // fixpoint over ALL modules guarantees. The old loop grew the table
+                // as it went, so the answer depended on module order (S-17).
+                val preDictMethods = prescanDictMethodsToFixpoint(allModulesForPrelower)
+                phase("dict-prescan-fixpoint")
                 val allAbilityImpls = allModulesForPrelower.values.flatMap { it.abilityImpls }
                 val allAbilityOpNames = abilityOpNamesOf(allModulesForPrelower.values)
+                // Requirements the compile itself discovers (constrained local
+                // lambdas), on top of the seed — what user-code compilation reads.
+                val discoveredDictMethods = preDictMethods.toMutableMap()
+                val loweredBy = HashMap<Hash, String>()
+                val collisions = mutableListOf<String>()
+                val dictDrift = mutableListOf<String>()
                 for ((modHash, typedMod) in allModulesForPrelower) {
                     try {
                         val compiler = TypedASTCompiler(
@@ -249,7 +290,19 @@ object PrecompiledStdlib {
                             abilityOpNames = allAbilityOpNames,
                             preloweredDictMethods = preDictMethods,
                         )
-                        val result = compiler.compile(typedMod, isStdlibCompilation = true)
+                        // Each impl op is lowered ONCE, by the module that declares
+                        // the impl, in that module's context. `abilityImpls` is still
+                        // every module's impls — that is the resolution index — but
+                        // only the owner compiles its ops. Before this every module's
+                        // compiler lowered EVERY impl op and `putIfAbsent` kept the
+                        // first one in: 1152 same-hash/different-IR pairs measured on
+                        // main (record-ABI calls into other modules' helpers, no
+                        // native inlining, and the stdlib-mode `from_query` above).
+                        val result = compiler.compile(
+                            typedMod,
+                            isStdlibCompilation = true,
+                            implOpsOwnedBy = typedMod.abilityImpls.mapTo(HashSet()) { it.hash },
+                        )
                         for (pr in result.performerRecords) {
                             val arr = mutableListOf(pr.performerHash, pr.effectHash)
                             for (i in pr.operationHashes.indices) {
@@ -258,10 +311,29 @@ object PrecompiledStdlib {
                             }
                             prePerformers.add(arr.toTypedArray())
                         }
-                        for (fn in result.functions) { preFunctions.putIfAbsent(fn.hash, fn) }
-                        // Accumulate dict method requirements for user-code compilation
-                        for ((h, methods) in compiler.getDictMethodsForHash()) {
-                            preDictMethods[h] = methods
+                        val compiledDicts = compiler.getDictMethodsForHash()
+                        for (fn in result.functions) {
+                            val prev = preFunctions.put(fn.hash, fn)
+                            if (prev != null && prev.shapeKey() != fn.shapeKey()) {
+                                collisions.add(
+                                    "${fn.hash.hex.take(10)} ${fn.qualifiedName}: " +
+                                        "${loweredBy[fn.hash]} vs ${typedMod.path}"
+                                )
+                            }
+                            loweredBy[fn.hash] = typedMod.path
+                            // A body lowered against more (or fewer) dictionaries than
+                            // the shared table says is a parameter list no caller
+                            // agrees with — the arg-shift shape.
+                            val seeded = preDictMethods[fn.hash]
+                            if (seeded != null && seeded != compiledDicts[fn.hash].orEmpty()) {
+                                dictDrift.add(
+                                    "${fn.hash.hex.take(10)} ${fn.qualifiedName}@${typedMod.path}: " +
+                                        "seeded=$seeded compiled=${compiledDicts[fn.hash].orEmpty()}"
+                                )
+                            }
+                        }
+                        for ((h, methods) in compiledDicts) {
+                            discoveredDictMethods.merge(h, methods) { a, b -> a + b }
                         }
                     } catch (e: Exception) {
                         // Stdlib lowering failures are not "best-effort": they mean a
@@ -276,10 +348,27 @@ object PrecompiledStdlib {
                         )
                     }
                 }
+                // Both lists are expected EMPTY. Each is a snapshot that would run
+                // different code depending on which module was lowered first.
+                if (collisions.isNotEmpty()) {
+                    System.err.println(
+                        "[PrecompiledStdlib] WARNING: ${collisions.size} hash(es) lowered to " +
+                            "different IR by two modules:\n  " + collisions.joinToString("\n  ")
+                    )
+                }
+                if (dictDrift.isNotEmpty()) {
+                    System.err.println(
+                        "[PrecompiledStdlib] WARNING: ${dictDrift.size} function(s) lowered against " +
+                            "dictionaries other than the shared table's:\n  " + dictDrift.joinToString("\n  ")
+                    )
+                }
+                phase("lower")
                 preloweredFunctions = preFunctions
                 preloweredPerformerRecords = prePerformers
-                preloweredDictMethods = preDictMethods
+                preloweredDictMethods = discoveredDictMethods
                 buildDependencyGraph()
+                phase("dep-graph")
+                phaseTimings = timings
             }
 
             stdlibAbilityImpls = stdlibTypedModules.values.flatMap { it.abilityImpls }
@@ -333,7 +422,10 @@ object PrecompiledStdlib {
             }
         }
 
-    private fun prescanDictMethodsFromModules(modules: Map<Hash, TypedAstModule>): Map<Hash, Set<String>> {
+    private fun prescanDictMethodsFromModules(
+        modules: Map<Hash, TypedAstModule>,
+        seed: Map<Hash, Set<String>> = emptyMap(),
+    ): Map<Hash, Set<String>> {
         if (modules.isEmpty()) return emptyMap()
         val allAbilityImpls = modules.values.flatMap { it.abilityImpls }
         val allAbilityOpNames = abilityOpNamesOf(modules.values)
@@ -346,13 +438,77 @@ object PrecompiledStdlib {
             val compiler = TypedASTCompiler(
                 abilityImpls = allAbilityImpls,
                 abilityOpNames = allAbilityOpNames,
+                preloweredDictMethods = seed,
             )
             compiler.prescanOnly(typedMod)
+            // UNION, not last-writer: two modules' prescans may each know a
+            // different part of one hash's requirement (the owner's body scan,
+            // a caller's transitive propagation), and dropping either is the
+            // dict-param mismatch this table exists to prevent.
             for ((h, methods) in compiler.getDictMethodsForHash()) {
-                result[h] = methods
+                result.merge(h, methods) { a, b -> a + b }
             }
         }
         return result
+    }
+
+    /** [prescanDictMethodsFromModules] re-seeded with its own answer until it
+     *  stops changing. The table only grows (bounded by functions × operation
+     *  names), so this terminates; the cap is the anti-hang guard that turns a
+     *  violated invariant into a loud failure instead of a hang. */
+    private fun prescanDictMethodsToFixpoint(modules: Map<Hash, TypedAstModule>): Map<Hash, Set<String>> {
+        var seed: Map<Hash, Set<String>> = emptyMap()
+        repeat(16) {
+            val next = prescanDictMethodsFromModules(modules, seed)
+            if (next == seed) return next
+            seed = next
+        }
+        error("Compiler internal error: stdlib dictionary prescan did not converge in 16 rounds")
+    }
+
+    /**
+     * Typecheck every module `std/MANIFEST.txt` lists — the same list
+     * [StdlibIdentities] stamps from — so the lowering that follows sees the
+     * whole stdlib and not only what the prelude happens to reach. `_`-prefixed
+     * files are the prelude's own and already loaded.
+     *
+     * A module that fails to LOAD is a broken stdlib file: it fails again at
+     * every user import, or worse hands ability resolution a malformed AST
+     * (#512). It is never "best effort" — fail here, loudly.
+     */
+    /** Every stdlib module's typed form, typechecking the ones not yet loaded —
+     *  for checks that must see the whole stdlib in a JVM that did not build it. */
+    fun everyStdlibTypedModule(): Collection<TypedAstModule> {
+        typeCheckEveryStdlibModule(moduleLoader, ModuleTypeChecker.withContextAndResolver(TypeChecker().parentContext, moduleLoader.getResolver()))
+        val all = HashMap<Hash, TypedAstModule>(stdlibTypedModules)
+        for ((_, m) in ModuleTypeChecker.getAllCachedModules()) m.typedModule?.let { all.putIfAbsent(it.hash, it) }
+        return all.values
+    }
+
+    private fun typeCheckEveryStdlibModule(loader: ModuleLoader, checker: ModuleTypeChecker) {
+        val manifest = PrecompiledStdlib::class.java.classLoader.getResourceAsStream("std/MANIFEST.txt")
+            ?.bufferedReader()?.use { it.readLines() }
+            ?: error("Compiler internal error: std/MANIFEST.txt is not on the classpath — rebuild :stdlib")
+        for (file in manifest) {
+            if (file.isBlank() || file.substringAfterLast('/').startsWith("_")) continue
+            val path = com.mezze.language.ast.ModulePath(file.removeSuffix(".mz").split('/'))
+            val loaded = loader.loadModuleWithDependencies(path)
+            if (loaded is ModuleLoadResult.Success) {
+                // A module that fails to TYPECHECK must fail the build the same
+                // way: lowering skips what did not check, so the snapshot ships
+                // without it and the first user import pays. MEASURED: an
+                // `http_client` with six type errors "compiled" to a snapshot of
+                // 3806 functions instead of 3879, with no word said.
+                val checked = checker.typeCheckModule(loaded.module)
+                if (checked is ModuleTypeCheckResult.Failure) {
+                    val msg = checked.errors.joinToString("\n  ") { "${it.modulePath}: ${it.message}" }
+                    error("Stdlib module '$path' does not typecheck:\n  $msg")
+                }
+            } else if (loaded is ModuleLoadResult.Failure) {
+                val msg = loaded.errors.joinToString("; ") { it.message ?: it.javaClass.simpleName }
+                error("Stdlib module '$path' failed to load: $msg")
+            }
+        }
     }
 
         @OptIn(ExperimentalSerializationApi::class)

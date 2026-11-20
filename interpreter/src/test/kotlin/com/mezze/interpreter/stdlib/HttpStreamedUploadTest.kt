@@ -31,9 +31,7 @@ import kotlin.test.assertTrue
 class HttpStreamedUploadTest {
 
     private val head = """
-        use std::effects::http::{ Request, Response, Method, HttpClient, SimpleHttpClient, request, format_error, with_text, with_method, body_str, body_bytes }
-        use std::effects::http_server::{ HttpServer, HelidonHttpServerWith, ServerConfig, incoming, incoming_streamed }
-        use std::effects::http_server::{ route, otherwise, Matched }
+        use std::effects::http::{ Request, Response, Method, request, format_error, with_text, with_method, body_str, body_bytes, HttpClient, SimpleHttpClient, HttpServer, HelidonHttpServerWith, ServerConfig, incoming, incoming_streamed, route, otherwise, Matched }
         use std::collections::map
         use std::collections::bytes
         use std::collections::iter
@@ -67,8 +65,8 @@ class HttpStreamedUploadTest {
         let chunks_of: { parts: [Str] } -> Iter Bytes = { parts } ->
           iter::map { it = iter::from_seq { xs = parts }, f = { x } -> bytes::from_str { s = x } }
 
-        let streaming: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = True, helidon_logs = False }
-        let buffering: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_logs = False }
+        let streaming: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = True, helidon_print_log = Off }
+        let buffering: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_print_log = Off }
     """.trimIndent()
 
     /** A handler walks the chunks it was given, boundaries intact. */

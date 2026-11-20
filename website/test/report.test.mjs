@@ -2,7 +2,7 @@
  * Warnings must not stop a program running.
  *
  * `report()` gates the Run button: it returned false for ANY diagnostic, so a
- * single unused import — `use std::effects::http::{ Http, request }` where
+ * single unused import — `use std::effects::http::{ HttpClient, request }` where
  * only `request` is named — printed an error where the output should be. The
  * program itself was always fine.
  *

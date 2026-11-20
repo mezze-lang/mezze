@@ -10,15 +10,14 @@ impl Default for Set 'a where {
   default = {} -> empty {}
 }
 
-## Structural equality for sets.
-## Structural hash, paired with the `Eq` below.
-## `Eq` and `Hash` are written together or not at all: a hash container
-## buckets by one and compares by the other, so a value whose hash
-## disagrees with its equality is silently kept twice.
+# `Eq` and `Hash` are written together or not at all: a hash disagreeing with
+# equality makes hash containers keep a value twice.
+## Structural hash, consistent with the set's `Eq`.
 impl Hash for Set 'a where {
   hash: { it: Set 'a } -> Int = { it } -> structural_hash { it = it }
 }
 
+## Structural equality for sets.
 impl Eq for Set 'a where {
   eq = { it, r } -> __native_set_equals { s1 = it, s2 = r },
   neq = { it, r } -> if __native_set_equals { s1 = it, s2 = r } then False else True,
@@ -27,10 +26,8 @@ impl Eq for Set 'a where {
 ## Creates an empty set.
 pub let empty: {} -> Set 'a = {} -> __native_set_empty {}
 
+# Without `with Eq 'a`, a type with no `Eq` (e.g. a newtype) was deduped structurally.
 ## Adds an element, returning a new set.
-## `with Eq 'a`: membership is an equality question, so the element type must HAVE
-## an equality. Without this a type with no `Eq` — a newtype, which derives none —
-## was still deduped, by a structural comparison its author never wrote.
 pub let insert: { s: Set 'a, x: 'a } with Eq 'a, Hash 'a -> Set 'a = { s, x } -> __native_set_insert { s = s, x = x }
 
 ## Removes an element, returning a new set.
@@ -67,7 +64,6 @@ pub let is_superset: { s1: Set 'a, s2: Set 'a } with Eq 'a -> Bool = { s1, s2 } 
   __native_set_is_superset { s1 = s1, s2 = s2 }
 
 ## Returns True if the two sets have no elements in common.
-## Short-circuits on the first shared element.
 pub let is_disjoint: { s1: Set 'a, s2: Set 'a } with Eq 'a -> Bool = { s1, s2 } ->
   __native_set_is_disjoint { s1 = s1, s2 = s2 }
 
@@ -77,34 +73,14 @@ pub let to_seq: { s: Set 'a } -> ['a] = { s } -> __native_set_to_seq { s = s }
 ## Creates a set from a Seq.
 pub let from_seq: { xs: ['a] } with Eq 'a, Hash 'a -> Set 'a = { xs } -> __native_set_from_seq { xs = xs }
 
+# Lives here, not in `iter`, because `set` imports `iter` for its `Iterable` impl.
 ## Collects an `Iter` into a Set.
-##
-## `Iter` has seven ways IN -- `range`, `from_seq`, `from_list`, `unfold`,
-## `once`, `empty`, and `.to_iter{}` on any of the seven types implementing
-## `Iterable` -- and had only `to_seq`/`to_list` out, so reaching any other
-## collection meant spelling the intermediate yourself.
-##
-## This is ERGONOMICS, not speed: it is what you would have written. `to_seq`
-## hands its buffer to the sequence without copying it, so the intermediate is
-## a wrapper around the buffer the sink had to fill anyway.
-##
-## Lives here rather than in `iter` because `set` imports `iter` for its
-## `Iterable` impl, so the dependency only runs this way.
 pub let from_iter: { it: Iter 'a } with Eq 'a, Hash 'a -> Set 'a = { it } ->
   from_seq { xs = iter::to_seq { it = it } }
 
-## ── Operations that carry the element's own `Eq`/`Hash` ──────────────────
-##
-## A hash container buckets by the element's runtime representation, which is
-## exactly right when its `Eq` is the compiler's derived structural one — and
-## wrong when the element wrote its own. `newtype P = Int` comparing mod 10 has
-## `P.(1) == P.(11)`, and a newtype is erased, so the structural tiers see the
-## payloads `1` and `11`, bucket them apart, and keep both.
-##
-## These take the element's `hash` and `eq` and install them ON THE SET, so every
-## later lookup asks the element's instance. The plain operations above stay the
-## default; which form a call site uses is the compiler's decision, taken once
-## from the element type, so a set of `Int` keeps its specialised storage.
+# ── Operations that carry the element's own `Eq`/`Hash` ──
+# These install the element's `hash`/`eq` on the set, for elements (e.g. newtypes)
+# whose `Eq` differs from structural; the compiler picks the form per element type.
 
 pub let insert_with_evidence:
   { s: Set 'a, x: 'a, hash: { it: 'a } -> Int, eq: { it: 'a, r: 'a } -> Bool } -> Set 'a =
@@ -143,12 +119,8 @@ pub let from_list: { xs: List 'a } with Eq 'a -> Set 'a = { xs } -> __native_set
 pub let filter: { s: Set 'a, p: { val: 'a } -> Bool <...> } -> Set 'a <...> = { s, p } ->
   __native_set_filter { s = s, p = p }
 
-## Transforms each element using f.
-## `Eq 'b, Hash 'b`, NOT the source's: the result's elements are `'b`, so the
-## SOURCE's equality says nothing about which of them are the same element.
-## Without it the result collapsed by REPRESENTATION — mapping the distinct Ints
-## 10 and 11 to a newtype equal by tens gave a set of two where the author's
-## `Eq` says one. `sorted_set::map` carries `with Ord 'b` for the same reason.
+# Without `Eq 'b, Hash 'b` the result deduped by representation, not the author's `Eq`.
+## Transforms each element using f; the result is deduped by `'b`'s own `Eq`.
 pub let map: { s: Set 'a, f: { val: 'a } -> 'b <...> } with Eq 'b, Hash 'b -> Set 'b <...> = { s, f } ->
   __native_set_map { s = s, f = f }
 
@@ -260,8 +232,6 @@ pub let symmetric_difference: { s1: Set 'a, s2: Set 'a } with Eq 'a -> Set 'a = 
   __native_set_symmetric_difference { s1 = s1, s2 = s2 }
 
 ## Maps elements with f, collecting only Some results into a Set.
-## `Eq 'b, Hash 'b` for the same reason as `map` above: the kept elements are
-## `'b`, so the source's equality says nothing about which are the same element.
 pub let filter_map
   : { set: Set 'a, f: { val: 'a } -> Option 'b <...> } with Eq 'b, Hash 'b
   -> Set 'b <...>
@@ -283,13 +253,8 @@ let to_sorted_set_with_cmp
   : { s: Set 'a, cmp: { a: 'a, b: 'a } -> Int } -> SortedSet 'a
   = { s, cmp } -> __native_set_to_sorted_set { s = s, cmp = cmp }
 
+# The order used to be a prose comment with no constraint (known-bugs.md BUG 45).
 ## Converts to a SortedSet, ordered by the element's `Ord`.
-##
-## THE REQUIREMENT USED TO BE A COMMENT: this said "(elements must be
-## comparable)" in prose and carried no constraint, so nothing supplied the
-## order and the result came out naturally ordered whatever that `Ord` said. A
-## comment where a constraint belongs tells the reader the order is handled
-## while the typechecker knows nothing about it. See known-bugs.md BUG 45.
 pub let to_sorted_set: { s: Set 'a } with Ord 'a -> SortedSet 'a = { s } ->
   to_sorted_set_with_cmp { s = s, cmp = { a, b } -> if a < b then 0 - 1 else if b < a then 1 else 0 }
 
@@ -318,8 +283,7 @@ impl Set 'a where {
   to_seq = { it } -> to_seq { s = it },
   to_list = { it } -> to_list { s = it },
 
-  ## dot-chain parity: an inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` always works.
+  # dot-chain parity: inherent method for every receiver-taking free function.
   insert_all = { it, xs } -> insert_all { s = it, xs = xs },
   remove_all = { it, xs } -> remove_all { s = it, xs = xs },
   none = { it, p } -> none { s = it, p = p },

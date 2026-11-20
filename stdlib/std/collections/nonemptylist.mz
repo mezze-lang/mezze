@@ -4,10 +4,8 @@ use std::abilities::iter::{ Iterable }
 use std::collections::iter
 use std::int
 
-## Structural equality for non-empty lists.
-## The declared `eq`/`cmp` params tie the comparator to the element type var, so
-## the impls below dispatch the ELEMENT's own instance rather than comparing
-## structurally in Java (seq's #23 pattern).
+# The declared `eq`/`cmp` params tie the comparator to the element type var, so
+# the impls dispatch the element's own instance rather than comparing in Java.
 let nel_equals_with_eq
   : { xs: NonEmptyList 'a, ys: NonEmptyList 'a, eq: { a: 'a, b: 'a } -> Bool } -> Bool
   = { xs, ys, eq } -> __native_nel_equals { xs = xs, ys = ys, eq = eq }
@@ -16,14 +14,14 @@ let nel_compare_with_cmp
   : { xs: NonEmptyList 'a, ys: NonEmptyList 'a, cmp: { a: 'a, b: 'a } -> Int } -> Int
   = { xs, ys, cmp } -> __native_nel_compare { xs = xs, ys = ys, cmp = cmp }
 
-## Structural hash, paired with the `Eq` below.
-## `Eq` and `Hash` are written together or not at all: a hash container
-## buckets by one and compares by the other, so a value whose hash
-## disagrees with its equality is silently kept twice.
+# `Eq` and `Hash` are written together or not at all: a hash disagreeing with
+# equality makes hash containers keep a value twice.
+## Structural hash, consistent with the list's `Eq`.
 impl Hash for NonEmptyList 'a where {
   hash: { it: NonEmptyList 'a } -> Int = { it } -> structural_hash { it = it }
 }
 
+## Structural equality for non-empty lists.
 impl Eq for NonEmptyList 'a where {
   eq: { it: NonEmptyList 'a, r: NonEmptyList 'a } with Eq 'a -> Bool = { it, r } ->
     nel_equals_with_eq { xs = it, ys = r, eq = { a, b } -> a == b },
@@ -98,10 +96,10 @@ pub let flat_map
   -> NonEmptyList 'b <...>
   = { xs, f } -> __native_nel_flat_map { xs = xs, f = f }
 
-## Left fold with an initial accumulator value.
 ## Returns the sum of all integer elements.
 pub let sum: { xs: NonEmptyList Int } -> Int = { xs } -> __native_nel_sum { xs = xs }
 
+## Left fold with an initial accumulator value.
 pub let fold_left
   : { xs: NonEmptyList 'a, init: 'acc, f: { acc: 'acc, x: 'a } -> 'acc <...> }
   -> 'acc <...>
@@ -159,34 +157,20 @@ pub let to_seq: { xs: NonEmptyList 'a } -> ['a] = { xs } -> __native_nel_to_seq 
 ## Creates a NonEmptyList from a Seq. Returns None if the seq is empty.
 pub let from_seq: { xs: ['a] } -> Option (NonEmptyList 'a) = { xs } -> __native_nel_from_seq { xs = xs }
 
-## Threads the element's own `Ord` to the native as a `le` callback, so the
-## compiler can see an `Ord` it may discharge directly. For an element it proves
-## directly comparable the whole operand is dropped and this becomes
-## `__native_nel_sort`, which sorts with no callback at all; for anything else —
-## notably a `newtype` whose `Ord` disagrees with the type it wraps — the
-## callback stays and the author's order is what runs.
-##
-## A typed intermediary rather than an inline lambda because a `'a` written
-## inside a lambda is FRESH, so the constraint has to arrive through a
-## signature. Same shape as `seq::sort` and `list::sort`.
+# Threads the element's `Ord` as a `le` callback; if the compiler proves the element
+# directly comparable it becomes callback-free `__native_nel_sort`. A typed
+# intermediary because a `'a` inside a lambda is fresh (same as `seq::sort`).
 let sort_by_ord
   : { xs: NonEmptyList 'a, le: { it: 'a, r: 'a } -> Bool } with Ord 'a
   -> NonEmptyList 'a
   = { xs, le } -> __native_nel_sort_by_ord { xs = xs, le = le }
 
-## Sorts elements in ascending order.
-##
-## WAS `sort_by { cmp = { l, r } -> l <= r }`, which ran a guest lambda for each
-## of roughly n log n comparisons — the same defect `seq::sort` and `list::sort`
-## carried. MEASURED against `seq::sort` on the same elements: 4409 ps against
-## 430 at four hundred elements. The Bool->Int wrapper `sort_by` adds is NOT the
-## cost and never was; an unwarmed first pass said 1.82x for it and a warm one
-## said none. The comparator call is the cost.
+# Was `sort_by` with a guest lambda per comparison: measured 4409 ps vs 430 for `seq::sort`.
+## Sorts elements in ascending order, by the element's `Ord`.
 pub let sort: { xs: NonEmptyList 'a } with Ord 'a -> NonEmptyList 'a = { xs } ->
   sort_by_ord { xs = xs, le = { it, r } -> it <= r }
 
-## Sorts using a `less-or-equal` comparator: `cmp { l, r }` returns True when `l`
-## should come before `r` (matches `Ord`'s `lt`/`le` and the `<`/`<=` operators).
+## Sorts with a less-or-equal comparator: `cmp { l, r }` is True when `l` comes before `r`.
 pub let sort_by
   : { xs: NonEmptyList 'a, cmp: { l: 'a, r: 'a } -> Bool <...> }
   -> NonEmptyList 'a <...>
@@ -210,8 +194,7 @@ impl NonEmptyList 'a where {
   to_list = { it } -> to_list { xs = it },
   to_seq = { it } -> to_seq { xs = it },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
+  # dot-chain parity: inherent method for every receiver-taking free function.
   append = { it, ys } -> append { xs = it, ys = ys },
   append_list = { it, ys } -> append_list { xs = it, ys = ys },
   get = { it, index } -> get { xs = it, index = index },
@@ -220,27 +203,18 @@ impl NonEmptyList 'a where {
   intersperse = { it, sep } -> intersperse { xs = it, sep = sep },
 }
 
-## NonEmptyList is never empty, so is_empty always returns False.
-
-## NonEmptyList joins the SEVEN other collections that can enter an `Iter` pipeline.
-## It was the odd one out: without this, `nonemptylist` had to be spelled
-## `iter::from_seq { xs = nonemptylist::to_seq { xs = it } }` by hand, while every
-## other collection answers `.to_iter {}`.
-##
-## Routed through `to_seq` exactly as Set, SortedSet, Deque, Map and SortedMap
-## are — `iter::from_seq` is the fused source, so a pipeline from here gets the
-## same treatment as one from a sequence.
+## Lets a NonEmptyList enter an `Iter` pipeline with `.to_iter {}`, via `to_seq`.
 impl Iterable for NonEmptyList 'a having 'elem = 'a where {
   to_iter = { it } -> iter::from_seq { xs = to_seq { xs = it } }
 }
 
+## NonEmptyList is never empty, so is_empty always returns False.
 impl Sized for NonEmptyList 'a where {
   size = { it } -> size { xs = it },
   is_empty = { it } -> False,
 }
 
-## Wrap any value in a singleton NonEmptyList via method syntax:
-## `x.nel {}` → single-element `NonEmptyList 'a`. Generic — covers every type.
+## Wrap any value in a singleton NonEmptyList: `x.nel {}`.
 ability NonEmptyListable for 'a where {
   nel: { it: 'a } -> NonEmptyList 'a
 }

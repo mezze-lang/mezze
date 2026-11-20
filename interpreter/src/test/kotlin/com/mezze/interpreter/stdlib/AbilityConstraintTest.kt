@@ -59,7 +59,7 @@ class AbilityConstraintTest {
         // Verifies an Encode-constrained helper can encode an arbitrary value
         // and ship it through the chainable HTTP request surface.
         val error = typeCheck("""
-            use std::effects::http::{HttpClient, PooledHttpClient, Method, request}
+            use std::effects::http::{ Method, request, HttpClient, PooledHttpClient }
             use std::codec::core::{Encode}
             use std::codec::json::{Json, JsonC, json_default, to_str}
             use std::collections::bytes
@@ -86,7 +86,7 @@ class AbilityConstraintTest {
     @Test
     fun `put with json body and ability constraint compiles`() {
         val error = typeCheck("""
-            use std::effects::http::{HttpClient, PooledHttpClient, Method, request}
+            use std::effects::http::{ Method, request, HttpClient, PooledHttpClient }
             use std::codec::core::{Encode}
             use std::codec::json::{Json, JsonC, json_default, to_str}
             use std::collections::bytes
@@ -113,7 +113,7 @@ class AbilityConstraintTest {
     @Test
     fun `patch with json body and ability constraint compiles`() {
         val error = typeCheck("""
-            use std::effects::http::{HttpClient, PooledHttpClient, Method, request}
+            use std::effects::http::{ Method, request, HttpClient, PooledHttpClient }
             use std::codec::core::{Encode}
             use std::codec::json::{Json, JsonC, json_default, to_str}
             use std::collections::bytes

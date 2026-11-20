@@ -496,6 +496,35 @@ public final class FilesystemNatives {
         }
     }
 
+    /**
+     * `read_chunk` for a body drained with NO handler in scope (`response_file`,
+     * written on the server thread). Answers the Bytes directly — empty at EOF —
+     * and RAISES on failure instead of answering an `Err`, because a chunk step
+     * is pure and can neither throw nor end the body honestly on an error.
+     */
+    @TruffleBoundary
+    public static Object streamRead(MezzeRecord args) {
+        MezzeFileHandle h = getHandle(args, "handle");
+        long maxBytes = getLong(args, "max_bytes");
+        if (h.isClosed()) {
+            throw new com.mezze.interpreter.values.MezzeGuestException(
+                "streamed file body: handle for " + h.path + " is closed");
+        }
+        try {
+            int cap = (int) Math.min(maxBytes, Integer.MAX_VALUE);
+            ByteBuffer buf = ByteBuffer.allocate(cap);
+            int n = h.channel.read(buf);
+            if (n <= 0) return new MezzeBytes(new byte[0]);
+            byte[] out = new byte[n];
+            buf.flip();
+            buf.get(out);
+            return new MezzeBytes(out);
+        } catch (IOException e) {
+            throw new com.mezze.interpreter.values.MezzeGuestException(
+                "streamed file body: read of " + h.path + " failed: " + e.getMessage());
+        }
+    }
+
     @TruffleBoundary
     public static Object writeChunk(MezzeRecord args) {
         MezzeFileHandle h = getHandle(args, "handle");

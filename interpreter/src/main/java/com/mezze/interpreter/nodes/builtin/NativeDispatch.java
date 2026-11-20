@@ -2932,11 +2932,7 @@ public final class NativeDispatch extends MezzeNode {
     private static void registerLogHandlers() {
         HANDLERS.put("__native_console_print", (r, c) -> LogNatives.consolePrint(r));
         HANDLERS.put("__native_console_println", (r, c) -> LogNatives.consolePrintln(r));
-        HANDLERS.put("__native_log_info", (r, c) -> LogNatives.logInfo(r));
-        HANDLERS.put("__native_log_warn", (r, c) -> LogNatives.logWarn(r));
-        HANDLERS.put("__native_log_error", (r, c) -> LogNatives.logError(r));
-        HANDLERS.put("__native_log_debug", (r, c) -> LogNatives.logDebug(r));
-        HANDLERS.put("__native_log_trace", (r, c) -> LogNatives.logTrace(r));
+        HANDLERS.put("__native_jvm_log", (r, c) -> LogNatives.jvmLog(r));
     }
 
     // ==================== Inspect ====================
@@ -3003,6 +2999,11 @@ public final class NativeDispatch extends MezzeNode {
         // Streaming
         HANDLERS.put("__native_fs_open",             (r, c) -> FilesystemNatives.open(r));
         HANDLERS.put("__native_fs_read_chunk",       (r, c) -> FilesystemNatives.readChunk(r));
+        // One native for both backends: the handle's class says which filesystem opened it.
+        HANDLERS.put("__native_fs_stream_read",      (r, c) ->
+            r.getField("handle") instanceof MemoryFilesystemNatives.MemFileHandle
+                ? MemoryFilesystemNatives.streamRead(r)
+                : FilesystemNatives.streamRead(r));
         HANDLERS.put("__native_fs_write_chunk",      (r, c) -> FilesystemNatives.writeChunk(r));
         HANDLERS.put("__native_fs_close",            (r, c) -> FilesystemNatives.close(r));
         HANDLERS.put("__native_fs_fsync",            (r, c) -> FilesystemNatives.fsync(r));
@@ -3427,9 +3428,6 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_codec_decode_record", (r, c) -> nativeCodecDecodeRecord(r));
 
         // === HTTP Mock ===
-        HANDLERS.put("__native_http_mock_request", (r, c) -> IONatives.httpMockRequest(r));
-        HANDLERS.put("__native_http_mock_set_response", (r, c) -> IONatives.httpMockSetResponse(r));
-        HANDLERS.put("__native_http_mock_clear", (r, c) -> IONatives.httpMockClear(r));
 
         // === HTTP Client ===
         HANDLERS.put("__native_http_client_create", (r, c) -> IONatives.httpClientCreate(r));
@@ -3444,6 +3442,10 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_http_server_port", (r, c) -> HttpServerNatives.httpServerPort(r));
         HANDLERS.put("__native_http_server_stop", (r, c) -> HttpServerNatives.httpServerStop(r));
         HANDLERS.put("__native_http_request_read_chunk", (r, c) -> HttpServerNatives.requestReadChunk(r));
+        // Helidon-free on purpose: buffering with no connection, so the browser build allows them.
+        HANDLERS.put("__native_http_sse_begin", (r, c) -> com.mezze.interpreter.nodes.builtin.io.SseNatives.begin(r));
+        HANDLERS.put("__native_http_sse_send",  (r, c) -> com.mezze.interpreter.nodes.builtin.io.SseNatives.send(r));
+        HANDLERS.put("__native_http_sse_end",   (r, c) -> com.mezze.interpreter.nodes.builtin.io.SseNatives.end(r));
 
         // === Database ===
         HANDLERS.put("__native_db_sqlite_scope_open", (r, c) -> DbNatives.dbSqliteScopeOpen(r));

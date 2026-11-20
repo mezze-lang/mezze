@@ -79,23 +79,16 @@ To enable this, implement: impl Shape for Int where { ... }
   Available impls: impl Shape for Square
 -->
 
-## With a name, or without
+## The target is a name
 
-Records and variants can be written inline rather than named, and the target
-of an `impl` is no different. This implements `Shape` for a bare record shape,
-with no alias anywhere:
+Records and variants can be written inline, but the target of an `impl` cannot:
+an impl has to be attributable to a declared type, so it names one. Implement
+`Shape` for a bare record shape and the compiler refuses:
 
-<!--mezze-editor
-use std::effects::log::{ Console, println }
-
-ability Shape for 'a where { area: { it: 'a } -> Int }
-
-# The target is the shape itself, written where the impl needs it.
-impl Shape for { w: Int, h: Int } where { area = { it } -> it.w * it.h }
-
-let main = {} -> perform Console in
-  println { msg = { w = 2, h = 5 }.area {}.to_str {} }
+<!--mezze-error
+error[V0701]: An ability impl must target a named type, but this one targets an inline record shape. Give the type a name with `type` or `newtype` and implement the ability for that name — an impl has to be attributable to a declared type.
 -->
+
 
 ## An alias is only a name
 

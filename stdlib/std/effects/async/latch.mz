@@ -2,13 +2,11 @@ use std::abilities::compare::{ Eq, Hash, structural_hash }
 use std::effects::async::{ Async, park, wait_on }
 use std::int
 
-## One-shot countdown barrier that releases waiting threads when count reaches zero.
+## One-shot countdown barrier; releases waiters when the count reaches zero.
 pub newtype Latch = __NativeLatch
 
-## Structural hash, paired with the `Eq` below.
-## `Eq` and `Hash` are written together or not at all: a hash container
-## buckets by one and compares by the other, so a value whose hash
-## disagrees with its equality is silently kept twice.
+# `Eq` and `Hash` are written together or not at all: a hash that disagrees
+# with equality makes a hash container keep a value twice.
 impl Hash for Latch where {
   hash: { it: Latch } -> Int = { it } -> structural_hash { it = it }
 }
@@ -24,8 +22,7 @@ impl Latch where {
   await_timeout = { it, ms } -> await_latch_timeout { latch = it, ms = ms },
   get_count = { it } -> get_count { latch = it },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
+  # dot-chain parity: so `x.op {}` works for every receiver-taking free function.
   await_latch = { it } -> await_latch { latch = it },
   await_latch_async = { it } -> await_latch_async { latch = it },
   await_latch_timeout = { it, ms } -> await_latch_timeout { latch = it, ms = ms },
@@ -46,7 +43,7 @@ pub let await_latch: { latch: Latch } -> {} <Async> = { latch } ->
 pub let await_latch_async: { latch: Latch } -> {} <Async, ...> = { latch } ->
   park { predicate = wait_on { on = latch, test = {} -> __native_latch_get_count { latch = latch } == 0 } }
 
-## Wait until count reaches zero or timeout expires. Returns True if released.
+## Wait for zero or the timeout; True if released.
 pub let await_latch_timeout: { latch: Latch, ms: Int } -> Bool <Async> = { latch, ms } ->
   __native_latch_await_timeout { latch = latch, ms = ms }
 

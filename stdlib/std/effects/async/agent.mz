@@ -1,13 +1,11 @@
 use std::abilities::compare::{ Eq, Hash, structural_hash }
 use std::effects::async::{ Async }
 
-## Serialized async state agent -- actions are queued and applied one at a time.
+## Async state agent: queued actions are applied one at a time.
 pub newtype Agent 'a = __NativeAgent
 
-## Structural hash, paired with the `Eq` below.
-## `Eq` and `Hash` are written together or not at all: a hash container
-## buckets by one and compares by the other, so a value whose hash
-## disagrees with its equality is silently kept twice.
+# `Eq` and `Hash` are written together or not at all: a hash that disagrees
+# with equality makes a hash container keep a value twice.
 impl Hash for Agent 'a where {
   hash: { it: Agent 'a } -> Int = { it } -> structural_hash { it = it }
 }
@@ -29,8 +27,7 @@ impl Agent 'a where {
   restart = { it, val } -> restart_agent { agent = it, val = val },
   set_error_handler = { it, handler } -> set_error_handler { agent = it, handler = handler },
 
-  ## dot-chain parity: inherent method for every receiver-taking free
-  ## function not already covered by an ability, so `x.op {}` works.
+  # dot-chain parity: so `x.op {}` works for every receiver-taking free function.
   deref_agent = { it } -> deref_agent { agent = it },
   await_agent = { it } -> await_agent { agent = it },
   await_agent_timeout = { it, timeout_ms } -> await_agent_timeout { agent = it, timeout_ms = timeout_ms },

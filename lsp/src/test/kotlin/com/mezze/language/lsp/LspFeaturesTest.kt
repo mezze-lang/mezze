@@ -74,7 +74,10 @@ class LspFeaturesTest {
     @AfterEach
     fun tearDown() {
         try { server.shutdown().get(2, TimeUnit.SECONDS) } catch (_: Throwable) {}
-        try { server.exit() } catch (_: Throwable) {}
+        // No `exit`: the server is IN-PROCESS here, and `exit` ends the process (LSP spec;
+        // MezzeLanguageServer.exit is System.exit(0)). It killed the test JVM after
+        // whichever test tore down first, so most of the class silently never ran —
+        // with exit code 0, so Gradle reported success on 12–40 of 135 tests.
         try { sIn.close() } catch (_: Throwable) {}
         try { sOut.close() } catch (_: Throwable) {}
         executor.shutdownNow()
@@ -3525,8 +3528,8 @@ class LspFeaturesTest {
     @Test
     fun `dot-parens on a transparent alias surfaces the alias-vs-newtype diagnostic`() {
         val (uri, _) = openSingleFile("""
-            type MyInt = Int
-            let y = {} -> MyInt.(42)
+            type Handler = { x: Int } -> Int
+            let y = {} -> Handler.({ x } -> x)
         """.trimIndent())
         val diags = client.awaitDiagnostics(uri, 5_000)?.diagnostics ?: emptyList()
         val hit = diags.firstOrNull { it.message.contains("transparent type alias") }
