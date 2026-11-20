@@ -87,6 +87,10 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
 
     @Test
     fun `iter stages and consumers are resumable too`() {
+        // Since main's rule that effects live on arrows, never on data, an Iter STAGE
+        // callback is pure (`map` stores it for a later pull); the await belongs in the
+        // SINK, which runs during the call and keeps its row. The point here is unchanged:
+        // the consumer pulls through the cursor chain when its callback may suspend.
         accepts(
             """
             $imports
@@ -95,7 +99,7 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
             use std::result
             pub let main = {} -> perform SystemTime, CoopAsync in do
               let ps = seq::map { xs = [1, 2], f = { x } -> Async.spawn { f = {} -> x * 10 } }
-              let total = iter::fold { it = iter::map { it = iter::from_seq { xs = ps }, f = { x } -> result::get_or { result = await { p = x }, def = 0 } }, init = 0, f = { acc, x } -> acc + x }
+              let total = iter::fold { it = iter::map { it = iter::from_seq { xs = ps }, f = { x } -> x }, init = 0, f = { acc, x } -> acc + result::get_or { result = await { p = x }, def = 0 } }
               {}
             """,
             "the consumer pulls through resumable cursors when the chain may suspend",

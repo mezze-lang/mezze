@@ -343,11 +343,13 @@ class CoopAsyncSchedulerTest {
         """)),
     )
 
-    /** C4 for iter: consumers pull through resumable cursors when a callback in the
-     *  chain or their own may suspend. Each stage kind keeps its own pending step. */
+    /** C4 for iter: a SINK's callback may await (its row is `<...>`), and the consumer pulls
+     *  through the cursor chain while it does. Stage callbacks (`map`, `filter`, `take_while`)
+     *  are pure by main's rule — an effect belongs to the arrow that performs it, never to data
+     *  — so the awaits live in the sinks: fold, any, all, find. */
     @Test
-    fun `iter chains resume after awaits in any stage - map, filter, take_while, fold`() = assertEquals(
-        listOf("fold=60", "seq=[20, 30]", "tw=[10]", "count=2", "find=Some { val = 30 }", "flat=[10, 20, 30]"),
+    fun `iter sinks resume after awaits in their callbacks - fold, any, all, find`() = assertEquals(
+        listOf("fold=60", "any=True", "all=True", "find=30"),
         lines(program(imports, """
             use std::collections::iter
             let settled = { p } -> result::get_or { result = await { p = p }, def = -1 }
@@ -356,12 +358,12 @@ class CoopAsyncSchedulerTest {
                 yield_now {}
                 x } }
               let it = {} -> iter::from_seq { xs = ps }
-              println { msg = "fold=${'$'}((iter::fold { it = iter::map { it = it {}, f = { x } -> settled { p = x } }, init = 0, f = { acc, x } -> acc + x }).to_str {})" }
-              println { msg = "seq=${'$'}((iter::to_seq { it = iter::filter { it = iter::map { it = it {}, f = { x } -> settled { p = x } }, p = { x } -> x > 15 } }).to_dbg {})" }
-              println { msg = "tw=${'$'}((iter::to_seq { it = iter::take_while { it = iter::map { it = it {}, f = { x } -> settled { p = x } }, p = { x } -> x < 15 } }).to_dbg {})" }
-              println { msg = "count=${'$'}((iter::count { it = iter::filter { it = it {}, p = { x } -> settled { p = x } > 15 } }).to_str {})" }
-              println { msg = "find=${'$'}((iter::find { it = it {}, p = { x } -> settled { p = x } == 30 }).map { f = { val } -> settled { p = val } }.to_dbg {})" }
-              println { msg = "flat=${'$'}((iter::to_seq { it = iter::flat_map { it = it {}, f = { x } -> iter::from_seq { xs = [settled { p = x }] } } }).to_dbg {})" }
+              println { msg = "fold=${'$'}((iter::fold { it = it {}, init = 0, f = { acc, x } -> acc + settled { p = x } }).to_str {})" }
+              println { msg = "any=${'$'}((iter::any { it = it {}, p = { x } -> settled { p = x } > 25 }).to_dbg {})" }
+              println { msg = "all=${'$'}((iter::all { it = it {}, p = { x } -> settled { p = x } > 5 }).to_dbg {})" }
+              println { msg = "find=${'$'}(match iter::find { it = it {}, p = { x } -> settled { p = x } == 30 } is
+                Some { val } -> (settled { p = val }).to_str {}
+                None -> "none")" }
         """)),
     )
 

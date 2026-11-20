@@ -6,6 +6,12 @@ use std::effects::async::{ Async, park, wait_on }
 ## Transactional variable -- can only be read/written inside STM transactions.
 pub newtype TVar 'a = __NativeTVar
 
+## The wait queue every transaction that `retry`s parks on; a commit signals it. Nominal so
+## `wait_on`'s polymorphic `on` is bound here (elaboration ends knowing its type) and so
+## nothing but this module can hand the queue around.
+pub newtype StmQueue = __NativeStmQueue
+let stm_queue: {} -> StmQueue = {} -> __native_stm_queue {}
+
 # `Eq` and `Hash` are written together or not at all: a hash disagreeing with
 # equality makes hash containers keep a value twice.
 ## Structural hash, paired with the type's `Eq`.
@@ -113,7 +119,7 @@ pub let atomically: { f: {} -> 'a <STM> } -> 'a <Async, ...> = { f } -> do
   let result = perform OptimisticSTM in __native_stm_atomic { f = f }
   match __native_stm_check_and_clear_retry_flag {} is
     True -> do
-      park { predicate = wait_on { on = __native_stm_queue {}, test = {} -> __native_stm_read_set_changed {} } }
+      park { predicate = wait_on { on = stm_queue {}, test = {} -> __native_stm_read_set_changed {} } }
       atomically { f = f }
     False -> result
 

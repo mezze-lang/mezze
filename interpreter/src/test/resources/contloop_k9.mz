@@ -70,7 +70,7 @@ let await_of = { x } -> result::get_or { result = await { p = Async.spawn { f = 
 let k_loop_seq = { n } -> perform CoopAsync in outer { b = n / m, acc = 0,
   body = { acc } -> seq::fold { xs = xs, init = acc, f = { acc, x } -> acc + await_of { x = x } } }
 let k_loop_iter = { n } -> perform CoopAsync in outer { b = n / m, acc = 0,
-  body = { acc } -> iter::fold { it = iter::map { it = iter::from_seq { xs = xs }, f = { x } -> await_of { x = x } }, init = acc, f = { acc, x } -> acc + x } }
+  body = { acc } -> iter::fold { it = iter::from_seq { xs = xs }, init = acc, f = { acc, x } -> acc + await_of { x = x } } }
 let k_loop_list = { n } -> perform CoopAsync in outer { b = n / m, acc = 0,
   body = { acc } -> list::fold_left { xs = lst, init = acc, f = { acc, x } -> acc + await_of { x = x } } }
 
