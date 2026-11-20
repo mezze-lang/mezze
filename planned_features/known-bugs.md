@@ -8158,3 +8158,54 @@ variant/record sweep against effects, as asked.
 Tests: `AbilityEffectSpecRowTest` BUG 61 section (variant, Option, list, plus
 the pure mirror); all 4 fail without the fix. Gates for the batch (43, 50
 group_by, 61): typechecker 5466/0, interpreter 8182/0.
+
+## BUG 62 — FIXED 2026-11-20: an `Iter` built inside a `perform` ran its effects AFTER the scope ended — `<suspended <hash>>` reached stdout
+
+```mezze
+let main = {} -> perform Console in do
+  let it = perform Ticker in map { it = from_seq { xs = [1, 2] }, f = { x } -> Tick.tick {} }
+  for_each { it = it, f = { x } -> println { msg = x } }
+```
+
+ACCEPTED, and printed `<suspended <3e20febf…>>` twice. `map` does not run `f`; it
+stores it for a later pull. But its signature `… f: {x} -> 'b <...> } -> Iter 'b <...>`
+charged `f`'s row to the `map` CALL, so `perform Ticker` "handled" Tick and the
+returned `Iter Str` carried no trace of it. The pull in `for_each` then ran Tick
+with no handler; the runtime answered a suspension (its lazy-effects model) and
+interpolation rendered it. Five stdlib sources had the same shape
+(`lines_of`, `watch_events`, download `chunks_of`, `response_file`'s body,
+`map_concurrent_lazy`); BUG 28's notes had already observed that `unfold`
+"attributes a step's effects to the construction site".
+
+**Decision (user):** an effect belongs to the ARROW that performs it, never to a
+data type — so there is no honest row for a lazy stage's callback. Stage and
+source callbacks (`map`, `filter`, `flat_map`, `take_while`, `drop_while`,
+`unfold`) are now PURE; sink callbacks (`for_each`, `fold`, `any`, …) keep
+`<...>` because they run during the call. An effectful lazy source is a
+FUNCTION taking the consumer as a fold: `lines { handle, chunk_bytes, init, f }`,
+`with_lines`, `watch`, `chunks { reader, chunk_bytes, init, f }`,
+`fold_concurrent_ordered { it, f, max_in_flight, init, step }`; `with_download`
+hands `f` the `reader`. `response_file` reads its handle through
+`__native_fs_stream_read` (local or memfs handle; raises on failure) because the
+body is drained on the server thread with no handler chain. Early stop is the
+consumer's `return` (`std::effects::early_return`). Rejected: a row on `Iter`
+(`Iter 'a <e>`), a `Stream` type, `Emit`-handler operators, `Continue/Stop`.
+
+**Second hole, same root:** a WRITTEN bare `<...>` with no callback to carry
+from is a wildcard — `let g: {} -> Int <...> = {} -> Tick.tick {}` emitted
+`g : {} -> Int`, and an annotated `{} -> Thunk Str <*>` over
+`type Thunk 'a = { run: {} -> 'a <...> }` dropped Tick from the field (inference
+alone tracked it). Now T0210 "nothing to carry from", with record/newtype/variant
+aliases expanded and the returned type compared against the inferred one.
+
+**Runtime backstop:** a `MezzeSuspend` reaching string interpolation,
+`to_str`/`to_dbg`, or the program's result is I0004 naming the operation
+(`MezzeSuspend.observedAsValue`), never text. `MezzeLanguage` used to keep the
+suspension at the top level "so the user sees it explicitly".
+
+Tests: `IterStageCallbacksArePureTest` (typechecker, 10), `BareOpenRowOnADeclSpecTest`
+now expects T0210, `SuspendedValueNeverObservableTest`, `RuntimeEffectValidationTest`
+(5 tests flipped from "returns MezzeSuspend" to "fails loudly"), `IterSourcesTest`,
+`IterCursorTest`, `HttpStreamed*Test` rewritten to the fold shape.
+Gates: typechecker 5480/0, interpreter 7631/0 + 556/0 timing, cli 360/0,
+langservice 86/0, lsp 135/0, formatter 187/0; website 126/0 against a rebuilt WASM.

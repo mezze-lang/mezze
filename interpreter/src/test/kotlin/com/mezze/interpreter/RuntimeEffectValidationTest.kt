@@ -3,20 +3,29 @@ package com.mezze.interpreter
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
-import com.mezze.interpreter.values.MezzeSuspend
 
 /**
  * Tests for runtime effect validation behavior.
  * Migrated from V1 to V2 with unboxed values.
  *
- * In V2, unhandled effects result in MezzeSuspend values that can be
- * checked for which effects are not yet handled.
+ * An effect performed with no handler must never reach the host as a value
+ * (a suspended computation is runtime plumbing). Such a program is refused by
+ * the type checker (V0501 for `main`); if one runs anyway, it fails loudly with
+ * an internal error naming the operation — never a `MezzeSuspend` result.
  */
 class RuntimeEffectValidationTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
 
+    private fun assertUnhandledFailsLoudly(source: String, op: String) {
+        val outcome = runCatching { eval(source) }
+        val message = outcome.exceptionOrNull()?.message
+            ?: fail<Nothing>("expected a loud failure, got the value: ${outcome.getOrNull()}")
+        assertFalse(message.contains("<suspended"), "a suspension leaked into the message: $message")
+        assertTrue(message.contains("Effect operation `$op` ran with no handler in scope"), "unexpected failure: $message")
+    }
+
     @Test
-    fun testUnhandledEffectReturnsSuspended() {
+    fun testUnhandledEffectFailsLoudly() {
         val source = """
             effect Log where {
               print : {msg: Str} -> {} <Log>
@@ -34,19 +43,7 @@ class RuntimeEffectValidationTest {
             effectfulFunc {x = 5}
         """.trimIndent()
 
-        val result = eval(source)
-
-        // Result should be a suspended computation
-        assertTrue(result is MezzeSuspend, "Result should be MezzeSuspend but was ${result::class.simpleName}")
-        val suspended = result as MezzeSuspend
-
-        // Should have exactly one unhandled effect (identified by content hash)
-        assertEquals(1, suspended.unhandledEffects.size,
-            "Should have exactly one unhandled effect but was ${suspended.unhandledEffects}")
-        // Verify it's a valid content hash (128 hex characters for SHA3-512)
-        val effectHash = suspended.unhandledEffects.first()
-        assertTrue(effectHash.hex.length == 128 && effectHash.hex.all { it in '0'..'9' || it in 'a'..'f' },
-            "Unhandled effect should be a content hash but was $effectHash")
+        assertUnhandledFailsLoudly(source, "print")
     }
 
     @Test
@@ -73,7 +70,7 @@ class RuntimeEffectValidationTest {
     }
 
     @Test
-    fun testMultipleUnhandledEffectsReturnsSuspended() {
+    fun testMultipleUnhandledEffectsFailLoudly() {
         val source = """
             effect Log where {
               print : {msg: Str} -> {} <Log>
@@ -101,24 +98,11 @@ class RuntimeEffectValidationTest {
             multiEffectFunc {x = 10}
         """.trimIndent()
 
-        val result = eval(source)
-
-        // Result should be a suspended computation
-        assertTrue(result is MezzeSuspend, "Result should be MezzeSuspend but was ${result::class.simpleName}")
-        val suspended = result as MezzeSuspend
-
-        // Should have at least one unhandled effect (identified by content hash)
-        assertTrue(suspended.unhandledEffects.isNotEmpty(),
-            "Should have at least one unhandled effect but was empty")
-        // Verify all are valid content hashes
-        suspended.unhandledEffects.forEach { hash ->
-            assertTrue(hash.hex.length == 128 && hash.hex.all { it in '0'..'9' || it in 'a'..'f' },
-                "Unhandled effect should be a content hash but was $hash")
-        }
+        assertUnhandledFailsLoudly(source, "print")
     }
 
     @Test
-    fun testPartiallyHandledEffectsReturnsSuspended() {
+    fun testPartiallyHandledEffectsFailLoudlyOnTheUnhandledOne() {
         val source = """
             effect Log where {
               print : {msg: Str} -> {} <Log>
@@ -145,19 +129,7 @@ class RuntimeEffectValidationTest {
             perform Console in multiEffectFunc {x = 10}
         """.trimIndent()
 
-        val result = eval(source)
-
-        // Result should be a suspended computation with Random unhandled
-        assertTrue(result is MezzeSuspend, "Result should be MezzeSuspend but was ${result::class.simpleName}")
-        val suspended = result as MezzeSuspend
-
-        // Should have exactly one unhandled effect (Random's content hash - Log was handled)
-        assertEquals(1, suspended.unhandledEffects.size,
-            "Should have exactly one unhandled effect (Random) but was ${suspended.unhandledEffects}")
-        // Verify it's a valid content hash
-        val effectHash = suspended.unhandledEffects.first()
-        assertTrue(effectHash.hex.length == 128 && effectHash.hex.all { it in '0'..'9' || it in 'a'..'f' },
-            "Unhandled effect should be a content hash but was $effectHash")
+        assertUnhandledFailsLoudly(source, "nextInt")
     }
 
     @Test
@@ -205,7 +177,7 @@ class RuntimeEffectValidationTest {
     }
 
     @Test
-    fun testNestedEffectfulFunctionValidation() {
+    fun testNestedEffectfulFunctionFailsLoudly() {
         val source = """
             effect Log where {
               print : {msg: Str} -> {} <Log>
@@ -227,22 +199,11 @@ class RuntimeEffectValidationTest {
             outerFunc {y = 5}
         """.trimIndent()
 
-        val result = eval(source)
-
-        // Result should be a suspended computation
-        assertTrue(result is MezzeSuspend, "Result should be MezzeSuspend but was ${result::class.simpleName}")
-        val suspended = result as MezzeSuspend
-
-        // Should have exactly one unhandled effect (identified by content hash)
-        assertEquals(1, suspended.unhandledEffects.size,
-            "Should have exactly one unhandled effect but was ${suspended.unhandledEffects}")
-        val effectHash = suspended.unhandledEffects.first()
-        assertTrue(effectHash.hex.length == 128 && effectHash.hex.all { it in '0'..'9' || it in 'a'..'f' },
-            "Unhandled effect should be a content hash but was $effectHash")
+        assertUnhandledFailsLoudly(source, "print")
     }
 
     @Test
-    fun testEffectValidationInPartialApplication() {
+    fun testPartialApplicationOfEffectfulFunctionFailsLoudly() {
         val source = """
             effect Log where {
               print : {msg: Str} -> {} <Log>
@@ -261,17 +222,6 @@ class RuntimeEffectValidationTest {
             partialFunc {y = 3}
         """.trimIndent()
 
-        val result = eval(source)
-
-        // Result should be a suspended computation
-        assertTrue(result is MezzeSuspend, "Result should be MezzeSuspend but was ${result::class.simpleName}")
-        val suspended = result as MezzeSuspend
-
-        // Should have exactly one unhandled effect (identified by content hash)
-        assertEquals(1, suspended.unhandledEffects.size,
-            "Should have exactly one unhandled effect but was ${suspended.unhandledEffects}")
-        val effectHash = suspended.unhandledEffects.first()
-        assertTrue(effectHash.hex.length == 128 && effectHash.hex.all { it in '0'..'9' || it in 'a'..'f' },
-            "Unhandled effect should be a content hash but was $effectHash")
+        assertUnhandledFailsLoudly(source, "print")
     }
 }

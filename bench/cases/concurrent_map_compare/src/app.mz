@@ -2,7 +2,7 @@
 ## `map_concurrent` worth building?
 ##
 ## The question only has a measurable half. For a source that CANNOT be
-## materialised — an endless `watch_events`, a paginated API whose page N+1
+## materialised — an endless `watch`, a paginated API whose page N+1
 ## needs page N — `chunk_fold` and `par_map` are both unusable, because
 ## chunking needs the whole sequence up front. That is a capability gap and no
 ## benchmark decides it.

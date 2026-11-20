@@ -2999,6 +2999,11 @@ public final class NativeDispatch extends MezzeNode {
         // Streaming
         HANDLERS.put("__native_fs_open",             (r, c) -> FilesystemNatives.open(r));
         HANDLERS.put("__native_fs_read_chunk",       (r, c) -> FilesystemNatives.readChunk(r));
+        // One native for both backends: the handle's class says which filesystem opened it.
+        HANDLERS.put("__native_fs_stream_read",      (r, c) ->
+            r.getField("handle") instanceof MemoryFilesystemNatives.MemFileHandle
+                ? MemoryFilesystemNatives.streamRead(r)
+                : FilesystemNatives.streamRead(r));
         HANDLERS.put("__native_fs_write_chunk",      (r, c) -> FilesystemNatives.writeChunk(r));
         HANDLERS.put("__native_fs_close",            (r, c) -> FilesystemNatives.close(r));
         HANDLERS.put("__native_fs_fsync",            (r, c) -> FilesystemNatives.fsync(r));

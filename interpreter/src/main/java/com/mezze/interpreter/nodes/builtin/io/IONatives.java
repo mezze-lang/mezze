@@ -921,9 +921,8 @@ public final class IONatives {
      * a chunk smaller than `max_bytes` is ordinary. Only 0 or -1 ends it.
      *
      * Reading a CLOSED download is an error that names itself, not an empty
-     * answer. `with_lines` settled this shape for files: "an Iter returned FROM
-     * the callback would be reading a closed handle, which reports
-     * FsClosedHandle rather than silently yielding nothing."
+     * answer. `lines` settled this shape for files: a read on a closed handle
+     * reports FsClosedHandle rather than silently answering nothing.
      */
     @TruffleBoundary
     public static Object httpStreamRead(MezzeRecord args) {

@@ -1,4 +1,5 @@
 ## Lazy `Iter`: stages build descriptors and nothing runs until a sink walks the chain.
+## Stage and source callbacks are pure; effects go in sink callbacks (`for_each`, `fold`, ...).
 ## Prefer a collection's own HOFs; use `Iter` across collections, for Map/SortedMap, or user sources.
 use std::int
 # `unfold` sources fuse at JIT time through Truffle partial evaluation.
@@ -28,10 +29,12 @@ pub let from_seq: { xs: ['a] } -> Iter 'a = { xs } ->
 pub let from_list: { xs: List 'a } -> Iter 'a = { xs } ->
   __native_iter_from_list { xs = xs }
 
-## Build an iterator from an initial `state` and a `step` function returning a `Step`.
+## Build an iterator from an initial `state` and a pure `step` function returning a `Step`.
+# Stage and source callbacks are PURE: they run later, when a sink pulls, so an effect in one
+# would run outside the `perform` the checker charged it to. Effects belong in sink callbacks.
 pub let unfold
-  : { state: 's, step: { s: 's } -> Step 'a 's <...> }
-  -> Iter 'a <...>
+  : { state: 's, step: { s: 's } -> Step 'a 's }
+  -> Iter 'a
   = { state, step } -> __native_iter_unfold { state = state, step = step }
 
 ## Single-element iterator.
@@ -45,11 +48,11 @@ pub let empty: {} -> Iter 'a = {} ->
 # Stages (lazy — return Iter)
 
 ## Applies `f` lazily to each element. Deferred until a sink runs.
-pub let map: { it: Iter 'a, f: { x: 'a } -> 'b <...> } -> Iter 'b <...> = { it, f } ->
+pub let map: { it: Iter 'a, f: { x: 'a } -> 'b } -> Iter 'b = { it, f } ->
   __native_iter_map { it = it, f = f }
 
 ## Keeps only elements for which `p` returns True. Deferred until a sink runs.
-pub let filter: { it: Iter 'a, p: { x: 'a } -> Bool <...> } -> Iter 'a <...> = { it, p } ->
+pub let filter: { it: Iter 'a, p: { x: 'a } -> Bool } -> Iter 'a = { it, p } ->
   __native_iter_filter { it = it, p = p }
 
 ## Takes the first `n` elements from the iterator (lazy).
@@ -62,12 +65,12 @@ pub let drop: { it: Iter 'a, n: Int } -> Iter 'a = { it, n } ->
 
 ## Takes elements while `p` holds.
 pub let take_while
-  : { it: Iter 'a, p: { x: 'a } -> Bool <...> } -> Iter 'a <...>
+  : { it: Iter 'a, p: { x: 'a } -> Bool } -> Iter 'a
   = { it, p } -> __native_iter_take_while { it = it, p = p }
 
 ## Drops elements while `p` holds, then yields the rest.
 pub let drop_while
-  : { it: Iter 'a, p: { x: 'a } -> Bool <...> } -> Iter 'a <...>
+  : { it: Iter 'a, p: { x: 'a } -> Bool } -> Iter 'a
   = { it, p } -> __native_iter_drop_while { it = it, p = p }
 
 ## Pairs each element with its 0-based index.
@@ -84,7 +87,7 @@ pub let zip: { a: Iter 'a, b: Iter 'b } -> Iter { fst: 'a, snd: 'b } = { a, b } 
 
 ## Applies `f` to each element, flattening the resulting iterators.
 pub let flat_map
-  : { it: Iter 'a, f: { x: 'a } -> Iter 'b <...> } -> Iter 'b <...>
+  : { it: Iter 'a, f: { x: 'a } -> Iter 'b } -> Iter 'b
   = { it, f } -> __native_iter_flat_map { it = it, f = f }
 
 # Cursors (pull, resumable)
@@ -97,8 +100,8 @@ pub newtype IterCursor 'a = __NativeIterCursor
 pub let cursor: { it: Iter 'a } -> IterCursor 'a = { it } ->
   __native_iter_cursor { it = it }
 
-## Pull the next element, or `None` once exhausted; runs the pipeline's stages and their effects.
-pub let cursor_next: { c: IterCursor 'a } -> Option 'a <...> = { c } ->
+## Pull the next element, or `None` once exhausted.
+pub let cursor_next: { c: IterCursor 'a } -> Option 'a = { c } ->
   __native_iter_cursor_next { cursor = c }
 
 

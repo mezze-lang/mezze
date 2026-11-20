@@ -200,6 +200,90 @@ internal class AnnotationValidator(
         else -> false
     }
 
+    /**
+     * Does [type] contain a function whose own effect row satisfies [pred]?
+     *
+     * Unlike [hasBareOpenRow] this EXPANDS record aliases through the registry,
+     * so a field such as `SelectBranch`'s `{} -> 'a <...>` is seen. Aliases are
+     * walked once each ([seen]) so a recursive type terminates.
+     */
+    private fun containsRow(
+        type: MezzeType,
+        seen: MutableSet<String> = HashSet(),
+        pred: (MezzeType.EffectRow) -> Boolean,
+    ): Boolean = when (type) {
+        is MezzeType.FunctionType -> {
+            val row = type.effects
+            (row != null && pred(row)) ||
+                containsRow(type.paramType, seen, pred) || containsRow(type.returnType, seen, pred)
+        }
+        is MezzeType.RecordType -> type.fields.values.any { containsRow(it, seen, pred) }
+        is MezzeType.VariantType -> type.constructors.values.filterNotNull().any { containsRow(it, seen, pred) }
+        is MezzeType.TypeApplication -> type.args.any { containsRow(it, seen, pred) } || aliasFieldsContainRow(type, seen, pred)
+        else -> false
+    }
+
+    private fun aliasFieldsContainRow(
+        type: MezzeType.TypeApplication,
+        seen: MutableSet<String>,
+        pred: (MezzeType.EffectRow) -> Boolean,
+    ): Boolean {
+        if (!seen.add(type.constructor)) return false
+        return declaredParts(type.constructor).any { ann ->
+            val t = runCatching { publicAnnToMezze(ann) }.getOrNull()
+            t != null && containsRow(t, seen, pred)
+        }
+    }
+
+    /** The type annotations a declared type is made of: record fields, a newtype's wrapped type, variant payloads. */
+    private fun declaredParts(constructor: String): List<ParsedTypeAnnotation> =
+        when (val def = registry.typeDeclarations[constructor]?.definition) {
+            is ParsedRecordDef -> def.fields.map { it.type }
+            is ParsedNewtypeDef -> listOf(def.wrappedType)
+            is ParsedVariantDef -> def.constructors.mapNotNull { it.dataType }
+            else -> emptyList()
+        }
+
+    /**
+     * Walk an annotated type and the inferred type side by side and report the
+     * first function whose annotated row is a BARE `<...>` while the inferred
+     * one performs named effects: that `<...>` would DROP them. Returns the
+     * dropped names, or null.
+     *
+     * Only shapes that can be paired are compared; anything else is left alone,
+     * so this never refuses a program over a shape it cannot see.
+     */
+    private fun droppedByBareRow(ann: MezzeType, inf: MezzeType, seen: MutableSet<String> = HashSet()): Set<String>? {
+        val inferred = inf
+        return when {
+            ann is MezzeType.FunctionType && inferred is MezzeType.FunctionType -> {
+                val row = ann.effects
+                val performed = inferred.effects?.allEffectNames ?: emptySet()
+                if (row != null && row.isOpen && row.allEffectNames.isEmpty() && performed.isNotEmpty()) performed
+                else droppedByBareRow(ann.paramType, inferred.paramType, seen)
+                    ?: droppedByBareRow(ann.returnType, inferred.returnType, seen)
+            }
+            ann is MezzeType.RecordType && inferred is MezzeType.RecordType ->
+                ann.fields.entries.firstNotNullOfOrNull { (name, t) ->
+                    inferred.fields[name]?.let { droppedByBareRow(t, it, seen) }
+                }
+            ann is MezzeType.TypeApplication && inferred is MezzeType.RecordType -> {
+                if (!seen.add(ann.constructor)) null
+                else {
+                    val def = registry.typeDeclarations[ann.constructor]?.definition as? ParsedRecordDef
+                    def?.fields?.firstNotNullOfOrNull { f ->
+                        val annField = runCatching { publicAnnToMezze(f.type) }.getOrNull()
+                        val infField = inferred.fields[f.name]
+                        if (annField != null && infField != null) droppedByBareRow(annField, infField, seen) else null
+                    }
+                }
+            }
+            ann is MezzeType.TypeApplication && inferred is MezzeType.TypeApplication && ann.constructor == inferred.constructor ->
+                ann.args.zip(inferred.args).firstNotNullOfOrNull { (a, i) -> droppedByBareRow(a, i, seen) }
+            else -> null
+        }
+    }
+
     fun validateEffectsNotOverpromised(
         annotationType: MezzeType,
         inferredType: MezzeType,
@@ -207,6 +291,40 @@ internal class AnnotationValidator(
         sourceLoc: Loc? = null
     ) {
         if (annotationType is MezzeType.FunctionType && inferredType is MezzeType.FunctionType) {
+            // A bare `<...>` means "the effects of this function's callbacks, carried
+            // through". With no parameter that is a function with an open row there is
+            // nothing to carry FROM, and the row degrades to a wildcard: the body's
+            // effects are dropped at the declaration (`let g: {} -> Int <...> = {} ->
+            // Tick.tick {}` emitted `g : {} -> Int`, so a pure caller got through).
+            // The same wildcard hides in a RETURNED type whose field carries `<...>` —
+            // a record alias like `{ run: {} -> 'a <...> }` built inside a `perform`
+            // and pulled after it. Refuse the spelling; the fix is always to write
+            // the effects or drop the row.
+            val ownRow = annotationType.effects
+            val ownBare = ownRow != null && ownRow.isOpen && ownRow.allEffectNames.isEmpty()
+            val carrierInParams = containsRow(annotationType.paramType) { it.isOpen }
+            if (!carrierInParams) {
+                val performed = inferredType.effects?.allEffectNames ?: emptySet()
+                val dropped = if (ownBare) performed
+                    else droppedByBareRow(annotationType.returnType, inferredType.returnType) ?: emptySet()
+                if (ownBare || dropped.isNotEmpty()) {
+                    val where = if (ownBare) "" else " inside the returned type"
+                    throw TypeCheckError(
+                        "Type annotation for '$varName' has a `<...>`$where with nothing to carry from. " +
+                            "`<...>` means \"the effects of this function's callbacks\", and no parameter here is " +
+                            "a function with an open row, so the row would drop" +
+                            (if (dropped.isNotEmpty()) " ${dropped.joinToString(", ")}, which the body performs." else " whatever the body performs."),
+                        sourceLoc,
+                        code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
+                        hints = listOf(
+                            if (dropped.isNotEmpty()) "write the effects: `<${dropped.joinToString(", ")}>`"
+                            else "drop the row if the body performs nothing",
+                            "a callback whose effects should flow out is declared on the PARAMETER: `{ f: {} -> 'a <...> } -> 'a <...>`",
+                        ),
+                    )
+                }
+            }
+
             val annotatedEffects = annotationType.effects?.allEffectNames ?: emptySet()
             val inferredEffects = inferredType.effects?.allEffectNames ?: emptySet()
 

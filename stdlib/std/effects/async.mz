@@ -407,46 +407,24 @@ pub let map_concurrent
     seq::concat { xs = final.done, ys = all { ps = final.window } }
 
 
-# A CURSOR, because a push walk can't hand out an element and resume. Each step tops the
-# window up, then awaits and yields the OLDEST; `Skip` is never needed.
-## Like `map_concurrent` but answers a lazy `Iter`, in source order; works on endless sources.
-## Costlier than `map_concurrent`; use it only when the output must stream.
-pub let map_concurrent_lazy
-  : { it: Iter 'a, f: { x: 'a } -> 'b <...>, max_in_flight: Int }
-  -> Iter (Result 'b AsyncError) <Async, ...>
-  = { it, f, max_in_flight } -> iter::unfold {
-    state = { c = iter::cursor { it = it }, window = [], drained = False },
-    step = { s } -> do
-      # Top the window up first, so the limit is what is in flight rather
-      # than what has been asked for.
-      let filled = fill_window { c = s.c, window = s.window, drained = s.drained, f = f, want = max_in_flight }
-      match seq::first { xs = filled.window } is
-        None -> Done
-        Some { val = oldest } -> Yield {
-          val = await { p = oldest },
-          next = { c = s.c, window = seq::tail { xs = filled.window }, drained = filled.drained },
-        }
-  }
-
-
-# Separate because `unfold`'s step is one expression and this needs to loop.
-## Pull from the cursor until the window holds `want` promises or the source
-## runs out.
-let fill_window
-  : { c: IterCursor 'a, window: [Promise 'b], drained: Bool, f: { x: 'a } -> 'b <...>, want: Int }
-  -> { window: [Promise 'b], drained: Bool } <Async, ...>
-  = { c, window, drained, f, want } ->
-    if drained then { window = window, drained = True }
-    else if seq::size { xs = window } >= want then { window = window, drained = False }
-    else match iter::cursor_next { c = c } is
-      None -> { window = window, drained = True }
-      Some { val = x } -> fill_window {
-        c = c,
-        window = seq::push { xs = window, x = Async.spawn { f = {} -> f { x = x } } },
-        drained = False,
-        f = f,
-        want = want,
-      }
+## Like `map_concurrent`, but folds each Result with `step` in SOURCE order as it settles; the output is
+## never materialised, so this works on endless sources (stop early with `std::effects::early_return`).
+pub let fold_concurrent_ordered
+  : { it: Iter 'a, f: { x: 'a } -> 'b <...>, max_in_flight: Int, init: 'acc, step: { acc: 'acc, r: Result 'b AsyncError } -> 'acc <...> }
+  -> 'acc <Async, ...>
+  = { it, f, max_in_flight, init, step } -> do
+    # The fold threads the in-flight window (oldest first) and the accumulator; a full window settles its oldest.
+    let state = iter::fold {
+      it = it,
+      init = { window = [], out = init },
+      f = { acc, x } -> do
+        let w = seq::push { xs = acc.window, x = Async.spawn { f = {} -> f { x = x } } }
+        if seq::size { xs = w } < max_in_flight then { window = w, out = acc.out }
+        else match seq::first { xs = w } is
+          Some { val = oldest } -> { window = seq::tail { xs = w }, out = step { acc = acc.out, r = await { p = oldest } } }
+          None -> { window = w, out = acc.out }
+    }
+    seq::fold { xs = state.window, init = state.out, f = { acc, x } -> step { acc = acc, r = await { p = x } } }
 
 
 ## Run `f` over each element concurrently; each element's Result is returned (no fail-fast).

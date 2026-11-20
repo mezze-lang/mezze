@@ -7452,6 +7452,14 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
      * chunks. Non-string expression values go through
      * {@link String#valueOf(Object)}.
      */
+    /** Text of a non-`Str` interpolated value. A suspended effect is never
+     *  text: it means an effect ran unhandled, see {@link com.mezze.interpreter.values.MezzeSuspend#observedAsValue}. */
+    @TruffleBoundary
+    private static String interpolationText(Object value) {
+        if (value instanceof com.mezze.interpreter.values.MezzeSuspend s) throw s.observedAsValue("string interpolation");
+        return String.valueOf(value);
+    }
+
     /**
      * {@link #buildInterpolatedString} for exactly one value, with no array to
      * read it out of. Same three routes and the same reasons; see there.
@@ -7475,7 +7483,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         for (String p : parts) if (p != null) estimate += p.length();
         StringBuilder sb = new StringBuilder(estimate);
         for (String p : parts) {
-            if (p == null) sb.append(String.valueOf(value));
+            if (p == null) sb.append(interpolationText(value));
             else sb.append(p);
         }
         return sb.toString();
@@ -7538,7 +7546,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         int exprIdx = 0;
         for (String p : parts) {
             if (p == null) {
-                sb.append(String.valueOf(exprValues[exprIdx++]));
+                sb.append(interpolationText(exprValues[exprIdx++]));
             } else {
                 sb.append(p);
             }

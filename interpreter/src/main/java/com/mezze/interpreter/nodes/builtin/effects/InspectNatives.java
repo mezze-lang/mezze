@@ -508,6 +508,10 @@ public final class InspectNatives {
             return name != null ? "<function:" + name + ">" : "<function>";
         }
 
+        if (value instanceof com.mezze.interpreter.values.MezzeSuspend s) {
+            throw s.observedAsValue("rendering (to_str / to_dbg)");
+        }
+
         // No fallback: every real Mezze value type has a branch above. An
         // unknown runtime object is a compiler/native bug, not a printable
         // value — surface it rather than laundering it into `<Class>`.

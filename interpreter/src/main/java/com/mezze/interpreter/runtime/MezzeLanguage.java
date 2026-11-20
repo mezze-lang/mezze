@@ -1511,24 +1511,17 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
 
         @CompilerDirectives.TruffleBoundary
         private Object forceSuspended(com.mezze.interpreter.values.MezzeSuspend suspended) {
-            try {
                 if (forceCallNode == null) {
                     CompilerDirectives.transferToInterpreterAndInvalidate();
                     forceCallNode = insert(com.oracle.truffle.api.nodes.IndirectCallNode.create());
                 }
-                // Under the new dispatch design, forcing routes through the
-                // current fiber rather than a context-wide handler map. At the
-                // top level no fiber is current, so force() will typically
-                // return the suspension unchanged — which is fine, the user
-                // sees the suspension explicitly.
+                // A top-level result that is still suspended after forcing means
+                // an effect ran with no handler: never hand it out as a value.
                 Object forced = suspended.force(forceCallNode);
-                if (!(forced instanceof com.mezze.interpreter.values.MezzeSuspend)) {
-                    return forced;
+                if (forced instanceof com.mezze.interpreter.values.MezzeSuspend still) {
+                    throw still.observedAsValue("the end of the program");
                 }
-            } catch (Exception e) {
-                // Force failed — return suspended as-is
-            }
-            return suspended;
+                return forced;
         }
 
         @CompilerDirectives.TruffleBoundary

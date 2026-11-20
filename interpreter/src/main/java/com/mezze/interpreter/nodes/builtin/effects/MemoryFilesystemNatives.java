@@ -568,6 +568,32 @@ public final class MemoryFilesystemNatives {
         return ok(new MezzeBytes(chunk));
     }
 
+    /** The memfs twin of {@code FilesystemNatives.streamRead}: Bytes or a raised failure, never an Err. */
+    @TruffleBoundary
+    public static Object streamRead(MezzeRecord args) {
+        MemFileHandle h = getMemHandle(args, "handle");
+        long maxBytes = getLong(args, "max_bytes");
+        if (h.closed.get()) {
+            throw new com.mezze.interpreter.values.MezzeGuestException(
+                "streamed file body: handle for " + h.path + " is closed");
+        }
+        if (!"Read".equals(h.mode)) {
+            throw new com.mezze.interpreter.values.MezzeGuestException(
+                "streamed file body: " + h.path + " was not opened for reading");
+        }
+        Entry e = files().get(h.path);
+        if (e == null) {
+            throw new com.mezze.interpreter.values.MezzeGuestException(
+                "streamed file body: " + h.path + " no longer exists");
+        }
+        if (h.pos >= e.bytes.length) return new MezzeBytes(new byte[0]);
+        int cap = (int) Math.min(maxBytes, e.bytes.length - h.pos);
+        byte[] chunk = new byte[cap];
+        System.arraycopy(e.bytes, h.pos, chunk, 0, cap);
+        h.pos += cap;
+        return new MezzeBytes(chunk);
+    }
+
     @TruffleBoundary
     public static Object writeChunk(MezzeRecord args) {
         MemFileHandle h = getMemHandle(args, "handle");

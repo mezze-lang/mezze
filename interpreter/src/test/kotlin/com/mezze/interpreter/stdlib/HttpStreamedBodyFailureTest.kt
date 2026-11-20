@@ -56,8 +56,7 @@ class HttpStreamedBodyFailureTest {
     private val block = "0123456789abcdefghij".repeat(1000)
 
     private val head = """
-        use std::effects::http::{ Request, Response, Method, request, format_error, response_stream, HttpClient, SimpleHttpClient, HttpDownload, SimpleHttpDownload, with_download, default_http_config, HttpServer, HelidonHttpServerWith, ServerConfig, route, otherwise, Matched }
-        use std::effects::exception::{ throw }
+        use std::effects::http::{ Request, Response, Method, request, format_error, response_stream, HttpClient, SimpleHttpClient, HttpDownload, SimpleHttpDownload, Download, with_download, chunks, default_http_config, HttpServer, HelidonHttpServerWith, ServerConfig, route, otherwise, Matched }
         use std::collections::{ bytes, iter, map, seq }
         use std::str
         use std::int
@@ -67,6 +66,10 @@ class HttpStreamedBodyFailureTest {
           url = req.url, chunks = None,
         }
         let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_print_log = Off }
+
+        ## Drain the download through `chunks`, counting bytes.
+        let total_of: { reader: Download } -> Int <HttpDownload> = { reader } ->
+          chunks { reader = reader, chunk_bytes = 65536, init = 0, f = { acc, x } -> acc + bytes::size { b = x } }
     """.trimIndent()
 
     /**
@@ -74,13 +77,14 @@ class HttpStreamedBodyFailureTest {
      * report what the client makes of it.
      */
     private fun overTheWire(good: Int): String = MezzeTestHelper.run(
-        """
-        $head
+        head + "\n" + """
         let blk: Bytes = bytes::from_str { s = "$block" }
-        let failing: { b: Bytes } -> Iter Bytes <Exception having 'error = Str> = { b } ->
+        # A chunk step is pure, so the body fails the one way pure code can: a
+        # raised arithmetic error (division by zero) once `good` chunks are out.
+        let failing: { b: Bytes } -> Iter Bytes = { b } ->
           iter::unfold {
             state = 0,
-            step = { s } -> if s >= $good then throw { error = "disk died" }
+            step = { s } -> if s >= $good then Yield { val = b, next = 1 / (s - s) }
               else Yield { val = b, next = s + 1 },
           }
         let app = otherwise {
@@ -99,14 +103,9 @@ class HttpStreamedBodyFailureTest {
                 req = request { url = str::concat { l = "http://127.0.0.1:", r = str::concat {
                   l = int::to_str { n = h.port }, r = "/big" } } },
                 config = default_http_config,
-                f = { resp } -> str::concat {
+                f = { resp, reader } -> str::concat {
                   l = str::concat { l = "status=", r = int::to_str { n = resp.status } },
-                  r = str::concat { l = " bytes=", r = int::to_str { n = iter::fold {
-                    it = match resp.chunks is
-                      None -> iter::from_seq { xs = [] }
-                      Some { val = cs } -> cs,
-                    init = 0, f = { acc, x } -> acc + bytes::size { b = x },
-                  } } },
+                  r = str::concat { l = " bytes=", r = int::to_str { n = total_of { reader = reader } } },
                 },
               } is
                 Ok { val = s } -> str::concat { l = "ok ", r = s }
@@ -155,8 +154,7 @@ class HttpStreamedBodyFailureTest {
     @Timeout(value = 120, unit = TimeUnit.SECONDS, threadMode = ThreadMode.SEPARATE_THREAD)
     fun `a healthy stream still completes`() {
         val out = MezzeTestHelper.run(
-            """
-            $head
+            head + "\n" + """
             let blk: Bytes = bytes::from_str { s = "$block" }
             let app = otherwise {
               routes = route { method = Get, path = "/big", handler = { m } -> response_stream {
@@ -175,12 +173,7 @@ class HttpStreamedBodyFailureTest {
                     req = request { url = str::concat { l = "http://127.0.0.1:", r = str::concat {
                       l = int::to_str { n = h.port }, r = "/big" } } },
                     config = default_http_config,
-                    f = { resp } -> iter::fold {
-                      it = match resp.chunks is
-                        None -> iter::from_seq { xs = [] }
-                        Some { val = cs } -> cs,
-                      init = 0, f = { acc, x } -> acc + bytes::size { b = x },
-                    },
+                    f = { resp, reader } -> total_of { reader = reader },
                   } is
                     Ok { val = n } -> str::concat { l = "ok:", r = int::to_str { n = n } }
                     Err { error = e } -> str::concat { l = "ERR:", r = format_error { err = e } }

@@ -4,7 +4,6 @@
 # Each primitive op is a backend-specialization slot (e.g. copy_file becomes sendfile locally).
 use std::collections::bytes
 use std::collections::seq
-use std::collections::iter
 use std::str
 use std::int
 use std::result
@@ -466,64 +465,66 @@ pub let with_read
     Err { error } -> Err { error = error }
 
 
-# Lazy sources: the filesystem as an `Iter`
+# Streaming sources are FUNCTIONS that take the consumer: the reads happen during the call, on the
+# arrow the handler is installed for. (An `Iter` holding the reads would hide them in data.)
 
-# Step.Skip lets a step with no complete line read another chunk without blocking the pipeline.
-## A file's lines, lazily, over an open handle: one `read_chunk` of `chunk_bytes` at a time.
-## Takes a handle, not a path, so an early-stopping consumer can't leak it; `with_lines` closes for you.
-pub let lines_of
-  : { handle: FileHandle, chunk_bytes: Int } -> Iter Str <FileStreaming, ...>
-  = { handle, chunk_bytes } -> iter::unfold {
-    state = { buf = "", eof = False },
-    step = { s } ->
-      match str::index_of { s = s.buf, sub = "\n" } is
-        Some { val = i } -> Yield {
-          val = str::substring { s = s.buf, start = 0, end = i },
-          next = { buf = str::substring { s = s.buf, start = i + 1, end = str::size { s = s.buf } }, eof = s.eof },
-        }
-        None -> if s.eof then
-            # No newline left: a last line without a trailing \n still counts.
-            if str::size { s = s.buf } > 0 then Yield { val = s.buf, next = { buf = "", eof = True } }
-            else Done
-          else match FileStreaming.read_chunk { handle = handle, max_bytes = chunk_bytes } is
-            Err { error = _ } -> Done
-            Ok { val = b } -> if bytes::size { b = b } == 0 then Skip { next = { buf = s.buf, eof = True } }
-              else match bytes::to_str { b = b } is
-                Ok { val = chunk } -> Skip { next = { buf = "$(s.buf)$(chunk)", eof = s.eof } }
-                Err { error = _ } -> Done
-  }
+## Fold `f` over the lines of an open handle, reading `chunk_bytes` at a time; stops at EOF or on a read error.
+## Takes a handle, so stopping early (`std::effects::early_return`) can't leak it; `with_lines` opens and closes for you.
+pub let lines
+  : { handle: FileHandle, chunk_bytes: Int, init: 'acc, f: { acc: 'acc, x: Str } -> 'acc <...> }
+  -> 'acc <FileStreaming, ...>
+  = { handle, chunk_bytes, init, f } ->
+    lines_loop { handle = handle, chunk_bytes = chunk_bytes, buf = "", acc = init, f = f }
+
+# `buf` carries the unfinished tail across chunk boundaries; a last line with no trailing \n still counts.
+let lines_loop
+  : { handle: FileHandle, chunk_bytes: Int, buf: Str, acc: 'acc, f: { acc: 'acc, x: Str } -> 'acc <...> }
+  -> 'acc <FileStreaming, ...>
+  = { handle, chunk_bytes, buf, acc, f } ->
+    match FileStreaming.read_chunk { handle = handle, max_bytes = chunk_bytes } is
+      Err { error = _ } -> acc
+      Ok { val = b } -> if bytes::size { b = b } == 0 then
+          if str::size { s = buf } > 0 then f { acc = acc, x = buf } else acc
+        else match bytes::to_str { b = b } is
+          Err { error = _ } -> acc
+          Ok { val = chunk } -> do
+            let step = fold_lines { buf = "$(buf)$(chunk)", acc = acc, f = f }
+            lines_loop { handle = handle, chunk_bytes = chunk_bytes, buf = step.buf, acc = step.acc, f = f }
+
+# Fold every complete line in `buf`; answer the accumulator and the unfinished tail.
+let fold_lines
+  : { buf: Str, acc: 'acc, f: { acc: 'acc, x: Str } -> 'acc <...> } -> { buf: Str, acc: 'acc } <...>
+  = { buf, acc, f } -> match str::index_of { s = buf, sub = "\n" } is
+    None -> { buf = buf, acc = acc }
+    Some { val = i } -> fold_lines {
+      buf = str::substring { s = buf, start = i + 1, end = str::size { s = buf } },
+      acc = f { acc = acc, x = str::substring { s = buf, start = 0, end = i } },
+      f = f,
+    }
 
 
-## Run `f` over a file's lines lazily, closing the handle when `f` returns.
-## Don't return the Iter from `f`: reading it afterwards reports FsClosedHandle.
+## Open `path`, fold `f` over its lines, then close the handle.
+## An abort out of `f` skips the close; to stop early and still close, use `lines` on a handle you own.
 pub let with_lines
-  : { path: Str, chunk_bytes: Int, f: { lines: Iter Str } -> 'a <...> }
-  -> Result 'a FsError <FileStreaming, ...>
-  = { path, chunk_bytes, f } -> match FileStreaming.open { path = path, mode = Read } is
+  : { path: Str, chunk_bytes: Int, init: 'acc, f: { acc: 'acc, x: Str } -> 'acc <...> }
+  -> Result 'acc FsError <FileStreaming, ...>
+  = { path, chunk_bytes, init, f } -> match FileStreaming.open { path = path, mode = Read } is
     Ok { val = h } -> do
-      let result = f { lines = lines_of { handle = h, chunk_bytes = chunk_bytes } }
+      let out = lines { handle = h, chunk_bytes = chunk_bytes, init = init, f = f }
       let _ = FileStreaming.close { handle = h }
-      Ok { val = result }
+      Ok { val = out }
     Err { error } -> Err { error = error }
 
 
-## A watch's events as a lazy Iter, flattening `poll` batches.
-## Finite: it stops at the first empty poll; call again to keep watching.
-pub let watch_events
-  : { handle: WatchHandle, timeout_ms: Int } -> Iter WatchEvent <FileWatch, ...>
-  = { handle, timeout_ms } -> iter::unfold {
-    state = { pending = [] },
-    step = { s } ->
-      match seq::first { xs = s.pending } is
-        Some { val = e } -> Yield {
-          val = e,
-          next = { pending = seq::drop { xs = s.pending, n = 1 } },
-        }
-        None -> match FileWatch.poll { handle = handle, timeout_ms = timeout_ms } is
-          Err { error = _ } -> Done
-          Ok { val = batch } -> if seq::size { xs = batch } == 0 then Done
-            else Skip { next = { pending = batch } }
-  }
+## Fold `f` over a watch's events, polling with `timeout_ms`; stops at the first empty poll or an error.
+## Finite by design: call again to keep watching.
+pub let watch
+  : { handle: WatchHandle, timeout_ms: Int, init: 'acc, f: { acc: 'acc, x: WatchEvent } -> 'acc <...> }
+  -> 'acc <FileWatch, ...>
+  = { handle, timeout_ms, init, f } -> match FileWatch.poll { handle = handle, timeout_ms = timeout_ms } is
+    Err { error = _ } -> init
+    Ok { val = batch } -> if seq::size { xs = batch } == 0 then init
+      else watch { handle = handle, timeout_ms = timeout_ms, init = seq::fold { xs = batch, init = init, f = f }, f = f }
 
 
 ## Auto-closing write wrapper.

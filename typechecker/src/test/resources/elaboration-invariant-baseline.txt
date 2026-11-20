@@ -177,9 +177,9 @@ UNBOUND_TYPE_VAR	let:body_json
 UNBOUND_TYPE_VAR	let:children
 UNBOUND_TYPE_VAR	let:chunk_map
 UNBOUND_TYPE_VAR	let:flatten
+UNBOUND_TYPE_VAR	let:fold_concurrent_ordered
 UNBOUND_TYPE_VAR	let:for_each_concurrent
 UNBOUND_TYPE_VAR	let:map_concurrent
-UNBOUND_TYPE_VAR	let:map_concurrent_lazy
 UNBOUND_TYPE_VAR	let:peek_tbqueue
 UNBOUND_TYPE_VAR	let:peek_tqueue
 UNBOUND_TYPE_VAR	let:query_params
@@ -199,7 +199,6 @@ UNBOUND_TYPE_VAR	let:try_par_filter
 UNBOUND_TYPE_VAR	let:try_read_tbqueue
 UNBOUND_TYPE_VAR	let:try_read_tqueue
 UNBOUND_TYPE_VAR	let:unwrap
-UNBOUND_TYPE_VAR	let:watch_events
 UNTYPED_PARAM	impl 0c4d55bb.from_jvm
 UNTYPED_PARAM	impl 0c4d55bb.from_jvm_with
 UNTYPED_PARAM	impl 12e3170b.to_json
@@ -324,8 +323,8 @@ UNTYPED_PARAM	impl UrlC.decode_str
 UNTYPED_PARAM	impl UrlC.decode_variant
 UNTYPED_PARAM	impl a3b17862.to_json_utf8
 UNTYPED_PARAM	impl a3b17862.to_json_utf8_with
-UNTYPED_PARAM	impl 6edfbb38.from_query
-UNTYPED_PARAM	impl 6edfbb38.from_query_with
+UNTYPED_PARAM	impl c96dcd55.from_query
+UNTYPED_PARAM	impl c96dcd55.from_query_with
 UNTYPED_PARAM	impl fc70cccc.from_json
 UNTYPED_PARAM	impl fc70cccc.from_json_with
 VARTYPE_RECEIVER	impl Matched.ok

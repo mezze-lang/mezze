@@ -87,33 +87,23 @@ class BareOpenRowOnADeclSpecTest : VariantSpecBase() {
      * running `mez check` never saw it. The analysis is now also reported as a
      * T0210, which is what this file's header asked for.
      */
-    private fun laundersViaInvariant(src: String, why: String) {
-        val e = check(src).exceptionOrNull()
-            ?: fail("$why\n\nexpected a T0210 naming the laundered effect; the " +
-                "program was ACCEPTED outright\n\n$src")
-        val msg = e.message ?: ""
-        assertTrue(
-            "does not say so" in msg || "[effect-conservation]" in msg,
-            "$why\n\nrefused, but not by the effect-conservation rule:\n$msg",
-        )
-    }
-
-    @Test fun `a bare open row on a decl launders - caught only by the invariant`() {
-        laundersViaInvariant(
+    @Test fun `a bare open row on a decl with nothing to carry from is refused`() {
+        rejects(
             """
             use std::int
             $eff
             pub let f: {} -> Int <...> = {} -> Tick.tick {}
             $MAIN
             """.trimIndent(),
+            "T0210",
             "A body performing Tick concretely does not satisfy \"for any row r\". " +
                 "The emitted row is NOTHING — `pub f : {} -> Int` — so this should " +
                 "be a T0210 at the annotation, not an internal invariant.",
         )
     }
 
-    @Test fun `a pure caller of such a function launders too`() {
-        laundersViaInvariant(
+    @Test fun `a pure caller of such a function is stopped at the declaration`() {
+        rejects(
             """
             use std::int
             $eff
@@ -121,6 +111,7 @@ class BareOpenRowOnADeclSpecTest : VariantSpecBase() {
             pub let caller: {} -> Int = {} -> f {}
             $MAIN
             """.trimIndent(),
+            "T0210",
             "THE CONSEQUENCE, and why the first case matters. With the row erased at " +
                 "the definition a pure caller cannot be stopped: `caller` performs " +
                 "Tick with nothing in its type saying so. The launder family's shape, " +

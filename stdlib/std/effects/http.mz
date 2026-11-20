@@ -100,7 +100,7 @@ pub let make_full_request
 ## The request's whole body: a buffered one as-is, a streamed one walked and
 ## collected (single-shot — a second call sees an exhausted stream and answers
 ## empty). A handler that genuinely streams should walk `chunks` instead.
-pub let body_bytes: { req: Request } -> Bytes <...> = { req } -> match req.body is
+pub let body_bytes: { req: Request } -> Bytes = { req } -> match req.body is
   Some { val } -> val
   None -> match req.chunks is
     None -> bytes::empty {}
@@ -680,12 +680,14 @@ pub let response_stream
       chunks = Some { val = chunks },
     }
 
-## A 200 whose body streams a file from disk, a chunk at a time, without reading
-## it into memory. `chunk_bytes` is the read size. Holds a `FileStreaming`
-## handle for the life of the response, so it is not closed here.
+# The body is drained later, on the server thread, with no handler in scope — so the chunk source
+# reads the handle through a native, never through `FileStreaming`. A read failure RAISES at the
+# drain (BUG 28: `Done` there would look like a complete body); the server aborts the connection.
+## A 200 whose body streams a file from disk, a chunk at a time, without reading it into memory.
+## `chunk_bytes` is the read size. The open handle is read natively while the response is written.
 pub let response_file
   : { path: Str, chunk_bytes: Int }
-  -> Result Response FsError <FileStreaming, Exception having 'error = FsError>
+  -> Result Response FsError <FileStreaming>
   = { path, chunk_bytes } -> match FileStreaming.open { path = path, mode = Read } is
     Err { error } -> Err { error = error }
     Ok { val = h } -> Ok {
@@ -694,12 +696,9 @@ pub let response_file
         headers = map::empty {},
         chunks = iter::unfold {
           state = {},
-          # a failed read throws rather than ending the stream — Done would
-          # signal a complete body and silently truncate the download
-          step = { s } -> match FileStreaming.read_chunk { handle = h, max_bytes = chunk_bytes } is
-            Err { error } -> throw { error = error }
-            Ok { val = b } -> if bytes::size { b = b } == 0 then Done
-              else Yield { val = b, next = {} }
+          step = { s } -> do
+            let b = __native_fs_stream_read { handle = h, max_bytes = chunk_bytes }
+            if bytes::size { b = b } == 0 then Done else Yield { val = b, next = {} }
         },
       },
     }
@@ -979,23 +978,20 @@ impl HttpDownload for SimpleHttpDownload where {
   close = { reader } -> __native_http_stream_close { reader = reader },
 }
 
-## A download's chunks, lazily. Takes the reader, not a request, so stopping
-## early does not leak the connection.
-pub let chunks_of
-  : { reader: Download, chunk_bytes: Int } -> Iter Bytes <HttpDownload, ...>
-  = { reader, chunk_bytes } -> iter::unfold {
-    state = {},
-    step = { s } -> match HttpDownload.read_chunk { reader = reader, max_bytes = chunk_bytes } is
-      Err { error = _ } -> Done
-      Ok { val = b } -> if bytes::size { b = b } == 0 then Done
-        else Yield { val = b, next = {} }
-  }
+## Fold `f` over a download's chunks, reading `chunk_bytes` at a time; ends at EOF or on any read error.
+## Takes the reader, not a request, so stopping early (`std::effects::early_return`) does not leak the connection.
+pub let chunks
+  : { reader: Download, chunk_bytes: Int, init: 'acc, f: { acc: 'acc, x: Bytes } -> 'acc <...> }
+  -> 'acc <HttpDownload, ...>
+  = { reader, chunk_bytes, init, f } -> match HttpDownload.read_chunk { reader = reader, max_bytes = chunk_bytes } is
+    Err { error = _ } -> init
+    Ok { val = b } -> if bytes::size { b = b } == 0 then init
+      else chunks { reader = reader, chunk_bytes = chunk_bytes, init = f { acc = init, x = b }, f = f }
 
-## Open a streamed download, run `f` on it, then close the connection.
-## The `Response` has `chunks` filled and `body` empty; read inside `f` —
-## returned chunks yield nothing once closed.
+## Open a streamed download, run `f` on its head and reader, then close the connection.
+## The `Response` has status and headers only; fold the body inside `f` with `chunks { reader, ... }`.
 pub let with_download
-  : { req: Request, config: HttpConfig, f: { resp: Response } -> 'a <...> }
+  : { req: Request, config: HttpConfig, f: { resp: Response, reader: Download } -> 'a <...> }
   -> Result 'a HttpError <HttpDownload, ...>
   = { req, config, f } -> match HttpDownload.open { req = req, config = config } is
     Err { error } -> Err { error = error }
@@ -1005,11 +1001,10 @@ pub let with_download
         headers = d.headers,
         body = bytes::empty {},
         url = req.url,
-        chunks = Some { val = chunks_of { reader = d.reader, chunk_bytes = 65536 } },
+        chunks = None,
       }
-      let out = f { resp = resp }
-      # close surfaces a part-way read failure the chunks iterator cannot carry
-      # (a dead connection arrives as Done, not an error).
+      let out = f { resp = resp, reader = d.reader }
+      # close surfaces a part-way read failure `chunks` cannot carry (a dead connection ends the walk).
       match HttpDownload.close { reader = d.reader } is
         Err { error } -> Err { error = error }
         Ok { val = _ } -> Ok { val = out }

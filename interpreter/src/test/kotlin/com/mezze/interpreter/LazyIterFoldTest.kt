@@ -44,31 +44,29 @@ class LazyIterFoldTest {
 
     /**
      * `flat_map`'s function is the SOURCE side and the folder is the sink side.
-     * Both append to one log, so the order says whether anything was buffered.
+     * Stage callbacks are pure, so interleaving is shown the one way pure code
+     * can show it: the source is ENDLESS, and a walk that buffered the inner
+     * iterators before folding could never finish. `take` bounds the fold.
      */
     @Test
     fun `a flat_map fold interleaves source and folder`() {
         val src = """
             $prelude
-            let main = {} -> perform LoomAsync in do
-              let log = atom { val = "" }
-              let total = iter::fold {
+            let main = {} -> iter::fold {
+              it = iter::take {
                 it = iter::flat_map {
-                  it = iter::range { start = 1, end = 4 },
-                  f = { x } -> do
-                    let _ = swap { atom = log, f = { current } -> "$(current)s" }
-                    iter::range { start = x, end = x + 1 }
+                  it = iter::unfold { state = 1, step = { s } -> Yield { val = s, next = s + 1 } },
+                  f = { x } -> iter::range { start = x, end = x + 1 }
                 },
-                init = 0,
-                f = { acc, x } -> do
-                  let _ = swap { atom = log, f = { current } -> "$(current)f" }
-                  acc + x
-              }
-              "$(deref { atom = log })|$(int::to_str { n = total })"
+                n = 3,
+              },
+              init = 0,
+              f = { acc, x } -> acc + x
+            }
             main {}
         """
-        // Three elements, each produced then immediately folded, summing 1+2+3.
-        assertEquals("sfsfsf|6", eval(src))
+        // The first three inner elements, 1+2+3, with the source never drained.
+        assertEquals(6L, eval(src))
     }
 
     /** The same question through `zip`, the shape with the worst number. */
@@ -76,31 +74,22 @@ class LazyIterFoldTest {
     fun `a zip fold interleaves production and folding`() {
         val src = """
             $prelude
-            let main = {} -> perform LoomAsync in do
-              let log = atom { val = "" }
-              let total = iter::fold {
-                it = iter::zip {
-                  a = iter::flat_map {
-                    it = iter::range { start = 1, end = 4 },
-                    f = { x } -> do
-                      let _ = swap { atom = log, f = { current } -> "$(current)s" }
-                      iter::range { start = x, end = x + 1 }
-                  },
-                  b = iter::range { start = 10, end = 13 },
+            let main = {} -> iter::fold {
+              it = iter::zip {
+                a = iter::flat_map {
+                  it = iter::unfold { state = 1, step = { s } -> Yield { val = s, next = s + 1 } },
+                  f = { x } -> iter::range { start = x, end = x + 1 }
                 },
-                init = 0,
-                f = { acc, x } -> do
-                  let _ = swap { atom = log, f = { current } -> "$(current)f" }
-                  acc + x.fst
-              }
-              "$(deref { atom = log })|$(int::to_str { n = total })"
+                b = iter::range { start = 10, end = 13 },
+              },
+              init = 0,
+              f = { acc, x } -> acc + x.fst + x.snd
+            }
             main {}
         """
-        assertEquals("sfsfsf|6", eval(src))
+        // zip stops at the shorter side: (1+10)+(2+11)+(3+12), with the endless side untouched beyond that.
+        assertEquals(39L, eval(src))
     }
-
-    // ── The values themselves, so a streaming rewrite cannot quietly
-    //    change what a fold answers ──
 
     @Test
     fun `zip folds the first component`() {

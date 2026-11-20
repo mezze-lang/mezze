@@ -293,9 +293,11 @@ class EffectPolymorphismTest {
 
     @Test
     fun `test validation allows polymorphic effects in function signature`() {
-        // This should pass: polymorphic effects are allowed in function signatures
+        // Polymorphic effects are allowed in a signature when there is a callback
+        // to carry them from. (A bare `<...>` with no such parameter is refused —
+        // it would be a wildcard that drops whatever the body performs.)
         val code = """
-            let f: { x: Int } -> Int <...> = { x } -> x + 1
+            let f: { x: Int, g: {} -> Int <...> } -> Int <...> = { x, g } -> x + g {}
         """.trimIndent()
 
         // Should not throw an exception
