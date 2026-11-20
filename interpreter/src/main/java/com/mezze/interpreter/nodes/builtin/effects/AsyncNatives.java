@@ -420,6 +420,12 @@ public final class AsyncNatives {
             return outcome instanceof CancelledOutcome;
         }
 
+        /** What a printed `PromiseId` shows: the state, not an address. */
+        @Override
+        public String toString() {
+            return "promise(" + (isCompleted() ? "completed" : isFailed() ? "failed" : isCancelled() ? "cancelled" : "pending") + ")";
+        }
+
         /** Terminal-state payload. Prefer {@link #snapshotResult()} —
          *  this is an alias kept for existing callers. */
         public Object getResult() {

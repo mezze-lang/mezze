@@ -58,6 +58,12 @@ object ScopedEffectConstants {
      *  `None` (and a performer without the field) means the machine reports nothing, ever —
      *  the runtime has no output of its own; the report is a Mezze function whose effects are
      *  the perform site's. */
+    /** Impl-only fields ANY cont-capable performer may declare, read by the machine like `drive`:
+     *  `stall_after = {} -> Duration` and `on_stall = { waiting } -> {}` (its body's effects are the
+     *  performer's added effects, so the perform site must handle them). `CoopAsyncWith` carries
+     *  the same report as CONFIG (`on_stall: Option {...}`) and registers it from `initialize_scope`. */
+    const val ON_STALL = "on_stall"
+    const val STALL_AFTER_HOOK = "stall_after"
     const val STALL_AFTER = "after"
     const val STALL_F = "f"
     const val STALL_WAITING = "waiting"
@@ -73,7 +79,7 @@ object ScopedEffectConstants {
      * them from a handler's op list, showing only the real operations.
      */
     fun isScopeHook(name: String): Boolean =
-        name == INITIALIZE_SCOPE || name == FINALIZE_SCOPE || name == DRIVE
+        name == INITIALIZE_SCOPE || name == FINALIZE_SCOPE || name == DRIVE || name == ON_STALL || name == STALL_AFTER_HOOK
 }
 
 /**

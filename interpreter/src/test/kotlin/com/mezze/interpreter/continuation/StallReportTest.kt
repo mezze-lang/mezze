@@ -131,4 +131,69 @@ class StallReportTest {
         val msg = (ex.message ?: ex.toString()).lowercase()
         assertTrue(msg.contains("zero") || msg.contains("divi"), "the report's failure must reach the entry: $ex")
     }
+
+    /** ANY cont-capable performer may declare the report as impl-only fields, like `drive`:
+     *  `stall_after = {} -> Duration`, `on_stall = { waiting } -> {}`. The report's effects are the
+     *  performer's added effects, so `Console` must be handled at the perform site — it is. */
+    @Test
+    fun `a user performer declares the stall report as impl-only fields`() {
+        val out = lines(
+            """
+            use std::effects::log::{ Console, println }
+            use std::effects::async::{ ParkOn, WaitSet, ParkOutcome }
+            use std::effects::time::{ SystemTime, now }
+            use std::datetime::{ Duration, duration_millis, add, after }
+            use std::collections::seq
+            use std::int
+            effect Wait where { wait_ms: { ms: Int } -> Bool <Wait>, }
+            impl Wait for Waiter where {
+              initialize_scope = {} -> {},
+              finalize_scope = {} -> {},
+              stall_after = {} -> duration_millis { n = 100 },
+              on_stall = { waiting } -> println { msg = "stall: $(int::to_str { n = seq::size { xs = waiting } }) parked" },
+              wait_ms = { ms } -> do
+                let deadline = add { i = now {}, d = duration_millis { n = ms } }
+                match cont.park { on = OnPredicates { fs = [{} -> after { a = now {}, b = deadline }] }, set = WaitDefault } is
+                  ParkReady { which } -> True
+                  ParkCancelled { reason } -> False,
+            }
+            let main = {} -> perform Console, SystemTime, Waiter in do
+              let _ = Wait.wait_ms { ms = 400 }
+              println { msg = "done" }
+            main {}
+            """,
+        )
+        assertEquals(listOf("stall: 1 parked", "done"), out)
+    }
+
+    /** The report's effects are the performer's added effects: a perform site that installs the
+     *  performer without handling Console carries `<Console>` in its row, so a pure annotation on
+     *  it is rejected. (The CLI's entry check reports the same for `pub let main`; the test harness
+     *  skips entry checks, so the assertion is on the type.) */
+    @Test
+    fun `an impl-only report's effects must be handled at the perform site`() {
+        assertThrows(com.mezze.language.typechecker.TypeCheckError::class.java) {
+            MezzeTestHelper.typeCheck(
+                """
+                use std::effects::log::{ Console, println }
+                use std::effects::async::{ ParkOn, WaitSet, ParkOutcome }
+                use std::effects::time::{ SystemTime, now }
+                use std::datetime::{ Duration, duration_millis, add, after }
+                effect Wait where { wait_ms: { ms: Int } -> Bool <Wait>, }
+                impl Wait for Waiter where {
+                  initialize_scope = {} -> {},
+                  finalize_scope = {} -> {},
+                  stall_after = {} -> duration_millis { n = 100 },
+                  on_stall = { waiting } -> println { msg = "stalled" },
+                  wait_ms = { ms } -> do
+                    let deadline = add { i = now {}, d = duration_millis { n = ms } }
+                    match cont.park { on = OnPredicates { fs = [{} -> after { a = now {}, b = deadline }] }, set = WaitDefault } is
+                      ParkReady { which } -> True
+                      ParkCancelled { reason } -> False,
+                }
+                let run: {} -> Bool = {} -> perform SystemTime, Waiter in Wait.wait_ms { ms = 10 }
+                """.trimIndent(),
+            )
+        }
+    }
 }

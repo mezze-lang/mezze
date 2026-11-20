@@ -1286,10 +1286,44 @@ hangs were seen earlier today under a DISCARDED variant that read the handler re
 did not reproduce under the shipped variant and their cause was not established — noted, not
 explained.
 
-Also surfaced: `perform CoopAsync` with no `Time` performer beside it and a `park_until` inside is a
-RUNTIME failure of the task (the await returns Err), not a type error, when the entry is a plain `let
-main` called at the top level. The entry check that names the clock covers `pub let main`; the
-top-level-call form needs the same rule. Open item.
+Correction (same day): the "clock hole" was the TEST HARNESS, not the language. Through the CLI
+every entry form is caught — `pub let main` and `let _ = main {}` both fail with V0501 "Entry 'main'
+performs Time, but nothing discharges it", and a bare top-level `main {}` is rejected outright (V0710).
+`MezzeTestHelper.run` accepts bare top-level expressions and skips the entry check, which is how a
+test program reached runtime without a clock. The performer's added effects ARE inferred from its op
+bodies and carried across imports (`PerformerBodyInferredEffectsTest`, `ImportedPerformerEffects`).
+
+**Backlog pass, 2026-11-20 (user: "fix all the remaining stuff and flexibility and performance").**
+- `PromiseId`: identity `Eq` with the required hand-written `Hash` beside it (the precompiler reports
+  only the DOWNSTREAM module when a stdlib module fails — `stm` lost `Async` — a diagnostics gap worth
+  its own fix); a promise prints as `promise(pending|completed|failed|cancelled)`.
+- Bridge: `from_fn3`; and `from_fn_task` — a callback that SCHEDULES A TASK on the Async performer in
+  effect where it was made, with that site's handlers (`box_fn_under*` in core: the converting site's
+  chain and scope are captured and installed around the call on the guest's thread, so `Async.spawn`
+  inside resolves to the cooperative scheduler or to LoomAsync — the runtime never learns which).
+  Tested under both performers; the callback may perform `Console`, `Async`, anything the site handles.
+  Cancellation flows OUT through `promise_from`'s `on_cancel` (test: the Java future is cancelled).
+- `ContBinding` park: node-based context lookup instead of the uncached slow path (yield drift).
+- io_uring, FOR REAL: Netty 4.2.21 io_uring transport (8 jars, 2.2 MB, `[jars]` with `file://`),
+  kernel 6.18: `IoUring.isAvailable()` = true; an io_uring event-loop THREAD completed a Mezze promise
+  that a task awaited under CoopAsync (`loop.execute(from_fn0 { complete })`): the reactor shape, no
+  Mezze-side thread. Remaining for a package: the socket layer in Mezze over Netty's bootstrap API.
+- Showcase exposure: NOT possible on any branch today — the showcase's demos import the pre-rewrite
+  `std::effects::http_client` and old codec sugar, so it fails at import; the published `mezze-js`
+  0.5.1 in the store also carries an inherent impl on `Result` the ownership rule rejects. Drift
+  against main, to be fixed in the showcase repo, not here.
+
+- The stall report for ANY cont-capable performer: impl-only `stall_after = {} -> Duration` and
+  `on_stall = { waiting } -> {}`, typed beside `drive`; the report body's inferred effects are merged
+  into the performer's ADDED effects, so the perform site must handle them (a pure annotation on a site
+  that installs a Console-reporting performer is rejected). The machine reads the two fields from the
+  handler record like `drive` when no `CoopAsyncWith` registration arrived. Tests: user performer
+  reports once; unhandled report effect is a type error.
+- Yield at 71 ns, profiled on the rebuilt launcher: ~half is the `cont.park` binding (two thread-local
+  reads, the context accessor, the request record), ~15% interpreter dispatch for the two Mezze calls
+  between `yield_now` and the machine, ~10% allocating the one-element predicate list and request per
+  yield, the rest the machine's own step. No frame is more than a few ns; the one structural cut left
+  is a single-predicate `ParkOn` variant (skips the list), a public-type change for ~5 ns — not taken.
 
 Still owed on the carrier design: the handoff cost when the inline child does NOT apply (two carriers
 waiting on each other, ~300 ns each; the fan-out kernel is that shape at 176 ns per element); a foreign-thread

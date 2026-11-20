@@ -493,7 +493,8 @@ public final class TaskMachine {
     @TruffleBoundary
     public Object runBoundary(MezzeFunction bodyThunk, MezzeRecord handler) {
         Object[] stall = PENDING_STALL.get(); PENDING_STALL.remove();   // handed over by initialize_scope on this thread
-        Boundary b = new Boundary(driveOf(handler), handler, stall != null ? stall : NO_STALL);
+        if (stall == null) stall = stallHooksOf(handler);                  // or declared impl-only, like `drive`
+        Boundary b = new Boundary(driveOf(handler), handler, stall);
         boundaries.push(b);
         if (handler != null) b.prevForHandler = openByHandler.put(handler, b);
         try {
@@ -1072,7 +1073,40 @@ public final class TaskMachine {
         return !b.signalled.isEmpty();
     }
 
+    /** The handler chain and scope in effect HERE, for a callback that a guest will run later on
+     *  its own thread (`*_fn_task`): installed around the call by {@link #installCaptured}. A
+     *  `perform` inside the callback then resolves through these handlers exactly as a spawned
+     *  task's would — `Async.spawn` reaches this scheduler (or LoomAsync) from a Java thread. */
+    public static Object[] captureHandlers() {
+        return new Object[]{HandlerChainRegistry.snapshotHandlerChainEntries(), HandlerChainRegistry.lookupScopeVar()};
+    }
+
+    public static Object[] installCaptured(Object[] captured) {
+        HandlerChainRegistry.EffectState es = HandlerChainRegistry.state();
+        Object[] prev = HandlerChainRegistry.installTaskChain(es, (HandlerChainEntry[]) captured[0]);
+        Object prevScope = HandlerChainRegistry.installScopeVar(es, captured[1]);
+        return new Object[]{prev, prevScope, es};
+    }
+
+    public static void restoreCaptured(Object[] saved) {
+        HandlerChainRegistry.installScopeVar((HandlerChainRegistry.EffectState) saved[2], saved[1]);
+        HandlerChainRegistry.restoreTaskChain((Object[]) saved[0]);
+    }
+
     private static final Object[] NO_STALL = {-1L, null};
+    /** A performer's impl-only `stall_after = {} -> Duration` and `on_stall = { waiting } -> {}`,
+     *  read from the handler record by constant name exactly as `drive` is. */
+    private static Object[] stallHooksOf(MezzeRecord handler) {
+        if (handler == null) return NO_STALL;
+        Object hook = handler.getField(com.mezze.language.ast.ScopedEffectConstants.ON_STALL);
+        Object after = handler.getField(com.mezze.language.ast.ScopedEffectConstants.STALL_AFTER_HOOK);
+        if (!(hook instanceof MezzeFunction h) || !(after instanceof MezzeFunction a)) return NO_STALL;
+        Object d = callWith(a, MezzeRecord.empty());
+        if (!(d instanceof com.mezze.interpreter.nodes.builtin.io.DateTimeNatives.MezzeDuration md)) {
+            throw new IllegalStateException("stall_after must return a Duration, got " + d);
+        }
+        return new Object[]{Math.max(0L, md.duration.toNanos()), h};
+    }
     /** `CoopAsyncWith`'s `initialize_scope` hands its `on_stall` config here, on the thread about
      *  to open the boundary; `runBoundary` takes it. The handler record itself carries only the
      *  ops (config lives in their closures), so the performer, not the machine, reads the field. */

@@ -14,6 +14,7 @@
 # for the two-layer design: verbs delegate down via `perform Runtime in
 # Polyglot.<op>`, so no verb calls a native. Requires the Context to allow host
 # class lookup (`allowAllAccess(true)` in test/dev).
+use std::effects::async::{ Async }
 use std::polyglot::core::{ InteropError, Polyglot, Runtime, Foreign }
 use std::codec::core::{
   Format,
@@ -174,6 +175,19 @@ pub let from_fn:  { f: { x: JvmForeign } -> 'r } -> JvmForeign = { f } ->
   __native_polyglot_box_fn { f = f, lang = "jvm", arity = 1 }
 pub let from_fn2: { f: { a: JvmForeign, b: JvmForeign } -> 'r } -> JvmForeign = { f } ->
   __native_polyglot_box_fn { f = f, lang = "jvm", arity = 2 }
+pub let from_fn3: { f: { a: JvmForeign, b: JvmForeign, c: JvmForeign } -> 'r } -> JvmForeign = { f } ->
+  __native_polyglot_box_fn { f = f, lang = "jvm", arity = 3 }
+
+## A callback that SCHEDULES A TASK instead of running inline on Java's thread: when Java
+## calls it, `f { x }` is spawned on the `Async` performer in effect where `from_fn_task`
+## was called — the cooperative scheduler or LoomAsync — and runs there with that site's
+## handlers, so `f` may perform whatever the site handles: `Async`, `Console`, `Log`, …
+## Java sees a `Consumer`-shaped callable that returns at once. This is the shape for an
+## event-loop library whose callbacks must do real Mezze work, not just complete a promise.
+pub let from_fn_task: { f: { x: JvmForeign } -> {} <...> } -> JvmForeign <Async, ...> = { f } ->
+  __native_polyglot_box_fn { f = { x } -> do
+      let _ = Async.spawn { f = {} -> f { x = x } }
+      {}, lang = "jvm", arity = 1, under = True }
 pub let null_val:   {}            -> JvmForeign = {} ->
   __native_polyglot_box_null  { lang = "jvm" }
 

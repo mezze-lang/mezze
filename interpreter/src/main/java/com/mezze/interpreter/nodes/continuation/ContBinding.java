@@ -118,7 +118,7 @@ public final class ContBinding {
                     onIdx = on; setIdx = set; lastShape = shape;
                 }
                 // Blocks this carrier until the machine delivers the outcome; no continuation.
-                return com.mezze.interpreter.runtime.MezzeContext.get(null).taskMachine()
+                return com.mezze.interpreter.runtime.MezzeContext.get(this).taskMachine()   // node-based lookup: compiled, no slow path
                     .park(new ParkRequest(rec.getField(on), rec.getField(set)));
             }
         };

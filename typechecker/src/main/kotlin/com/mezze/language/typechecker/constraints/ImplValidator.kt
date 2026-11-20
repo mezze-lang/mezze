@@ -1051,6 +1051,60 @@ internal class ImplValidator(
                 recordLiteralBindings = if (scopeType != null) setOf("scope") else emptySet(),
             )
         }
+        // The stall report, impl-only like `drive`: `stall_after = {} -> Duration` (pure) and
+        // `on_stall = { waiting: [{ id: Int, on: Str }] } -> {}`. The report runs under the perform
+        // site's handlers, so its body's effects are this performer's ADDED effects: the site must
+        // handle them, exactly as it must handle what an op body performs.
+        impl.operations.find { it.name == ScopedEffectConstants.STALL_AFTER_HOOK }?.let { afterOp ->
+            val lambda = afterOp.implementation as? ParsedLambda ?: throw TypeCheckError(
+                "`stall_after` in impl '${impl.performerName}' must be a function `{} -> Duration`.",
+                afterOp.loc, code = ErrorCode.T0201_TYPE_MISMATCH,
+            )
+            val duration = EffectHandlerBindings.stdlibType("Duration") ?: throw TypeCheckError(
+                "`stall_after` needs `Duration` from `std::datetime`, which this module cannot see — import it.",
+                afterOp.loc, code = ErrorCode.T0213_UNKNOWN_TYPE,
+            )
+            validateImplOperationBody(
+                lambda = lambda,
+                opName = ScopedEffectConstants.STALL_AFTER_HOOK,
+                opLoc = afterOp.loc,
+                expectedParamType = MezzeType.RecordType(emptyMap()),
+                expectedReturnType = duration,
+                baseContext = contextWithScope,
+                implLabel = "impl '${impl.performerName}'",
+                validationReason = "Stall hook validation",
+                recordLiteralBindings = if (scopeType != null) setOf("scope") else emptySet(),
+            )
+        }
+        impl.operations.find { it.name == ScopedEffectConstants.ON_STALL }?.let { stallOp ->
+            val lambda = stallOp.implementation as? ParsedLambda ?: throw TypeCheckError(
+                "`on_stall` in impl '${impl.performerName}' must be a function `{ waiting } -> {}`.",
+                stallOp.loc, code = ErrorCode.T0201_TYPE_MISMATCH,
+            )
+            val entry = MezzeType.RecordType(mapOf(
+                ScopedEffectConstants.STALL_TASK_ID to MezzeType.IntType,
+                ScopedEffectConstants.STALL_TASK_ON to MezzeType.StringType,
+            ))
+            val waiting = com.mezze.language.typechecker.util.WellKnownTypeApp.of("Seq", listOf(entry))
+            validateImplOperationBody(
+                lambda = lambda,
+                opName = ScopedEffectConstants.ON_STALL,
+                opLoc = stallOp.loc,
+                expectedParamType = MezzeType.RecordType(mapOf(ScopedEffectConstants.STALL_WAITING to waiting)),
+                expectedReturnType = MezzeType.RecordType(emptyMap()),
+                baseContext = contextWithScope,
+                implLabel = "impl '${impl.performerName}'",
+                validationReason = "Stall report validation",
+                recordLiteralBindings = if (scopeType != null) setOf("scope") else emptySet(),
+                onBodyResult = { bodyResult, _ ->
+                    val bodyEffects = bodyResult.effects - effectRef.localName
+                    if (bodyEffects.isNotEmpty()) {
+                        val existing = performerAddedEffects[impl.performerName] ?: emptySet()
+                        performerAddedEffects[impl.performerName] = existing + bodyEffects
+                    }
+                },
+            )
+        }
         for (implOp in impl.operations) {
             if (ScopedEffectConstants.isScopeHook(implOp.name)) {
                 continue

@@ -36,17 +36,23 @@ import com.oracle.truffle.api.library.ExportMessage;
 @ExportLibrary(InteropLibrary.class)
 public final class GuestCallable implements TruffleObject {
     private static final String[] ARGS_FIELD = {"args"};
-    private static final String[][] POSITIONAL = {{}, {"x"}, {"a", "b"}};
+    private static final String[][] POSITIONAL = {{}, {"x"}, {"a", "b"}, {"a", "b", "c"}};
 
     final MezzeFunction fn;
     final String lang;
     /** Fixed argument count, or -1 for variadic. */
     final int arity;
+    /** The converting site's handler chain and scope, or null: a plain callable runs with no
+     *  handlers (its row is empty by type); an UNDER callable runs with the site's handlers
+     *  installed on the calling thread, which is how a `*_fn_task` callback's `Async.spawn`
+     *  finds the scheduler — or LoomAsync — from a Java, JS or Python thread. */
+    final Object[] under;
 
-    public GuestCallable(MezzeFunction fn, String lang, int arity) {
+    public GuestCallable(MezzeFunction fn, String lang, int arity, Object[] under) {
         this.fn = fn;
         this.lang = lang;
         this.arity = arity;
+        this.under = under;
     }
 
     @ExportMessage
@@ -57,6 +63,7 @@ public final class GuestCallable implements TruffleObject {
     @ExportMessage
     @TruffleBoundary
     Object execute(Object[] arguments) throws ArityException {
+        if (arity > 3) throw new IllegalStateException("box_fn arity " + arity + " is not a stdlib shape");
         if (arity >= 0 && arguments.length != arity) {
             throw ArityException.create(arity, arity, arguments.length);
         }
@@ -80,7 +87,13 @@ public final class GuestCallable implements TruffleObject {
         Object[] call = new Object[closure.length + 1];
         System.arraycopy(closure, 0, call, 0, closure.length);
         call[closure.length] = param;
-        return fn.getCallTarget().call(call);
+        if (under == null) return fn.getCallTarget().call(call);
+        Object[] prev = com.mezze.interpreter.nodes.continuation.TaskMachine.installCaptured(under);
+        try {
+            return fn.getCallTarget().call(call);
+        } finally {
+            com.mezze.interpreter.nodes.continuation.TaskMachine.restoreCaptured(prev);
+        }
     }
 
     @Override

@@ -323,6 +323,19 @@ pub type ParkOutcome = |
 |
 
 pub newtype PromiseId = __NativePromiseRef
+## A `PromiseId` is compared by IDENTITY — two ids are equal when they name the same
+## promise. `Hash` is written beside it, as the rule requires (a hand-written `Eq` and
+## an automatic `Hash` could disagree): the structural hash of a native ref is its
+## identity hash, so the two agree. No `Ord`: ids have no meaningful order. `Inspect`
+## derives and shows the promise's state (`promise(pending)`, `promise(completed)`, …).
+impl Hash for PromiseId where {
+  hash: { it: PromiseId } -> Int = { it } -> structural_hash { it = it }
+}
+
+impl Eq for PromiseId where {
+  eq = { it, r } -> __native_ref_eq { l = it, r = r },
+  neq = { it, r } -> __native_ref_neq { l = it, r = r },
+}
 pub newtype TaskId = Int
 pub newtype WaitSetId = Int
 

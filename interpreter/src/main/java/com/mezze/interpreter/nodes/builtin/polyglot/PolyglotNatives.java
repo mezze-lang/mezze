@@ -1232,7 +1232,9 @@ public final class PolyglotNatives {
         }
         Object a = args.getField("arity");
         int arity = a instanceof Long l ? (int) (long) l : -1;
-        return new MezzeForeign(new GuestCallable(fn, lang, arity), lang);
+        Object u = args.getField("under");
+        Object[] under = Boolean.TRUE.equals(u) ? com.mezze.interpreter.nodes.continuation.TaskMachine.captureHandlers() : null;
+        return new MezzeForeign(new GuestCallable(fn, lang, arity, under), lang);
     }
 
     @TruffleBoundary
