@@ -52,6 +52,17 @@ object ScopedEffectConstants {
      */
     const val DRIVE = "drive"
     const val DRIVE_RUNNABLE = "runnable"
+
+    /** `CoopAsyncWith { on_stall: Option { after: Duration, f: { waiting } -> {} <...> } }`: the
+     *  stall report, handed to the task machine by the performer's `initialize_scope`.
+     *  `None` (and a performer without the field) means the machine reports nothing, ever —
+     *  the runtime has no output of its own; the report is a Mezze function whose effects are
+     *  the perform site's. */
+    const val STALL_AFTER = "after"
+    const val STALL_F = "f"
+    const val STALL_WAITING = "waiting"
+    const val STALL_TASK_ID = "id"
+    const val STALL_TASK_ON = "on"
     /** Field name carried by `abort` and `resume` records. */
     const val VAL_FIELD = "val"
 

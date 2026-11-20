@@ -3156,6 +3156,12 @@ public final class NativeDispatch extends MezzeNode {
 
         // Loom scope lifecycle (scoped effects)
         HANDLERS.put("__native_async_init_scope", (r, c) -> AsyncNatives.initScope(r));
+        // CoopAsyncWith: hand the stall report to the machine for the boundary this perform is
+        // about to open (initialize_scope runs on the opening thread, right before runBoundary).
+        HANDLERS.put("__native_coop_on_stall", (r, c) -> {
+            com.mezze.interpreter.nodes.continuation.TaskMachine.registerPendingStall(getField(r, "on_stall"));
+            return MezzeRecord.empty();
+        });
         HANDLERS.put("__native_async_finalize_scope", (r, c) -> AsyncNatives.finalizeScopeNative(r));
 
         // Simple operations that don't spawn threads use regular HANDLERS

@@ -212,8 +212,14 @@ public final class TaskMachine {
          *  are (a time-only limit re-scanned 100k predicates on every step once one scan outlasted it). */
         long lastPlainScanCost;
         long idleSince;
-        boolean graceReported;
-        Boundary(MezzeFunction drive, MezzeRecord handler) { this.handler = handler; this.drive = drive; this.runQueue = new RunQueue(this); this.entryThread = Thread.currentThread(); }
+        /** The stall report (`on_stall`): fire `stallHook { waiting }` once the machine has made no
+         *  progress for `stallAfterNanos`; -1 = no report. Re-armed on every progress. */
+        final long stallAfterNanos;
+        final MezzeFunction stallHook;
+        boolean stallReported;
+        Boundary(MezzeFunction drive, MezzeRecord handler, Object[] stall) {
+            this.stallAfterNanos = (Long) stall[0]; this.stallHook = (MezzeFunction) stall[1];
+            this.handler = handler; this.drive = drive; this.runQueue = new RunQueue(this); this.entryThread = Thread.currentThread(); }
     }
 
     /** A pooled virtual thread that runs one task at a time. */
@@ -486,7 +492,8 @@ public final class TaskMachine {
      */
     @TruffleBoundary
     public Object runBoundary(MezzeFunction bodyThunk, MezzeRecord handler) {
-        Boundary b = new Boundary(driveOf(handler), handler);
+        Object[] stall = PENDING_STALL.get(); PENDING_STALL.remove();   // handed over by initialize_scope on this thread
+        Boundary b = new Boundary(driveOf(handler), handler, stall != null ? stall : NO_STALL);
         boundaries.push(b);
         if (handler != null) b.prevForHandler = openByHandler.put(handler, b);
         try {
@@ -618,6 +625,7 @@ public final class TaskMachine {
         t.state = RUNNING;
         t.owner.pollNanos = 50_000L;
         t.owner.idleSince = 0;
+        t.owner.stallReported = false;
         Carrier c = t.carrier;
         if (c == null) {
             c = idle.pollFirst();
@@ -1008,9 +1016,10 @@ public final class TaskMachine {
      * else is waited for, because in an open system a foreign thread, a signal or a settlement
      * can always arrive: promise waits and `wait_on` waits are woken by their event, deadlines by
      * time, and a PLAIN predicate — a Mezze function over state the machine cannot see — is
-     * re-evaluated with exponential backoff (50 us .. 20 ms). A boundary idle on plain predicates
-     * for {@link #GRACE_NANOS} prints one diagnostic naming the tasks, so a stuck program is
-     * visible without being guessed at.
+     * re-evaluated with exponential backoff (50 us .. 20 ms). The machine PRINTS NOTHING of its
+     * own: a boundary that has made no progress for the performer's `on_stall.after` calls the
+     * performer's `on_stall.f` with the parked tasks, under the perform site's handlers, so a
+     * stuck program is visible through an effect the site declared, never guessed at.
      */
     private void blockOrDeadlock(Boundary b) {
         // Every wait but a plain predicate is event-driven: a promise settling signals its task waiters,
@@ -1037,11 +1046,19 @@ public final class TaskMachine {
                 if (plain) {
                     wait = b.pollNanos;
                     b.pollNanos = Math.min(b.pollNanos * 2, 20_000_000L);
-                    long now = System.nanoTime();
-                    if (b.idleSince == 0) b.idleSince = now;
-                    else if (!b.graceReported && now - b.idleSince > GRACE_NANOS) { b.graceReported = true; reportGrace(b); }
                 } else {
                     wait = 1_000_000L;                 // the fallback for anything the hooks above missed
+                }
+                long now = System.nanoTime();
+                if (b.idleSince == 0) b.idleSince = now;
+                if (b.stallHook != null && !b.stallReported) {
+                    // The stall report: no progress for `after`. The machine never prints; it calls
+                    // the performer's `on_stall` function under the perform site's handlers, so what
+                    // the report does — log, fail, complete a promise — is an effect the site declared.
+                    // Once per stall; re-armed when any task runs again.
+                    long stallAt = b.idleSince + b.stallAfterNanos;
+                    if (now >= stallAt) { b.stallReported = true; fireStall(b); return; }
+                    wait = Math.min(wait, stallAt - now);
                 }
                 if (nearest != Long.MAX_VALUE) wait = Math.max(1_000L, Math.min(wait, nearest - System.nanoTime()));
                 LockSupport.parkNanos(this, wait);
@@ -1055,18 +1072,51 @@ public final class TaskMachine {
         return !b.signalled.isEmpty();
     }
 
-    static final long GRACE_NANOS = Long.getLong("mezze.coop.graceMillis", 10_000L) * 1_000_000L;
+    private static final Object[] NO_STALL = {-1L, null};
+    /** `CoopAsyncWith`'s `initialize_scope` hands its `on_stall` config here, on the thread about
+     *  to open the boundary; `runBoundary` takes it. The handler record itself carries only the
+     *  ops (config lives in their closures), so the performer, not the machine, reads the field. */
+    private static final ThreadLocal<Object[]> PENDING_STALL = new ThreadLocal<>();
 
+    /** `__native_coop_on_stall { on_stall }`: `None` → no report; `Some { val = { after, f } }` → the
+     *  report `f { waiting }` after `after` of no progress. Anything else is a stdlib bug. */
     @TruffleBoundary
-    private static void reportGrace(Boundary b) {
-        StringBuilder sb = new StringBuilder("mezze: ").append(b.parked.size())
-            .append(b.parked.size() == 1 ? " task has" : " tasks have")
-            .append(" been parked on predicates for ").append(GRACE_NANOS / 1_000_000_000L)
-            .append(" s and nothing in the scheduler can wake them; the machine keeps checking (every 20 ms)."
-                  + " If another thread is expected to change the state, wait on a channel, mutex, latch or promise"
-                  + " instead — those wake the task at once. Parked:");
-        for (Task t : b.parked) sb.append(' ').append(t).append(" on ").append(describe(t.parkedOn)).append(';');
-        System.err.println(sb);
+    public static void registerPendingStall(Object onStall) {
+        if (!(onStall instanceof MezzeVariant v)) {
+            throw new IllegalStateException("on_stall must be an Option, got " + (onStall == null ? "null" : onStall.getClass().getName()));
+        }
+        if (!"Some".equals(v.getConstructorName())) { PENDING_STALL.remove(); return; }
+        Object payload = v.getPayloadFieldByName(com.mezze.language.ast.ScopedEffectConstants.VAL_FIELD);
+        if (!(payload instanceof MezzeRecord r)) throw new IllegalStateException("on_stall payload is not a record: " + payload);
+        Object after = r.getField(com.mezze.language.ast.ScopedEffectConstants.STALL_AFTER);
+        Object f = r.getField(com.mezze.language.ast.ScopedEffectConstants.STALL_F);
+        if (!(after instanceof com.mezze.interpreter.nodes.builtin.io.DateTimeNatives.MezzeDuration d) || !(f instanceof MezzeFunction fn)) {
+            throw new IllegalStateException("on_stall needs { after: Duration, f }, got after=" + after + " f=" + f);
+        }
+        PENDING_STALL.set(new Object[]{Math.max(0L, d.duration.toNanos()), fn});
+    }
+
+    /** Call the stall report with every parked task, under the boundary's own handlers. A throw
+     *  (a `fail` in the report) is the machine step failing: the boundary's failure, like a deadlock. */
+    @TruffleBoundary
+    private void fireStall(Boundary b) {
+        Object[] waiting = new Object[b.parked.size()];
+        String[] names = {com.mezze.language.ast.ScopedEffectConstants.STALL_TASK_ID, com.mezze.language.ast.ScopedEffectConstants.STALL_TASK_ON};
+        for (int i = 0; i < waiting.length; i++) {
+            Task t = b.parked.get(i);
+            waiting[i] = MezzeRecord.fromFields(names, new Object[]{t.id, t + " on " + describe(t.parkedOn)});
+        }
+        HandlerChainRegistry.EffectState es = HandlerChainRegistry.state();
+        var prev = HandlerChainRegistry.installTaskChain(es, b.body.chain);
+        var prevScope = HandlerChainRegistry.installScopeVar(es, b.body.scope);
+        try {
+            callWith(b.stallHook, MezzeRecord.fromFields(
+                new String[]{com.mezze.language.ast.ScopedEffectConstants.STALL_WAITING},
+                new Object[]{com.mezze.datastructures.seq.MezzeSeq.fromArray(waiting)}));
+        } finally {
+            HandlerChainRegistry.installScopeVar(es, prevScope);
+            HandlerChainRegistry.restoreTaskChain(prev);
+        }
     }
 
     /** A host-level promise await WITH a deadline: woken by the settlement or at the deadline. */

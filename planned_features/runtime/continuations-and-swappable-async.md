@@ -1263,6 +1263,34 @@ empties at the end of the call that resolved the promise, so a JS reactor pumps 
 Python's `asyncio` loop runs only where someone runs it. A Java thread's FIRST callback enters the
 runtime once (the thread-registry walk above), so callback pools are free and thread-per-event is not.
 
+**The stall report, 2026-11-20 (user decision: NO stderr — a runtime writing on its own is an
+effect nobody declared).** The ten-second diagnostic and its JVM property are gone. The machine prints
+nothing, ever. The only error it raises is an EMPTY wait set (provable). A program that wants to know
+about a stall says so where it picks the performer: `CoopAsyncWith { on_stall: Option { after:
+Duration, f: { waiting: [{ id: Int, on: Str }] } -> {} <...> } }`. The report is a Mezze function run
+under the perform site's handlers (the boundary body's chain), so its effects are the site's and in the
+row — `Log`, `Console`, a metric, completing the promise everyone waits on; a failure inside it is the
+boundary's failure exactly as a deadlock error is. It fires ONCE per stall (no progress for `after`,
+plain predicates and event-driven waits alike) and re-arms when any task runs. `after` is pacing on
+the machine's monotonic clock like the poll backoff, not the `Time` effect, so it decides WHEN a report
+fires, never WHETHER a program is correct. `None` is `CoopAsync`.
+
+How the config reaches the machine: the handler record of a configured performer carries ONLY the
+ops (config fields live in their closures — verified by printing the record: `[initialize_scope,
+finalize_scope, spawn, await, cancel, park, park_until]`), so the machine cannot read `on_stall` the
+way it reads the impl-only `drive`. `CoopAsyncWith`'s `initialize_scope` hands it over through
+`__native_coop_on_stall`, on the thread about to open the boundary, and `runBoundary` takes it. Tests:
+`StallReportTest` (4: reported once with every parked task incl. the body, the report completes the
+stalling promise, `None` silent, a failing report fails the perform). Eight guarded runs clean. Three
+hangs were seen earlier today under a DISCARDED variant that read the handler record directly; they
+did not reproduce under the shipped variant and their cause was not established — noted, not
+explained.
+
+Also surfaced: `perform CoopAsync` with no `Time` performer beside it and a `park_until` inside is a
+RUNTIME failure of the task (the await returns Err), not a type error, when the entry is a plain `let
+main` called at the top level. The entry check that names the clock covers `pub let main`; the
+top-level-call form needs the same rule. Open item.
+
 Still owed on the carrier design: the handoff cost when the inline child does NOT apply (two carriers
 waiting on each other, ~300 ns each; the fan-out kernel is that shape at 176 ns per element); a foreign-thread
 park (a Mezze callback on a Loom/HTTP thread calling `cont.park` is refused with a clear message —

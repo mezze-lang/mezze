@@ -4,7 +4,7 @@ use std::abilities::compare::{ Eq, Hash, structural_hash }
 use std::result
 use std::effects::exception::{ Exception, unwrap }
 use std::effects::time::{ Time, now }
-use std::datetime::{ duration_millis, add, after }
+use std::datetime::{ Duration, duration_millis, add, after }
 use std::int
 use std::bool
 
@@ -372,6 +372,43 @@ pub let settled_result: { p: Promise 'a } -> Result 'a AsyncError = { p } -> mat
 ## a clock on its own: that is what keeps a test scheduler deterministic.
 impl Async for CoopAsync where {
   initialize_scope = {} -> {},
+  finalize_scope = {} -> {},
+  spawn = { f } -> spawn_task { f = f },
+  await = { p } -> match inspect { p = p } is
+    PromiseCompleted { val } -> Ok { val = val }
+    PromiseFailed { err } -> Err { error = err }
+    PromisePending -> match cont.park { on = OnPromises { ids = [promise_id { p = p }] }, set = WaitDefault } is
+      ParkReady { which } -> settled_result { p = p }
+      ParkCancelled { reason } -> Err { error = AsyncCancelled { reason = reason } },
+  cancel = { p, reason } -> __native_promise_cancel { p = p, reason = reason },
+  park = { predicate } -> match cont.park { on = OnPredicates { fs = [predicate] }, set = WaitDefault } is
+    ParkReady { which } -> {}
+    ParkCancelled { reason } -> {},
+  park_until = { predicate, ms } -> do
+    let deadline = add { i = now {}, d = duration_millis { n = ms } }
+    match cont.park { on = OnPredicates { fs = [predicate, {} -> after { a = now {}, b = deadline }] }, set = WaitDefault } is
+      ParkReady { which } -> which == 0
+      ParkCancelled { reason } -> False,
+}
+
+## `CoopAsync` with a STALL REPORT. The machine never prints anything of its own — a
+## runtime writing to stderr would be an effect nobody declared. A program that wants
+## to know when the scheduler has made no progress for a while says so here, and the
+## report is a Mezze function run under THIS perform site's handlers, so whatever it
+## does — `Log`, `Console`, a metric, a `fail`, completing the promise everyone waits
+## on — is an effect the site declared:
+##
+##   perform CoopAsyncWith { on_stall = Some { val = { after = duration_seconds { n = 10 },
+##     f = { waiting } -> Log.warn { msg = "stalled: $(seq::size { xs = waiting }) parked" } } } } in …
+##
+## `waiting` lists every parked task with what it waits on. The report fires ONCE per
+## stall and re-arms when any task runs again. `after` is pacing against the machine's
+## own monotonic clock, like the poll backoff — not the `Time` effect — so a MockTime
+## does not move it; it decides WHEN the report fires, never WHETHER a program is
+## correct. `None` is exactly `CoopAsync`: silent. Only an EMPTY wait set is ever an
+## error (a provable deadlock); every other wait is waited for, Go- and Eio-style.
+impl Async for CoopAsyncWith { on_stall: Option { after: Duration, f: { waiting: [{ id: Int, on: Str }] } -> {} <...> } } where {
+  initialize_scope = {} -> __native_coop_on_stall { on_stall = on_stall },
   finalize_scope = {} -> {},
   spawn = { f } -> spawn_task { f = f },
   await = { p } -> match inspect { p = p } is
