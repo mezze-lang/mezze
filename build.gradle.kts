@@ -71,6 +71,50 @@ subprojects {
         // flake without hiding a genuine hang.
         systemProperty("junit.jupiter.execution.timeout.default", "120s")
         systemProperty("junit.jupiter.execution.timeout.mode", "disabled_on_debug")
+
+        // GATE MEMORY GUARD (2026-11-20). A test task is `maxParallelForks` JVMs of
+        // `maxHeapSize` each, plus ~1 GB per fork of metaspace, Truffle code and
+        // off-heap. Several sessions run gates on one machine at once; when their
+        // forks add up past physical memory the box does not fail, it SWAPS (25 GB of
+        // swap on 27 GB of RAM) — a nine-minute gate becomes a ninety-minute one and
+        // the machine freezes until someone reboots it. Five times in one week.
+        //
+        // So at execution time, after every module has set its own forks and heap:
+        //  - size the forks by the memory AVAILABLE NOW (never more than fit, and a
+        //    3 GB floor stays for the desktop and the Gradle JVMs);
+        //  - refuse to start when not even one fork fits — a fast, named failure
+        //    beats a swap death. `MEZZE_GATE_UNGUARDED=1` bypasses (CI containers
+        //    whose /proc/meminfo is not theirs); `MEZZE_GATE_AVAIL_MB` injects the
+        //    reading, for the guard's own test.
+        doFirst {
+            if (System.getenv("MEZZE_GATE_UNGUARDED") == null) {
+                val heapMb = maxHeapSize?.lowercase()?.let { h ->
+                    val n = h.filter { it.isDigit() }.toLongOrNull() ?: 0L
+                    when { h.endsWith("g") -> n * 1024; h.endsWith("k") -> n / 1024; else -> n }
+                } ?: 512L
+                val perForkMb = heapMb + 1024
+                val availMb = System.getenv("MEZZE_GATE_AVAIL_MB")?.toLongOrNull()
+                    ?: runCatching {
+                        File("/proc/meminfo").readLines()
+                            .first { it.startsWith("MemAvailable:") }
+                            .filter { it.isDigit() }.toLong() / 1024
+                    }.getOrNull()
+                if (availMb != null) {
+                    val fits = ((availMb - 3072) / perForkMb).toInt()
+                    val wanted = maxParallelForks
+                    if (fits < 1) throw GradleException(
+                        "gate memory guard: ${project.path}:${name} needs ${perForkMb} MB per fork " +
+                            "(${heapMb} MB heap + ~1 GB) but only ${availMb} MB is available — " +
+                            "another gate or build is probably running on this machine. Wait for it, " +
+                            "or run with fewer/lighter forks. (MEZZE_GATE_UNGUARDED=1 bypasses.)")
+                    if (fits < wanted) {
+                        logger.quiet("gate memory guard: ${project.path}:${name} forks ${wanted} -> ${fits} " +
+                            "(${availMb} MB available, ${perForkMb} MB per fork)")
+                        maxParallelForks = fits
+                    }
+                }
+            }
+        }
     }
 }
 
