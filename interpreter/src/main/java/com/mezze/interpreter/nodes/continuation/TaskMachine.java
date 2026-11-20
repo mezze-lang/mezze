@@ -101,6 +101,10 @@ public final class TaskMachine {
         volatile boolean signalled;
         /** The park waits on at least one `wait_on` predicate (registered with its queue). */
         boolean waitOn;
+        /** Where this task sits in its boundary's lists, for O(1) removal. -1 = not there. */
+        int parkedIndex = -1, plainIndex = -1;
+        /** The deadline this park wakes at (0 = none); the deadline heap orders by it. */
+        long deadlineAt;
         ParkRequest parkedOn;
         Object deliver;
         Object result;
@@ -168,7 +172,14 @@ public final class TaskMachine {
     /** One cont-capable perform: its body task and the tasks spawned under it. */
     private static final class Boundary {
         final ArrayDeque<Task> ready = new ArrayDeque<>();
+        /** Every parked task (the master list); the three indexes below find the ones to look at. */
         final ArrayList<Task> parked = new ArrayList<>();
+        /** Tasks a wait queue or a promise signalled since the last step: re-checked, nothing else is. */
+        final java.util.concurrent.ConcurrentLinkedQueue<Task> signalled = new java.util.concurrent.ConcurrentLinkedQueue<>();
+        /** Tasks whose park is (also) a PLAIN predicate: the only ones the machine must poll. */
+        final ArrayList<Task> plain = new ArrayList<>();
+        /** Tasks with a deadline, soonest first; stale entries (woken earlier) are skipped when met. */
+        final java.util.PriorityQueue<Task> deadlines = new java.util.PriorityQueue<>((a, c) -> Long.compare(a.deadlineAt, c.deadlineAt));
         final MezzeFunction drive;
         final RunQueue runQueue;
         /** The thread that entered the perform. It parks once, until the boundary FINISHES; it
@@ -224,12 +235,27 @@ public final class TaskMachine {
             if (waitedNanos < spinNanos * 4) spinBudget = Math.min(spinNanos, Math.max(waitedNanos * 2, 1_000L));   // a near miss: spin longer next time
             else spinBudget = Math.max(0L, spinBudget / 2);                                                            // a real wait: spin less
         }
+        /** The Truffle context this carrier enters on start (see run). */
+        private final com.oracle.truffle.api.TruffleContext truffleContext;
         Carrier(Env env) {
-            thread = env.newTruffleThreadBuilder(this).virtual(true).build();
-            thread.setName("mezze-coop-" + (++carriersMinted));
+            // NOT env.newTruffleThreadBuilder: building a polyglot thread walks every live thread of the
+            // context (PolyglotContextImpl.checkAllThreadAccesses, measured 72% of a spawn), so the
+            // n-th carrier cost n steps and 100k parked tasks took minutes. A plain virtual thread that
+            // enters the context itself takes the per-thread path once.
+            truffleContext = env.getContext();
+            thread = Thread.ofVirtual().name("mezze-coop-" + (++carriersMinted)).unstarted(this);
             allCarriers.add(this);
         }
         @Override public void run() {
+            Object prevContext = truffleContext.enter(null);
+            try {
+                loop();
+            } finally {
+                truffleContext.leave(null, prevContext);
+            }
+        }
+
+        private void loop() {
             es = HandlerChainRegistry.state();
             CURRENT_CARRIER.set(this);
             while (true) {
@@ -276,6 +302,13 @@ public final class TaskMachine {
     static void poke(Task t) {
         Boundary b = t.owner;
         if (b != null) wakeIdler(b);
+    }
+
+    /** A wait queue or a promise says this parked task is worth re-checking. From any thread. */
+    static void signalled(Task t) {
+        t.signalled = true;
+        Boundary b = t.owner;
+        if (b != null) { b.signalled.add(t); wakeIdler(b); }
     }
 
     static Object callWith(MezzeFunction fn, MezzeRecord arg) { return callWithImpl(fn, arg); }
@@ -385,7 +418,7 @@ public final class TaskMachine {
 
     private void cancelParked(Task t, Object reason) {
         if (t.state != PARKED || t.owner == null) return;
-        t.owner.parked.remove(t);
+        removeParked(t.owner, t);              // by index: a shift here corrupted every later index
         deliver(t.owner, t, parkCancelled(reason));
     }
 
@@ -416,7 +449,10 @@ public final class TaskMachine {
             t.chain = fp.chain;
             t.parkedOn = fp.request;
             t.state = PARKED;
-            b.parked.add(t);
+            t.parkEpoch++;
+            addParked(b, t, fp.request);
+            int nowReady = readyIndex(fp.request);     // the same registration race, for a foreign parker
+            if (nowReady >= 0) { removeParked(b, t); deliver(b, t, parkReady(nowReady)); }
         }
     }
 
@@ -511,8 +547,7 @@ public final class TaskMachine {
                 if (b.parked.isEmpty()) { finish(b); return null; }
                 if (!b.abandoning && b.teardownRounds++ < TEARDOWN_ROUNDS) {
                     Object cancelled = parkCancelled(scopeTeardown());
-                    for (Task t : new ArrayList<>(b.parked)) deliver(b, t, cancelled);
-                    b.parked.clear();
+                    for (Task t : new ArrayList<>(b.parked)) { removeParked(b, t); deliver(b, t, cancelled); }
                     continue;
                 }
                 if (b.failure == null) b.failure = new MezzeGuestException(
@@ -537,8 +572,7 @@ public final class TaskMachine {
      *  A carrier left parked would outlive the perform — and context close waits for it. */
     private void abandonParked(Boundary b) {
         b.abandoning = true;
-        for (Task t : new ArrayList<>(b.parked)) deliver(b, t, ABANDON);
-        b.parked.clear();
+        for (Task t : new ArrayList<>(b.parked)) { removeParked(b, t); deliver(b, t, ABANDON); }
     }
 
     private static final Object ABANDON = new Object();
@@ -678,8 +712,16 @@ public final class TaskMachine {
             b.ready.addLast(t);
         } else {
             t.state = PARKED;
-            registerWaitQueues(t, request);
-            b.parked.add(t);
+            addParked(b, t, request);
+            // The event may have landed between the pre-check and the registration (a foreign thread
+            // settling the promise, a signal on the queue): nobody will signal again, so look once more.
+            int nowReady = readyIndex(request);
+            if (nowReady >= 0) {
+                removeParked(b, t);
+                t.state = RUNNING;
+                t.parkedOn = null;
+                return parkReady(nowReady);
+            }
         }
         boolean sameChain = HandlerChainRegistry.installedTaskChain(es) == b.body.chain;
         Object[] prev = sameChain ? null : HandlerChainRegistry.installTaskChain(es, b.body.chain);
@@ -791,33 +833,43 @@ public final class TaskMachine {
 
     static final long PLAIN_SCAN_NANOS = 100_000L;
 
+    /**
+     * Wake what can be woken, in time proportional to what HAPPENED, not to what is parked: the
+     * tasks a wait queue or a promise signalled, the deadlines that have passed, and — on the
+     * amortised schedule — the plain predicates, which are polls.
+     */
     private boolean wakeParked(Boundary b, HandlerChainRegistry.EffectState es) {
         boolean any = false;
-        long now = System.nanoTime();
-        boolean scanPlain = b.ready.isEmpty() || now - b.lastPlainScan >= Math.max(PLAIN_SCAN_NANOS, 10 * b.lastPlainScanCost);
-        long scanStart = now;
-        for (int i = 0; i < b.parked.size(); ) {
-            Task t = b.parked.get(i);
-            if (t.waitOn && !t.signalled) { i++; continue; }   // event-driven: only a signalled waiter re-checks
-            if (!t.waitOn && !scanPlain && hasPlainPredicate(t.parkedOn)) { i++; continue; }   // a poll, rate-limited while busy
+        Task t;
+        while ((t = b.signalled.poll()) != null) {
+            if (t.state != PARKED || t.owner != b) continue;   // woke or re-parked since: stale
             t.signalled = false;
-            int which = needsChain(t.parkedOn) ? readyIndexUnderChain(t, es) : readyIndex(t.parkedOn);
-            if (which >= 0) {
-                removeParked(b, i);                    // O(1): parked order is not scheduling order
-                deliver(b, t, parkReady(which));
-                any = true;
-            } else {
-                i++;
-            }
+            if (tryWake(b, t, es)) any = true;
         }
-        if (scanPlain) { long end = System.nanoTime(); b.lastPlainScan = end; b.lastPlainScanCost = end - scanStart; }
+        long now = System.nanoTime();
+        while ((t = b.deadlines.peek()) != null && t.deadlineAt - now <= 0) {
+            b.deadlines.poll();
+            if (t.state != PARKED || t.owner != b || t.deadlineAt == 0) continue;   // stale entry
+            if (tryWake(b, t, es)) any = true;
+        }
+        if (!b.plain.isEmpty() && (b.ready.isEmpty() || now - b.lastPlainScan >= Math.max(PLAIN_SCAN_NANOS, 10 * b.lastPlainScanCost))) {
+            long scanStart = now;
+            for (int i = 0; i < b.plain.size(); ) {
+                Task pt = b.plain.get(i);
+                if (tryWake(b, pt, es)) any = true; else i++;   // a wake swap-removes pt from the plain list
+            }
+            long end = System.nanoTime(); b.lastPlainScan = end; b.lastPlainScanCost = end - scanStart;
+        }
         return any;
     }
 
-    private static void removeParked(Boundary b, int i) {
-        int last = b.parked.size() - 1;
-        if (i != last) b.parked.set(i, b.parked.get(last));
-        b.parked.remove(last);
+    /** Re-check one parked task; deliver and unindex it when its wait holds. */
+    private boolean tryWake(Boundary b, Task t, HandlerChainRegistry.EffectState es) {
+        int which = needsChain(t.parkedOn) ? readyIndexUnderChain(t, es) : readyIndex(t.parkedOn);
+        if (which < 0) return false;
+        removeParked(b, t);
+        deliver(b, t, parkReady(which));
+        return true;
     }
 
     private int readyIndex(ParkRequest pr) {
@@ -849,11 +901,65 @@ public final class TaskMachine {
         return pr.on instanceof MezzeVariant on && on.getTag() != tagImmediately() && on.getTag() != tagOnPromises() && !isYield(pr);
     }
 
-    /** Register the task with every wait queue its `wait_on` predicates name. */
+    /** Index a parked task so every later event finds it without a scan: the master list, the plain
+     *  list when it must be polled, the deadline heap when it has one, and the wait queues (a
+     *  primitive's, or a promise's) that will signal it. */
+    private static void addParked(Boundary b, Task t, ParkRequest pr) {
+        t.parkedIndex = b.parked.size();
+        b.parked.add(t);
+        t.deadlineAt = deadlineOf(pr);
+        if (t.deadlineAt != 0) b.deadlines.add(t);
+        registerWaitQueues(t, pr);
+        boolean opaqueHost = pr.on instanceof java.util.function.BooleanSupplier && !(pr.on instanceof QueueWait) && !(pr.on instanceof Deadline) && !(pr.on instanceof PromiseOrDeadline);
+        if (hasPlainPredicate(pr) || opaqueHost) {
+            t.plainIndex = b.plain.size();
+            b.plain.add(t);
+        }
+    }
+
+    private static long deadlineOf(ParkRequest pr) {
+        if (pr.on instanceof Deadline d) return d.at;
+        if (pr.on instanceof PromiseOrDeadline pd) return pd.at;
+        if (pr.on instanceof QueueWait qw) return qw.at;
+        return 0;
+    }
+
+    /** Take a task out of every index (O(1) each; its deadline-heap entry is skipped when met). */
+    private static void removeParked(Boundary b, Task t) {
+        int i = t.parkedIndex;
+        if (i >= 0) {
+            int last = b.parked.size() - 1;
+            Task moved = b.parked.get(last);
+            b.parked.set(i, moved); moved.parkedIndex = i;
+            b.parked.remove(last);
+            t.parkedIndex = -1;
+        }
+        int j = t.plainIndex;
+        if (j >= 0) {
+            int last = b.plain.size() - 1;
+            Task moved = b.plain.get(last);
+            b.plain.set(j, moved); moved.plainIndex = j;
+            b.plain.remove(last);
+            t.plainIndex = -1;
+        }
+        t.deadlineAt = 0;
+    }
+
+    /** Register the task with every wait queue (a primitive's or a promise's) that will signal it. */
     private static void registerWaitQueues(Task t, ParkRequest pr) {
-        if (pr.on instanceof QueueWait qw) { qw.queue.register(t); t.waitOn = true; return; }
-        if (!(pr.on instanceof MezzeVariant on) || on.getTag() != tagOnPredicates()) return;
-        Object payload = on.getPayloadFieldByName("fs");
+        Object on = pr.on;
+        if (on instanceof QueueWait qw) { qw.queue.register(t); t.waitOn = true; return; }
+        if (on instanceof MezzePromise p) { p.taskWaiters().register(t); return; }
+        if (on instanceof PromiseOrDeadline pd) { pd.promise.taskWaiters().register(t); return; }
+        if (!(on instanceof MezzeVariant v)) return;
+        if (v.getTag() == tagOnPromises()) {
+            Object payload = v.getPayloadFieldByName("ids");
+            int n = seqSize(payload);
+            for (int i = 0; i < n; i++) promiseOf(seqAt(payload, i)).taskWaiters().register(t);
+            return;
+        }
+        if (v.getTag() != tagOnPredicates()) return;
+        Object payload = v.getPayloadFieldByName("fs");
         int n = seqSize(payload);
         for (int i = 0; i < n; i++) {
             WaitQueue q = ContBinding.queueOf(seqAt(payload, i));
@@ -907,42 +1013,16 @@ public final class TaskMachine {
      * visible without being guessed at.
      */
     private void blockOrDeadlock(Boundary b) {
+        // Every wait but a plain predicate is event-driven: a promise settling signals its task waiters,
+        // a primitive signals its queue, a deadline sits in the heap. The idle park below ends on any
+        // signal (it wakes the idler), at the nearest deadline, or on the plain-predicate backoff. An
+        // empty wait set is the one provable deadlock.
         boolean allUnsatisfiable = !b.parked.isEmpty();
-        boolean plain = false;
-        long nearest = Long.MAX_VALUE;
+        for (Task t : b.parked) if (!unsatisfiable(t.parkedOn)) { allUnsatisfiable = false; break; }
+        boolean plain = !b.plain.isEmpty();
+        Task soonest = b.deadlines.peek();
+        long nearest = soonest != null ? soonest.deadlineAt : Long.MAX_VALUE;
         Thread me = Thread.currentThread();
-        ArrayList<MezzePromise> hooked = null;
-        for (Task t : b.parked) {
-            ParkRequest pr = t.parkedOn;
-            if (!unsatisfiable(pr)) allUnsatisfiable = false;
-            Object on = pr.on;
-            if (on instanceof MezzePromise p) {
-                if (p.isDone()) return;
-                p.machineWaiter = me; (hooked == null ? hooked = new ArrayList<>() : hooked).add(p);
-                continue;
-            }
-            if (on instanceof PromiseOrDeadline pd) {
-                if (pd.promise.isDone()) return;
-                pd.promise.machineWaiter = me; (hooked == null ? hooked = new ArrayList<>() : hooked).add(pd.promise);
-                nearest = Math.min(nearest, pd.at);
-                continue;
-            }
-            if (on instanceof Deadline d) { nearest = Math.min(nearest, d.at); continue; }
-            if (on instanceof QueueWait qw) { if (qw.at != 0) nearest = Math.min(nearest, qw.at); continue; }   // woken by its queue's signal
-            if (on instanceof java.util.function.BooleanSupplier) { plain = true; continue; }
-            if (on instanceof MezzeVariant v && v.getTag() == tagOnPromises()) {
-                Object payload = v.getPayloadFieldByName("ids");
-                int n = seqSize(payload);
-                for (int i = 0; i < n; i++) {
-                    MezzePromise p = promiseOf(seqAt(payload, i));
-                    if (p.isDone()) return;
-                    p.machineWaiter = me; (hooked == null ? hooked = new ArrayList<>() : hooked).add(p);
-                }
-                continue;
-            }
-            if (hasPlainPredicate(pr)) plain = true;
-            // a wait_on-only predicate park is woken by its queue's signal (poke)
-        }
         if (allUnsatisfiable) {
             StringBuilder sb = new StringBuilder("deadlock: ").append(b.parked.size())
                 .append(b.parked.size() == 1 ? " task is parked" : " tasks are parked")
@@ -952,9 +1032,7 @@ public final class TaskMachine {
         }
         b.idler = me;
         try {
-            boolean settled = false;
-            if (hooked != null) for (MezzePromise p : hooked) if (p.isDone()) { settled = true; break; }
-            if (!settled && b.inbox.isEmpty() && !anySignalled(b)) {
+            if (b.inbox.isEmpty() && !anySignalled(b)) {
                 long wait;
                 if (plain) {
                     wait = b.pollNanos;
@@ -970,13 +1048,11 @@ public final class TaskMachine {
             }
         } finally {
             b.idler = null;
-            if (hooked != null) for (MezzePromise p : hooked) if (p.machineWaiter == me) p.machineWaiter = null;
         }
     }
 
     private static boolean anySignalled(Boundary b) {
-        for (Task t : b.parked) if (t.signalled) return true;
-        return false;
+        return !b.signalled.isEmpty();
     }
 
     static final long GRACE_NANOS = Long.getLong("mezze.coop.graceMillis", 10_000L) * 1_000_000L;

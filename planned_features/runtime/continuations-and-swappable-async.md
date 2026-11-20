@@ -1186,7 +1186,28 @@ by design: a raw blocking call into a Java library through polyglot, data-parall
 (`Parallel`, CPU-bound and short), and a file-watch poll; these are documented as the cost of calling
 foreign code from a cooperative task, as in Eio and Go.
 
-MEASURED-ELEVENTH-PASS-PLACEHOLDER
+**Twelfth pass, 2026-11-20 — scheduling in time proportional to what happened.** With sleeps parking,
+the memory probe's hundred thousand tasks exposed that a scheduler step was linear in the parked count:
+every step re-evaluated every parked plain predicate, and the parked list was removed from by index
+shift. Now each wait is indexed by what will wake it: a `WaitQueue`'s signal and a promise's settlement
+push the task onto the boundary's `signalled` queue (the promise carries its own task-waiter queue, so
+`OnPromises` and the host-level await are no longer polled), deadlines sit in a heap, and only PLAIN
+predicates are polled — when idle, and otherwise on an amortised schedule (no sooner than 100 us and
+ten times the last scan's own duration, so polling never exceeds a tenth of the machine's time). The
+parked list is swap-removed by index. A registration race came with this and is fixed: a task
+re-checks once AFTER registering, because an event that lands between the pre-check and the
+registration is never re-signalled (found as a hang in the full gate). The wait group's one-shot latch
+became a monitor on the count (a wait after a re-add returned early; a pre-existing flake). Carriers
+are plain virtual threads that enter the context themselves: building them through the polyglot thread
+builder walked every live thread of the context (`checkAllThreadAccesses`, 72% of a spawn profile), so
+the n-th carrier cost n steps. Measured: spawn+park of 100k tasks 191 s → 81 s (still superlinear:
+100 us/task at 10k, 800 at 100k — profiled next); heap per parked task 3.6–5.3 KB (17 MB baseline, 70
+MB at 10k, 376 MB at 100k; a parked task is a virtual thread's stack chunk plus the Mezze frames —
+a million parked tasks is 4–5 GB, the price Loom and Eio pay too; a task that has not started is ~100
+bytes); GC is not the spawn cost (1.5 s of pauses in 191 s under Serial; G1 slower). Kernels: yield 69
+(50 before the indexes — the step now polls three empty indexes), park-True 54, spawn+await 141, fold
+152, fan-out 200; ping-pong 2.2–2.4 us. Gates: typechecker 5502/5502, interpreter 8260/8260 (incl.
+testTiming), cli 357/357.
 
 Still owed on the carrier design: the handoff cost when the inline child does NOT apply (two carriers
 waiting on each other, ~300 ns each; the fan-out kernel is that shape at 176 ns per element); a foreign-thread

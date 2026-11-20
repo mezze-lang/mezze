@@ -932,18 +932,33 @@ public final class ConcurrencyNatives {
     public static class MezzeWaitGroup {
         public final com.mezze.interpreter.nodes.continuation.WaitQueue waitQueue = new com.mezze.interpreter.nodes.continuation.WaitQueue();
         private final AtomicInteger count = new AtomicInteger(0);
-        private final CountDownLatch done = new CountDownLatch(1);
-
+        // A monitor on the COUNT, not a one-shot latch: a group whose count touches zero and is then
+        // added to again must make a later `wait` block (the latch form opened for good the first time,
+        // and a wait after a re-add returned early — a flaky test under timing changes).
+        private final Object monitor = new Object();
         public void add(int delta) {
-            int newCount = count.addAndGet(delta);
-            if (newCount == 0) done.countDown();
+            int c = count.addAndGet(delta);
+            if (c < 0) { count.addAndGet(-delta); throw new IllegalStateException("WaitGroup count went negative"); }
+            if (c == 0) synchronized (monitor) { monitor.notifyAll(); }
         }
         public void done() { add(-1); }
         public void await() throws InterruptedException {
-            if (count.get() > 0) done.await();
+            synchronized (monitor) { while (count.get() > 0) monitor.wait(); }
+        }
+        /** @return whether the count reached zero before the timeout */
+        public boolean await(long ms) throws InterruptedException {
+            long deadline = System.nanoTime() + Math.max(0L, ms) * 1_000_000L;
+            synchronized (monitor) {
+                while (count.get() > 0) {
+                    long left = deadline - System.nanoTime();
+                    if (left <= 0) return false;
+                    monitor.wait(Math.max(1L, left / 1_000_000L), (int) (left % 1_000_000L));
+                }
+            }
+            return true;
         }
         public int getCount() { return count.get(); }
-        @Override public String toString() { return "<waitgroup:" + count.get() + ">"; }
+        @Override public String toString() { return "<waitgroup count=" + count.get() + ">"; }
     }
 
     @TruffleBoundary
@@ -1819,7 +1834,7 @@ public final class ConcurrencyNatives {
             return true;
         }
         try {
-            return wg.done.await(ms, TimeUnit.MILLISECONDS);
+            return wg.await(ms);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return false;

@@ -26,8 +26,7 @@ public final class WaitQueue {
             Entry e = it.next();
             TaskMachine.Task t = e.task;
             if (t.parkEpoch != e.epoch || t.state != TaskMachine.PARKED) { it.remove(); continue; }
-            t.signalled = true;
-            TaskMachine.poke(t);
+            TaskMachine.signalled(t);                  // onto the boundary's signalled queue; the next step finds it in O(1)
         }
     }
 

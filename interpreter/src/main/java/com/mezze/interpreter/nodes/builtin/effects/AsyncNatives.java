@@ -183,6 +183,16 @@ public final class AsyncNatives {
         /** The task machine's idle carrier waiting on this promise, if any — woken on settlement
          *  beside the ordinary {@code waiter}. Volatile on both sides (Dekker with the re-check). */
         public volatile Thread machineWaiter;
+        /** Cooperative tasks parked on this promise (`OnPromises`, host-level await): woken by the
+         *  settlement in O(1) instead of being polled by every scheduler step. Created on first use. */
+        private volatile com.mezze.interpreter.nodes.continuation.WaitQueue taskWaiters;
+        public com.mezze.interpreter.nodes.continuation.WaitQueue taskWaiters() {
+            var q = taskWaiters;
+            if (q == null) {
+                synchronized (this) { q = taskWaiters; if (q == null) taskWaiters = q = new com.mezze.interpreter.nodes.continuation.WaitQueue(); }
+            }
+            return q;
+        }
         /** The machine task that settles this promise (a `TaskMachine.Task`), for the inline-child
          *  fast path: an await of exactly this promise while its task has not started runs the task
          *  on the awaiting carrier. */
@@ -390,6 +400,8 @@ public final class AsyncNatives {
             }
             Thread mw = machineWaiter;
             if (mw != null) LockSupport.unpark(mw);
+            var tq = taskWaiters;
+            if (tq != null) tq.signal();
         }
 
         public boolean isDone() {
