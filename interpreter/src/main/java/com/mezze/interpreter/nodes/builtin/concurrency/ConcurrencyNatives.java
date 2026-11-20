@@ -769,6 +769,7 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static MezzeRecord mutexLock(MezzeRecord args) {
         MezzeMutex mutex = getMutex(args, "mutex");
+        if (com.mezze.interpreter.nodes.continuation.TaskMachine.onCarrier()) { com.mezze.interpreter.nodes.continuation.TaskMachine.waitOnQueue(mutex.waitQueue, mutex::tryLock, 0); return MezzeRecord.empty(); }
         // Interruptibly so Async.cancel surfaces AsyncCancelled to a
         // task blocked on mutex.lock.
         try {
@@ -827,6 +828,7 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static MezzeRecord semaphoreAcquire(MezzeRecord args) {
         MezzeSemaphore sem = getSemaphore(args, "sem");
+        if (com.mezze.interpreter.nodes.continuation.TaskMachine.onCarrier()) { com.mezze.interpreter.nodes.continuation.TaskMachine.waitOnQueue(sem.waitQueue, sem::tryAcquire, 0); return MezzeRecord.empty(); }
         try {
             sem.acquire();
             return MezzeRecord.empty();
@@ -897,6 +899,7 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static MezzeRecord latchAwait(MezzeRecord args) {
         MezzeLatch latch = getLatch(args, "latch");
+        if (com.mezze.interpreter.nodes.continuation.TaskMachine.onCarrier()) { com.mezze.interpreter.nodes.continuation.TaskMachine.waitOnQueue(latch.waitQueue, () -> latch.getCount() == 0, 0); return MezzeRecord.empty(); }
         try {
             latch.await();
             return MezzeRecord.empty();
@@ -967,6 +970,7 @@ public final class ConcurrencyNatives {
     @TruffleBoundary
     public static MezzeRecord waitgroupWait(MezzeRecord args) {
         MezzeWaitGroup wg = getWaitGroup(args, "wg");
+        if (com.mezze.interpreter.nodes.continuation.TaskMachine.onCarrier()) { com.mezze.interpreter.nodes.continuation.TaskMachine.waitOnQueue(wg.waitQueue, () -> wg.getCount() == 0, 0); return MezzeRecord.empty(); }
         try {
             wg.await();
         } catch (InterruptedException e) {
@@ -1145,7 +1149,7 @@ public final class ConcurrencyNatives {
                 if (remainingNanos <= 0) break;
 
                 // Park until a sender unparks us or the deadline expires.
-                LockSupport.parkNanos(remainingNanos);
+                com.mezze.interpreter.nodes.continuation.TaskMachine.parkNanosCooperatively(remainingNanos);
 
                 if (Thread.interrupted()) {
                     throw new CancellationException("Channel select cancelled");
@@ -1405,7 +1409,9 @@ public final class ConcurrencyNatives {
                     long remainingNanos = deadlineNanos - System.nanoTime();
                     if (remainingNanos <= 0) return false;
 
-                    if (deadlineNanos == Long.MAX_VALUE) {
+                    if (com.mezze.interpreter.nodes.continuation.TaskMachine.onCarrier()) {
+                        com.mezze.interpreter.nodes.continuation.TaskMachine.parkNanosCooperatively(deadlineNanos == Long.MAX_VALUE ? 1_000_000L : remainingNanos);
+                    } else if (deadlineNanos == Long.MAX_VALUE) {
                         LockSupport.park();
                     } else {
                         LockSupport.parkNanos(remainingNanos);
@@ -1521,7 +1527,8 @@ public final class ConcurrencyNatives {
             // Commit-conflict retry path: exponential-ish backoff.
             if (!blocked) {
                 try {
-                    Thread.sleep(Math.min(i, 10));
+                    if (com.mezze.interpreter.nodes.continuation.TaskMachine.onCarrier()) com.mezze.interpreter.nodes.continuation.TaskMachine.parkNanosCooperatively(Math.min(i, 10) * 1_000_000L);
+                    else Thread.sleep(Math.min(i, 10));
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     throw new CancellationException("STM transaction cancelled during retry backoff");
@@ -1760,6 +1767,7 @@ public final class ConcurrencyNatives {
     public static MezzeRecord semaphoreAcquireN(MezzeRecord args) {
         MezzeSemaphore sem = getSemaphore(args, "sem");
         long permits = getLong(args, "permits");
+        if (com.mezze.interpreter.nodes.continuation.TaskMachine.onCarrier()) { for (int i = 0; i < permits; i++) com.mezze.interpreter.nodes.continuation.TaskMachine.waitOnQueue(sem.waitQueue, sem::tryAcquire, 0); return MezzeRecord.empty(); }
         try {
             for (int i = 0; i < permits; i++) sem.acquire();
         } catch (InterruptedException e) {
@@ -1784,6 +1792,7 @@ public final class ConcurrencyNatives {
     public static boolean latchAwaitTimeout(MezzeRecord args) {
         MezzeLatch latch = getLatch(args, "latch");
         long ms = getLong(args, "ms");
+        if (com.mezze.interpreter.nodes.continuation.TaskMachine.onCarrier()) return com.mezze.interpreter.nodes.continuation.TaskMachine.waitOnQueue(latch.waitQueue, () -> latch.getCount() == 0, System.nanoTime() + Math.max(0L, ms) * 1_000_000L);
         try {
             return latch.latch.await(ms, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
@@ -1804,6 +1813,7 @@ public final class ConcurrencyNatives {
     public static boolean waitgroupWaitTimeout(MezzeRecord args) {
         MezzeWaitGroup wg = getWaitGroup(args, "wg");
         long ms = getLong(args, "ms");
+        if (com.mezze.interpreter.nodes.continuation.TaskMachine.onCarrier()) return com.mezze.interpreter.nodes.continuation.TaskMachine.waitOnQueue(wg.waitQueue, () -> wg.getCount() == 0, System.nanoTime() + Math.max(0L, ms) * 1_000_000L);
         // If count is already 0, return immediately without waiting
         if (wg.getCount() == 0) {
             return true;

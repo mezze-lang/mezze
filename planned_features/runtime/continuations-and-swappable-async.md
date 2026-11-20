@@ -1171,6 +1171,23 @@ gate used `Time.sleep`, which turned out to BLOCK its carrier (see the eleventh 
 yield_now 53, park-True 55, spawn+await 145, fold with await 153, fan-out 140–178 (noisy). Gates:
 typechecker 5502/5502, interpreter 8259/8259 (incl. testTiming), cli 357/357.
 
+**Blocking natives park the task, 2026-11-19 (eleventh pass).** The memory probe's gate task slept
+four seconds with `Time.sleep` and the whole machine stalled: `SystemTime`'s sleep is `DateTimeNatives
+.sleep`, a `Thread.sleep` on the carrier, not the async module's sleep that already parked. The same
+held for every blocking entry of the synchronisation natives — `mutex::lock`, `semaphore::acquire`,
+`latch::await`, `waitgroup::wait` and their timed forms, the receive-any backoff and the STM retry
+backoff: correct under a thread per task, a stall under a carrier. Each now asks `TaskMachine
+.onCarrier()` and, on a carrier, parks the TASK: a sleep through `parkNanosCooperatively` (a deadline
+wait), a primitive through `waitOnQueue(queue, test, deadline)`, which registers with the primitive's
+WaitQueue and re-checks on its signal or at the deadline — the same event-driven path the stdlib's
+`wait_on` uses, reached from Java. Rule for anyone adding a native: a wait that can block must offer the
+carrier path; the carrier is the one thread a program cannot afford to lose. What still blocks a carrier
+by design: a raw blocking call into a Java library through polyglot, data-parallel joins
+(`Parallel`, CPU-bound and short), and a file-watch poll; these are documented as the cost of calling
+foreign code from a cooperative task, as in Eio and Go.
+
+MEASURED-ELEVENTH-PASS-PLACEHOLDER
+
 Still owed on the carrier design: the handoff cost when the inline child does NOT apply (two carriers
 waiting on each other, ~300 ns each; the fan-out kernel is that shape at 176 ns per element); a foreign-thread
 park (a Mezze callback on a Loom/HTTP thread calling `cont.park` is refused with a clear message —

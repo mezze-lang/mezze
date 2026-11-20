@@ -191,6 +191,15 @@ public final class TaskMachine {
         volatile Thread idler;
         /** Plain-predicate polling: the current backoff, and when the boundary went idle on them. */
         long pollNanos = 50_000L;
+        /** Plain predicates are POLLS, so they have a rate: while tasks are runnable they are
+         *  re-evaluated at most every {@link #PLAIN_SCAN_NANOS}; when the boundary is idle, every
+         *  step. Without this a step was linear in parked plain waiters and a spawn loop quadratic
+         *  (100k tasks parking on `is_done(gate)` ran for minutes). */
+        long lastPlainScan;
+        /** How long the last plain scan took: the next one waits at least ten times that, so polling
+         *  plain predicates never takes more than a tenth of the machine's time however many there
+         *  are (a time-only limit re-scanned 100k predicates on every step once one scan outlasted it). */
+        long lastPlainScanCost;
         long idleSince;
         boolean graceReported;
         Boundary(MezzeFunction drive, MezzeRecord handler) { this.handler = handler; this.drive = drive; this.runQueue = new RunQueue(this); this.entryThread = Thread.currentThread(); }
@@ -328,6 +337,30 @@ public final class TaskMachine {
         Task t = currentTask();
         if (t == null) throw new IllegalStateException("awaitPromiseOnCarrier off a carrier");
         while (!p.isDone()) t.machine.park(new ParkRequest(p, null));
+    }
+
+    /**
+     * A blocking native on a carrier (mutex lock, semaphore acquire, latch await, wait-group wait):
+     * park the TASK on the primitive's wait queue and re-check {@code test} when the queue is
+     * signalled, or at {@code deadlineNanos} (0 = none). Returns whether the test held (false only
+     * at a deadline). The thread-per-task performers keep their blocking path.
+     */
+    public static boolean waitOnQueue(WaitQueue q, java.util.function.BooleanSupplier test, long deadlineNanos) {
+        Task t = currentTask();
+        if (t == null) throw new IllegalStateException("waitOnQueue off a carrier");
+        while (!test.getAsBoolean()) {
+            if (deadlineNanos != 0 && System.nanoTime() - deadlineNanos >= 0) return false;
+            t.machine.park(new ParkRequest(new QueueWait(q, test, deadlineNanos), null));
+        }
+        return true;
+    }
+
+    /** The request `waitOnQueue` parks on: registered with {@code queue}, woken by its signal or
+     *  the deadline; {@code getAsBoolean} is the re-check. */
+    static final class QueueWait implements java.util.function.BooleanSupplier {
+        final WaitQueue queue; final java.util.function.BooleanSupplier test; final long at;
+        QueueWait(WaitQueue queue, java.util.function.BooleanSupplier test, long at) { this.queue = queue; this.test = test; this.at = at; }
+        @Override public boolean getAsBoolean() { return test.getAsBoolean() || (at != 0 && System.nanoTime() - at >= 0); }
     }
 
     /** A time-based host wait: the idle fallback parks only until the nearest deadline. */
@@ -756,22 +789,35 @@ public final class TaskMachine {
 
     // ---------------------------------------------------------------- wakes
 
+    static final long PLAIN_SCAN_NANOS = 100_000L;
+
     private boolean wakeParked(Boundary b, HandlerChainRegistry.EffectState es) {
         boolean any = false;
+        long now = System.nanoTime();
+        boolean scanPlain = b.ready.isEmpty() || now - b.lastPlainScan >= Math.max(PLAIN_SCAN_NANOS, 10 * b.lastPlainScanCost);
+        long scanStart = now;
         for (int i = 0; i < b.parked.size(); ) {
             Task t = b.parked.get(i);
             if (t.waitOn && !t.signalled) { i++; continue; }   // event-driven: only a signalled waiter re-checks
+            if (!t.waitOn && !scanPlain && hasPlainPredicate(t.parkedOn)) { i++; continue; }   // a poll, rate-limited while busy
             t.signalled = false;
             int which = needsChain(t.parkedOn) ? readyIndexUnderChain(t, es) : readyIndex(t.parkedOn);
             if (which >= 0) {
-                b.parked.remove(i);
+                removeParked(b, i);                    // O(1): parked order is not scheduling order
                 deliver(b, t, parkReady(which));
                 any = true;
             } else {
                 i++;
             }
         }
+        if (scanPlain) { long end = System.nanoTime(); b.lastPlainScan = end; b.lastPlainScanCost = end - scanStart; }
         return any;
+    }
+
+    private static void removeParked(Boundary b, int i) {
+        int last = b.parked.size() - 1;
+        if (i != last) b.parked.set(i, b.parked.get(last));
+        b.parked.remove(last);
     }
 
     private int readyIndex(ParkRequest pr) {
@@ -805,6 +851,7 @@ public final class TaskMachine {
 
     /** Register the task with every wait queue its `wait_on` predicates name. */
     private static void registerWaitQueues(Task t, ParkRequest pr) {
+        if (pr.on instanceof QueueWait qw) { qw.queue.register(t); t.waitOn = true; return; }
         if (!(pr.on instanceof MezzeVariant on) || on.getTag() != tagOnPredicates()) return;
         Object payload = on.getPayloadFieldByName("fs");
         int n = seqSize(payload);
@@ -881,6 +928,7 @@ public final class TaskMachine {
                 continue;
             }
             if (on instanceof Deadline d) { nearest = Math.min(nearest, d.at); continue; }
+            if (on instanceof QueueWait qw) { if (qw.at != 0) nearest = Math.min(nearest, qw.at); continue; }   // woken by its queue's signal
             if (on instanceof java.util.function.BooleanSupplier) { plain = true; continue; }
             if (on instanceof MezzeVariant v && v.getTag() == tagOnPromises()) {
                 Object payload = v.getPayloadFieldByName("ids");
@@ -955,6 +1003,7 @@ public final class TaskMachine {
     private static String describe(ParkRequest pr) {
         if (pr.on instanceof MezzePromise) return "a promise (host-level await)";
         if (pr.on instanceof PromiseOrDeadline) return "a promise with a deadline (host-level await)";
+        if (pr.on instanceof QueueWait) return "a synchronisation primitive (host-level wait)";
         if (pr.on instanceof java.util.function.BooleanSupplier) return "a host-level wait";
         if (pr.on instanceof MezzeVariant on) {
             String c = on.getConstructorName();

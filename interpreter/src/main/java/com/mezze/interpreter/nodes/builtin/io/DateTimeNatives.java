@@ -671,6 +671,10 @@ public final class DateTimeNatives {
     public static MezzeRecord sleep(MezzeDuration d) {
         long nanos = d.duration.toNanos();
         if (nanos <= 0) return MezzeRecord.empty();
+        if (com.mezze.interpreter.nodes.continuation.TaskMachine.onCarrier()) {                      // a cooperative task: park it, do not block its carrier
+            com.mezze.interpreter.nodes.continuation.TaskMachine.parkNanosCooperatively(nanos);
+            return MezzeRecord.empty();
+        }
         long millis = nanos / 1_000_000L;
         int subNanos = (int) (nanos % 1_000_000L);
         try {

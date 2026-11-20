@@ -139,6 +139,30 @@ class ForeignThreadParkTest {
         ),
     )
 
+    /** `Time.sleep` inside a cooperative task used to block its carrier (the memory probe's gate
+     *  stalled the whole machine for its four seconds): now it parks the task, so three tasks sleeping
+     *  60 ms each on ONE carrier finish together. */
+    @Test
+    fun `a Time sleep inside a cooperative task parks it instead of blocking its carrier`() {
+        val ms = eval(
+            """
+            use std::effects::async::{ Async, CoopAsync, await, sleep }
+            use std::effects::time::{ SystemTime, monotonic }
+            use std::datetime::{ duration_to_nanos, sub_duration }
+            use std::collections::seq
+            use std::result
+            perform SystemTime, CoopAsync in do
+              let t0 = monotonic {}
+              let ps = [1, 2, 3].map { f = { x } -> Async.spawn { f = {} -> do
+                sleep { ms = 60 }
+                x } }
+              let total = seq::fold { xs = ps, init = 0, f = { acc, x } -> acc + result::get_or { result = await { p = x }, def = 0 - 100 } }
+              if total == 6 then duration_to_nanos { d = sub_duration { a = monotonic {}, b = t0 } } / 1000000 else 0 - 1
+            """,
+        ) as Long
+        assertTrue(ms in 60..149, "three 60 ms sleeps on one carrier overlap when they PARK, got $ms ms")
+    }
+
     /** The surface a userland reactor needs (an io_uring or any Java-library backend): build a
      *  promise with `promise_from`, hand `complete` to a foreign thread, and let a cooperative task
      *  await it. The machine idles with nothing to do, the foreign thread completes the promise, and
