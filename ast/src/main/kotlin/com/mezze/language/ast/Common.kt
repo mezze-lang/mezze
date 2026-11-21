@@ -273,7 +273,41 @@ data class TypeVar(val name: String, val level: Int = 0, val id: Int) {
     }
 }
 
-@Serializable
+/**
+ * [RowVar] as its name. A row variable IS its name, and a generated one is named
+ * from a counter the whole process shares — so inside [Positions] the name
+ * written is the row's NUMBER WITHIN THE DECLARATION (keeping whether the user
+ * wrote the `...`, which the name's prefix says), and the name itself goes aside.
+ */
+object RowVarSerializer : KSerializer<RowVar> {
+    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("com.mezze.language.ast.RowVar") {
+        element<String>("name")
+    }
+
+    override fun serialize(encoder: Encoder, value: RowVar) {
+        val aside = Positions.writing.get()
+        val name = if (aside == null) value.name
+            else (if (value.isUserSpecified()) "userOpen_row" else "row") + aside.row(value.name)
+        encoder.encodeStructure(descriptor) { encodeStringElement(descriptor, 0, name) }
+    }
+
+    override fun deserialize(decoder: Decoder): RowVar {
+        var name: String? = null
+        decoder.decodeStructure(descriptor) {
+            while (true) {
+                when (val i = decodeElementIndex(descriptor)) {
+                    0 -> name = decodeStringElement(descriptor, 0)
+                    CompositeDecoder.DECODE_DONE -> break
+                    else -> error("unexpected RowVar element $i")
+                }
+            }
+        }
+        val written = name ?: error("a row variable was stored without its name")
+        return RowVar(Positions.reading.get()?.file() ?: written)
+    }
+}
+
+@Serializable(with = RowVarSerializer::class)
 data class RowVar(val name: String) {
     companion object {
         /** A row variable IS its name, so the number must be unique across threads. */

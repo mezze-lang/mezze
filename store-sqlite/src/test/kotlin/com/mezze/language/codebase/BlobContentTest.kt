@@ -31,6 +31,8 @@ class BlobContentTest {
 
         let twice = { x: Int } -> x * 2
         let pick : { a: 'a, b: 'a } -> 'a = { a, b } -> a
+        let first = { o: { x: Int, ... } } -> o.x
+        let apply : { x: Int, f: { v: Int } -> Int <...> } -> Int <...> = { x, f } -> f { v = x }
         let shout = { msg: Str } -> println { msg = msg }
         let main = {} -> perform Console in shout { msg = { x = 1, y = 2 }.label {} }
     """.trimIndent()
@@ -104,14 +106,16 @@ class BlobContentTest {
      */
     @Test
     fun `OPEN - a compiler-named type variable still runs through typed content`() {
-        val a = indexed(source + inferred, "app.mz")
-        val b = indexed(source + inferred, "app.mz")
-        val double = a.resolveName("app", "double")!!
-        assertEquals(double, b.resolveName("app", "double"))
+        fun double(store: MezzeStore) =
+            StoreSerialization.deserializeTypedLetDecl(store.getBlob(store.resolveName("app", "double")!!)!!.typed!!)
+        val a = double(indexed(source + inferred, "app.mz"))
+        val b = double(indexed(source + inferred, "app.mz"))
+        assertEquals(a.hash, b.hash)
+        assertTrue(a.typeParams.isNotEmpty(), "`double` is no longer generic: ${a.scheme.type}")
         assertFalse(
-            StoreSerialization.contentOf(a.getBlob(double)!!.typed!!)
-                .contentEquals(StoreSerialization.contentOf(b.getBlob(double)!!.typed!!)),
-            "typed content no longer depends on the name counter — fold `inferred` into `source`",
+            a.typeParams.map { it.name } == b.typeParams.map { it.name },
+            "`double`'s type parameters are now named the same in every run (${a.typeParams.map { it.name }}) — " +
+                "fold `inferred` into `source`",
         )
     }
 
@@ -134,6 +138,9 @@ class BlobContentTest {
         val typed = StoreSerialization.deserializeTypedLetDecl(blob.typed!!)
         assertEquals(file, typed.loc.file)
         assertEquals(11, typed.loc.startLine, "`twice` is on line 11 of the shifted source")
+        assertEquals(1, typed.loc.startCol, "and starts in column 1")
+        assertEquals(11, typed.loc.endLine)
+        assertTrue(typed.loc.endCol > 20, "and ends where its line does, not at column ${typed.loc.endCol}")
 
         val ir = StoreSerialization.deserializeFunctionIR(blob.ir!!)
         assertEquals(file, ir.sourceFile)
@@ -142,17 +149,24 @@ class BlobContentTest {
     }
 
     @Test
-    fun `a type variable read back is the one that was written`() {
-        val parsed = com.mezze.language.parser.MezzeParser().parseParsedModule(source, "app.mz")
+    fun `what is read back is what was written, every location and variable of it`() {
+        val parsed = com.mezze.language.parser.MezzeParser().parseParsedModule(source + inferred, "/home/one/app.mz")
         val checked = com.mezze.language.typechecker.TypeChecker()
             .checkParsedModule(parsed, java.nio.file.Paths.get("."), enablePrelude = true)
             as com.mezze.language.typechecker.TypeChecker.TypeCheckResult.Success
-        val written = checked.typedModule!!.decls
-            .filterIsInstance<com.mezze.language.typedast.TypedLetDecl>().single { it.name == "pick" }
 
-        val read = StoreSerialization.deserializeTypedLetDecl(StoreSerialization.serializeTypedLetDecl(written))
-        assertEquals(written, read, "`pick` came back a different declaration — its variables' ids included")
-        assertEquals(written.scheme.type.toString(), read.scheme.type.toString())
+        val lets = checked.typedModule!!.decls.filterIsInstance<com.mezze.language.typedast.TypedLetDecl>()
+        assertTrue(lets.any { it.name == "first" } && lets.any { it.name == "double" }, "${lets.map { it.name }}")
+        for (written in lets) {
+            val read = StoreSerialization.deserializeTypedLetDecl(StoreSerialization.serializeTypedLetDecl(written))
+            assertEquals(written, read, "`${written.name}` came back a different declaration")
+        }
+        val lowered = checked.loweredFunctions!!
+        assertTrue(lowered.isNotEmpty())
+        for (written in lowered) {
+            val read = StoreSerialization.deserializeFunctionIR(StoreSerialization.serializeFunctionIR(written))
+            assertEquals(written, read, "`${written.qualifiedName}` came back a different function")
+        }
     }
 
     @Test

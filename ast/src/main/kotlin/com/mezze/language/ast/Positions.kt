@@ -21,7 +21,8 @@ import java.io.ByteArrayOutputStream
  * whole process shares, so it says how much was checked before, not what the
  * declaration is: the value carries the variable's NUMBER WITHIN THE
  * DECLARATION — first met is 0 — which keeps two variables apart exactly as
- * their ids did, and the id itself goes beside it.
+ * their ids did, and the id itself goes beside it. A row variable's name is
+ * such a number too, and is treated the same.
  */
 object Positions {
     internal class Writer {
@@ -36,7 +37,7 @@ object Positions {
             out.write(v)
         }
 
-        /** A file by number; its text follows the first time it is met. */
+        /** A file — or any text that recurs — by number; the text follows the first time it is met. */
         fun file(path: String) {
             val known = files[path]
             if (known != null) { int(known); return }
@@ -54,6 +55,14 @@ object Positions {
         fun variable(id: Int): Int {
             int(id)
             return variables.getOrPut(id) { variables.size }
+        }
+
+        private val rows = HashMap<String, Int>()
+
+        /** The number of the row variable [name] within what is being written; the name itself goes aside. */
+        fun row(name: String): Int {
+            file(name)
+            return rows.getOrPut(name) { rows.size }
         }
 
         fun bytes(): ByteArray = out.toByteArray()
