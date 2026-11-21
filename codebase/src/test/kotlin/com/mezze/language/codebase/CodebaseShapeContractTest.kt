@@ -33,7 +33,7 @@ class CodebaseShapeContractTest {
         type Shape = | Circle { r: Float }, Dot |
         type Box 'a = { item: 'a }
         newtype Meters = Float
-        type Name = Str
+        type Points = [Point]
         impl Total for Point where { total = { it } -> it.x + it.y }
 
         #{route: "/p"}
@@ -184,7 +184,7 @@ class CodebaseShapeContractTest {
           y: Int }
         newtype Meters = Float
         type Pair = { left: Int, right: Int }
-        type Alias = Point
+        type Alias = [Point]
 
         ability Area for 'a where { area: { it: 'a } -> Float }
         ability Measure for 'a having 'unit where { measure: { it: 'a } -> 'unit }

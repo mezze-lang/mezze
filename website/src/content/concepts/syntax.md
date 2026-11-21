@@ -248,10 +248,11 @@ the type the operations act on.
 | `where` | open a body of operations | |
 | `for` | name the type an ability, impl or handler applies to | |
 
-## Names bound for you
+### Reserved names
 
-Three names are not keywords but are supplied by the language inside certain
-bodies, and all three are reserved. `cont` and `scope` cannot be bound at all.
+Three names are not keywords. The language supplies them inside certain
+bodies, and they are reserved all the same. `cont` and `scope` cannot be bound
+at all.
 `it` can be bound only as a parameter, because the receiver is declared as one
 (`{ it, r } -> …`), and a function with the shape of an ability operation names
 its parameter `it` too. A `let it` or a pattern binding `it` is an error.

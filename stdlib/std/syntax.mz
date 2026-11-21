@@ -110,6 +110,9 @@ pub type AssocBinding = { name: Str, ty: TypeExpr }
 pub type Arm = {
   patterns: [Pattern],
   guard: Option Expr,
+  ## One guard per alternative, parallel to `patterns` (`A if x | B if y`), or
+  ## empty when the arm has a single guard (in `guard`) or none.
+  alt_guards: [Option Expr],
   if_lets: [IfLet],
   body: Expr,
   span: Span,

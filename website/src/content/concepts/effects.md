@@ -223,9 +223,50 @@ deliberate. What differs is who supplies the operations and when: a type
 implements an ability and the compiler resolves the call, while a handler
 supplies an effect and `perform` decides which one is in scope.
 
-A handler can do more than answer. It can end the whole `perform` block, which
-is all an exception is, or wait while other work runs, which is all async is.
-The [Handlers](/concepts#handlers) page shows both.
+## What a handler can do: `cont`
+
+A handler body is answering one call. Most of the time its value is simply the
+answer, as in `ToFile` above. When it needs more than that, it has one name to
+reach for, `cont`, and three things it can ask of it:
+
+| | |
+|---|---|
+| `cont.resume { val }` | answer the call with `val`. Falling off the body does the same, so it is rarely written. |
+| `cont.abort { val }` | do not answer. End the whole `perform` block, and make `val` its value. |
+| `cont.park { on, set }` | wait until something holds, and let other tasks run meanwhile. |
+
+<!--mezze-editor
+use std::effects::log::{ Console, println }
+
+effect Stock where {
+  take: { item: Str, qty: Int } -> Int <Stock>
+}
+
+# Answer with the quantity, or stop the whole order.
+impl Stock for Shelf where {
+  take = { item, qty } -> if qty > 3 then cont.abort { val = "out of $(item)" } else qty
+}
+
+let order = {} -> do
+  let a = Stock.take { item = "tahini", qty = 2 }
+  let b = Stock.take { item = "olive-oil", qty = 5 }
+  let n = a + b
+  "took $(n.to_str {})"
+
+let main = {} -> perform Console in do
+  println { msg = perform Shelf in order {} }
+-->
+
+The first `take` is answered with `2` and `order` carries on. The second is
+too large, so the handler aborts: `order` never reaches its last line, and the
+`perform` block's value is `"out of olive-oil"`. That one line is all an
+exception is. `cont.abort` and `cont.resume` must be the last thing a handler
+does, and `cont` itself cannot be stored or passed on: the runtime holds the
+rest of the program, a handler never does.
+
+`cont.park` is what makes async a library rather than a language feature.
+The [Handlers](/concepts#handlers) page covers all three in depth, including
+how `Async` is just an effect whose scheduler you choose.
 
 ## The row can be a variable
 
