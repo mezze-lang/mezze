@@ -42,11 +42,14 @@ internal val MezzeParser.variablePatternForLet: Parser<ParsedPattern>
                 val name = ident.value.text
                 val reservedError = checkReservedName(name)
                 if (reservedError != null) {
+                    // Fatal for `it`: a `let it` inside a `do` would otherwise
+                    // backtrack and surface as "Do block is empty".
                     ParseResult.Failure(
                         reservedError,
                         ident.remaining.getSourcePosition(),
                         ident.value.line,
-                        ident.value.column
+                        ident.value.column,
+                        isFatal = name == PARAM_ONLY_NAME,
                     )
                 } else if (name.first().isUpperCase()) {
                     // An uppercase name is a CONSTRUCTOR everywhere else in the
@@ -264,7 +267,9 @@ internal val MezzeParser.standaloneRecordPattern: Parser<ParsedPattern>
 
                 val firstToken = stream1.current()
                 if (firstToken?.type == TokenType.IDENTIFIER) {
-                    val reservedError = checkReservedName(firstToken.text)
+                    // A LABEL here: `it` is checked by recordPatternEntryParser,
+                    // which knows whether the field is punned (`{ it }`) or not.
+                    val reservedError = checkReservedName(firstToken.text, isParameter = true)
                     if (reservedError != null) {
                         return@parser ParseResult.Failure(
                             reservedError,
@@ -420,11 +425,14 @@ internal val MezzeParser.variablePattern: Parser<ParsedPattern>
                     val name = ident.value.text
                     val reservedError = checkReservedName(name)
                     if (reservedError != null) {
+                        // Fatal for `it`: a pattern alternative would otherwise
+                        // backtrack and report an unrelated "Expected '}'".
                         ParseResult.Failure(
                             reservedError,
                             ident.remaining.getSourcePosition(),
                             ident.value.line,
-                            ident.value.column
+                            ident.value.column,
+                            isFatal = name == PARAM_ONLY_NAME,
                         )
                     } else {
                         val file = currentFile ?: "<unknown>"
@@ -643,7 +651,9 @@ internal val MezzeParser.recordPatternEntryParser: Parser<ParsedRecordPatternEnt
         when (ident) {
             is ParseResult.Success -> {
                 val fieldName = ident.value.text
-                val reservedError = checkReservedName(fieldName)
+                // `it` is a fine field LABEL (`{ it = x }` binds x); only the
+                // punned form binds it — checked in the punning branch below.
+                val reservedError = checkReservedName(fieldName, isParameter = true)
                 if (reservedError != null) {
                     ParseResult.Failure(
                         reservedError,
@@ -685,6 +695,14 @@ internal val MezzeParser.recordPatternEntryParser: Parser<ParsedRecordPatternEnt
                                     stream1.getSourceLine(),
                                     stream1.getSourceColumn(),
                                     isFatal = true,
+                                )
+                            } else if (fieldName == PARAM_ONLY_NAME) {
+                                ParseResult.Failure(
+                                    checkReservedName(fieldName)!! +
+                                        ". Bind the field to another name: `{ it = x }`.",
+                                    ident.remaining.getSourcePosition(),
+                                    ident.value.line,
+                                    ident.value.column
                                 )
                             } else {
                                 // Punning: field

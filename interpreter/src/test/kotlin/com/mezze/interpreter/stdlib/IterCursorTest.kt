@@ -92,9 +92,9 @@ class IterCursorTest {
         val code = """
             $head
             do
-              let it = iter::range { start = 0, end = 5 }
-              let a = iter::cursor { it = it }
-              let b = iter::cursor { it = it }
+              let src = iter::range { start = 0, end = 5 }
+              let a = iter::cursor { it = src }
+              let b = iter::cursor { it = src }
               let _ = iter::cursor_next { c = a }
               let _ = iter::cursor_next { c = a }
               match iter::cursor_next { c = a } is

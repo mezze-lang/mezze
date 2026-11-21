@@ -126,6 +126,41 @@ class ReservedNameTest {
     }
 
     @Test
+    fun `it not allowed in let binding`() {
+        val error = assertFails { parser.parseParsedModule("let it = 42") }
+        val msg = error.message ?: ""
+        assertTrue(msg.contains("'it'") && msg.contains("reserved"), "Error should say 'it' is reserved: $msg")
+    }
+
+    @Test
+    fun `it in a do block names it rather than an empty block`() {
+        val error = assertFails { parser.parseParsedModule("let f = {} -> do\n  let it = 1\n  it") }
+        val msg = error.message ?: ""
+        assertTrue(msg.contains("'it'") && !msg.contains("empty"), "Error should name 'it', not an empty block: $msg")
+    }
+
+    @Test
+    fun `it not allowed as a match binding`() {
+        val error = assertFails { parser.parseParsedModule("let f = { o } -> match o is\n  Some { val = it } -> it\n  None -> 0") }
+        assertTrue((error.message ?: "").contains("'it'"), "Error should name 'it': ${error.message}")
+    }
+
+    @Test
+    fun `it not allowed as a punned record pattern field`() {
+        val error = assertFails { parser.parseParsedModule("let f = { r } -> match r is\n  { it, n } -> n") }
+        assertTrue((error.message ?: "").contains("'it'"), "Error should name 'it': ${error.message}")
+    }
+
+    @Test
+    fun `it is allowed as a parameter and as a record pattern label`() {
+        // The receiver is DECLARED as a parameter, and functions shaped like an
+        // ability op name their parameter `it` too.
+        parser.parseParsedModule("let le = { it, r } -> it <= r")
+        parser.parseParsedModule("let h: { it: Int } -> Int = { it } -> it")
+        parser.parseParsedModule("let f = { r } -> match r is\n  { it = x, n } -> x + n")
+    }
+
+    @Test
     fun `abort and resume are ordinary binding names`() {
         // The continuation handles are fields of `cont`; the bare words are free.
         parser.parseParsedModule("let abort = 1\nlet resume = { abort } -> abort")

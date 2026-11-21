@@ -15,12 +15,26 @@ internal val RESERVED_WORDS = setOf(
     "cont"
 )
 
-internal fun checkReservedName(name: String): String? {
+/**
+ * `it` names the receiver inside an ability or inherent impl, the way `cont` and
+ * `scope` name runtime values inside a handler. Unlike those two it is DECLARED,
+ * as a parameter: every ability op takes `{ it, … }`, so any function shaped like
+ * an op (`hash: { it: 'a } -> Int`, the iterator API's `{ it = xs }`) names its
+ * parameter `it` too. So `it` is legal only as a PARAMETER and reserved at every
+ * other binding site — a `let it` or a pattern binding `it` would shadow the
+ * receiver inside an impl body.
+ */
+internal const val PARAM_ONLY_NAME = "it"
+
+internal fun checkReservedName(name: String, isParameter: Boolean = false): String? {
     if (name.startsWith("__native")) {
         return "Names starting with '__native' are reserved for Mezze internals"
     }
     if (name in RESERVED_WORDS) {
         return "'$name' is a reserved word"
+    }
+    if (name == PARAM_ONLY_NAME && !isParameter) {
+        return "'it' is a reserved word: it names the receiver in an impl, and may only be bound as a parameter"
     }
     return null
 }

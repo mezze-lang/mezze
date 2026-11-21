@@ -40,8 +40,8 @@ class SuspendedValueNeverObservableTest {
         val src = """
             $head
             do
-              let it = perform Ticker in map { it = from_seq { xs = [1, 2] }, f = { x } -> Tick.tick {} }
-              fold { it = it, init = "", f = { acc, x } -> "${'$'}(acc)${'$'}(x);" }
+              let src = perform Ticker in map { it = from_seq { xs = [1, 2] }, f = { x } -> Tick.tick {} }
+              fold { it = src, init = "", f = { acc, x } -> "${'$'}(acc)${'$'}(x);" }
         """.trimIndent()
         val failure = runCatching { MezzeTestHelper.runAllowingDroppedEffects(src) }
         val message = failure.exceptionOrNull()?.message

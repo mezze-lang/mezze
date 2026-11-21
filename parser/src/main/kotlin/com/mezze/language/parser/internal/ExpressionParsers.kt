@@ -337,7 +337,7 @@ internal val MezzeParser.lambdaParameterEntry: Parser<Pair<String, ParsedTypeAnn
             is ParseResult.Success -> {
                 val paramName = ident.value.text
 
-                val reservedError = checkReservedName(paramName)
+                val reservedError = checkReservedName(paramName, isParameter = true)
                 if (reservedError != null) {
                     // Use remaining position so this error "wins" over earlier failures,
                     // but report the token's line/column for better error pointing
@@ -418,7 +418,7 @@ internal val MezzeParser.untypedLambdaParams: Parser<ParsedLambdaParams>
                 val tokens = params.value
 
                 for (token in tokens) {
-                    val reservedError = checkReservedName(token.text)
+                    val reservedError = checkReservedName(token.text, isParameter = true)
                     if (reservedError != null) {
                         return@parser ParseResult.Failure(
                             reservedError,

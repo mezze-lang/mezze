@@ -108,8 +108,8 @@ class PhantomTypeArgTest {
             """
             use std::collections::iter
             use std::collections::iter::{ IterCursor }
-            let it = iter::range { start = 1, end = 4 }
-            let c = iter::cursor { it = it }
+            let src = iter::range { start = 1, end = 4 }
+            let c = iter::cursor { it = src }
             let s: IterCursor Str = c
             match iter::cursor_next { c = s } is
               Some { val } -> val
@@ -129,8 +129,8 @@ class PhantomTypeArgTest {
                 """
                 use std::collections::iter
                 use std::collections::iter::{ IterCursor }
-                let it = iter::range { start = 1, end = 4 }
-                let c: IterCursor Int = iter::cursor { it = it }
+                let src = iter::range { start = 1, end = 4 }
+                let c: IterCursor Int = iter::cursor { it = src }
                 match iter::cursor_next { c = c } is
                   Some { val } -> val
                   None -> 0

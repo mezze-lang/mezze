@@ -251,7 +251,10 @@ the type the operations act on.
 ## Names bound for you
 
 Three names are not keywords but are supplied by the language inside certain
-bodies. `cont` and `scope` are reserved, so nothing else can be called that.
+bodies, and all three are reserved. `cont` and `scope` cannot be bound at all.
+`it` can be bound only as a parameter, because the receiver is declared as one
+(`{ it, r } -> …`), and a function with the shape of an ability operation names
+its parameter `it` too. A `let it` or a pattern binding `it` is an error.
 
 | | | |
 |---|---|---|

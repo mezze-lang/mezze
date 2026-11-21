@@ -357,11 +357,11 @@ class CoopAsyncSchedulerTest {
               let ps = seq::map { xs = [10, 20, 30], f = { x } -> Async.spawn { f = {} -> do
                 yield_now {}
                 x } }
-              let it = {} -> iter::from_seq { xs = ps }
-              println { msg = "fold=${'$'}((iter::fold { it = it {}, init = 0, f = { acc, x } -> acc + settled { p = x } }).to_str {})" }
-              println { msg = "any=${'$'}((iter::any { it = it {}, p = { x } -> settled { p = x } > 25 }).to_dbg {})" }
-              println { msg = "all=${'$'}((iter::all { it = it {}, p = { x } -> settled { p = x } > 5 }).to_dbg {})" }
-              println { msg = "find=${'$'}(match iter::find { it = it {}, p = { x } -> settled { p = x } == 30 } is
+              let src = {} -> iter::from_seq { xs = ps }
+              println { msg = "fold=${'$'}((iter::fold { it = src {}, init = 0, f = { acc, x } -> acc + settled { p = x } }).to_str {})" }
+              println { msg = "any=${'$'}((iter::any { it = src {}, p = { x } -> settled { p = x } > 25 }).to_dbg {})" }
+              println { msg = "all=${'$'}((iter::all { it = src {}, p = { x } -> settled { p = x } > 5 }).to_dbg {})" }
+              println { msg = "find=${'$'}(match iter::find { it = src {}, p = { x } -> settled { p = x } == 30 } is
                 Some { val } -> (settled { p = val }).to_str {}
                 None -> "none")" }
         """)),
