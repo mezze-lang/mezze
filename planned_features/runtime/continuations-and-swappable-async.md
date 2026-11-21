@@ -1034,7 +1034,11 @@ lasts until the nearest one, a foreign post to the inbox unparks the idler, and 
 for opaque host waits. Register-then-re-check keeps a settlement racing the registration from being
 missed (both stores volatile). MultiTier re-measured with BUG 76 moot: 12/12 correct with it on, peak
 equal (spawn+await 777 vs 771, yield 41 vs 39), first timed run of yield_now SLOWER with it on
-(288 vs 51 ns at 200k) — the default stays `engine.MultiTier=false`. Native image re-verified after the
+(288 vs 51 ns at 200k) — the default stayed `engine.MultiTier=false` UNTIL 2026-11-21, when the
+merge-time A/B against main found the fast path paying for it: pure `seq::fold` 2.3–3.5x slower, pure
+`list::fold` 1.35x, the HTTP work route −18.5%; `MEZZE_ENGINE_OPTS=engine.MultiTier=true` restored
+parity in one run (1594 vs main 1616 ps at 2M). Multi-tier is back on everywhere, test helper included.
+Lesson: a regime decision measured on one kernel family is not a decision. Native image re-verified after the
 second pass (yield_now 89 ns, spawn+await 954, fan-out 673, seq fold with await 1030 at 200k).
 
 **Relics removed, 2026-11-19 (fourth pass).** With the carrier machine nothing yields, so the

@@ -139,10 +139,10 @@ public final class IterNatives {
         return acc[0];
     }
 
-    // ==================== Cursors (pull) ====================
+    // ==================== Cursors (pull, resumable) ====================
 
     /**
-     * A pull view over `it` (`iter::cursor`). See {@link IterCursor} for why this is
+     * A resumable pull view over `it`. See {@link IterCursor} for why this is
      * a second mechanism rather than a replacement for the push walk.
      *
      * The cursor is MUTABLE POSITION, so it is a handle like a FileHandle
@@ -167,11 +167,7 @@ public final class IterNatives {
     }
 
     @TruffleBoundary
-    public static Object forEach(MezzeIter it, MezzeFunction f, IndirectCallNode callNode) {
-        return forEachWalk(it, f, callNode);
-    }
-
-    public static Object forEachWalk(MezzeIter it, MezzeFunction f,
+    public static Object forEach(MezzeIter it, MezzeFunction f,
                                  IndirectCallNode callNode) {
         Object[] closure = f.getClosureValues();
         int closureLen = closure.length;
@@ -198,11 +194,7 @@ public final class IterNatives {
     }
 
     @TruffleBoundary
-    public static Object count(MezzeIter it, MezzeFunction p, IndirectCallNode callNode) {
-        return countWalk(it, p, callNode);
-    }
-
-    public static long countWalk(MezzeIter it, MezzeFunction p,
+    public static long count(MezzeIter it, MezzeFunction p,
                              IndirectCallNode callNode) {
         Object[] closure = p.getClosureValues();
         int closureLen = closure.length;
@@ -232,11 +224,7 @@ public final class IterNatives {
     }
 
     @TruffleBoundary
-    public static Object any(MezzeIter it, MezzeFunction p, IndirectCallNode callNode) {
-        return anyWalk(it, p, callNode);
-    }
-
-    public static boolean anyWalk(MezzeIter it, MezzeFunction p,
+    public static boolean any(MezzeIter it, MezzeFunction p,
                               IndirectCallNode callNode) {
         Object[] closure = p.getClosureValues();
         int closureLen = closure.length;
@@ -272,11 +260,7 @@ public final class IterNatives {
     }
 
     @TruffleBoundary
-    public static Object all(MezzeIter it, MezzeFunction p, IndirectCallNode callNode) {
-        return allWalk(it, p, callNode);
-    }
-
-    public static boolean allWalk(MezzeIter it, MezzeFunction p,
+    public static boolean all(MezzeIter it, MezzeFunction p,
                               IndirectCallNode callNode) {
         Object[] closure = p.getClosureValues();
         int closureLen = closure.length;
@@ -312,11 +296,7 @@ public final class IterNatives {
     }
 
     @TruffleBoundary
-    public static Object find(MezzeIter it, MezzeFunction p, IndirectCallNode callNode) {
-        return findWalk(it, p, callNode);
-    }
-
-    public static Object findWalk(MezzeIter it, MezzeFunction p,
+    public static Object find(MezzeIter it, MezzeFunction p,
                               IndirectCallNode callNode) {
         Object[] closure = p.getClosureValues();
         int closureLen = closure.length;
@@ -352,11 +332,7 @@ public final class IterNatives {
     }
 
     @TruffleBoundary
-    public static Object reduce(MezzeIter it, MezzeFunction f, IndirectCallNode callNode) {
-        return reduceWalk(it, f, callNode);
-    }
-
-    public static Object reduceWalk(MezzeIter it, MezzeFunction f,
+    public static Object reduce(MezzeIter it, MezzeFunction f,
                                 IndirectCallNode callNode) {
         Object[] closure = f.getClosureValues();
         int closureLen = closure.length;
@@ -415,10 +391,6 @@ public final class IterNatives {
 
     @TruffleBoundary
     public static Object toSeq(MezzeIter it, IndirectCallNode callNode) {
-        return toSeqWalk(it, callNode);
-    }
-
-    public static Object toSeqWalk(MezzeIter it, IndirectCallNode callNode) {
         java.util.ArrayList<Object> buf = new java.util.ArrayList<>();
         walkElements(it.getDescriptor(), buf::add, callNode);
         return com.mezze.datastructures.seq.MezzeSeq.fromArray(buf.toArray());
@@ -433,10 +405,6 @@ public final class IterNatives {
 
     @TruffleBoundary
     public static Object first(MezzeIter it, IndirectCallNode callNode) {
-        return firstWalk(it, callNode);
-    }
-
-    public static Object firstWalk(MezzeIter it, IndirectCallNode callNode) {
         Object[] result = {null};
         walkElements(it.getDescriptor(), x -> {
             result[0] = MezzeVariant.some(x);
@@ -447,10 +415,6 @@ public final class IterNatives {
 
     @TruffleBoundary
     public static Object last(MezzeIter it, IndirectCallNode callNode) {
-        return lastWalk(it, callNode);
-    }
-
-    public static Object lastWalk(MezzeIter it, IndirectCallNode callNode) {
         Object[] result = {null};
         walkElements(it.getDescriptor(), x -> { result[0] = x; return true; }, callNode);
         return result[0] != null ? MezzeVariant.some(result[0]) : MezzeVariant.none();
@@ -458,10 +422,6 @@ public final class IterNatives {
 
     @TruffleBoundary
     public static Object toList(MezzeIter it, IndirectCallNode callNode) {
-        return toListWalk(it, callNode);
-    }
-
-    public static Object toListWalk(MezzeIter it, IndirectCallNode callNode) {
         java.util.ArrayList<Object> buf = new java.util.ArrayList<>();
         walkElements(it.getDescriptor(), buf::add, callNode);
         com.mezze.datastructures.list.MezzeList result = com.mezze.datastructures.list.MezzeNil.INSTANCE;
@@ -473,6 +433,7 @@ public final class IterNatives {
 
     // ===== ELEMENT WALKER =====
 
+    @FunctionalInterface
     /**
      * A sink for walked elements.
      *
@@ -488,7 +449,6 @@ public final class IterNatives {
      * consumer that has its answer may be sitting in front of an infinite
      * producer.
      */
-
     private interface ElementConsumer {
         /** @return true to keep walking, false to stop now. */
         boolean accept(Object element);
@@ -629,7 +589,7 @@ public final class IterNatives {
             // which meant zipping anything endless exhausted memory — and
             // `zip { a = finite, b = endless }` is an ordinary thing to write.
             // Interleaving two pushes is what a push driver cannot do, so each
-            // side gets a pull view instead and this holds one pair
+            // side gets a resumable pull view instead and this holds one pair
             // at a time. Stops at the shorter side, as before.
             IterCursor left = IterCursor.of(zip.first, callNode);
             IterCursor right = IterCursor.of(zip.second, callNode);

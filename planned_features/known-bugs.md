@@ -8464,6 +8464,7 @@ statement-`if` form failed 9 of 12 too, and `engine.FirstTierUseEconomy=false` 3
 harness does not reproduce it even first-tier-only with low thresholds (`ParkUnderJitTest`, 19/19),
 so the built app's regime (precompiled stdlib, eager compilation order) is part of it. **MITIGATED
 2026-11-18:** `engine.MultiTier=false` is now the default engine option for built apps
+**2026-11-21:** reverted — multi-tier is back on. BUG 76 is moot under the carrier machine and the single tier cost the fast path 2–3.5x (`seq::fold`) and the HTTP route 18.5% against main; see the design doc.
 (`EmbeddedExec`), the runtime server and the JIT test engines — 36/36 runs clean; last-tier-only
 compilation costs warm-up, not peak (measured beside it). `MEZZE_ENGINE_OPTS` can override. STILL
 OPEN upstream: a first-tier compiled yield-bearing BDSL root whose branch profile was one-sided takes

@@ -199,12 +199,12 @@ object EmbeddedExec {
         val engineBuilder = Engine.newBuilder()
             .allowExperimentalOptions(true)
             .option("engine.WarnInterpreterOnly", "false")
-            // BUG 76: a yield-bearing root compiled by the FIRST tier while every call parked
-            // mis-executed once calls stopped parking (its propagation yield fired on the
-            // value it had just received). 0 failures in 36 runs with multi-tier off; 8 of 12
-            // with the first tier alone. Last-tier-only compilation costs warm-up, not peak.
-            // MEZZE_ENGINE_OPTS (below) can override it.
-            .option("engine.MultiTier", "false")
+            // Multi-tier compilation stays ON (Truffle's default). It was switched off on
+            // 2026-11-18 for BUG 76 (a propagation yield mis-executing under first-tier code);
+            // the carrier machine made that design moot a day later, and the switch was kept
+            // on the strength of the PARK kernels alone. Measured 2026-11-21 against main on
+            // the fast path: last-tier-only made a pure `seq::fold` 2.3–3.5x slower and the
+            // HTTP work route 18.5% slower; with multi-tier back both are at parity.
             .apply { if (jitDisabled) option("engine.Compilation", "false") }
             .apply { if (traceCompilation && jitCapable) option("engine.TraceCompilation", "true") }
             .apply {

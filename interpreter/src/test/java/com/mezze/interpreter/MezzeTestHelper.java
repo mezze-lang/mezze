@@ -56,7 +56,6 @@ public final class MezzeTestHelper {
         .option("engine.WarnInterpreterOnly", "false")
         // engine.Compilation defaults to true; spell it out for clarity.
         .option("engine.Compilation", "true")
-        .option("engine.MultiTier", "false")   // BUG 76: production's regime (EmbeddedExec sets the same)
         .build();
 
     private MezzeTestHelper() {}
@@ -103,7 +102,6 @@ public final class MezzeTestHelper {
                 .option("engine.WarnInterpreterOnly", "false")
                 .option("engine.Compilation", "true")
                 .option("engine.BackgroundCompilation", "true")
-                .option("engine.MultiTier", "false")   // BUG 76: production's regime
                 .option("engine.LastTierCompilationThreshold", "60")
                 .option("engine.OSRCompilationThreshold", "100")
                 .build()) {

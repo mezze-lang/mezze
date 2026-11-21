@@ -81,7 +81,8 @@ let k_seq_map_eff = { n } -> perform Ones in outer { b = n / m, acc = 0,
 let k_iter_pure = { n } -> outer { b = n / m, acc = 0,
   body = { acc } -> iter::fold { it = iter::filter { it = iter::map { it = iter::from_seq { xs = xs }, f = { x } -> m7 { i = x } }, p = { x } -> x >= 0 }, init = acc, f = { acc, x } -> acc + x } }
 let k_iter_eff = { n } -> perform Ones in outer { b = n / m, acc = 0,
-  body = { acc } -> iter::fold { it = iter::filter { it = iter::map { it = iter::from_seq { xs = xs }, f = { x } -> eff_fn { x = x } }, p = { x } -> x >= 0 }, init = acc, f = { acc, x } -> acc + x } }
+  ## the effectful call sits in the SINK: an Iter stage callback is pure (effects live on arrows, never on data)
+  body = { acc } -> iter::fold { it = iter::filter { it = iter::from_seq { xs = xs }, p = { x } -> x >= 0 }, init = acc, f = { acc, x } -> acc + eff_fn { x = x } } }
 
 ## 9..10
 let lst = list::from_seq { xs = xs }

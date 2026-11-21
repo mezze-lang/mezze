@@ -194,63 +194,67 @@ public final class SeqNatives {
         return MezzeVariant.some((long) idx);
     }
 
-    public static Object findIndex(MezzeSeq seq, MezzeFunction predicate,
-                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        var ctx = ScalarCall.prepare1(predicate, "x");
-        return CallbackLoops.run(0, seq.size(), new CallbackLoops.Body() {
-            Object answer;
-            public Object call(int i) { return ctx.call1(callNode, seq.get(i)); }
-            public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) { answer = MezzeVariant.some((long) i); return CallbackLoops.STOP; } return CallbackLoops.CONTINUE; }
-            public Object finish() { return answer != null ? answer : MezzeVariant.none(); }
-        });
+    public static MezzeVariant findIndex(MezzeSeq seq, MezzeFunction predicate,
+                                         com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        Object[] closureValues = predicate.getClosureValues();
+        int closureLen = closureValues.length;
+        Object[] args;
+        CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
+        if (innerTarget != null) {
+            args = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, args, 0, closureLen);
+            for (int i = 0; i < seq.size(); i++) {
+                args[closureLen] = seq.get(i);
+                Object result = callNode.call(innerTarget, args);
+                if (result instanceof Boolean && (Boolean) result) {
+                    return MezzeVariant.some((long) i);
+                }
+            }
+            return MezzeVariant.none();
+        }
+        com.oracle.truffle.api.CallTarget target = predicate.getCallTarget();
+        args = new Object[closureLen + 1];
+        System.arraycopy(closureValues, 0, args, 0, closureLen);
+        for (int i = 0; i < seq.size(); i++) {
+            args[closureLen] = MezzeRecord.wrapX(seq.get(i));
+            Object result = callNode.call(target, args);
+            if (result instanceof Boolean && (Boolean) result) {
+                return MezzeVariant.some((long) i);
+            }
+        }
+        return MezzeVariant.none();
     }
 
-    public static Object find(MezzeSeq seq, MezzeFunction predicate,
-                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        return searchFrom(seq, predicate, callNode, 0, SEARCH_FIND);
-    }
-
-    private static final int SEARCH_ANY = 0, SEARCH_ALL = 1, SEARCH_FIND = 2;
-    private static final Object CONTINUE = new Object();
-
-    /** Predicate scan shared by any/all/find: stops at the first element
-     *  that decides the answer; a suspended predicate resumes the scan with the
-     *  predicate's eventual answer for the same element. */
-    private static Object searchFrom(MezzeSeq seq, MezzeFunction predicate,
-                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode,
-                                     int start, int mode) {
+    public static MezzeVariant find(MezzeSeq seq, MezzeFunction predicate,
+                                    com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] closureValues = predicate.getClosureValues();
         int closureLen = closureValues.length;
         CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
-        CallTarget target = innerTarget != null ? innerTarget : predicate.getCallTarget();
+        if (innerTarget != null) {
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, args, 0, closureLen);
+            for (int i = 0; i < seq.size(); i++) {
+                Object element = seq.get(i);
+                args[closureLen] = element;
+                Object result = callNode.call(innerTarget, args);
+                if (result instanceof Boolean && (Boolean) result) {
+                    return MezzeVariant.some(element);
+                }
+            }
+            return MezzeVariant.none();
+        }
+        com.oracle.truffle.api.CallTarget target = predicate.getCallTarget();
         Object[] args = new Object[closureLen + 1];
         System.arraycopy(closureValues, 0, args, 0, closureLen);
-        int size = seq.size();
-        for (int i = start; i < size; i++) {
-            Object elem = seq.get(i);
-            args[closureLen] = innerTarget != null ? elem : MezzeRecord.wrapX(elem);
+        for (int i = 0; i < seq.size(); i++) {
+            Object element = seq.get(i);
+            args[closureLen] = MezzeRecord.wrapX(element);
             Object result = callNode.call(target, args);
-            Object decided = searchDecide(mode, elem, result);
-            if (decided != CONTINUE) return decided;
+            if (result instanceof Boolean && (Boolean) result) {
+                return MezzeVariant.some(element);
+            }
         }
-        return searchDone(mode);
-    }
-
-    private static Object searchDecide(int mode, Object elem, Object answer) {
-        boolean yes = answer instanceof Boolean && (Boolean) answer;
-        switch (mode) {
-            case SEARCH_ANY: return yes ? Boolean.TRUE : CONTINUE;
-            case SEARCH_ALL: return yes ? CONTINUE : Boolean.FALSE;
-            default: return yes ? MezzeVariant.some(elem) : CONTINUE;
-        }
-    }
-
-    private static Object searchDone(int mode) {
-        switch (mode) {
-            case SEARCH_ANY: return Boolean.FALSE;
-            case SEARCH_ALL: return Boolean.TRUE;
-            default: return MezzeVariant.none();
-        }
+        return MezzeVariant.none();
     }
 
     // ==================== Transform Operations ====================
@@ -260,59 +264,79 @@ public final class SeqNatives {
         return seq.reverse();
     }
 
-    public static Object map(MezzeSeq seq, MezzeFunction mapper,
-                             com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        return mapFrom(seq, mapper, callNode, new Object[seq.size()], 0);
-    }
-
-    /** The map loop from element {@code start} into {@code result}. */
-    private static Object mapFrom(MezzeSeq seq, MezzeFunction mapper,
-                                  com.oracle.truffle.api.nodes.IndirectCallNode callNode,
-                                  Object[] result, int start) {
+    public static MezzeSeq map(MezzeSeq seq, MezzeFunction mapper,
+                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] closureValues = mapper.getClosureValues();
         int closureLen = closureValues.length;
         int size = seq.size();
+        Object[] result = new Object[size];
         CallTarget innerTarget = ScalarBypass.tryResolve(mapper);
-        CallTarget target = innerTarget != null ? innerTarget : mapper.getCallTarget();
+        if (innerTarget != null) {
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, args, 0, closureLen);
+            for (int i = 0; i < size; i++) {
+                args[closureLen] = seq.get(i);
+                result[i] = callNode.call(innerTarget, args);
+            }
+            return MezzeSeq.fromArray(result);
+        }
+        com.oracle.truffle.api.CallTarget target = mapper.getCallTarget();
         Object[] args = new Object[closureLen + 1];
         System.arraycopy(closureValues, 0, args, 0, closureLen);
-        for (int i = start; i < size; i++) {
-            Object elem = seq.get(i);
-            args[closureLen] = innerTarget != null ? elem : MezzeRecord.wrapX(elem);
-            Object r = callNode.call(target, args);
-            result[i] = r;
+        for (int i = 0; i < size; i++) {
+            args[closureLen] = MezzeRecord.wrapX(seq.get(i));
+            result[i] = callNode.call(target, args);
         }
         return MezzeSeq.fromArray(result);
     }
 
-    public static Object filter(MezzeSeq seq, MezzeFunction predicate,
-                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+    public static MezzeSeq filter(MezzeSeq seq, MezzeFunction predicate,
+                                  com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         int size = seq.size();
         if (size == 0) return MezzeSeq.empty();
-        return filterFrom(seq, predicate, callNode, new Object[Math.min(size, 16)], 0, 0);
-    }
 
-    /** The filter loop: {@code buf[0..count)} holds the kept elements so far. */
-    private static Object filterFrom(MezzeSeq seq, MezzeFunction predicate,
-                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode,
-                                     Object[] buf, int count, int start) {
-        int size = seq.size();
         Object[] closureValues = predicate.getClosureValues();
         int closureLen = closureValues.length;
+
+        // Single-pass: collect matching elements into a growable buffer.
+        // Eliminates the boolean[size] + second seq.get() per kept element
+        // that the old two-pass approach needed.
+        Object[] buf = new Object[Math.min(size, 16)]; // start small, grow as needed
+        int count = 0;
+
         CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
-        CallTarget target = innerTarget != null ? innerTarget : predicate.getCallTarget();
-        Object[] args = new Object[closureLen + 1];
-        System.arraycopy(closureValues, 0, args, 0, closureLen);
-        for (int i = start; i < size; i++) {
-            Object elem = seq.get(i);
-            args[closureLen] = innerTarget != null ? elem : MezzeRecord.wrapX(elem);
-            Object result = callNode.call(target, args);
-            if (result instanceof Boolean && (Boolean) result) {
-                if (count == buf.length) buf = java.util.Arrays.copyOf(buf, buf.length * 2);
-                buf[count++] = elem;
+        if (innerTarget != null) {
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, args, 0, closureLen);
+            for (int i = 0; i < size; i++) {
+                Object elem = seq.get(i);
+                args[closureLen] = elem;
+                Object result = callNode.call(innerTarget, args);
+                if (result instanceof Boolean && (Boolean) result) {
+                    if (count == buf.length) buf = java.util.Arrays.copyOf(buf, buf.length * 2);
+                    buf[count++] = elem;
+                }
+            }
+        } else {
+            com.oracle.truffle.api.CallTarget target = predicate.getCallTarget();
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, args, 0, closureLen);
+            for (int i = 0; i < size; i++) {
+                Object elem = seq.get(i);
+                args[closureLen] = MezzeRecord.wrapX(elem);
+                Object result = callNode.call(target, args);
+                if (result instanceof Boolean && (Boolean) result) {
+                    if (count == buf.length) buf = java.util.Arrays.copyOf(buf, buf.length * 2);
+                    buf[count++] = elem;
+                }
             }
         }
-        return MezzeSeq.fromArray(count == buf.length ? buf : java.util.Arrays.copyOf(buf, count));
+
+        if (count == 0) return MezzeSeq.empty();
+        if (count == size) return seq; // All kept — return original
+
+        Object[] results = (count == buf.length) ? buf : java.util.Arrays.copyOf(buf, count);
+        return MezzeSeq.fromArray(results);
     }
 
     /**
@@ -327,48 +351,61 @@ public final class SeqNatives {
      * (`Ok { val = ... }` / `Err { error = ... }`). Anything else is
      * propagated verbatim as a successful element.
      */
-    public static Object tryMap(MezzeSeq seq, MezzeFunction mapper,
-                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        int size = seq.size();
+    public static MezzeVariant tryMap(MezzeSeq seq, MezzeFunction mapper,
+                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] closureValues = mapper.getClosureValues();
         int closureLen = closureValues.length;
         com.oracle.truffle.api.CallTarget target = mapper.getCallTarget();
+        int size = seq.size();
+        Object[] result = new Object[size];
         Object[] args = new Object[closureLen + 1];
         System.arraycopy(closureValues, 0, args, 0, closureLen);
-        Object[] result = new Object[size];
-        return CallbackLoops.run(0, size, new CallbackLoops.Body() {
-            Object err;
-            public Object call(int i) { args[closureLen] = MezzeRecord.wrapX(seq.get(i)); return callNode.call(target, args); }
-            public Object accept(int i, Object elemResult) {
-                if (elemResult instanceof MezzeVariant v) {
-                    if (v.isErr()) { err = v; return CallbackLoops.STOP; }
-                    if (v.isOk()) {
-                        Object payload = v.getPayloadValue();
-                        if (payload instanceof MezzeRecord r) {
-                            try { result[i] = r.getFieldByName("val"); } catch (Exception e) { result[i] = payload; }
-                        } else result[i] = payload;
-                        return CallbackLoops.CONTINUE;
-                    }
+        for (int i = 0; i < size; i++) {
+            args[closureLen] = MezzeRecord.wrapX(seq.get(i));
+            Object elemResult = callNode.call(target, args);
+            if (elemResult instanceof MezzeVariant v) {
+                if (v.isErr()) {
+                    return v; // short-circuit
                 }
-                result[i] = elemResult;
-                return CallbackLoops.CONTINUE;
+                if (v.isOk()) {
+                    Object payload = v.getPayloadValue();
+                    if (payload instanceof MezzeRecord r) {
+                        try {
+                            result[i] = r.getFieldByName("val");
+                        } catch (Exception e) {
+                            result[i] = payload;
+                        }
+                        continue;
+                    }
+                    result[i] = payload;
+                    continue;
+                }
             }
-            public Object finish() { return err != null ? err : MezzeVariant.ok(MezzeSeq.fromArray(result)); }
-        });
+            // Non-Result callback return — treat as raw element.
+            result[i] = elemResult;
+        }
+        return MezzeVariant.ok(MezzeSeq.fromArray(result));
     }
 
-    public static Object flatMap(MezzeSeq seq, MezzeFunction mapper,
-                                 com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+    public static MezzeSeq flatMap(MezzeSeq seq, MezzeFunction mapper,
+                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        // `ScalarCall` resolves the scalar-ABI bypass ONCE and reuses one args
+        // array; `prepareArgs` allocated an `Object[]` and a
+        // `MezzeRecord.wrapX` per element. At 27 765 ps per input element this
+        // was the most expensive seq operation still unfixed apart from
+        // `unique`, and above `group_by`'s 20 588 — which is where the
+        // prediction had it below.
         var ctx = ScalarCall.prepare1(mapper, "x");
         java.util.ArrayList<Object> results = new java.util.ArrayList<>();
-        return CallbackLoops.run(0, seq.size(), new CallbackLoops.Body() {
-            public Object call(int i) { return ctx.call1(callNode, seq.get(i)); }
-            public Object accept(int i, Object mapped) {
-                if (mapped instanceof MezzeSeq innerSeq) for (int j = 0; j < innerSeq.size(); j++) results.add(innerSeq.get(j));
-                return CallbackLoops.CONTINUE;
+        for (int i = 0; i < seq.size(); i++) {
+            Object mapped = ctx.call1(callNode, seq.get(i));
+            if (mapped instanceof MezzeSeq innerSeq) {
+                for (int j = 0; j < innerSeq.size(); j++) {
+                    results.add(innerSeq.get(j));
+                }
             }
-            public Object finish() { return MezzeSeq.fromArray(results.toArray()); }
-        });
+        }
+        return MezzeSeq.fromArray(results.toArray());
     }
 
     /** #403: fold hot loop — see {@link #foldTwoArg} for design notes. */
@@ -467,38 +504,106 @@ public final class SeqNatives {
         }
     }
 
-    public static Object reduce(MezzeSeq seq, MezzeFunction reducer,
-                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        if (seq.isEmpty()) return MezzeVariant.none();
-        return MezzeVariant.some(foldTwoArg(seq, seq.get(0), reducer, callNode, /*startIndex=*/1, /*scanOut=*/null));
+    public static MezzeVariant reduce(MezzeSeq seq, MezzeFunction reducer,
+                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        if (seq.isEmpty()) {
+            return MezzeVariant.none();
+        }
+        Object acc = foldTwoArg(seq, seq.get(0), reducer, callNode,
+                                /*startIndex=*/1, /*scanOut=*/null);
+        return MezzeVariant.some(acc);
     }
 
     // ==================== Predicate Operations ====================
 
-    public static Object any(MezzeSeq seq, MezzeFunction predicate,
-                             com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        return searchFrom(seq, predicate, callNode, 0, SEARCH_ANY);
-    }
-
-    public static Object all(MezzeSeq seq, MezzeFunction predicate,
-                             com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        return searchFrom(seq, predicate, callNode, 0, SEARCH_ALL);
-    }
-
-    public static Object none(MezzeSeq seq, MezzeFunction predicate,
+    public static boolean any(MezzeSeq seq, MezzeFunction predicate,
                               com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        return !(Boolean) (any(seq, predicate, callNode));
+        Object[] closureValues = predicate.getClosureValues();
+        int closureLen = closureValues.length;
+        Object[] args = new Object[closureLen + 1];
+        System.arraycopy(closureValues, 0, args, 0, closureLen);
+        CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
+        if (innerTarget != null) {
+            for (int i = 0; i < seq.size(); i++) {
+                args[closureLen] = seq.get(i);
+                Object result = callNode.call(innerTarget, args);
+                if (result instanceof Boolean && (Boolean) result) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        com.oracle.truffle.api.CallTarget target = predicate.getCallTarget();
+        for (int i = 0; i < seq.size(); i++) {
+            args[closureLen] = MezzeRecord.wrapX(seq.get(i));
+            Object result = callNode.call(target, args);
+            if (result instanceof Boolean && (Boolean) result) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    public static Object count(MezzeSeq seq, MezzeFunction predicate,
+    public static boolean all(MezzeSeq seq, MezzeFunction predicate,
+                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        Object[] closureValues = predicate.getClosureValues();
+        int closureLen = closureValues.length;
+        Object[] args = new Object[closureLen + 1];
+        System.arraycopy(closureValues, 0, args, 0, closureLen);
+        CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
+        if (innerTarget != null) {
+            for (int i = 0; i < seq.size(); i++) {
+                args[closureLen] = seq.get(i);
+                Object result = callNode.call(innerTarget, args);
+                if (!(result instanceof Boolean) || !(Boolean) result) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        com.oracle.truffle.api.CallTarget target = predicate.getCallTarget();
+        for (int i = 0; i < seq.size(); i++) {
+            args[closureLen] = MezzeRecord.wrapX(seq.get(i));
+            Object result = callNode.call(target, args);
+            if (!(result instanceof Boolean) || !(Boolean) result) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public static boolean none(MezzeSeq seq, MezzeFunction predicate,
                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        var ctx = ScalarCall.prepare1(predicate, "x");
-        return CallbackLoops.run(0, seq.size(), new CallbackLoops.Body() {
-            long n;
-            public Object call(int i) { return ctx.call1(callNode, seq.get(i)); }
-            public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) n++; return CallbackLoops.CONTINUE; }
-            public Object finish() { return n; }
-        });
+        return !any(seq, predicate, callNode);
+    }
+
+    public static long count(MezzeSeq seq, MezzeFunction predicate,
+                             com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        Object[] closureValues = predicate.getClosureValues();
+        int closureLen = closureValues.length;
+        Object[] args = new Object[closureLen + 1];
+        System.arraycopy(closureValues, 0, args, 0, closureLen);
+        long count = 0;
+        CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
+        if (innerTarget != null) {
+            for (int i = 0; i < seq.size(); i++) {
+                args[closureLen] = seq.get(i);
+                Object result = callNode.call(innerTarget, args);
+                if (result instanceof Boolean && (Boolean) result) {
+                    count++;
+                }
+            }
+            return count;
+        }
+        com.oracle.truffle.api.CallTarget target = predicate.getCallTarget();
+        for (int i = 0; i < seq.size(); i++) {
+            args[closureLen] = MezzeRecord.wrapX(seq.get(i));
+            Object result = callNode.call(target, args);
+            if (result instanceof Boolean && (Boolean) result) {
+                count++;
+            }
+        }
+        return count;
     }
 
     // ==================== Zip/Unzip Operations ====================
@@ -550,26 +655,65 @@ public final class SeqNatives {
 
     // ==================== Partition Operations ====================
 
-    public static Object partition(MezzeSeq seq, MezzeFunction predicate,
-                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+    public static MezzeRecord partition(MezzeSeq seq, MezzeFunction predicate,
+                                        com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         int size = seq.size();
         if (size == 0) {
-            return MezzeRecord.fromFields(FIELD_PASS_FAIL, new Object[]{MezzeSeq.empty(), MezzeSeq.empty()});
+            return MezzeRecord.fromFields(
+                FIELD_PASS_FAIL,
+                new Object[]{MezzeSeq.empty(), MezzeSeq.empty()}
+            );
         }
-        var ctx = ScalarCall.prepare1(predicate, "x");
+
+        // Two-pass: first determine matches, then collect.
+        Object[] closureValues = predicate.getClosureValues();
+        int closureLen = closureValues.length;
         boolean[] matches = new boolean[size];
-        return CallbackLoops.run(0, size, new CallbackLoops.Body() {
-            int matchCount;
-            public Object call(int i) { return ctx.call1(callNode, seq.get(i)); }
-            public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) { matches[i] = true; matchCount++; } return CallbackLoops.CONTINUE; }
-            public Object finish() {
-                Object[] matchingArr = new Object[matchCount];
-                Object[] nonMatchingArr = new Object[size - matchCount];
-                int m = 0, nm = 0;
-                for (int i = 0; i < size; i++) { if (matches[i]) matchingArr[m++] = seq.get(i); else nonMatchingArr[nm++] = seq.get(i); }
-                return MezzeRecord.fromFields(FIELD_PASS_FAIL, new Object[]{MezzeSeq.fromArray(matchingArr), MezzeSeq.fromArray(nonMatchingArr)});
+        int matchCount = 0;
+        CallTarget innerTarget = ScalarBypass.tryResolve(predicate);
+        if (innerTarget != null) {
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, args, 0, closureLen);
+            for (int i = 0; i < size; i++) {
+                args[closureLen] = seq.get(i);
+                Object result = callNode.call(innerTarget, args);
+                if (result instanceof Boolean && (Boolean) result) {
+                    matches[i] = true;
+                    matchCount++;
+                }
             }
-        });
+        } else {
+            com.oracle.truffle.api.CallTarget target = predicate.getCallTarget();
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, args, 0, closureLen);
+            for (int i = 0; i < size; i++) {
+                args[closureLen] = MezzeRecord.wrapX(seq.get(i));
+                Object result = callNode.call(target, args);
+                if (result instanceof Boolean && (Boolean) result) {
+                    matches[i] = true;
+                    matchCount++;
+                }
+            }
+        }
+
+        Object[] matchingArr = new Object[matchCount];
+        Object[] nonMatchingArr = new Object[size - matchCount];
+        int mIdx = 0, nIdx = 0;
+        for (int i = 0; i < size; i++) {
+            if (matches[i]) {
+                matchingArr[mIdx++] = seq.get(i);
+            } else {
+                nonMatchingArr[nIdx++] = seq.get(i);
+            }
+        }
+
+        return MezzeRecord.fromFields(
+            FIELD_PASS_FAIL,
+            new Object[]{
+                MezzeSeq.fromArray(matchingArr),
+                MezzeSeq.fromArray(nonMatchingArr)
+            }
+        );
     }
 
     // ==================== Sort Operations ====================
@@ -827,26 +971,35 @@ public final class SeqNatives {
         return seq.sliding((int) windowSize);
     }
 
-    public static Object takeWhile(MezzeSeq seq, MezzeFunction predicate,
-                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        var ctx = ScalarCall.prepare1(predicate, "x");
+    public static MezzeSeq takeWhile(MezzeSeq seq, MezzeFunction predicate,
+                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         java.util.ArrayList<Object> results = new java.util.ArrayList<>();
-        return CallbackLoops.run(0, seq.size(), new CallbackLoops.Body() {
-            public Object call(int i) { return ctx.call1(callNode, seq.get(i)); }
-            public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) { results.add(seq.get(i)); return CallbackLoops.CONTINUE; } return CallbackLoops.STOP; }
-            public Object finish() { return MezzeSeq.fromArray(results.toArray()); }
-        });
+        for (int i = 0; i < seq.size(); i++) {
+            Object element = seq.get(i);
+            Object result = callNode.call(predicate.getCallTarget(),
+                prepareArgs(predicate, element));
+            if (result instanceof Boolean && (Boolean) result) {
+                results.add(element);
+            } else {
+                break;
+            }
+        }
+        return MezzeSeq.fromArray(results.toArray());
     }
 
-    public static Object dropWhile(MezzeSeq seq, MezzeFunction predicate,
-                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        var ctx = ScalarCall.prepare1(predicate, "x");
-        return CallbackLoops.run(0, seq.size(), new CallbackLoops.Body() {
-            int dropCount;
-            public Object call(int i) { return ctx.call1(callNode, seq.get(i)); }
-            public Object accept(int i, Object r) { if ((r instanceof Boolean && (Boolean) r)) { dropCount++; return CallbackLoops.CONTINUE; } return CallbackLoops.STOP; }
-            public Object finish() { return seq.drop(dropCount); }
-        });
+    public static MezzeSeq dropWhile(MezzeSeq seq, MezzeFunction predicate,
+                                     com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        int dropCount = 0;
+        for (int i = 0; i < seq.size(); i++) {
+            Object result = callNode.call(predicate.getCallTarget(),
+                prepareArgs(predicate, seq.get(i)));
+            if (result instanceof Boolean && (Boolean) result) {
+                dropCount++;
+            } else {
+                break;
+            }
+        }
+        return seq.drop(dropCount);
     }
 
     // ==================== Range ====================
@@ -1014,23 +1167,29 @@ public final class SeqNatives {
 
     // ==================== Group By ====================
 
-    public static Object groupBy(MezzeSeq seq, MezzeFunction keyFn,
-                                 com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+    public static MezzeSeq groupBy(MezzeSeq seq, MezzeFunction keyFn,
+                                   com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+        // `ScalarCall` resolves the scalar-ABI bypass ONCE and reuses one args
+        // array for the whole walk. This used to call `prepareArgs` per
+        // element, which allocates an `Object[]` AND a `MezzeRecord.wrapX` to
+        // carry a single value — two allocations an element, where `map`,
+        // `fold` and `forEach` all hoist theirs out of the loop.
         var ctx = ScalarCall.prepare1(keyFn, "x");
         java.util.LinkedHashMap<Object, java.util.ArrayList<Object>> groups = new java.util.LinkedHashMap<>();
-        return CallbackLoops.run(0, seq.size(), new CallbackLoops.Body() {
-            public Object call(int i) { return ctx.call1(callNode, seq.get(i)); }
-            public Object accept(int i, Object key) { groups.computeIfAbsent(key, k -> new java.util.ArrayList<>()).add(seq.get(i)); return CallbackLoops.CONTINUE; }
-            public Object finish() {
-                Object[] result = new Object[groups.size()];
-                int idx = 0;
-                for (var entry : groups.entrySet()) {
-                    result[idx++] = MezzeRecord.fromFields(FIELD_KEY_VALUES,
-                        new Object[]{entry.getKey(), MezzeSeq.fromArray(entry.getValue().toArray())});
-                }
-                return MezzeSeq.fromArray(result);
-            }
-        });
+        for (int i = 0; i < seq.size(); i++) {
+            Object elem = seq.get(i);
+            Object key = ctx.call1(callNode, elem);
+            groups.computeIfAbsent(key, k -> new java.util.ArrayList<>()).add(elem);
+        }
+        Object[] result = new Object[groups.size()];
+        int idx = 0;
+        for (var entry : groups.entrySet()) {
+            result[idx++] = MezzeRecord.fromFields(
+                FIELD_KEY_VALUES,
+                new Object[]{entry.getKey(), MezzeSeq.fromArray(entry.getValue().toArray())}
+            );
+        }
+        return MezzeSeq.fromArray(result);
     }
 
     /**
@@ -1065,7 +1224,7 @@ public final class SeqNatives {
         return groups;
     }
 
-    public static Object groupByWithEvidence(MezzeSeq seq, MezzeFunction keyFn,
+    public static MezzeSeq groupByWithEvidence(MezzeSeq seq, MezzeFunction keyFn,
                                                MezzeFunction hashFn, MezzeFunction eqFn,
                                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         ElementHashing hashing = ClosureHashing.of(hashFn, eqFn);
@@ -1090,38 +1249,32 @@ public final class SeqNatives {
         return zipWithIndex(seq);  // Same as zip_with_index
     }
 
-    public static Object forEach(MezzeSeq seq, MezzeFunction fn,
-                                 com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
-        return forEachFrom(seq, fn, callNode, 0);
-    }
-
-    private static Object forEachFrom(MezzeSeq seq, MezzeFunction fn,
-                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode, int start) {
-        Object[] closureValues = fn.getClosureValues();
-        int closureLen = closureValues.length;
+    public static MezzeRecord forEach(MezzeSeq seq, MezzeFunction fn,
+                                      com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         CallTarget innerTarget = ScalarBypass.tryResolve(fn);
-        CallTarget target = innerTarget != null ? innerTarget : fn.getCallTarget();
-        Object[] args = new Object[closureLen + 1];
-        System.arraycopy(closureValues, 0, args, 0, closureLen);
-        for (int i = start; i < seq.size(); i++) {
-            Object elem = seq.get(i);
-            args[closureLen] = innerTarget != null ? elem : MezzeRecord.wrapX(elem);
-            Object r = callNode.call(target, args);
+        if (innerTarget != null) {
+            Object[] closureValues = fn.getClosureValues();
+            int closureLen = closureValues.length;
+            Object[] args = new Object[closureLen + 1];
+            System.arraycopy(closureValues, 0, args, 0, closureLen);
+            for (int i = 0; i < seq.size(); i++) {
+                args[closureLen] = seq.get(i);
+                callNode.call(innerTarget, args);
+            }
+            return MezzeRecord.empty();
+        }
+        for (int i = 0; i < seq.size(); i++) {
+            callNode.call(fn.getCallTarget(), prepareArgs(fn, seq.get(i)));
         }
         return MezzeRecord.empty();  // Returns unit
     }
 
-    public static Object scan(MezzeSeq seq, Object init, MezzeFunction fn,
-                              com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
+    public static MezzeSeq scan(MezzeSeq seq, Object init, MezzeFunction fn,
+                                com.oracle.truffle.api.nodes.IndirectCallNode callNode) {
         Object[] result = new Object[seq.size() + 1];
         result[0] = init;
-        var f = new CallbackLoops.Call2(fn, callNode);
-        return CallbackLoops.run(0, seq.size(), new CallbackLoops.Body() {
-            Object acc = init;
-            public Object call(int i) { return f.on(acc, seq.get(i)); }
-            public Object accept(int i, Object r) { acc = r; result[i + 1] = acc; return CallbackLoops.CONTINUE; }
-            public Object finish() { return MezzeSeq.fromArray(result); }
-        });
+        foldTwoArg(seq, init, fn, callNode, /*startIndex=*/0, result);
+        return MezzeSeq.fromArray(result);
     }
 
     // ==================== Split Operations ====================
