@@ -223,6 +223,10 @@ deliberate. What differs is who supplies the operations and when: a type
 implements an ability and the compiler resolves the call, while a handler
 supplies an effect and `perform` decides which one is in scope.
 
+A handler can do more than answer. It can end the whole `perform` block, which
+is all an exception is, or wait while other work runs, which is all async is.
+The [Handlers](/concepts#handlers) page shows both.
+
 ## The row can be a variable
 
 Every row so far named its effects. A row can instead say "whatever the

@@ -247,8 +247,19 @@ the type the operations act on.
 | `having` | fix an associated type | |
 | `where` | open a body of operations | |
 | `for` | name the type an ability, impl or handler applies to | |
-| `abort` `resume` | abort and resume continuations, inside a handler | |
-| `scope` | effect handler scopes | |
+
+## Names bound for you
+
+Three names are not keywords but are supplied by the language inside certain
+bodies. `cont` and `scope` are reserved, so nothing else can be called that.
+
+| | | |
+|---|---|---|
+| `it` | the receiver, inside an ability or inherent `impl` | |
+| `cont` | the rest of the program, inside a handler: `cont.resume`, `cont.abort`, `cont.park` | |
+| `scope` | what `initialize_scope` returned, inside a handler | |
+
+The [Handlers](/concepts#handlers) page covers `cont` and `scope`.
 
 ## All of it together
 
