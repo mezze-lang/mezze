@@ -8,7 +8,7 @@
 # Run:  mez build --native && ./.build/server_smoke-native
 
 use std::effects::log::{ println, Console }
-use std::effects::http::{ Request, Response, request, format_error, body_str, with_query, ToQuery, Method, HttpClient, SimpleHttpClient, HttpDownload, SimpleHttpDownload, default_http_config, HttpServer, HelidonHttpServerWith, ServerConfig, route, routes, otherwise, Matched, FromQuery, BadInput, sse, sse_event, SseEvent, events }
+use std::effects::http::{ Request, Response, request, format_error, body_str, with_query, ToQuery, Method, HttpClient, SimpleHttpClient, HttpDownload, SimpleHttpDownload, default_http_config, HttpServer, HelidonHttpServerWith, ServerConfig, route, routes, otherwise, Matched, FromQuery, BadInput, sse, sse_event, SseEvent, events, Message, Socket, WebSocket, NativeWebSocket, SocketClient, HelidonSocketClient, router, messages }
 use std::collections::map
 use std::collections::bytes
 use std::int
@@ -29,8 +29,13 @@ let ticks = route { method = Get, path = "/ticks", handler = { m } -> sse { f = 
     send { ev = sse_event { data = "tick" } }
     send { ev = { data = "tock", event = Some { val = "named" }, id = None } } } }
 
-let app = otherwise {
-    routes = routes { of = [ticks, route { method = Get, path = "/hello/:name", handler = { m } -> do
+# A WebSocket echo endpoint: the handler folds incoming messages and sends each back.
+let echo = router { path = "" }.websocket { path = "/echo", handler = { m, socket } ->
+    messages { socket = socket, init = {}, f = { acc, msg } -> do
+        let _ = WebSocket.send { socket = socket, msg = msg }
+        {} } }
+
+let table = routes { of = [echo.table {}, ticks, route { method = Get, path = "/hello/:name", handler = { m } -> do
         let who = m.param_or { name = "name", default = "?" }
         let q: Result { times: Int } BadInput = m.query_as {}
         match q is
@@ -40,9 +45,7 @@ let app = otherwise {
                 url = m.req.url,
             }
             Err { error = e } -> reply { code = 400, text = e.message, url = m.req.url }
-    }] },
-    fallback = not_found,
-}
+    }] }
 
 let fetch: { url: Str } -> Str <HttpClient> = { url } ->
     match request { url = url }.send {} is
@@ -55,8 +58,9 @@ let any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 2, stream
 
 let main = {} -> perform Console in
     perform HelidonHttpServerWith { config = any_port } in
-        perform SimpleHttpClient in perform SimpleHttpDownload in do
-            let h = match HttpServer.serve { handler = app } is
+        perform SimpleHttpClient in perform SimpleHttpDownload in
+        perform NativeWebSocket in perform HelidonSocketClient in do
+            let h = match HttpServer.serve_routes { routes = table, fallback = not_found } is
               Ok { val = hh } -> hh
               Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
             let base = "http://127.0.0.1:$(int::to_str { n = h.port })"
@@ -74,5 +78,15 @@ let main = {} -> perform Console in
             } is
                 Ok { val } -> val
                 Err { error = e } -> format_error { err = e }
+            let echoed = match SocketClient.connect { url = "ws://127.0.0.1:$(int::to_str { n = h.port })/echo", config = default_http_config } is
+                Err { error = _ } -> "connect-failed"
+                Ok { val = s } -> do
+                    let _ = WebSocket.send { socket = s, msg = Text { text = "ws-ok" } }
+                    let got = match WebSocket.receive { socket = s } is
+                        Some { val = Text { text } } -> text
+                        Some { val = Binary { bytes = _ } } -> "binary"
+                        None -> "closed"
+                    WebSocket.close { socket = s }
+                    got
             h.stop {}
-            println { msg = "server-smoke: port>0=$(if h.port > 0 then "yes" else "no") hit=$(hit) missed=$(missed) sse=$(streamed)" }
+            println { msg = "server-smoke: port>0=$(if h.port > 0 then "yes" else "no") hit=$(hit) missed=$(missed) sse=$(streamed) ws=$(echoed)" }

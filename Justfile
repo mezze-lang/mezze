@@ -146,7 +146,7 @@ native-server-test:
     echo "Running native binary…"
     OUT=$(./.build/server_smoke-native 2>/dev/null | tail -1)
     echo "$OUT"
-    EXPECTED="server-smoke: port>0=yes hit=hi world x3 missed=nope sse=[-:tick][named:tock]"
+    EXPECTED="server-smoke: port>0=yes hit=hi world x3 missed=nope sse=[-:tick][named:tock] ws=ws-ok"
     if [ "$OUT" != "$EXPECTED" ]; then
         echo "FAIL: expected"
         echo "  $EXPECTED"

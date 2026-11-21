@@ -101,6 +101,13 @@ dependencies {
     // std::effects::http_server.
     implementation("io.helidon.webserver:helidon-webserver:4.4.1")
 
+    // WebSockets, both sides, on the same stack. The server registers its
+    // endpoints up front (WsRouting); the client's WsClient runs each session on
+    // a virtual thread. Both feed a per-connection inbox that the guest's
+    // blocking `receive` drains on a Truffle-owned thread (see WsNatives).
+    implementation("io.helidon.webserver:helidon-webserver-websocket:4.4.1")
+    implementation("io.helidon.webclient:helidon-webclient-websocket:4.4.1")
+
     // DSL-JSON - high performance JSON library (byte-level, no reflection, GraalVM native-image compatible)
     implementation("com.dslplatform:dsl-json:2.0.2")
 

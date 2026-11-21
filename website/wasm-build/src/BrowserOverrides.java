@@ -68,6 +68,10 @@ public final class BrowserOverrides {
         // --- Server-Sent Events sink: no connection ever exists here, so `sse { f }`
         //     buffers the events into the response body (the mock-router shape) --
         "__native_http_sse_",
+
+        // --- WebSocket ops on in-memory ends (`socket_pair`); `__native_ws_connect`
+        //     is the one that needs a network and stays denied ------------------
+        "__native_ws_send", "__native_ws_receive", "__native_ws_close",
     };
 
     /**
@@ -87,6 +91,7 @@ public final class BrowserOverrides {
         {"__native_polyglot_",    "Polyglot"},
         {"__native_http_server_", "HelidonHttpServer"},
         {"__native_http_stream_", "SimpleHttpDownload (streamed download)"},
+        {"__native_ws_connect",   "HelidonSocketClient (a real WebSocket connection)"},
         {"__native_time_",        "SystemTime.sleep"},
         {"__native_async_",       "LoomAsync"},
         {"__native_loom_",        "LoomAsync"},

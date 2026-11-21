@@ -700,6 +700,59 @@ class ExpressionConstraintGenerator {
      * candidates deferred path computes its own caughtByOp/hasRowVar and calls
      * [harvestCallbackEffectsWith] with them.
      */
+    /**
+     * Does a method CHARGE its callback's effects to the call?
+     *
+     * A callback's effects go to exactly one of two places. If the method's result
+     * ROW is open (`-> ['b] <...>`, `seq::map`), the shared tail carries them out of
+     * the call. If the result TYPE carries an open function row — a record field,
+     * a newtype's content, a variant payload (`Routes.run`, `RouteGroup`'s entries,
+     * `SocketRoute.handler`) — the callback is STORED and the data's own row tracks
+     * the effects, which run later under whatever handlers are installed then.
+     * Otherwise (`Async.spawn` → `Promise 'a`) the callback runs under the handlers
+     * in force at the call, and its effects are the call's. Charging a storing
+     * method made `router { … }.get { handler = <effectful> }` "perform" at the top
+     * level and refused every such program (V0502) while `route { … }` passed.
+     */
+    internal fun chargesCallbackEffects(method: MezzeType.FunctionType): Boolean =
+        method.effects?.rowVar != null || !carriesOpenCallbackRow(method.returnType)
+
+    /** Is there an open function row anywhere inside [type]? Declared types are expanded through the registry. */
+    internal fun carriesOpenCallbackRow(type: MezzeType, seen: MutableSet<String> = HashSet()): Boolean = when (type) {
+        is MezzeType.FunctionType ->
+            type.effects?.rowVar != null ||
+                carriesOpenCallbackRow(type.paramType, seen) || carriesOpenCallbackRow(type.returnType, seen)
+        is MezzeType.RecordType -> type.fields.values.any { carriesOpenCallbackRow(it, seen) }
+        is MezzeType.VariantType -> type.constructors.values.filterNotNull().any { carriesOpenCallbackRow(it, seen) }
+        is MezzeType.NewtypeType ->
+            carriesOpenCallbackRow(type.wrappedType, seen) || declaredTypeCarriesOpenCallbackRow(type.name, type.identity, seen)
+        is MezzeType.TypeApplication ->
+            type.args.any { carriesOpenCallbackRow(it, seen) } || declaredTypeCarriesOpenCallbackRow(type.constructor, type.identity, seen)
+        else -> false
+    }
+
+    /**
+     * Resolved by HASH when the type carries one: the module being checked need
+     * not import a type that only appears INSIDE another's definition
+     * (`RouteGroup`'s entries are `RouteEntry`s, which `use …::{ router }` never
+     * names), and the registry resolves transitive types by hash.
+     */
+    private fun declaredTypeCarriesOpenCallbackRow(constructor: String, identity: TypeIdentity, seen: MutableSet<String>): Boolean {
+        if (!seen.add(constructor)) return false
+        // A deferred candidate's types arrive without their identity; the registry
+        // still knows a transitive type's hash by name.
+        val hash = (identity as? TypeIdentity.Declared)?.hash ?: registry?.typeHashFor(constructor)
+        val parts: List<ParsedTypeAnnotation> = when (val def = registry?.lookupType(constructor, hash)?.definition) {
+            is ParsedRecordDef -> def.fields.map { it.type }
+            is ParsedNewtypeDef -> listOf(def.wrappedType)
+            is ParsedVariantDef -> def.constructors.mapNotNull { it.dataType }
+            else -> emptyList()
+        }
+        return parts.any { ann ->
+            runCatching { convertParsedTypeAnnotation(ann) }.getOrNull()?.let { carriesOpenCallbackRow(it, seen) } == true
+        }
+    }
+
     internal fun harvestCallbackEffects(callbackHostParamType: MezzeType?, argType: MezzeType): Set<String> {
         val hasCallbackRowVar = (callbackHostParamType as? MezzeType.RecordType)?.fields?.values?.any { field ->
             (field as? MezzeType.FunctionType)?.effects?.rowVar != null

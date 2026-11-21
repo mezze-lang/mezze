@@ -846,7 +846,8 @@ internal fun ExpressionConstraintGenerator.tryGenerateMethodCall(
     // Move-6b: one shared harvest (was a byte-identical copy in the inherent path).
     val abilityCaughtByOp = collectCaughtByAncestor(strippedMethodType.paramType)
     val abilityHarvestedEffects: Set<String> =
-        harvestCallbackEffects(strippedMethodType.paramType, argumentResult.type)
+        if (chargesCallbackEffects(strippedMethodType)) harvestCallbackEffects(strippedMethodType.paramType, argumentResult.type)
+        else emptySet()
 
     // #218: stash the ability's instantiation TyVars into typeArgs so the
     // monomorphizer can substitute them when specializing the enclosing
@@ -1546,7 +1547,8 @@ internal fun ExpressionConstraintGenerator.generateInherentMethodCall(
     val inherentCaughtByOp = if (inherentFnType != null) collectCaughtByAncestor(inherentFnType.paramType) else emptySet()
     // Move-6b: shared harvest (identical logic to the ability path above).
     val inherentHarvestedEffects: Set<String> =
-        harvestCallbackEffects(inherentFnType?.paramType, argumentResult.type)
+        if (inherentFnType == null || chargesCallbackEffects(inherentFnType)) harvestCallbackEffects(inherentFnType?.paramType, argumentResult.type)
+        else emptySet()
 
     // Emit the inherent method's OWN ability constraints (e.g. an HTTP
     // `.decode {}` whose impl body forwards to a `with FromJson 'a Str` free
@@ -1681,8 +1683,13 @@ internal fun ExpressionConstraintGenerator.generateDeferredInherentMethodCall(
     // Move-6b: shared harvest tail — this path aggregates caughtByOp/hasRowVar over
     // all deferred candidates, then applies the same row-subtraction as the
     // ability/inherent paths.
+    // Conservative over the candidates: charge if ANY of them would.
+    val deferredAnyCharges = resolvedCandidates.any { (_, fnType) ->
+        (fnType as? MezzeType.FunctionType)?.let { chargesCallbackEffects(it) } ?: true
+    }
     val deferredHarvestedEffects: Set<String> =
-        harvestCallbackEffectsWith(deferredAnyCallbackRowVar, deferredCaughtByOp, argumentResult.type)
+        if (deferredAnyCharges) harvestCallbackEffectsWith(deferredAnyCallbackRowVar, deferredCaughtByOp, argumentResult.type)
+        else emptySet()
 
     val methodCallInfo = ConstraintResult.MethodCallInfo(
         abilityName = null,

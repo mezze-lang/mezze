@@ -31,8 +31,16 @@ import java.nio.file.Paths
  *     nothing — the first attempt asked a fragment question and closed live
  *     variables, changing generalization.
  *  2. Only the OUTERMOST row. A variable on a nested arrow has call-site
- *     meaning, and pruning it would make an effectful-callback parameter PURE —
- *     a stricter language, not a tidier type.
+ *     meaning: `{ f: {} -> Int <...> } -> Int <...>` shares it with the result,
+ *     which carries it. This prune never touches a nested arrow.
+ *
+ * A nested tail that NOTHING carries — `{ f: {} -> Int <...> } -> Int`, closed
+ * result, no rowed field in the result type — is a different matter and is
+ * closed EARLIER, when the written annotation is converted
+ * (`closeUncarriedCallbackTails`, BUG 66): such a `...` can only ever mean `<>`,
+ * so the declaration stands and an effectful callback passed to it is an
+ * ordinary argument mismatch. Before that, the tail bound the callback's
+ * effects and dropped them — a caller with no handler compiled.
  *
  * The guard cases below are therefore the load-bearing ones, not the headline.
  */
@@ -113,18 +121,24 @@ class VacuousResultRowTest {
     }
 
     /**
-     * GUARD 2: the same for a variable that appears ONLY on a nested arrow,
-     * where the enclosing row is closed. Pruning it would make the parameter
-     * pure and start refusing this program.
+     * GUARD 2 (BUG 66): a variable that appears ONLY on a nested arrow under a
+     * CLOSED result, with no rowed field in the result type to carry it, IS
+     * closed — it could never have meant anything but `<>`. The declaration is
+     * legal; an effectful callback handed to it is refused where it is passed,
+     * even under a handler for its effect, because the slot is pure.
      */
-    @Test fun `a nested-arrow row variable still takes an effectful callback`() {
-        assertEquals(
-            null,
-            err("""
-                let absorb: { f: {} -> Int <...> } -> Int = { f } -> f {}
-                let go: {} -> Int <*> = {} -> perform Ticker in absorb { f = {} -> Tick.tick {} }
-            """),
-        )
+    @Test fun `an uncarried nested tail is pure - an effectful callback is refused at the call`() {
+        assertEquals(null, err("""
+            let absorb: { f: {} -> Int <...> } -> Int = { f } -> f {}
+            let go: {} -> Int = {} -> absorb { f = {} -> 7 }
+        """), "a pure callback fits the pure slot")
+        val message = err("""
+            let absorb: { f: {} -> Int <...> } -> Int = { f } -> f {}
+            let go: {} -> Int <*> = {} -> perform Ticker in absorb { f = {} -> Tick.tick {} }
+        """)
+        assert(message != null && message.contains("'f'")) {
+            "the effectful callback must be refused at the argument; got: $message"
+        }
     }
 
     /** A named effect means the tail is a lower bound on a real row. */

@@ -294,12 +294,19 @@ public final class HttpServerNatives {
         TruffleContext truffleCtx = env.getContext();
         Semaphore inFlight = new Semaphore(workerCount);
 
-        WebServer server = WebServer.builder()
+        var serverBuilder = WebServer.builder()
             .host(host)
             .port(port)
             .routing(rules -> rules.any((req, res) ->
-                dispatch(truffleCtx, handler, chain, scope, inFlight, streamBodies, req, res)))
-            .build();
+                dispatch(truffleCtx, handler, chain, scope, inFlight, streamBodies, req, res)));
+        // WebSocket endpoints are an upgrade negotiated by Helidon before any HTTP
+        // route runs, so they are known when the server is built, not matched per
+        // request: `serve_routes` hands them over as `[SocketRoute]`.
+        Object sockets = getField(args, "sockets");
+        if (WsNatives.hasRoutes(sockets)) {
+            serverBuilder.addRouting(WsNatives.routing(sockets, env, chain, scope));
+        }
+        WebServer server = serverBuilder.build();
 
         // Starting can fail: the port may be taken, privileged, or name an
         // address this host can't assign. We return a `Result ServerHandle
