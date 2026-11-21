@@ -470,10 +470,26 @@ class ModuleResolver(
         fun clearCache(world: World = World.DEFAULT) {
             val c = caches(world)
             synchronized(c.lock) {
-                c.modules.clear()
-                c.exportsDerivedFrom.clear()
-                c.current.clear(); c.sources.clear()
+                // The stdlib stays. Its source cannot change while a process runs
+                // (the same premise as `isCurrent` and `fromSnapshot`), so a clear
+                // that dropped it only bought re-reading, re-parsing and re-stamping
+                // every stdlib module the next check imports: measured at a third of
+                // every test, which clears before each one (1087 call sites). A world
+                // that overlays any stdlib module clears everything, as before.
+                val keepStdlib = c.sourceOverlay.keys.none { ModulePathConventions.isStdlib(it) }
+                fun drop(path: String) = !(keepStdlib && ModulePathConventions.isStdlib(path))
+                c.modules.keys.removeIf(::drop)
+                c.exportsDerivedFrom.keys.removeIf(::drop)
+                c.current.keys.removeIf(::drop)
+                c.sources.keys.removeIf { drop(it.second) }
             }
+        }
+
+        /** True when [world] reads its own text for some stdlib module: its stdlib is not THE stdlib. */
+        @JvmStatic
+        fun hasStdlibOverlay(world: World): Boolean {
+            val c = caches(world)
+            synchronized(c.lock) { return c.sourceOverlay.keys.any { ModulePathConventions.isStdlib(it) } }
         }
 
         /**

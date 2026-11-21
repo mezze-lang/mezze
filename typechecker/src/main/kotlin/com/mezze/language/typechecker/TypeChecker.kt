@@ -1585,6 +1585,8 @@ class TypeChecker(
      */
     private fun loadCodecImplContext(importResolver: ImportResolver): ModuleImportContext? {
         cachedCodecImplContext?.let { return it }
+        val shareable = !ModuleResolver.hasStdlibOverlay(world)
+        if (shareable) codecImplContexts[world]?.let { cachedCodecImplContext = it; return it }
         val src = "use std::codec::core\nuse std::codec::json\n"
         val synthetic = com.mezze.language.parser.MezzeParser().parseParsedModule(src, file = "<codec-impls>")
         val resolved = when (val r = importResolver.resolveImports(synthetic)) {
@@ -1614,6 +1616,9 @@ class TypeChecker(
             is ImportResolutionResult.Failure -> null
         }
         cachedCodecImplContext = resolved
+        // Built only from `std::codec::core`/`json`: identical for every checker in a
+        // world whose stdlib is not overlaid, and it was rebuilt by each new one.
+        if (shareable && resolved != null) codecImplContexts[world] = resolved
         return resolved
     }
 
@@ -1808,6 +1813,9 @@ class TypeChecker(
         fun withContext(context: TypingContext): TypeChecker = TypeChecker(context)
         fun withContext(context: TypingContext, strictTopLevel: Boolean): TypeChecker =
             TypeChecker(context, strictTopLevel)
+
+        /** [loadCodecImplContext] per world — see there. Stdlib-only, so never cleared. */
+        private val codecImplContexts = java.util.concurrent.ConcurrentHashMap<World, ModuleImportContext>()
 
         @JvmStatic
         /**
