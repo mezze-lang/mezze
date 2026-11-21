@@ -13,6 +13,7 @@ import com.mezze.language.ast.solving.Substitution
 import com.mezze.language.ast.solving.collectFreeTypeVars
 import com.mezze.language.ast.solving.closeGeneratedRowVars
 import com.mezze.language.ast.solving.pruneVacuousResultRow
+import com.mezze.language.ast.solving.closeUncarriedCallbackTails
 import com.mezze.language.parsedast.diagnostics.ErrorCode
 import com.mezze.language.typechecker.TypeCheckError
 import com.mezze.language.typechecker.WellKnownHashConstants
@@ -149,7 +150,10 @@ class ConstraintGenerator(
                         }
                     }
                 }
-                val convertedType = convertTypeAnnotation(annotation)
+                // A bare `<...>` on a callback that nothing can carry means `<>` (BUG 66).
+                val convertedType = closeUncarriedCallbackTails(convertTypeAnnotation(annotation)) {
+                    expressionGenerator.carriesOpenCallbackRow(it)
+                }
                 annotationTypes[binding] = convertedType
             }
 
@@ -1074,7 +1078,7 @@ class ConstraintGenerator(
             // because a `<...>` HOF's callback arg was a VarType then (e.g. routed
             // through a polymorphic intermediary). Re-harvest the SOLVED arg types.
             val effectsForOverpromiseCheck = enrichWithReHarvestedClosureEffects(
-                inferredTypeWithAbilities, result.pendingClosureArgEffects, substitution
+                inferredTypeWithAbilities, result.pendingClosureArgEffects.filter { it.depth <= 1 }, substitution
             )
             annotationValidator.validateEffectsNotOverpromised(
                 preConvertedAnnotationType, effectsForOverpromiseCheck,
@@ -1278,7 +1282,7 @@ class ConstraintGenerator(
             // when annotated (the annotation already supplies the authoritative
             // row, and the validator compares annotation-vs-inferred separately).
             if (item.typeAnnotation == null) {
-                enrichWithReHarvestedClosureEffects(withAbilities, result.pendingClosureArgEffects, substitution)
+                enrichWithReHarvestedClosureEffects(withAbilities, result.pendingClosureArgEffects.filter { it.depth <= 1 }, substitution)
             } else withAbilities
         }
 

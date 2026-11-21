@@ -700,6 +700,8 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
     // receiver stays generic contributes a `having` binding to this function's
     // signature — see AbilityHavingParityTest.
     return bodyResult.copy(
+        // One lambda boundary crossed: see PendingClosureHarvest.depth.
+        pendingClosureArgEffects = bodyResult.pendingClosureArgEffects.map { it.copy(depth = it.depth + 1) },
         type = functionType,
         constraints = stampedBodyConstraints + effectAssociatedTypeConstraints + abilityAssociatedTypeConstraints + effectMergeConstraints,
         // The ONE thing a lambda must not pass outwards. Building the function

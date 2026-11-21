@@ -3446,6 +3446,12 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_http_sse_begin", (r, c) -> com.mezze.interpreter.nodes.builtin.io.SseNatives.begin(r));
         HANDLERS.put("__native_http_sse_send",  (r, c) -> com.mezze.interpreter.nodes.builtin.io.SseNatives.send(r));
         HANDLERS.put("__native_http_sse_end",   (r, c) -> com.mezze.interpreter.nodes.builtin.io.SseNatives.end(r));
+        // WebSockets: one set of ops for Helidon sessions (either side) and the in-memory pair.
+        HANDLERS.put("__native_ws_connect",   (r, c) -> com.mezze.interpreter.nodes.builtin.io.WsNatives.connect(r));
+        HANDLERS.put("__native_ws_send",      (r, c) -> com.mezze.interpreter.nodes.builtin.io.SocketNatives.send(r));
+        HANDLERS.put("__native_ws_receive",   (r, c) -> com.mezze.interpreter.nodes.builtin.io.SocketNatives.receive(r));
+        HANDLERS.put("__native_ws_close",     (r, c) -> com.mezze.interpreter.nodes.builtin.io.SocketNatives.close(r));
+        HANDLERS.put("__native_mock_ws_pair", (r, c) -> com.mezze.interpreter.nodes.builtin.io.SocketNatives.pair(r));
 
         // === Database ===
         HANDLERS.put("__native_db_sqlite_scope_open", (r, c) -> DbNatives.dbSqliteScopeOpen(r));

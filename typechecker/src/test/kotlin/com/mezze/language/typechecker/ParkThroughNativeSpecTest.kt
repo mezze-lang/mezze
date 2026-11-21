@@ -176,7 +176,8 @@ class ParkThroughNativeSpecTest : AbilityEffectSpecBase() {
               let p = spawn_task { f = {} -> yield_now {} }
               yield_now {}
             """,
-            "`spawn_task: { f: {} -> 'a <...> } -> Promise 'a` — a pure arrow: the callback does not run during the call",
+            "`spawn_task: { f: {} -> 'a <...> } -> Promise 'a <...>` — the callback does not run during the call; " +
+                "its effects flow to the spawner through the open result row, whose handlers the task runs under",
         )
     }
 

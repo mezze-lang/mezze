@@ -188,6 +188,17 @@ internal class AnnotationValidator(
      * The case set mirrors `TypePrinter.collectFreeTypeVars` deliberately rather
      * than inventing another partial walker: same five shapes, same `else -> false`.
      */
+    /** A callback field carrying a row OBJECT that is empty and closed: a written `<...>` that nothing could carry. */
+    private fun hasWrittenEmptyClosedRow(type: MezzeType): Boolean = when (type) {
+        is MezzeType.FunctionType -> {
+            val row = type.effects
+            (row != null && row.isClosed && row.allEffectNames.isEmpty() && !row.performed) ||
+                hasWrittenEmptyClosedRow(type.paramType)
+        }
+        is MezzeType.RecordType -> type.fields.values.any { hasWrittenEmptyClosedRow(it) }
+        else -> false
+    }
+
     private fun hasBareOpenRow(type: MezzeType): Boolean = when (type) {
         is MezzeType.FunctionType -> {
             val row = type.effects
@@ -331,24 +342,29 @@ internal class AnnotationValidator(
             val isPolymorphic = annotationType.effects?.isOpen == true
             val overpromisedEffects = annotatedEffects - inferredEffects
             if (overpromisedEffects.isNotEmpty() && !isPolymorphic) {
-                // A parameter whose own row is a BARE `<...>` is the common cause, and
-                // "not used in the implementation" is the wrong story for it. Such a
-                // parameter may perform ANY effects, so a body that only calls it
-                // cannot be known to perform THIS one — the declaration would be a
-                // lie, and the rejection is right. What the author needs is which
-                // spelling to use instead, and the message said nothing about that.
+                // A parameter whose own row was written as a BARE `<...>` is the
+                // common cause, and "not used in the implementation" is the wrong
+                // story for it. Under this CLOSED result nothing carries that tail,
+                // so the conversion closed it to `<>` (BUG 66,
+                // `closeUncarriedCallbackTails`): the callback is pure here, a body
+                // that only calls it performs nothing, and the declaration is a lie.
+                // The rejection is right; what the author needs is which spelling to
+                // use instead. Both honest forms are measured working: name the
+                // effect on the parameter (`{} -> 'a <E, ...>`), which guarantees it
+                // is performed; or let the row flow out to the result (`-> 'r <...>`),
+                // which promises only what the callee promises.
                 //
-                // Both honest forms are measured working, and both work through a type
-                // alias: name the effect on the parameter (`{} -> 'a <E, ...>`), which
-                // guarantees it is performed; or let the row flow out to the result
-                // (`-> 'r <...>`), which promises only what the callee promises.
-                val bareOpenRowParam = hasBareOpenRow(annotationType.paramType)
+                // The closed tail is recognisable: a WRITTEN row object that is empty
+                // and closed. A parameter written without a row has no row object.
+                val bareOpenRowParam = hasBareOpenRow(annotationType.paramType) ||
+                    hasWrittenEmptyClosedRow(annotationType.paramType)
                 throw TypeCheckError(
                     "Type annotation mismatch for '$varName': Annotation declares effects ${overpromisedEffects.joinToString(", ")} " +
                     "which are not used in the implementation." +
                     if (bareOpenRowParam) {
-                        " A parameter declared `<...>` may perform ANY effects, so calling it does not " +
-                        "establish ${overpromisedEffects.joinToString(", ")} — nothing here performs that."
+                        " A parameter's `<...>` under this closed result can only be `<>` — nothing carries its " +
+                        "tail — so the callback is pure here and calling it does not establish " +
+                        "${overpromisedEffects.joinToString(", ")}."
                     } else "",
                     sourceLoc,
                     code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,

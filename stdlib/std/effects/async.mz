@@ -298,7 +298,10 @@ pub let promise_id: { p: Promise 'a } -> PromiseId = { p } -> __native_promise_i
 
 ## L1 mechanism: register `f {}` as a task of the machine. Its promise settles when
 ## the task finishes. A userland scheduler's `spawn` is this plus its own policy.
-pub let spawn_task: { f: {} -> 'a <...> } -> Promise 'a = { f } -> __native_task_spawn { f = f }
+## The result row is open on purpose: the task runs under the handlers in force
+## where it was spawned, so `f`'s effects are the caller's (a closed `-> Promise 'a`
+## would make `f` pure — nothing could carry its tail).
+pub let spawn_task: { f: {} -> 'a <...> } -> Promise 'a <...> = { f } -> __native_task_spawn { f = f }
 
 ## The settled half of `await`: read a promise that is known to have settled.
 pub let settled_result: { p: Promise 'a } -> Result 'a AsyncError = { p } -> match inspect { p = p } is

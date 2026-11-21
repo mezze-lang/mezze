@@ -8603,3 +8603,74 @@ fixture now also streams Server-Sent Events both ways).
 Gates for the batch (SSE + BUG 63 + BUG 64): datastructures 808/0, interpreter 7640/0 +
 556/0 timing, cli 362/0, typechecker 5480/0, langservice 86/0, lsp 135/0, formatter 187/0;
 website 126/0 on a rebuilt WASM; `just native-server-test` green.
+
+## BUG 65 — FIXED 2026-11-20: a METHOD call charged a stored callback's effects to the call
+
+```mezze
+let g = router { path = "" }.get { path = "/x", handler = { m } -> do
+  sleep { ms = 1 }
+  not_found { body = "x" } }
+```
+
+`error[V0502]: Top-level g performs Time at module-load time` — while the free
+`route { … handler = <the same> }` was accepted. The method-call paths
+(ability / inherent / deferred) harvested every callback argument's effects onto
+the call unconditionally; the free-function path charges them only when the
+callee's result row is open. `router.get` STORES the handler in `RouteGroup`'s
+entries, whose field is typed `… <...>`, and the data's own row tracks it.
+
+Rule: a callback's effects belong to the call iff the callee cannot carry them —
+open result row (`seq::map … -> ['b] <...>`): the tail carries; result TYPE with
+a function field `<...>` (`Routes`, `RouteGroup`, `SocketRoute`): stored, the
+field's row carries; otherwise (`Async.spawn` → `Promise 'a`): the call performs
+them. `ExpressionConstraints.chargesCallbackEffects` / `carriesOpenCallbackRow`;
+declared types expanded through the registry BY HASH (a deferred candidate's
+types arrive without identity, and `RouteEntry` is never imported by name).
+Second fault found on the way: a pending post-solve harvest from inside a NESTED
+lambda surfaced on the enclosing declaration (`g: {} -> RouteGroup = {} ->
+…websocket { handler = { … messages {…} } }` refused for "performing
+WebSocket"); harvests now carry their lambda depth and the decl finalizer reads
+depth <= 1 while the `perform` body check reads every depth.
+Tests: `CallbackEffectsChargedOnlyWhenNotCarriedTest`.
+
+## BUG 66 — FIXED 2026-11-20: a bare `<...>` callback tail that nothing could carry laundered the callback's effects
+
+```mezze
+let apply: { f: {} -> Int <...> } -> Int = { f } -> f {}
+let main = {} -> perform Console in … apply { f = {} -> Tick.tick {} } …   ## no Tick handler anywhere
+```
+
+COMPILED. `f`'s tail bound `{Tick}`, the closed `-> Int` had no row to carry it,
+and the effect vanished: the caller was never asked for a handler. The printed
+scheme already showed `apply : { f: {} -> Int } -> Int`, which is the truth the
+checker was not enforcing.
+
+USER RULE (2026-11-20): such a `...` "could only be `<>`, so pointless" — one may
+write it, the only possible implementation is one that treats the callback as
+pure, and any effect trying to live in that tail is an error where it appears.
+So the declaration is LEGAL, and `closeUncarriedCallbackTails` (applied once,
+where a written annotation is converted) closes the tail to `<>` when all three
+hold: the outer row is closed (absent, `<>`, `<*>`); the variable occurs exactly
+once in the whole type (the converter mints one shared variable per signature,
+so `{ f: {} -> Int <...> } -> Int <...>` is untouched — the result carries it);
+the result type carries no open callback row (`route: { handler: … <...> } ->
+Routes` STORES the handler, `Routes.run`'s row tracks it). The parameter is then
+pure and the ordinary argument check refuses an effectful callback — with or
+without a handler in scope, and whether or not the body ever calls it
+(`ignore: { f: {} -> Int <...> } -> Int = { f } -> 1`). A row that NAMES an
+effect (`<Tick, ...>`) is untouched: a declared callback row, reconciled per call
+(`CallbackTailEscapesClosedRowTest`).
+
+The rule found a real one on landing: the continuations merge's `spawn_task:
+{ f: {} -> 'a <...> } -> Promise 'a` made `f` pure, and `spawn_task { f = {} ->
+yield_now {} }` was refused; the honest `-> Promise 'a <...>` says what is true
+(the task runs under the spawner's handlers).
+
+A first cut refused the DECLARATION (T0210) and was withdrawn: eleven existing
+tests pin the named-row spelling, two pin `{ f: … <...> } -> Int` with pure
+callbacks, and the user's reading is that the spelling is legal and vacuous.
+Tests: `CallbackEffectsChargedOnlyWhenNotCarriedTest`, `VacuousResultRowTest`
+(guard 2 rewritten), `EveryStdlibModuleTypechecksTest` (every stdlib module on
+its own, failure NAMED — the snapshot build reports only the importer that lost
+a name).
+Gates: see the commit that lands this entry.

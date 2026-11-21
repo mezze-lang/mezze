@@ -30,9 +30,10 @@ import org.junit.jupiter.api.Test
  * case itself.
  *
  * L-2 is still closed, by the pair of open-row cases below: a bare `<...>`
- * parameter may perform ANY effects, so an enclosing function cannot declare a
- * specific one — refusing that is sound, and letting the row FLOW THROUGH is the
- * honest alternative. L-2 was filed as "an OPEN row inside a type alias does not
+ * parameter under a CLOSED result has nothing to carry its tail, so it can only
+ * be `<>` (BUG 66) — the callback is pure there, and an enclosing function
+ * cannot declare a specific effect through it; refusing that is sound, and
+ * letting the row FLOW THROUGH is the honest alternative. L-2 was filed as "an OPEN row inside a type alias does not
  * propagate"; it propagated, and the alias was never the cause, which is the
  * conclusion that outlives the alias spelling.
  */
@@ -150,10 +151,10 @@ class AliasEffectRowProbeTest {
      * A bare `<...>` parameter cannot justify a declared effect, and refusing it is
      * SOUND rather than the bug L-2 filed.
      *
-     * `g : {} -> Int <...>` may perform anything, so a body that only calls `g`
-     * cannot be known to perform `Tick` — declaring `<Tick>` would be a lie, and
-     * accepting it would let a `g` that performs `Tock` hide behind a `<Tick>`
-     * signature. The diagnostic says so and names both honest spellings.
+     * Under the closed `<Tick>` nothing carries `g`'s tail, so `g : {} -> Int <...>`
+     * means `g : {} -> Int` here (BUG 66): a body that only calls `g` performs
+     * nothing, and declaring `<Tick>` is a lie. The diagnostic says so and names
+     * both honest spellings.
      *
      * L-2 was filed as "an OPEN row inside a type ALIAS does not propagate". It
      * propagated; what fails is the signature, and it failed identically with and
@@ -170,8 +171,8 @@ class AliasEffectRowProbeTest {
         }
         val message = t.message ?: ""
         assertTrue(
-            message.contains("may perform ANY effects"),
-            "expected the open-row explanation, got: $message",
+            message.contains("can only be `<>`"),
+            "expected the closed-tail explanation, got: $message",
         )
     }
 

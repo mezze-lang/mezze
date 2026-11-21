@@ -694,6 +694,54 @@ fun pruneVacuousResultRow(type: MezzeType, mustBeOpenRowVars: Set<RowVar> = empt
     )
 }
 
+/**
+ * Close the BARE `<...>` tail of a callback parameter that nothing can carry
+ * (BUG 66).
+ *
+ *     let apply: { f: {} -> Int <...> } -> Int = { f } -> f {}
+ *
+ * The result row is closed and `Int` holds no function field, so whatever `f`'s
+ * tail bound had nowhere to go: `apply { f = {} -> Tick.tick {} }` compiled
+ * with no `Tick` handler anywhere — the effect was laundered. The user's rule:
+ * such a `...` can only ever mean `<>`, so the declaration is legal (its body
+ * must treat `f` as pure) and the only error is an effectful callback passed to
+ * it, which the ordinary argument check now reports because the parameter IS
+ * pure. `{ f: {} -> Int <...> } -> Int <...>` is the spelling that carries.
+ *
+ * Three conditions, each load-bearing:
+ *  - the OUTER row is closed (absent, `<>`, or `<*>`): an open outer row shares
+ *    the tail and carries it (`spawn`, `thru`);
+ *  - the variable occurs exactly ONCE in the whole type (the converter mints one
+ *    shared variable per signature, so a second occurrence means it is related to
+ *    something — see [pruneVacuousResultRow], narrowing 1);
+ *  - the RESULT TYPE does not carry an open callback row: `route: { handler: … <...>
+ *    } -> Routes` STORES the handler and `Routes.run`'s own row tracks it, so the
+ *    tail is carried by the data ([resultCarriesRow] is the registry-aware walk).
+ * A row that NAMES an effect (`<Tick, ...>`) is untouched: it is a declared
+ * callback row, reconciled at each call site (CallbackTailEscapesClosedRowTest).
+ *
+ * Applied to a WRITTEN annotation, once, where it is converted; inferred types
+ * are row-polymorphic by construction and never reach here.
+ */
+fun closeUncarriedCallbackTails(type: MezzeType, resultCarriesRow: (MezzeType) -> Boolean): MezzeType {
+    val fn = type as? MezzeType.FunctionType ?: return type
+    if (fn.effects?.rowVar != null) return type
+    val params = fn.paramType as? MezzeType.RecordType ?: return type
+    var changed = false
+    var resultCarries: Boolean? = null
+    val fields = params.fields.mapValues { (_, t) ->
+        val cb = t as? MezzeType.FunctionType ?: return@mapValues t
+        val row = cb.effects ?: return@mapValues t
+        val v = row.rowVar ?: return@mapValues t
+        if (row.effects.isNotEmpty() || row.effectInstances.isNotEmpty()) return@mapValues t
+        if (countEffectRowVar(type, v) != 1) return@mapValues t
+        if (resultCarries ?: resultCarriesRow(fn.returnType).also { resultCarries = it }) return@mapValues t
+        changed = true
+        cb.copy(effects = row.copy(rowVar = null))
+    }
+    return if (changed) fn.copy(paramType = params.copy(fields = fields)) else type
+}
+
 /** How many effect rows in [type] carry [v] as their row variable. */
 private fun countEffectRowVar(type: MezzeType, v: RowVar): Int = when (type) {
     is MezzeType.EffectRow ->

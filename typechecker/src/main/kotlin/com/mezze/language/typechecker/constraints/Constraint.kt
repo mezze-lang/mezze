@@ -588,7 +588,19 @@ data class ConstraintResult(
     /** A deferred callback-effect harvest for BUG C (#331). [argType] is the
      *  `<...>` HOF call's argument type as seen at gen-time (may contain VarType
      *  fields); [caughtByOp] are effect names the op discharges (row subtraction). */
-    data class PendingClosureHarvest(val argType: MezzeType, val caughtByOp: Set<String>)
+    data class PendingClosureHarvest(val argType: MezzeType, val caughtByOp: Set<String>,
+        /**
+         * How many lambda boundaries this harvest has crossed. A lambda discharges
+         * its body's effects at its arrow, so a harvest from INSIDE a nested lambda
+         * must not surface on the enclosing declaration (`g: {} -> RouteGroup = {} ->
+         * router {…}.websocket { handler = { … messages {…} } }` was refused for
+         * "performing WebSocket"); the decl finalizer reads depth <= 1 — its own
+         * value lambda's body. The `perform` body check still reads every depth,
+         * which is what lets an effectful stage callback get its TYPE error
+         * instead of "the handler can never fire".
+         */
+        val depth: Int = 0,
+    )
 
     /** A do-block `let` binding's type + the effect names its value surfaced,
      *  used by an enclosing `perform` to pin the binding's discharged-effect

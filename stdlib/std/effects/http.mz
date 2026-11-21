@@ -809,6 +809,57 @@ pub let events
   }
 
 
+# ─── WebSockets ─────────────────────────────────────────────────────────
+
+## A WebSocket message.
+pub type Message = | Text { text: Str }, Binary { bytes: Bytes } |
+
+## An open WebSocket, either side. Opaque: use the `WebSocket` effect's ops on it.
+pub newtype Socket = __NativeSocket
+
+## WebSocket failures.
+pub type SocketError = | SocketConnectFailed { url: Str, reason: Str }, SocketClosed |
+
+## Send and receive on an open socket, either side. `receive` blocks; `None` means the peer closed.
+effect WebSocket where {
+  send: { socket: Socket, msg: Message } -> Result {} SocketError <WebSocket>,
+  receive: { socket: Socket } -> Option Message <WebSocket>,
+  close: { socket: Socket } -> {} <WebSocket>,
+}
+
+## The runtime's sockets: Helidon sessions on either side, and the in-memory ends of `socket_pair`.
+impl WebSocket for NativeWebSocket where {
+  send = { socket, msg } -> __native_ws_send { socket = socket, msg = msg },
+  receive = { socket } -> __native_ws_receive { socket = socket },
+  close = { socket } -> __native_ws_close { socket = socket },
+}
+
+## Open a WebSocket to a server (`ws://` or `wss://`).
+effect SocketClient where {
+  connect: { url: Str, config: HttpConfig } -> Result Socket SocketError <SocketClient>,
+}
+
+## Connects over a real socket (Helidon); `config.timeout_ms` bounds the handshake.
+impl SocketClient for HelidonSocketClient where {
+  connect = { url, config } -> __native_ws_connect { url = url, config = config },
+}
+
+## Answers a prepared socket instead of connecting; pair it with `socket_pair` to test a client.
+impl SocketClient for MockSocketClient { socket: Socket } where {
+  connect = { url, config } -> Ok { val = socket },
+}
+
+## Two connected in-memory sockets: what one end sends, the other receives. Works everywhere, no port.
+pub let socket_pair: {} -> { a: Socket, b: Socket } = {} -> __native_mock_ws_pair {}
+
+## Fold `f` over incoming messages until the peer closes; stop early with `std::effects::early_return`.
+pub let messages
+  : { socket: Socket, init: 'acc, f: { acc: 'acc, msg: Message } -> 'acc <...> } -> 'acc <WebSocket, ...>
+  = { socket, init, f } -> match WebSocket.receive { socket = socket } is
+    None -> init
+    Some { val = m } -> messages { socket = socket, init = f { acc = init, msg = m }, f = f }
+
+
 # ─── Mock rules, chained ──────────────────────────────────────────────
 # A chain reads WHICH requests, then WHAT comes back; a hand-built `MockRule` grows with `Response`.
 
@@ -1547,14 +1598,17 @@ pub type ServerError = |
 ## Run a handler as a server: `Ok` with the handle, or `Err` with a
 ## `ServerError` when the socket cannot bind.
 effect HttpServer where {
-  serve: { handler: { req: Request } -> Response <...> } -> Result ServerHandle ServerError <HttpServer>
+  serve: { handler: { req: Request } -> Response <...> } -> Result ServerHandle ServerError <HttpServer>,
+  ## Serve a route table including its WebSocket endpoints; unmatched requests go to `fallback`.
+  serve_routes: { routes: Routes, fallback: { req: Request } -> Response <...> } -> Result ServerHandle ServerError <HttpServer>,
 }
 
 ## A server that never binds a socket: `stop` is a no-op and `port` is 0.
 ## The handler is NOT called — a test calls it directly. Installs no async
 ## performer, so a handler's `<Async>` escapes to the test.
 impl HttpServer for MockHttpServer where {
-  serve = { handler } -> Ok { val = { stop = {} -> {}, port = 0 } }
+  serve = { handler } -> Ok { val = { stop = {} -> {}, port = 0 } },
+  serve_routes = { routes, fallback } -> Ok { val = { stop = {} -> {}, port = 0 } },
 }
 
 ## Build a `Request` for a handler without a server — the test seam for
@@ -1660,9 +1714,9 @@ let attach_reader: { req: Request, reader: Option BodyReader } -> Request = { re
 
 ## Bind the socket, start the workers, hand back the handle.
 let start_socket
-  : { handler: { req: Request } -> Response <...>, config: ServerConfig }
+  : { handler: { req: Request } -> Response <...>, sockets: [SocketRoute], config: ServerConfig }
   -> Result ServerHandle ServerError
-  = { handler, config } -> do
+  = { handler, sockets, config } -> do
     let wrapped = { req, reader } -> handler { req = attach_reader { req = req, reader = reader } }
     # The native speaks a plain level name; the tag is mezze-side only.
     let log_level = helidon_log_level_name { level = config.helidon_print_log }
@@ -1673,6 +1727,7 @@ let start_socket
       workers = config.workers,
       stream_bodies = config.stream_bodies,
       helidon_log_level = log_level,
+      sockets = sockets,
     } is
       Ok { val = s } -> Ok { val = {
         stop = {} -> __native_http_server_stop { server = s },
@@ -1684,12 +1739,16 @@ let start_socket
 ## A server on a real socket, backed by Helidon. Handlers run on worker
 ## threads with the performers in force at `serve` (`Time`, `Log`, …).
 impl HttpServer for HelidonHttpServer where {
-  serve = { handler } -> start_socket { handler = handler, config = default_server_config },
+  serve = { handler } -> start_socket { handler = handler, sockets = [], config = default_server_config },
+  serve_routes = { routes, fallback } -> start_socket {
+    handler = otherwise { routes = routes, fallback = fallback }, sockets = routes.sockets, config = default_server_config },
 }
 
 ## `HelidonHttpServer` with a config. `port = 0` is what a test wants.
 impl HttpServer for HelidonHttpServerWith { config: ServerConfig } where {
-  serve = { handler } -> start_socket { handler = handler, config = config },
+  serve = { handler } -> start_socket { handler = handler, sockets = [], config = config },
+  serve_routes = { routes, fallback } -> start_socket {
+    handler = otherwise { routes = routes, fallback = fallback }, sockets = routes.sockets, config = config },
 }
 
 ## Block until `on` returns, then stop the server. `on` is any shutdown
@@ -1722,7 +1781,11 @@ pub type Matched = {
 ## perform effects even though the routing around them performs none.
 pub type Routes = {
   run: { req: Request } -> Option Response <...>,
+  sockets: [SocketRoute],
 }
+
+## A WebSocket endpoint: its path, and the handler run once per connection with the open socket.
+pub type SocketRoute = { path: Str, handler: { m: Matched, socket: Socket } -> {} <...> }
 
 ## Split a path into segments, dropping the empty pieces a leading or trailing
 ## slash produces, so `/users/7/` and `users/7` agree.
@@ -1841,6 +1904,7 @@ pub let route: { method: Method, path: Str, handler: { m: Matched } -> Response 
           None -> None
           Some { val = params } ->
             Some { val = handler { m = { req = req, params = params } } },
+      sockets = [],
     }
 
 ## Route one method and path to a handler, converting whatever it answers (a
@@ -1926,14 +1990,14 @@ pub type RouteEntry = {
 
 ## A path prefix and its routes — a table, not yet a handler. Close it with
 ## `handler` (404 on no match) or `otherwise` before passing it to `serve`.
-pub newtype RouteGroup = { prefix: Str, entries: [RouteEntry] }
+pub newtype RouteGroup = { prefix: Str, entries: [RouteEntry], sockets: [SocketRoute] }
 
 ## An empty router whose routes are prefixed by `path` (`""` for none). Chain
 ## `.get` / `.post` / … and close with `.otherwise` or `.handler`.
 pub let router: { path: Str } -> RouteGroup = { path } ->
-  RouteGroup.({ prefix = path, entries = [] })
+  RouteGroup.({ prefix = path, entries = [], sockets = [] })
 
-let group_inner: { g: RouteGroup } -> { prefix: Str, entries: [RouteEntry] } = { g } ->
+let group_inner: { g: RouteGroup } -> { prefix: Str, entries: [RouteEntry], sockets: [SocketRoute] } = { g } ->
   match g is
     RouteGroup.(v) -> v
 
@@ -1941,7 +2005,7 @@ let group_inner: { g: RouteGroup } -> { prefix: Str, entries: [RouteEntry] } = {
 let fold_entries: { g: RouteGroup } -> Routes = { g } ->
   seq::fold {
     xs = group_inner { g = g }.entries,
-    init = { run = { req } -> None },
+    init = { run = { req } -> None, sockets = group_inner { g = g }.sockets },
     f = { acc, x } -> or_else {
       a = acc,
       b = route { method = x.method, path = x.path, handler = x.handler },
@@ -1978,9 +2042,30 @@ let group_add
           handler = handler,
         },
       },
+      sockets = inner.sockets,
+    })
+
+let group_add_socket
+  : { g: RouteGroup, path: Str, handler: { m: Matched, socket: Socket } -> {} <...> }
+  -> RouteGroup
+  =
+  { g, path, handler } -> do
+    let inner = group_inner { g = g }
+    RouteGroup.({
+      prefix = inner.prefix,
+      entries = inner.entries,
+      sockets = seq::push {
+        xs = inner.sockets,
+        x = { path = join_prefix { prefix = inner.prefix, path = path }, handler = handler },
+      },
     })
 
 impl RouteGroup where {
+  ## Add a WebSocket endpoint under this group's prefix; `handler` runs once per connection with the open socket.
+  ## Close a group with sockets via `table` and `HttpServer.serve_routes`, which registers them.
+  websocket: { it: 'it, path: Str, handler: { m: Matched, socket: Socket } -> {} <...> } -> RouteGroup =
+    { it, path, handler } -> group_add_socket { g = it, path = path, handler = handler },
+
   ## Append a GET under this group's prefix, answering whatever the handler returns.
   get: { it: 'it, path: Str, handler: { m: Matched } -> 'r <...> } with IntoResponse 'r -> RouteGroup =
     { it, path, handler } -> group_add {
@@ -2069,6 +2154,13 @@ impl RouteGroup where {
           },
         },
       },
+      sockets = seq::concat {
+        xs = outer.sockets,
+        ys = seq::map {
+          xs = child.sockets,
+          f = { x } -> { path = join_prefix { prefix = outer.prefix, path = x.path }, handler = x.handler },
+        },
+      },
     }),
 
   ## Fold this group into a route table. First added wins.
@@ -2092,10 +2184,13 @@ impl RouteGroup where {
 }
 
 ## Fold a list of routes into one table; the first to match wins.
+# Typed once, so the fold's seed is not a literal with an open element type.
+let no_routes: Routes = { run = { req } -> None, sockets = [] }
+
 pub let routes: { of: [Routes] } -> Routes = { of } ->
   seq::fold {
     xs = of,
-    init = { run = { req } -> None },
+    init = no_routes,
     f = { acc, x } -> or_else { a = acc, b = x },
   }
 
@@ -2104,6 +2199,7 @@ pub let or_else: { a: Routes, b: Routes } -> Routes = { a, b } -> {
   run = { req } -> match a.run { req = req } is
     Some { val } -> Some { val = val }
     None -> b.run { req = req },
+  sockets = seq::concat { xs = a.sockets, ys = b.sockets },
 }
 
 ## Close the table into the handler `serve` takes; unmatched requests go to
