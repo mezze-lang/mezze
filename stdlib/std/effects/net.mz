@@ -1,33 +1,21 @@
-# Raw TCP and UDP: bytes in, bytes out, nothing above the socket. Framing,
-# codecs and protocols are plain functions over these ops, so the same code runs
-# on real sockets (`NativeTcp`, `NativeTcpServer`, `NativeUdp`) or on an
-# in-memory `Network` (`MockTcp`, `MockTcpServer`, `MockUdp`), under any `Async`.
-#
-# Every blocking op blocks the CALLING THREAD on the native performers: a virtual
-# thread under `LoomAsync`, the one carrier under `CoopAsync`. The mock
-# performers park the TASK instead, so a `CoopAsync` test schedules
-# deterministically, and a receive nothing will ever satisfy is a parked task
-# that `CoopAsyncWith`'s stall report can name, not a carrier blocked in a read.
+# Raw TCP and UDP: bytes in, bytes out. Framing and protocols are functions over
+# the ops, so the same code runs on real sockets or on an in-memory `Network`.
 use std::collections::bytes
 use std::int
 use std::option
 use std::result
 use std::effects::async::{ Async }
 
-
-# ─── Addresses and errors ─────────────────────────────────────────────────
-
-## Where a socket is: a host name or IP literal, and a port. Names resolve at `connect` or `bind`.
+## A host name or IP literal and a port. Names resolve at `connect` or `bind`.
 pub type Addr = { host: Str, port: Int }
 
 ## Loopback on `port`.
 pub let local: { port: Int } -> Addr = { port } -> { host = "127.0.0.1", port = port }
 
-## `"host:port"`, for messages and logs.
+## `"host:port"`.
 pub let addr_to_str: { addr: Addr } -> Str = { addr } -> "$(addr.host):$(int::to_str { n = addr.port })"
 
-## Why a socket operation failed. Decided by WHAT the runtime threw, never by the
-## wording of its message; `NetIo` carries the message for anything the others do not name.
+## Why a socket op failed. `NetIo` carries the runtime's message for anything the others do not name.
 pub type NetError = |
   NetRefused { addr: Addr },
   NetUnresolved { host: Str },
@@ -38,35 +26,28 @@ pub type NetError = |
   NetIo { reason: Str },
 |
 
-## Connection options. `connect_timeout_ms` bounds `connect`; `receive_timeout_ms` bounds each
-## `receive` (`0` waits forever; one that runs out answers `Err NetTimeout` and the connection stays
-## usable). `no_delay` turns Nagle's algorithm off, which write-then-wait protocols want. A
-## listener's config is what its accepted connections get.
+## `connect_timeout_ms` bounds `connect`; `receive_timeout_ms` bounds each `receive` (`0` waits
+## forever; a timed-out receive leaves the connection usable). `no_delay` turns Nagle's algorithm off.
 pub type TcpConfig = { connect_timeout_ms: Int, receive_timeout_ms: Int, no_delay: Bool }
 
 ## Ten seconds to connect, receives wait forever, no delay.
 pub let default_tcp_config: TcpConfig = { connect_timeout_ms = 10000, receive_timeout_ms = 0, no_delay = True }
 
-
-# ─── TCP ──────────────────────────────────────────────────────────────────
-
-## One TCP connection, either side. Opaque: the `Tcp` ops work on it.
+## One TCP connection, either side.
 pub newtype TcpConn = __NativeTcpConn
 
-## Connect out, and move bytes over an open connection (either side).
+## Connect out and move bytes over an open connection.
 effect Tcp where {
   connect: { addr: Addr, config: TcpConfig } -> Result TcpConn NetError <Tcp>,
-  ## Whatever has arrived, at most `max_bytes` of it; blocks until something has.
-  ## `None` once the peer has closed its side.
+  ## At most `max_bytes` of what has arrived; blocks until something has. `None` once the peer closed its side.
   receive: { conn: TcpConn, max_bytes: Int } -> Result (Option Bytes) NetError <Tcp>,
   send: { conn: TcpConn, data: Bytes } -> Result {} NetError <Tcp>,
-  ## Half-close: nothing more goes out from this side, so the peer's `receive` sees `None`.
-  ## Receiving still works, which is how a request-then-read-to-end protocol finishes.
+  ## Half-close: the peer's `receive` sees `None`; receiving here still works.
   shutdown_write: { conn: TcpConn } -> Result {} NetError <Tcp>,
   close: { conn: TcpConn } -> {} <Tcp>,
 }
 
-## The JDK's sockets, blocking on the calling thread.
+## The JDK's sockets, blocking the calling thread.
 impl Tcp for NativeTcp where {
   connect = { addr, config } -> __native_tcp_connect { addr = addr, config = config },
   receive = { conn, max_bytes } -> __native_net_conn_receive { conn = conn, max_bytes = max_bytes },
@@ -75,13 +56,14 @@ impl Tcp for NativeTcp where {
   close = { conn } -> __native_net_conn_close { conn = conn },
 }
 
-## A bound, listening TCP socket. Opaque: the `TcpServer` ops work on it.
+## A bound, listening TCP socket.
 pub newtype TcpListener = __NativeTcpListener
 
-## What `accept` hands back: the connection and who opened it.
+## An accepted connection and who opened it.
 pub type Accepted = { conn: TcpConn, peer: Addr }
 
 ## Listen and accept. Port `0` binds a free port; `listener_port` tells which.
+## Accepted connections get the listener's `TcpConfig`.
 effect TcpServer where {
   bind: { addr: Addr, config: TcpConfig } -> Result TcpListener NetError <TcpServer>,
   ## The next connection; blocks. `Err NetClosed` once the listener is closed.
@@ -89,37 +71,33 @@ effect TcpServer where {
   close: { listener: TcpListener } -> {} <TcpServer>,
 }
 
-## The JDK's server sockets. A listener the program never closes is closed when the program ends.
+## The JDK's server sockets. A listener never closed is closed when the program ends.
 impl TcpServer for NativeTcpServer where {
   bind = { addr, config } -> __native_tcp_bind { addr = addr, config = config },
   accept = { listener } -> __native_net_listener_accept { listener = listener },
   close = { listener } -> __native_net_listener_close { listener = listener },
 }
 
-## The port a listener is bound to: the one that was picked after `port = 0`.
+## The port a listener is bound to.
 pub let listener_port: { listener: TcpListener } -> Int = { listener } -> __native_net_listener_port { listener = listener }
 
-
-# ─── UDP ──────────────────────────────────────────────────────────────────
-
-## A bound UDP socket. Opaque: the `Udp` ops work on it.
+## A bound UDP socket.
 pub newtype UdpSocket = __NativeUdpSocket
 
 ## One datagram and who sent it.
 pub type Datagram = { data: Bytes, from: Addr }
 
-## Datagrams: no connection, no order, no promise of delivery. Port `0` binds a free port.
+## Datagrams: no connection, no order, no delivery promise. Port `0` binds a free port.
 effect Udp where {
   ## `receive_timeout_ms` bounds each `recv_from` (`0` waits forever).
   bind: { addr: Addr, receive_timeout_ms: Int } -> Result UdpSocket NetError <Udp>,
   send_to: { sock: UdpSocket, addr: Addr, data: Bytes } -> Result {} NetError <Udp>,
-  ## The next datagram, at most `max_bytes` of it (a longer one is cut); blocks.
-  ## `Err NetClosed` once the socket is closed.
+  ## The next datagram, cut to `max_bytes`; blocks. `Err NetClosed` once the socket is closed.
   recv_from: { sock: UdpSocket, max_bytes: Int } -> Result Datagram NetError <Udp>,
   close: { sock: UdpSocket } -> {} <Udp>,
 }
 
-## The JDK's datagram sockets. A socket the program never closes is closed when the program ends.
+## The JDK's datagram sockets. A socket never closed is closed when the program ends.
 impl Udp for NativeUdp where {
   bind = { addr, receive_timeout_ms } -> __native_udp_bind { addr = addr, receive_timeout_ms = receive_timeout_ms },
   send_to = { sock, addr, data } -> __native_net_udp_send_to { sock = sock, addr = addr, data = data },
@@ -127,25 +105,18 @@ impl Udp for NativeUdp where {
   close = { sock } -> __native_net_udp_close { sock = sock },
 }
 
-## The port a UDP socket is bound to: the one that was picked after `port = 0`.
+## The port a UDP socket is bound to.
 pub let udp_port: { sock: UdpSocket } -> Int = { sock } -> __native_net_udp_port { sock = sock }
 
-
-# ─── In memory ────────────────────────────────────────────────────────────
-# One network value, three performers: a test's server and client meet on it without a port, and
-# the connection ops are the SAME natives the real sockets use, dispatched on what the handle is.
-
-## An in-memory network: hosts and ports that exist only in this process. Every mock performer
-## handed the same `Network` shares them. Hosts are compared as written (`"localhost"` and
-## `"127.0.0.1"` are two hosts here); nothing resolves.
+## An in-memory network. Mock performers handed the same `Network` see the same hosts and ports;
+## hosts are compared as written, nothing resolves.
 pub newtype Network = __NativeMockNetwork
 
 ## A fresh, empty network.
 pub let mock_network: {} -> Network = {} -> __native_mock_net_new {}
 
-## `Tcp` over a `Network`. `connect` to an address nothing listens on is `NetRefused`.
-## `receive_timeout_ms` is honoured; `connect_timeout_ms` has nothing to bound. A blocked
-## `receive` or `accept` parks the task, so other tasks run meanwhile under `CoopAsync` too.
+## `Tcp` over a `Network`: `connect` to an address nothing listens on is `NetRefused`.
+## A blocked `receive` parks the task, so other tasks run meanwhile under `CoopAsync`.
 impl Tcp for MockTcp { net: Network } where {
   connect = { addr, config } -> __native_mock_net_connect { net = net, addr = addr, config = config },
   receive = { conn, max_bytes } -> __native_net_conn_receive { conn = conn, max_bytes = max_bytes },
@@ -154,15 +125,14 @@ impl Tcp for MockTcp { net: Network } where {
   close = { conn } -> __native_net_conn_close { conn = conn },
 }
 
-## `TcpServer` over a `Network`. Binding a port twice is `NetBindFailed`; closing a listener closes
-## the connections it has not yet handed out.
+## `TcpServer` over a `Network`. Closing a listener closes the connections it has not handed out yet.
 impl TcpServer for MockTcpServer { net: Network } where {
   bind = { addr, config } -> __native_mock_net_bind { net = net, addr = addr, config = config },
   accept = { listener } -> __native_net_listener_accept { listener = listener },
   close = { listener } -> __native_net_listener_close { listener = listener },
 }
 
-## `Udp` over a `Network`. A datagram to an address nothing is bound to is dropped, as on a wire.
+## `Udp` over a `Network`. A datagram to an address nothing is bound to is dropped.
 impl Udp for MockUdp { net: Network } where {
   bind = { addr, receive_timeout_ms } -> __native_mock_net_udp_bind { net = net, addr = addr, receive_timeout_ms = receive_timeout_ms },
   send_to = { sock, addr, data } -> __native_net_udp_send_to { sock = sock, addr = addr, data = data },
@@ -170,14 +140,7 @@ impl Udp for MockUdp { net: Network } where {
   close = { sock } -> __native_net_udp_close { sock = sock },
 }
 
-
-# ─── Helpers: functions over the ops ──────────────────────────────────────
-# Sources are FUNCTIONS that take the consumer: the reads happen during the call, on the arrow
-# the handler is installed for. Each takes a connection the caller owns, so stopping early with
-# `std::effects::early_return` cannot leak it; `with_conn` opens and closes for you.
-
-## Connect to `addr`, run `f` on the connection, close it when `f` returns.
-## An abort out of `f` skips the close; to stop early and still close, work on a connection you own.
+## Connect to `addr`, run `f` on the connection, close it when `f` returns. An abort out of `f` skips the close.
 pub let with_conn
   : { addr: Addr, config: TcpConfig, f: { conn: TcpConn } -> 'a <...> }
   -> Result 'a NetError <Tcp, ...>
@@ -192,8 +155,8 @@ pub let with_conn
 pub let send_str: { conn: TcpConn, s: Str } -> Result {} NetError <Tcp> =
   { conn, s } -> Tcp.send { conn = conn, data = bytes::from_str { s = s } }
 
-## Fold `f` over what arrives, at most `max_bytes` at a time, until the peer closes its side:
-## `Ok` with the final accumulator, or the first read error.
+## Fold `f` over what arrives, at most `max_bytes` at a time, until the peer closes its side.
+## Stop early with `std::effects::early_return`.
 pub let chunks
   : { conn: TcpConn, max_bytes: Int, init: 'acc, f: { acc: 'acc, x: Bytes } -> 'acc <...> }
   -> Result 'acc NetError <Tcp, ...>
@@ -202,7 +165,7 @@ pub let chunks
     Ok { val = Some { val = x } } -> chunks { conn = conn, max_bytes = max_bytes, init = f { acc = init, x = x }, f = f }
     Err { error } -> Err { error = error }
 
-# Fold every complete frame in `buf` (delimiter excluded); what follows the last delimiter stays buffered.
+# Folds every complete frame in `buf`; what follows the last delimiter stays buffered.
 let split_delimited
   : { buf: Bytes, delim: Bytes, acc: 'acc, f: { acc: 'acc, x: Bytes } -> 'acc <...> }
   -> { buf: Bytes, acc: 'acc } <...>
@@ -215,8 +178,8 @@ let split_delimited
       f = f,
     }
 
-## Fold `f` over the frames between occurrences of `delim` (the delimiter excluded), across
-## chunk boundaries. A last frame the peer never terminated is delivered too, unless empty.
+## Fold `f` over the frames between occurrences of `delim` (excluded), across chunk boundaries.
+## An unterminated last frame is delivered too, unless empty.
 pub let delimited
   : { conn: TcpConn, delim: Bytes, init: 'acc, f: { acc: 'acc, x: Bytes } -> 'acc <...> }
   -> Result 'acc NetError <Tcp, ...>
@@ -231,7 +194,7 @@ pub let delimited
       if bytes::is_empty { b = final.buf } then Ok { val = final.acc }
       else Ok { val = f { acc = final.acc, x = final.buf } }
 
-# A line's bytes as text, with a trailing `\r` dropped; `Err` names the line that is not UTF-8.
+# A line as text with a trailing `\r` dropped, or `NetIo` when it is not UTF-8.
 let line_text: { x: Bytes } -> Result Str NetError = { x } ->
   match bytes::to_str { b = x } is
     Err { error } -> Err { error = NetIo { reason = "a line is not UTF-8: $(error)" } }
@@ -240,7 +203,7 @@ let line_text: { x: Bytes } -> Result Str NetError = { x } ->
       then Ok { val = result::get_or { result = bytes::to_str { b = bytes::take { b = x, n = bytes::size { b = x } - 1 } }, def = s } }
       else Ok { val = s }
 
-# One line for `lines`: decode it and fold it, unless an earlier line already failed.
+# One step of `lines`: decode and fold, unless an earlier line already failed.
 let line_step
   : { acc: Result 'acc NetError, x: Bytes, f: { acc: 'acc, x: Str } -> 'acc <...> }
   -> Result 'acc NetError <...>
@@ -250,9 +213,8 @@ let line_step
       Err { error } -> Err { error = error }
       Ok { val = s } -> Ok { val = f { acc = a, x = s } }
 
-## Fold `f` over `\n`-terminated lines as text (a trailing `\r` is dropped; a last line with no
-## `\n` still counts). A line that is not UTF-8 makes the result `Err NetIo` and the lines after it
-## are not delivered, though the connection is still drained to the peer's close.
+## Fold `f` over `\n`-terminated lines as text; a trailing `\r` is dropped and an unterminated last
+## line still counts. A line that is not UTF-8 makes the result `Err NetIo`.
 pub let lines
   : { conn: TcpConn, init: 'acc, f: { acc: 'acc, x: Str } -> 'acc <...> }
   -> Result 'acc NetError <Tcp, ...>
@@ -265,7 +227,7 @@ pub let lines
     Err { error } -> Err { error = error }
     Ok { val = folded } -> folded
 
-## A length-prefixed frame: four big-endian bytes of length, then the payload. `frames` reads them back.
+## A length-prefixed frame: four big-endian length bytes, then `data`. `frames` reads them back.
 pub let frame: { data: Bytes } -> Bytes = { data } -> do
   let n = bytes::size { b = data }
   bytes::concat {
@@ -273,10 +235,9 @@ pub let frame: { data: Bytes } -> Bytes = { data } -> do
     b2 = data,
   }
 
-# The byte at `i`, or 0 past the end (callers check the size first).
 let byte_at: { b: Bytes, i: Int } -> Int = { b, i } -> option::get_or { opt = bytes::get { b = b, i = i }, def = 0 }
 
-# Fold every complete length-prefixed frame in `buf`; a partial one stays buffered.
+# Folds every complete length-prefixed frame in `buf`; a partial one stays buffered.
 let split_prefixed
   : { buf: Bytes, acc: 'acc, f: { acc: 'acc, x: Bytes } -> 'acc <...> }
   -> { buf: Bytes, acc: 'acc } <...>
@@ -292,8 +253,8 @@ let split_prefixed
         f = f,
       }
 
-## Fold `f` over length-prefixed frames (see `frame`) until the peer closes its side. Bytes left
-## over at the close, a frame the peer cut off, make the result `Err NetIo`.
+## Fold `f` over length-prefixed frames (see `frame`) until the peer closes its side.
+## A frame the peer cut off makes the result `Err NetIo`.
 pub let frames
   : { conn: TcpConn, init: 'acc, f: { acc: 'acc, x: Bytes } -> 'acc <...> }
   -> Result 'acc NetError <Tcp, ...>
@@ -308,10 +269,8 @@ pub let frames
       if bytes::is_empty { b = final.buf } then Ok { val = final.acc }
       else Err { error = NetIo { reason = "the peer closed inside a frame, $(int::to_str { n = bytes::size { b = final.buf } }) byte(s) in" } }
 
-## Accept on `listener` until it is closed, running `handler` for each connection as its own
-## task (`Async.spawn`: a virtual thread under `LoomAsync`, a scheduled task under `CoopAsync`)
-## and closing the connection when the handler returns. `Ok` once the listener is closed; `Err`
-## on an accept failure.
+## Accept on `listener` until it is closed, running `handler` for each connection in an `Async.spawn`
+## task and closing the connection when it returns. `Ok` once the listener is closed.
 pub let serve_on
   : { listener: TcpListener, handler: { conn: TcpConn, peer: Addr } -> {} <...> }
   -> Result {} NetError <Tcp, TcpServer, Async, ...>
@@ -324,8 +283,8 @@ pub let serve_on
         Tcp.close { conn = a.conn } }
       serve_on { listener = listener, handler = handler }
 
-## Bind `addr` and `serve_on` it. Returns only when accepting fails, since nobody else holds the
-## listener; a program with more to do binds itself and spawns `serve_on`.
+## Bind `addr` and `serve_on` it. Returns only on an accept failure; to keep control of the
+## listener, bind it yourself and spawn `serve_on`.
 pub let serve
   : { addr: Addr, config: TcpConfig, handler: { conn: TcpConn, peer: Addr } -> {} <...> }
   -> Result {} NetError <Tcp, TcpServer, Async, ...>

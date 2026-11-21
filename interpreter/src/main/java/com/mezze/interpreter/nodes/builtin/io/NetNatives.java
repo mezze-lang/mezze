@@ -25,23 +25,19 @@ import java.net.UnknownHostException;
 import java.util.Arrays;
 
 /**
- * `std::effects::net`: raw TCP and UDP over the JDK's sockets, and the connection,
- * listener and datagram ops that are SHARED with the in-memory network
- * ({@link MockNetNatives}).
+ * `std::effects::net` over the JDK's sockets, plus the connection, listener and
+ * datagram ops shared with the in-memory network ({@link MockNetNatives}).
  *
- * <p>One shape, two backends. A guest `TcpConn` is a {@link Conn}, a `TcpListener`
- * a {@link Listener}, a `UdpSocket` a {@link UdpSock}; the shared natives
- * (`__native_net_conn_*`, `__native_net_listener_*`, `__native_net_udp_*`) call
- * the interface, so what the handle IS decides the behaviour — never a name.
- * The real backend blocks the calling thread (a virtual thread under
- * `LoomAsync`); the mock backend parks the task.
+ * <p>A guest `TcpConn` is a {@link Conn}, a `TcpListener` a {@link Listener}, a
+ * `UdpSocket` a {@link UdpSock}. The shared natives call the interface, so the
+ * handle decides the backend. The real one blocks the calling thread.
  *
- * <p>Failures become a guest `NetError` by the exception's CLASS, never by its
- * message: {@link ConnectException} is `NetRefused`, {@link SocketTimeoutException}
- * `NetTimeout`, an unresolved address `NetUnresolved`, {@link NoRouteToHostException}
- * `NetUnreachable`, {@link BindException} `NetBindFailed` (with the JDK's reason,
- * since the class alone does not tell "in use" from "not permitted"), an
- * operation on a handle this side closed `NetClosed`, and anything else `NetIo`.
+ * <p>Failures map to `NetError` by exception class: {@link ConnectException}
+ * `NetRefused`, {@link SocketTimeoutException} `NetTimeout`, an unresolved
+ * address `NetUnresolved`, {@link NoRouteToHostException} `NetUnreachable`,
+ * {@link BindException} `NetBindFailed` (with the JDK's reason, since the class
+ * does not tell "in use" from "not permitted"), an op on a handle this side
+ * closed `NetClosed`, anything else `NetIo`.
  */
 public final class NetNatives {
 
@@ -160,7 +156,7 @@ public final class NetNatives {
         throw new NativeTypeMismatchException("net natives expect '" + field + "' to be Bytes");
     }
 
-    /** A positive byte count; a guest asking for zero or fewer bytes has a bug worth naming. */
+    /** A positive byte count, capped at 16 MiB. */
     static int maxBytesOf(MezzeRecord args) {
         long m = longOf(args, "max_bytes");
         if (m <= 0) throw new MezzeGuestException("max_bytes must be positive; got " + m);
@@ -185,7 +181,7 @@ public final class NetNatives {
         throw new NativeTypeMismatchException("Udp ops expect a UdpSocket from bind");
     }
 
-    /** A `TcpConfig` record's three fields, with the stdlib defaults for a field left out. */
+    /** A guest `TcpConfig`. */
     record TcpConfig(int connectTimeoutMs, int receiveTimeoutMs, boolean noDelay) {
         static TcpConfig of(MezzeRecord args) {
             MezzeRecord c = record(args, "config");
@@ -196,7 +192,7 @@ public final class NetNatives {
         }
     }
 
-    // ==================== shared ops: dispatch on the handle ====================
+    // ==================== shared ops ====================
 
     /** `__native_net_conn_receive { conn, max_bytes }` → `Result (Option Bytes) NetError`. */
     @TruffleBoundary
@@ -345,7 +341,7 @@ public final class NetNatives {
         }
     }
 
-    /** `__native_tcp_bind { addr, config }` → `Result TcpListener NetError`. Registered for dispose with the context. */
+    /** `__native_tcp_bind { addr, config }` → `Result TcpListener NetError`. Disposed with the context. */
     @TruffleBoundary
     public static Object tcpBind(MezzeRecord args) {
         MezzeRecord a = record(args, "addr");
@@ -374,7 +370,7 @@ public final class NetNatives {
         }
     }
 
-    /** `__native_udp_bind { addr, receive_timeout_ms }` → `Result UdpSocket NetError`. Registered for dispose with the context. */
+    /** `__native_udp_bind { addr, receive_timeout_ms }` → `Result UdpSocket NetError`. Disposed with the context. */
     @TruffleBoundary
     public static Object udpBind(MezzeRecord args) {
         MezzeRecord a = record(args, "addr");

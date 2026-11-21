@@ -16,23 +16,15 @@ import java.util.concurrent.CancellationException;
 import java.util.function.BooleanSupplier;
 
 /**
- * The in-memory network behind `MockTcp`, `MockTcpServer` and `MockUdp`: hosts and
- * ports that exist only in one {@link Network} value, connections that are two
+ * The in-memory network behind `MockTcp`, `MockTcpServer` and `MockUdp`: one
+ * {@link Network} of listeners and UDP sockets, connections that are two
  * {@link Mailbox}es wired to each other, datagrams that land in the bound
  * socket's mailbox or nowhere.
  *
- * <p>The handles implement the same {@link NetNatives.Conn}, {@link NetNatives.Listener}
- * and {@link NetNatives.UdpSock} the real sockets do, so every op after `connect` /
- * `bind` is the shared native. What differs is WAITING: a real socket blocks its
- * thread; here a wait on a carrier parks the TASK on the mailbox's
- * {@link WaitQueue} ({@link TaskMachine#waitOnQueue}), so under `CoopAsync` a
- * test's tasks interleave deterministically and a receive nothing will ever
- * satisfy is a parked task (one `CoopAsyncWith`'s stall report names) rather
- * than a carrier blocked in a read. The machine does not call it a deadlock:
- * a mailbox CAN be fed from a foreign thread, and it never guesses.
- * Off a carrier (a `LoomAsync` task, the main thread) the wait is a plain
- * monitor wait. Every state change does both: {@code notifyAll} for the
- * threads, {@link WaitQueue#signal()} for the tasks.
+ * <p>The handles implement {@link NetNatives.Conn}, {@link NetNatives.Listener}
+ * and {@link NetNatives.UdpSock}, so every op after `connect` / `bind` is the
+ * shared native. A wait parks the TASK ({@link TaskMachine#waitOnQueue}) on a
+ * carrier and is a monitor wait off one; every state change signals both.
  */
 public final class MockNetNatives {
 
@@ -57,10 +49,7 @@ public final class MockNetNatives {
         synchronized MockUdp udp(String host, int port) { return udp.get(key(host, port)); }
     }
 
-    /**
-     * A queue one side fills and the other drains, with an end marker, waited on
-     * by parking (on a carrier) or by a monitor wait (off one).
-     */
+    /** A queue one side fills and the other drains, with an end marker. */
     static final class Mailbox<T> {
         private final ArrayDeque<T> items = new ArrayDeque<>();
         private boolean ended;
@@ -78,7 +67,7 @@ public final class MockNetNatives {
 
         synchronized boolean ready() { return !items.isEmpty() || ended; }
 
-        /** Block until something is queued or the box has ended; false only at the deadline. */
+        /** Wait until something is queued or the box has ended; false only at the deadline. */
         boolean await(long timeoutMs) {
             BooleanSupplier ready = this::ready;
             if (TaskMachine.onCarrier()) {

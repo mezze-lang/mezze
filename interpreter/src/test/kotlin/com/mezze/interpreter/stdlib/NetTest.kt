@@ -9,15 +9,9 @@ import org.junit.jupiter.api.Timeout.ThreadMode
 import java.util.concurrent.TimeUnit
 
 /**
- * `std::effects::net`: raw TCP and UDP. Three effects (`Tcp`, `TcpServer`, `Udp`),
- * real sockets (`NativeTcp`, `NativeTcpServer`, `NativeUdp`) and an in-memory
- * `Network` (`MockTcp`, `MockTcpServer`, `MockUdp`) that shares every op after
- * `connect` / `bind` with them; the helpers (`with_conn`, `lines`, `delimited`,
- * `frames`, `serve_on`) are functions over the ops, so one test body runs on
- * either backend.
- *
- * The mock parks the TASK, so a `CoopAsync` test schedules deterministically; the
- * real sockets block the thread, so those tests run under `LoomAsync`.
+ * `std::effects::net`: the `Tcp`, `TcpServer` and `Udp` ops and the helpers over
+ * them, on the in-memory `Network` (deterministic under `CoopAsync`, where a
+ * wait parks the task) and on real loopback sockets under `LoomAsync`.
  */
 class NetTest {
 
@@ -77,7 +71,7 @@ class NetTest {
             Err { error } -> show_err { e = error }
     """.trimIndent()
 
-    /** The shared head, then the body at column 1: a body interpolated INTO a raw string keeps its indent and reads as more statements of the head's last `do`. */
+    /** Head then body at column 1; a body interpolated into the raw string would keep its indent and continue the head's last `do`. */
     private fun src(body: String): String = head + "\n" + body.trimIndent()
 
     // ==================== in memory ====================
