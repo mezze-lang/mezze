@@ -5,14 +5,16 @@ import com.mezze.language.parsedast.*
 import com.mezze.language.typedast.*
 
 /**
- * Continuations: a performer is CONT-CAPABLE when any of its op bodies names
- * `cont`. The check is SYNTACTIC on purpose — it is the capability tax's whole
- * trigger, and a handler that never says `cont` pays nothing (design: "the tax
- * is only paid by a block whose handler mentions `cont`"). `cont` is a
- * runtime-bound keyword, so this is a keyword rule, not a name match on user
- * code.
+ * Continuations: a performer is CONT-CAPABLE when any of its op bodies can PARK,
+ * i.e. names `cont` other than as `cont.abort`/`cont.resume`. Those two are plain
+ * tail calls (identity, throw) that every handler may use at today's cost; only
+ * `cont.park` suspends. The check is SYNTACTIC on purpose — it is the capability
+ * tax's whole trigger, and a handler that never parks pays nothing. `cont` is
+ * reserved and cannot be passed on (HandlerTailPositionValidator), so the
+ * receiver of `.park` is the only other place it can appear.
  */
 internal fun mentionsCont(expr: ParsedExpr): Boolean {
+    if (ScopedEffectConstants.contHandle(expr) != null) return false
     if (expr is ParsedIdentifier && expr.qualifier == null && expr.localName == ScopedEffectConstants.CONT) return true
     return expr.children().any { mentionsCont(it) }
 }

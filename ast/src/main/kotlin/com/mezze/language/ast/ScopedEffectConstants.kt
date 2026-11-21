@@ -22,28 +22,41 @@ object ScopedEffectConstants {
     const val SCOPE = "scope"
 
     /**
-     * Runtime-bound name available inside op handler bodies. Calling
-     * `abort {val = X}` ends the perform with X as its result, discarding
-     * the body. See EffectHandlerBindings for the type shape.
+     * IR names of the two control handles, reached in source ONLY as fields of
+     * `cont` (`cont.abort { val }`, `cont.resume { val }`). The bare names are
+     * NOT bound in a handler body and NOT reserved: `abort` and `resume` are
+     * ordinary identifiers. The compiler lowers `cont.abort`/`cont.resume` to
+     * `EffectBindingIR("abort"/"resume")`, so the handles keep their
+     * constant-folded fast path (see `MezzeBytecodeRootNode.EffectBinding`).
      */
     const val ABORT = "abort"
-
-    /**
-     * Runtime-bound name available inside op handler bodies. Calling
-     * `resume {val = X}` drives the body forward with X as the op's return.
-     * Falling off the op body normally is treated as `resume {val = <last expr>}`.
-     */
     const val RESUME = "resume"
 
     /**
-     * Runtime-bound name available inside op handler bodies (continuations
-     * design): `cont.park { on, set }` suspends the task until the condition
-     * holds and evaluates to a `ParkOutcome`; `cont.abort { val }` ends the
-     * perform. Userland never holds a continuation — the runtime does.
+     * THE runtime-bound name in a performer op body — the one record through
+     * which a handler touches its continuation (one mechanism, one spelling):
+     *
+     *     cont.resume { val }      hand `val` back as the op's result (tail only;
+     *                              falling off the body does the same, and is
+     *                              what the 99% handler writes)
+     *     cont.abort  { val }      end the whole `perform` with `val` (tail only)
+     *     cont.park   { on, set }  suspend this task until the condition holds
+     *
+     * Reserved at binding sites like `scope`. Userland never holds a
+     * continuation — the runtime does; `cont` itself is not a value.
      */
     const val CONT = "cont"
     const val CONT_PARK = "park"
-    const val CONT_ABORT = "abort"
+    const val CONT_ABORT = ABORT
+    const val CONT_RESUME = RESUME
+
+    /** `"abort"`/`"resume"` when [e] is `cont.abort`/`cont.resume` (unqualified `cont`), else null. */
+    fun contHandle(e: com.mezze.language.parsedast.ParsedExpr): String? {
+        if (e !is com.mezze.language.parsedast.ParsedMemberAccess) return null
+        val r = e.receiver
+        if (r !is com.mezze.language.parsedast.ParsedIdentifier || r.qualifier != null || r.localName != CONT) return null
+        return if (e.member == ABORT || e.member == RESUME) e.member else null
+    }
     /**
      * The third impl-only field, after `initialize_scope`/`finalize_scope`: a
      * SELECTOR the runtime calls while the perform body is parked —

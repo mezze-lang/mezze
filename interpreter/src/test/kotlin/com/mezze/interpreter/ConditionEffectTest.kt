@@ -142,7 +142,7 @@ class ConditionEffectTest {
             use std::effects::condition::{ Condition, signal }
 
             impl Condition for Lenient having 'ctx = Str where {
-              signal = { ctx, fallback } -> resume { val = fallback }
+              signal = { ctx, fallback } -> cont.resume { val = fallback }
             }
 
             pub let total: {} -> Int <Condition> = {} -> do
@@ -167,7 +167,7 @@ class ConditionEffectTest {
             use std::effects::condition::{ Condition, signal }
 
             impl Condition for Strict having 'ctx = Str where {
-              signal = { ctx, fallback } -> abort { val = 0 - 1 }
+              signal = { ctx, fallback } -> cont.abort { val = 0 - 1 }
             }
 
             pub let total: {} -> Int <Condition> = {} -> do

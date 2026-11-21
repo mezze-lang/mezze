@@ -26,7 +26,7 @@ effect Stopper where {
 }
 
 impl Stopper for Aborts {} where {
-  stop = {} -> abort { val = 1 }
+  stop = {} -> cont.abort { val = 1 }
 }
 
 let lit_int = 0

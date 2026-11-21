@@ -7,8 +7,8 @@ import org.junit.jupiter.api.Test
  * never values.
  *
  * The rule follows from what they are at runtime rather than from typing:
- * `resume { val = X }` is the IDENTITY FUNCTION (it transfers no control) and
- * `abort { val = X }` THROWS. Mezze has tail-resumptive handlers plus an escape
+ * `cont.resume { val = X }` is the IDENTITY FUNCTION (it transfers no control) and
+ * `cont.abort { val = X }` THROWS. Mezze has tail-resumptive handlers plus an escape
  * continuation — not one-shot continuations. There is no `k` to store, defer or
  * call twice.
  *
@@ -19,8 +19,8 @@ import org.junit.jupiter.api.Test
  * continuations checks clean and means something else. MEASURED:
  *
  *     a = {} -> do
- *       resume { val = 1 }
- *       resume { val = 2 }
+ *       cont.resume { val = 1 }
+ *       cont.resume { val = 2 }
  *
  * printed `body ran, v = 2` — body ran ONCE, with the SECOND value. The first
  * call computed 1 as a discarded statement. In Eff/Koka/OCaml 5 that same
@@ -43,8 +43,8 @@ class HandlerTailPositionSpecTest : VariantSpecBase() {
             $eff
             impl A for Twice where {
               a = {} -> do
-                resume { val = 1 }
-                resume { val = 2 }
+                cont.resume { val = 1 }
+                cont.resume { val = 2 }
             }
             $MAIN
             """,
@@ -61,7 +61,7 @@ class HandlerTailPositionSpecTest : VariantSpecBase() {
             $eff
             impl A for ThenMore where {
               a = {} -> do
-                resume { val = 1 }
+                cont.resume { val = 1 }
                 2
             }
             $MAIN
@@ -84,8 +84,8 @@ class HandlerTailPositionSpecTest : VariantSpecBase() {
             $eff
             impl A for AbortThen where {
               a = {} -> do
-                abort { val = 0 }
-                resume { val = 1 }
+                cont.abort { val = 0 }
+                cont.resume { val = 1 }
             }
             $MAIN
             """,
@@ -100,7 +100,7 @@ class HandlerTailPositionSpecTest : VariantSpecBase() {
             """
             $eff
             impl A for Operand where {
-              a = {} -> resume { val = 1 } + 1
+              a = {} -> cont.resume { val = 1 } + 1
             }
             $MAIN
             """,
@@ -117,7 +117,7 @@ class HandlerTailPositionSpecTest : VariantSpecBase() {
             $eff
             impl A for Store where {
               a = {} -> do
-                let k = resume
+                let k = cont.resume
                 k { val = 1 }
             }
             $MAIN
@@ -136,12 +136,45 @@ class HandlerTailPositionSpecTest : VariantSpecBase() {
             $eff
             pub let apply_it: { f: { val: Int } -> Int } -> Int = { f } -> f { val = 7 }
             impl A for Passed where {
-              a = {} -> apply_it { f = abort }
+              a = {} -> apply_it { f = cont.abort }
             }
             $MAIN
             """,
             "V0503",
             "Same confusion through a parameter rather than a `let`.",
+        )
+    }
+
+    @Test fun `cont itself may not be stored`() {
+        rejects(
+            """
+            $eff
+            impl A for Keep where {
+              a = {} -> do
+                let k = cont
+                k.resume { val = 1 }
+            }
+            $MAIN
+            """,
+            "V0503",
+            "The runtime holds the continuation. Binding `cont` is the capture the " +
+                "design forbids, spelled one level up from `let k = cont.resume`.",
+        )
+    }
+
+    @Test fun `bare resume is not a handler binding`() {
+        rejects(
+            """
+            $eff
+            impl A for Old where {
+              a = {} -> resume { val = 1 }
+            }
+            $MAIN
+            """,
+            "V0702",
+            "ONE mechanism, one spelling: the handles live on `cont`. A bare `resume` " +
+                "is an ordinary (here undefined) name, so a missed migration is a compile " +
+                "error rather than a silent second mechanism.",
         )
     }
 
@@ -152,7 +185,7 @@ class HandlerTailPositionSpecTest : VariantSpecBase() {
             """
             $eff
             impl A for Fine where {
-              a = {} -> resume { val = 1 }
+              a = {} -> cont.resume { val = 1 }
             }
             $MAIN
             """,
@@ -166,7 +199,7 @@ class HandlerTailPositionSpecTest : VariantSpecBase() {
             use std::result
             effect Ex having 'error where { throw: { error: 'error } -> 'a <Ex> }
             impl Ex for ToResult having 'error = 'e where {
-              throw = { error } -> abort { val = Err { error } }
+              throw = { error } -> cont.abort { val = Err { error } }
             }
             $MAIN
             """,
@@ -183,9 +216,9 @@ class HandlerTailPositionSpecTest : VariantSpecBase() {
             impl Ex for PerArm having 'error = E where {
               throw = { error } ->
                 match error is
-                  X -> abort { val = 1 }
-                  Y -> abort { val = 2 }
-                  Z -> abort { val = 3 }
+                  X -> cont.abort { val = 1 }
+                  Y -> cont.abort { val = 2 }
+                  Z -> cont.abort { val = 3 }
             }
             $MAIN
             """,
@@ -204,7 +237,7 @@ class HandlerTailPositionSpecTest : VariantSpecBase() {
               a = {} -> do
                 let base = 40
                 let more = base + 2
-                resume { val = more }
+                cont.resume { val = more }
             }
             $MAIN
             """,
@@ -219,7 +252,7 @@ class HandlerTailPositionSpecTest : VariantSpecBase() {
             """
             $eff
             impl A for Branch where {
-              a = {} -> if True then resume { val = 1 } else resume { val = 2 }
+              a = {} -> if True then cont.resume { val = 1 } else cont.resume { val = 2 }
             }
             $MAIN
             """,
@@ -269,9 +302,9 @@ class HandlerTailPositionSpecTest : VariantSpecBase() {
             """
             $eff
             impl A for AbortInit where {
-              initialize_scope = {} -> abort { val = 11 },
+              initialize_scope = {} -> cont.abort { val = 11 },
               finalize_scope = {} -> {},
-              a = {} -> resume { val = 7 }
+              a = {} -> cont.resume { val = 7 }
             }
             $MAIN
             """,
@@ -292,14 +325,14 @@ class HandlerTailPositionSpecTest : VariantSpecBase() {
             $eff
             impl A for AbortFin where {
               initialize_scope = {} -> { n = 1 },
-              finalize_scope = {} -> abort { val = 22 },
-              a = {} -> resume { val = 7 }
+              finalize_scope = {} -> cont.abort { val = 22 },
+              a = {} -> cont.resume { val = 7 }
             }
             $MAIN
             """,
             "V0503",
             "Measured: SILENTLY SWALLOWED. The block produced 7 and still yielded " +
-                "7 despite `abort { val = 22 }` — the quietest possible way for a " +
+                "7 despite `cont.abort { val = 22 }` — the quietest possible way for a " +
                 "written intention to do nothing.",
         )
     }
@@ -309,9 +342,9 @@ class HandlerTailPositionSpecTest : VariantSpecBase() {
             """
             $eff
             impl A for ResumeInit where {
-              initialize_scope = {} -> resume { val = { n = 1 } },
+              initialize_scope = {} -> cont.resume { val = { n = 1 } },
               finalize_scope = {} -> {},
-              a = {} -> resume { val = 7 }
+              a = {} -> cont.resume { val = 7 }
             }
             $MAIN
             """,
@@ -328,8 +361,8 @@ class HandlerTailPositionSpecTest : VariantSpecBase() {
             $eff
             impl A for ResumeFin where {
               initialize_scope = {} -> { n = 1 },
-              finalize_scope = {} -> resume { val = {} },
-              a = {} -> resume { val = 7 }
+              finalize_scope = {} -> cont.resume { val = {} },
+              a = {} -> cont.resume { val = 7 }
             }
             $MAIN
             """,
@@ -347,7 +380,7 @@ class HandlerTailPositionSpecTest : VariantSpecBase() {
             impl A for Scoped where {
               initialize_scope = {} -> { n = 1 },
               finalize_scope = {} -> scope,
-              a = {} -> resume { val = scope.n }
+              a = {} -> cont.resume { val = scope.n }
             }
             pub let use_it: {} -> Int <A> = {} -> A.a {}
             pub let run = {} -> perform Scoped in use_it {}

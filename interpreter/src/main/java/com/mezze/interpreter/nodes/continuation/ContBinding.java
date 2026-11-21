@@ -14,7 +14,7 @@ import com.oracle.truffle.api.frame.VirtualFrame;
 
 /**
  * The value of the runtime-bound name {@code cont} inside a performer op body:
- * a record {@code { park, abort }}. One per language instance (a root node
+ * a record {@code { abort, park, resume }}. One per language instance (a root node
  * belongs to one engine's sharing layer — see {@code MezzeLanguage.fallThroughResumeFn}).
  *
  * <p>{@code park} does not block and does not capture anything itself: it returns
@@ -124,9 +124,12 @@ public final class ContBinding {
         };
         RootCallTarget target = new MezzeRootNode(language, fd, body, "cont-park", 0, 1, new int[0]).getCallTarget();
         MezzeFunction park = new MezzeFunction(target, ScopedEffectConstants.CONT_PARK, new Object[0]);
+        // `cont.abort`/`cont.resume` CALLS are lowered to EffectBindingIR (the per-dispatch
+        // handles); these fields serve only a reflective read of the record.
         MezzeRecord rec = MezzeRecord.fromFields(
-            new String[]{ScopedEffectConstants.CONT_PARK, ScopedEffectConstants.CONT_ABORT},
-            new Object[]{park, EffectHandlerDriver.makeAbortFunction()}
+            new String[]{ScopedEffectConstants.CONT_ABORT, ScopedEffectConstants.CONT_PARK, ScopedEffectConstants.CONT_RESUME},
+            new Object[]{EffectHandlerDriver.makeAbortFunction(), park,
+                com.mezze.interpreter.bytecode.YieldDispatch.fallThroughResumeFnPublic()}
         );
         language.contRecord = rec;
         return rec;

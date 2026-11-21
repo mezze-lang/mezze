@@ -98,7 +98,7 @@ class ReturnTypeInferenceTest {
             }
 
             impl Return for IntReturn having 'result = Int where {
-                return = {val} -> abort {val}
+                return = {val} -> cont.abort {val}
             }
 
             pub let get_number : {} -> Int <*> = {} ->
@@ -155,7 +155,7 @@ class ReturnTypeInferenceTest {
             type Status = | Success {msg: Str}, Failed {error: Str} |
 
             impl Return for StatusReturn having 'result = Status where {
-                return = {val} -> abort {val}
+                return = {val} -> cont.abort {val}
             }
 
             pub let process : {x: Int} -> Status <*> = {x} ->

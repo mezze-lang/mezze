@@ -42,7 +42,7 @@ main {}
 
     @Test
     fun `finalize_scope runs when the handler resumes`() {
-        val r = MezzeTestHelper.runWithOutput(scoped("Resuming", "resume { val = 7 }"))
+        val r = MezzeTestHelper.runWithOutput(scoped("Resuming", "cont.resume { val = 7 }"))
         assertTrue(r.output.contains("INIT"), "init ran:\n${r.output}")
         assertTrue(r.output.contains("FINALIZE"), "cleanup ran:\n${r.output}")
         assertTrue(r.output.contains("RESULT=7"), "body's value came out:\n${r.output}")
@@ -54,7 +54,7 @@ main {}
         // operations, so cleanup running here is a real guarantee rather than an
         // obvious consequence. If this ever regresses, every scoped handler
         // leaks on exactly the path V0506 exists to protect.
-        val r = MezzeTestHelper.runWithOutput(scoped("Aborting", "abort { val = 99 }"))
+        val r = MezzeTestHelper.runWithOutput(scoped("Aborting", "cont.abort { val = 99 }"))
         assertTrue(r.output.contains("INIT"), "init ran:\n${r.output}")
         assertTrue(
             r.output.contains("FINALIZE"),
@@ -79,7 +79,7 @@ impl R for Counting where {
   finalize_scope = {} -> do
     println { msg = "FINALIZE" }
     {},
-  use_it = {} -> resume { val = scope.n }
+  use_it = {} -> cont.resume { val = scope.n }
 }
 
 pub let body: {} -> Int <R> = {} -> do

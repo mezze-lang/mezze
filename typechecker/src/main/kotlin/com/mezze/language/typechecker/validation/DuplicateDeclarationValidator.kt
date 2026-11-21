@@ -187,9 +187,8 @@ object DuplicateDeclarationValidator {
             ErrorCode.V0701_DUPLICATE_DECLARATION
         ) { "Duplicate type declaration: type '$it' is already declared" }
 
-        private val RUNTIME_RESERVED_NAMES = setOf(
-        ScopedEffectConstants.ABORT,
-        ScopedEffectConstants.RESUME,
+    private val RUNTIME_RESERVED_NAMES = setOf(
+        ScopedEffectConstants.CONT,
         ScopedEffectConstants.SCOPE
     )
 
@@ -198,9 +197,8 @@ object DuplicateDeclarationValidator {
         if (name in RUNTIME_RESERVED_NAMES) {
             throw TypeCheckError(
                 "Name '$name' is reserved by the effect-handler runtime. " +
-                "It's bound inside op handler bodies (call site of " +
-                "`abort {val = ...}` / `resume {val = ...}` / `scope`) and " +
-                "cannot be used as a user-defined binding.",
+                "It is bound inside performer op bodies (`cont.resume`, `cont.abort`, " +
+                "`cont.park`, and `scope`) and cannot be used as a user-defined binding.",
                 loc,
                 code = ErrorCode.V0701_DUPLICATE_DECLARATION,
             )

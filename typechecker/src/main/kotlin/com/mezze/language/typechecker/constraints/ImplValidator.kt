@@ -90,7 +90,7 @@ internal class ImplValidator(
      * The work was always being done. This is the channel that keeps it.
      */
     /**
-     * Each performer's `abort { val = … }` payload type, as a VARIABLE the
+     * Each performer's `cont.abort { val = … }` payload type, as a VARIABLE the
      * op-body solve will have unified with the real payload.
      *
      * `ContextBuilder.extractSuspensionType` guesses this syntactically, walking
@@ -733,7 +733,7 @@ internal class ImplValidator(
                 // different operations (measured):
                 //
                 //   throw = { e } -> 7                  the site gets 7, body resumes
-                //   throw = { e } -> abort { val = 7 }  the block yields 7
+                //   throw = { e } -> cont.abort { val = 7 }  the block yields 7
                 //
                 // A bare value RESUMES, so it becomes the value of `Effect.op {}`
                 // inside the performing function — a claim about the DECLARED
@@ -767,7 +767,7 @@ internal class ImplValidator(
                             "To make ${prettyPrintType(resolved)} the result of the " +
                             "`perform` block instead of a value handed back where " +
                             "the effect was performed, return " +
-                            "`abort { val = … }`.",
+                            "`cont.abort { val = … }`.",
                         opLoc,
                         code = ErrorCode.T0210_ANNOTATION_VS_BODY_MISMATCH,
                         // Not the shared ANNOTATION_VS_BODY hint: "change the
@@ -776,7 +776,7 @@ internal class ImplValidator(
                         // declaration and changing it rewrites every performer and
                         // every site. Naming both real resolutions, nearest first.
                         hints = listOf(
-                            "return `abort { val = … }` to end the `perform` block " +
+                            "return `cont.abort { val = … }` to end the `perform` block " +
                                 "with that value, or declare the op as returning " +
                                 "${prettyPrintType(resolved)} if it always does",
                         ),
@@ -990,7 +990,7 @@ internal class ImplValidator(
 
                 // Same rule. An abort here is SILENTLY SWALLOWED — measured, a
                 // block that produced 7 still yields 7 despite
-                // `abort { val = 22 }` — which is the quietest possible way for
+                // `cont.abort { val = 22 }` — which is the quietest possible way for
                 // a written intention to do nothing.
                 HandlerTailPositionValidator.validateHook(
                     lambda.body, finalOp.name, "impl '${impl.performerName}'",
@@ -1321,14 +1321,11 @@ internal class ImplValidator(
                     prepareContext = { ctx ->
                         // The payload variable is created HERE rather than inside
                         // the helper, so it survives the solve and a post-solve
-                        // pass can resolve what `abort { val = … }` actually
+                        // pass can resolve what `cont.abort { val = … }` actually
                         // produced. See `drainAbortPayloadVars`.
                         val payloadVar = MezzeType.VarType(TypeVar.fresh())
                         abortPayloadVars[impl.performerName] = payloadVar
-                        EffectHandlerBindings.extendWithCont(
-                            EffectHandlerBindings.extendWithAbortAndResume(ctx, expectedReturnType, payloadVar),
-                            payloadVar,
-                        )
+                        EffectHandlerBindings.extendWithCont(ctx, expectedReturnType, payloadVar)
                     },
                     // Whatever variables SURVIVE the `having` substitution are the
                     // site's — EXCEPT the ones the effect declared as associated

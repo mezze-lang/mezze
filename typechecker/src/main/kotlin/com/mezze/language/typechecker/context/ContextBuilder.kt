@@ -770,9 +770,7 @@ class ContextBuilder {
         return when (expr) {
             is ParsedFunctionCall -> {
                 val callee = expr.function
-                if (callee is ParsedIdentifier
-                    && EffectBindingKind.fromName(callee.localName) == EffectBindingKind.ABORT
-                ) {
+                if (ScopedEffectConstants.contHandle(callee) == ScopedEffectConstants.CONT_ABORT) {
                     val v = extractRecordField(expr.arguments, ScopedEffectConstants.VAL_FIELD)
                     if (v != null) return v
                 }
@@ -864,7 +862,7 @@ class ContextBuilder {
             // type ("perform body must return the same type that handler X
             // produces"), so a fresh variable there does not mean "unknown" — it
             // UNIFIES WITH ANYTHING and the comparison succeeds vacuously.
-            // Measured with `throw = { error } -> abort { val = "ABORTED-STRING" }`
+            // Measured with `throw = { error } -> cont.abort { val = "ABORTED-STRING" }`
             // against a block declared Int: `run : {} -> Int` checked clean, then
             // printed the Str and died at `Cannot multiply String and Long`.
             //
@@ -878,7 +876,7 @@ class ContextBuilder {
             is ParsedFracLit -> MezzeType.FracType
             is ParsedStringLit -> MezzeType.StringType
             is ParsedCharLit -> MezzeType.CharType
-            // STILL A HOLE for a COMPUTED payload (`abort { val = f {} }`): this
+            // STILL A HOLE for a COMPUTED payload (`cont.abort { val = f {} }`): this
             // walker runs at context-build time over PARSED, un-typechecked
             // expressions, so it cannot type a call. A fresh variable keeps the
             // comparison vacuous for those, exactly as above.

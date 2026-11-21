@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test
  * What a handler ABORTS with must be what the `perform` block produces, and a
  * performer's parameters must be supplied where it is installed.
  *
- * `abort { val = v }` abandons the body and makes `v` the value of the whole
+ * `cont.abort { val = v }` abandons the body and makes `v` the value of the whole
  * `perform` block — but the block ALSO finishes normally when nothing throws.
  * One expression, one type, so the two have to agree. The machinery for that
  * already existed: `ContextBuilder.extractSuspensionType` walks a performer's op
@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test
  * variant constructs, record literals and identifiers; everything else became a
  * FRESH VARIABLE — which does not mean "unknown", it means "unifies with
  * anything", so the comparison succeeded vacuously. Measured, with
- * `throw = { error } -> abort { val = "ABORTED-STRING" }` and a block declared
+ * `throw = { error } -> cont.abort { val = "ABORTED-STRING" }` and a block declared
  * `Int`:
  *
  *     pub run : {} -> Int <*>
@@ -59,7 +59,7 @@ class PerformAbortPayloadSpecTest : VariantSpecBase() {
             """
             $exEffect
             impl Ex for AbortStr having 'error = Str where {
-              throw = { error } -> abort { val = "ABORTED-STRING" }
+              throw = { error } -> cont.abort { val = "ABORTED-STRING" }
             }
             ${divide("Int")}
             pub let run: {} -> Int <*> = {} -> perform AbortStr in divide { a = 10, b = 0 }
@@ -78,7 +78,7 @@ class PerformAbortPayloadSpecTest : VariantSpecBase() {
             """
             $exEffect
             impl Ex for AbortZero having 'error = Str where {
-              throw = { error } -> abort { val = 0 }
+              throw = { error } -> cont.abort { val = 0 }
             }
             ${divide("Int")}
             pub let run: {} -> Int <*> = {} -> perform AbortZero in divide { a = 10, b = 0 }
@@ -94,7 +94,7 @@ class PerformAbortPayloadSpecTest : VariantSpecBase() {
             """
             $exEffect
             impl Ex for AbortStr having 'error = Str where {
-              throw = { error } -> abort { val = "recovered" }
+              throw = { error } -> cont.abort { val = "recovered" }
             }
             pub let describe: { b: Int } -> Str <Ex> = { b } ->
               if b == 0 then
@@ -119,7 +119,7 @@ class PerformAbortPayloadSpecTest : VariantSpecBase() {
             use std::result
             $exEffect
             impl Ex for ExToResult having 'error = 'e where {
-              throw = { error } -> abort { val = Err { error } }
+              throw = { error } -> cont.abort { val = Err { error } }
             }
             pub let risky: { b: Int } -> Int <Ex> = { b } ->
               if b == 0 then Ex.throw { error = "div0" } else b
@@ -141,7 +141,7 @@ class PerformAbortPayloadSpecTest : VariantSpecBase() {
             $exEffect
             pub let make_str: {} -> Str = {} -> "computed"
             impl Ex for AbortComputed having 'error = Str where {
-              throw = { error } -> abort { val = make_str {} }
+              throw = { error } -> cont.abort { val = make_str {} }
             }
             ${divide("Int")}
             pub let run: {} -> Int <*> = {} -> perform AbortComputed in divide { a = 10, b = 0 }

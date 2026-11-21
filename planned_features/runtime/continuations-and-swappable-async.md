@@ -18,8 +18,18 @@ Userland never holds a continuation.
 
 ### The whole surface
 
-    cont.park  { on: ParkOn, set: WaitSet } -> ParkOutcome
-    cont.abort { val = v }                  -> 'b            ## DIVERGENT
+    cont.resume { val = v }                  -> 'op           ## tail only; same as falling off the body
+    cont.abort  { val = v }                  -> 'b            ## tail only; DIVERGENT
+    cont.park   { on: ParkOn, set: WaitSet } -> ParkOutcome
+
+**One mechanism, one spelling (2026-11-21).** The bare `resume`/`abort` names that
+predate this design are GONE: not bound in an op body, not reserved, ordinary
+identifiers. `cont` is reserved at binding sites like `scope`, and neither `cont`
+nor its handles may be stored or passed (V0503). `cont.resume`/`cont.abort` lower
+to the same `EffectBindingIR` call the bare names compiled to, so their constant-
+folded fast path is unchanged; only a body that names `cont.park` is cont-capable
+and pays the suspension tax. Until this sweep both spellings coexisted, which the
+rejected-framings table below had already ruled out.
 
 `cont` is a runtime-bound name in a PERFORMER OP BODY, exactly as `scope` is —
 referencing it anywhere else is V0702, which is already `scope`'s behaviour

@@ -16,7 +16,7 @@ effect Comptime where {
 
 # The body is the run-time fallback for sites the reduction pass left alone.
 # A bare value is an implicit resume, measured ~14 ns/op vs ~34 ns for explicit
-# `resume` (which hits a @TruffleBoundary ThreadLocal lookup).
+# `cont.resume` (which hits a @TruffleBoundary ThreadLocal lookup).
 ## Handler for `Comptime`; must be installed at `main` to allow build-time code to run.
 impl Comptime for ComptimeEval where {
   comptime = { eval } -> __native_comptime_eval { eval = eval },

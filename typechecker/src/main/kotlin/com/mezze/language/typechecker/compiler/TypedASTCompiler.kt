@@ -1428,12 +1428,9 @@ class TypedASTCompiler(
                     ?: ReadLocalIR(abilityOpDictSlot(binding), SlotKind.OBJECT, src)
             }
             is BindingRef.Local -> {
-                // Names contributed by the effect-handler runtime inside op
-                // handler bodies (`scope`, `resume`, `abort`). See
-                // EffectBindingIR / EffectBindingNode for the lookup rules.
-                if (EffectBindingKind.fromName(expr.name) != null) {
-                    return EffectBindingIR(expr.name, src)
-                }
+                // Runtime-bound, reserved names in op bodies: `scope` and `cont` (whose
+                // `abort`/`resume` calls lower in compileContHandleCall). See EffectBindingNode.
+                if (isRuntimeBoundName(expr.name)) return EffectBindingIR(expr.name, src)
 
                 // RECURSIVE LET: If this references a recursive let-bound lambda from
                 // an outer scope, recreate the lambda inline. The lambda's captures
@@ -1583,6 +1580,8 @@ class TypedASTCompiler(
         val fn = expr.function
         val calleeMaySuspend = calleeMaySuspend(fn)   // C1: one verdict for every node this call becomes
         val argIR = compileArgWithDictWrapping(expr.arg, src)
+
+        compileContHandleCall(expr, calleeMaySuspend, argIR, src)?.let { return it }   // SuspendSites.kt
 
         // Check for method call: receiver.method { args }
         if (fn is TypedFieldAccess) {
@@ -5052,7 +5051,7 @@ class TypedASTCompiler(
      *  guarantees the single field name matches the callee's single param name,
      *  so positional binding at index 0 is correct. Wider arities defer to the
      *  record path because we can't statically know the callee's param order. */
-    private fun emitCallIndirect(
+    internal fun emitCallIndirect(
         maySuspend: Boolean,
         fnIR: NodeIR,
         argIR: NodeIR,

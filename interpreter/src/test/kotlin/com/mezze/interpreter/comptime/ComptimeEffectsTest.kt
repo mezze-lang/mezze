@@ -52,7 +52,7 @@ class ComptimeEffectsTest {
     fun `a user-defined effect with a user-defined handler folds`() {
         assertEquals(99L, run("""
             effect Config where { port: {} -> Int <Config> }
-            impl Config for FixedConfig where { port = {} -> resume { val = 99 } }
+            impl Config for FixedConfig where { port = {} -> cont.resume { val = 99 } }
             (perform ComptimeEval in Comptime.comptime { eval = {} -> perform FixedConfig in Config.port {} })
         """))
     }
@@ -65,8 +65,8 @@ class ComptimeEffectsTest {
         val src = { performer: String ->
             """
             effect Config where { port: {} -> Int <Config> }
-            impl Config for Dev where { port = {} -> resume { val = 1 } }
-            impl Config for Prod where { port = {} -> resume { val = 2 } }
+            impl Config for Dev where { port = {} -> cont.resume { val = 1 } }
+            impl Config for Prod where { port = {} -> cont.resume { val = 2 } }
             (perform ComptimeEval in Comptime.comptime { eval = {} -> perform $performer in Config.port {} })
             """
         }
@@ -125,7 +125,7 @@ class ComptimeEffectsTest {
             """
             use std::effects::mutation::{ Mut, MutInt, int_to_mut, read_int }
             effect Config where { port: {} -> Int <Config> }
-            impl Config for Dev where { port = {} -> resume { val = 1 } }
+            impl Config for Dev where { port = {} -> cont.resume { val = 1 } }
             (perform ComptimeEval in Comptime.comptime { eval = {} -> perform Dev in do
                 let c = int_to_mut { n = 1 }
                 read_int { n = c } + Config.port {}

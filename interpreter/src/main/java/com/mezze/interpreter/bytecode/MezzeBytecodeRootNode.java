@@ -2082,7 +2082,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
         // hot loops vs manually-inlined equivalents.
 
         /**
-         * {@code resume { val = X }} IS {@code X}. Return the argument; make
+         * {@code cont.resume { val = X }} IS {@code X}. Return the argument; make
          * no call at all.
          *
          * <p>WHY THIS IS A SPECIAL CASE AND NOT A MISSING BYPASS. The
@@ -2104,7 +2104,7 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
          * <pre>
          *   kernel 3  handler is a bare value `1`              840 ps/iter
          *   kernel 8  handler is a DIRECT call returning arg   894      (+54, free)
-         *   kernel 4  handler is `resume { val = 1 }`        4 091    (+3 251)
+         *   kernel 4  handler is `cont.resume { val = 1 }`        4 091    (+3 251)
          * </pre>
          *
          * Kernel 8 is what rules out "calling a function is expensive": a

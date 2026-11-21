@@ -6,15 +6,13 @@ import com.mezze.language.parser.ParseException
 import com.mezze.language.parser.internal.lib.*
 
 internal val RESERVED_WORDS = setOf(
+    // Runtime-bound names inside performer bodies, reserved at BINDING sites so
+    // nothing can shadow them: `scope` (what `initialize_scope` returned) and
+    // `cont` (the continuation handle: `cont.resume`, `cont.abort`, `cont.park`).
+    // `abort` and `resume` are NOT reserved — they are fields of `cont`, and
+    // ordinary identifiers everywhere else.
     "scope",
-    // Runtime-bound names inside op handler bodies: `abort {val = ...}`
-    // ends the perform with a value; `resume {val = ...}` drives the body
-    // forward. Reserved at binding sites to prevent shadowing the runtime
-    // names. The call sites (the actual `abort { ... }` / `resume { ... }`
-    // expressions inside op handler bodies) are NOT blocked — those are
-    // call-position uses, not binding-position uses.
-    "abort",
-    "resume"
+    "cont"
 )
 
 internal fun checkReservedName(name: String): String? {

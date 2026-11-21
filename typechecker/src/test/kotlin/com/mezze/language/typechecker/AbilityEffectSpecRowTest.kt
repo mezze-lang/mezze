@@ -71,7 +71,7 @@ class AbilityEffectSpecRowTest : AbilityEffectSpecBase() {
             impl Ex for Stop where {
               initialize_scope = {} -> {},
               finalize_scope = {} -> {},
-              throw = { e } -> abort { val = "s" },
+              throw = { e } -> cont.abort { val = "s" },
             }
             let use_it: {} -> Str = {} -> perform Stop {} in Ex.throw { e = "x" }
             $MAIN
@@ -89,7 +89,7 @@ class AbilityEffectSpecRowTest : AbilityEffectSpecBase() {
             impl Ex for Stop where {
               initialize_scope = {} -> {},
               finalize_scope = {} -> {},
-              throw = { e } -> abort { val = "s" },
+              throw = { e } -> cont.abort { val = "s" },
             }
             let use_it: {} -> Str <*> = {} -> perform Stop {} in Ex.throw { e = "x" }
             $MAIN
@@ -106,7 +106,7 @@ class AbilityEffectSpecRowTest : AbilityEffectSpecBase() {
             impl Ex for Stop where {
               initialize_scope = {} -> {},
               finalize_scope = {} -> {},
-              throw = { e } -> abort { val = 0 },
+              throw = { e } -> cont.abort { val = 0 },
             }
             let use_it: {} -> Str <*> = {} -> perform Stop {} in Ex.throw { e = "x" }
             $MAIN
@@ -126,7 +126,7 @@ class AbilityEffectSpecRowTest : AbilityEffectSpecBase() {
             impl Ex2 for Stop where {
               initialize_scope = {} -> {},
               finalize_scope = {} -> {},
-              throw = { e } -> resume { val = 1 },
+              throw = { e } -> cont.resume { val = 1 },
             }
             $MAIN
             """,
@@ -142,7 +142,7 @@ class AbilityEffectSpecRowTest : AbilityEffectSpecBase() {
             impl Ex2 for Stop where {
               initialize_scope = {} -> {},
               finalize_scope = {} -> {},
-              throw = { e } -> resume { val = 1 } + 1,
+              throw = { e } -> cont.resume { val = 1 } + 1,
             }
             $MAIN
             """,
@@ -157,7 +157,7 @@ class AbilityEffectSpecRowTest : AbilityEffectSpecBase() {
             """
             effect Ex2 where { throw: { e: Str } -> Int <Ex2>, }
             impl Ex2 for Stop where {
-              initialize_scope = {} -> abort { val = 1 },
+              initialize_scope = {} -> cont.abort { val = 1 },
               finalize_scope = {} -> {},
               throw = { e } -> 1,
             }

@@ -35,7 +35,7 @@ class EffectPicIntegrationTest {
             }
 
             impl Counter for Inc where {
-                tick = { v } -> resume { val = v + 1 }
+                tick = { v } -> cont.resume { val = v + 1 }
             }
 
             let body : { n: Int, acc: Int } -> Int <Counter> = { n, acc } ->
@@ -115,7 +115,7 @@ class EffectPicIntegrationTest {
             }
 
             impl Counter for Inc where {
-                tick = { v } -> resume { val = v + 1 }
+                tick = { v } -> cont.resume { val = v + 1 }
             }
 
             effect Logger where {
@@ -123,7 +123,7 @@ class EffectPicIntegrationTest {
             }
 
             impl Logger for Echo where {
-                log = { v } -> resume { val = v }
+                log = { v } -> cont.resume { val = v }
             }
 
             let body : { n: Int, acc: Int } -> Int <Counter, Logger> = { n, acc } ->
@@ -170,7 +170,7 @@ class EffectPicIntegrationTest {
             }
 
             impl Counter for Bump where {
-                tick = {} -> resume { val = 1 }
+                tick = {} -> cont.resume { val = 1 }
             }
 
             let outer : { n: Int, acc: Int } -> Int <*> = { n, acc } ->

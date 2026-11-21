@@ -51,7 +51,7 @@ impl Unit1 for OnesBare where {
 ## should cost what Ones costs; if it does not, the two forms compile
 ## differently and that is worth knowing.
 impl Unit1 for OnesResume {} where {
-  one = {} -> resume { val = 1 }
+  one = {} -> cont.resume { val = 1 }
 }
 
 ## A handler that ABORTS with its value instead of returning it. The perform's
@@ -62,7 +62,7 @@ effect Stopper where {
 }
 
 impl Stopper for Aborts {} where {
-  stop = {} -> abort { val = 1 }
+  stop = {} -> cont.abort { val = 1 }
 }
 
 ## Three more effects, to put a handler CHAIN between the perform and the one

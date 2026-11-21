@@ -9,7 +9,7 @@ effect NoOp where {
   noop: {} -> {} <NoOp>
 }
 
-# `{}` is an implicit resume with unit: ~2.4x cheaper than `resume { val = {} }` (no @TruffleBoundary).
+# `{}` is an implicit resume with unit: ~2.4x cheaper than `cont.resume { val = {} }` (no @TruffleBoundary).
 ## The only handler `NoOp` needs: it does nothing.
 impl NoOp for NoOpHandler where {
   noop = {} -> {}

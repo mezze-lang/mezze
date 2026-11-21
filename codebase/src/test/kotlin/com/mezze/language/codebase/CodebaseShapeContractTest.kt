@@ -194,8 +194,8 @@ class CodebaseShapeContractTest {
         impl Measure for Point having 'unit = Int where { measure = { it } -> it.x }
 
         effect Beep where { beep: { times: Int } -> Int <Beep> }
-        impl Beep for Quiet where { beep = { times } -> resume { val = times } }
-        impl Beep for Scaled { factor: Int } where { beep = { times } -> resume { val = times * factor } }
+        impl Beep for Quiet where { beep = { times } -> cont.resume { val = times } }
+        impl Beep for Scaled { factor: Int } where { beep = { times } -> cont.resume { val = times * factor } }
 
         let half: { n: Nat } -> Nat = { n } -> n
         let ratio = {} -> 3//4

@@ -112,6 +112,26 @@ class ReservedNameTest {
     // ========================================
 
     @Test
+    fun `cont not allowed in let binding`() {
+        val error = assertFails { parser.parseParsedModule("let cont = 42") }
+        val msg = error.message ?: ""
+        assertTrue(msg.contains("'cont'") && msg.contains("reserved"), "Error should say 'cont' is reserved: $msg")
+    }
+
+    @Test
+    fun `cont not allowed in lambda parameter`() {
+        val error = assertFails { parser.parseParsedModule("let f = { cont } -> cont") }
+        val msg = error.message ?: ""
+        assertTrue(msg.contains("'cont'") && msg.contains("reserved"), "Error should say 'cont' is reserved: $msg")
+    }
+
+    @Test
+    fun `abort and resume are ordinary binding names`() {
+        // The continuation handles are fields of `cont`; the bare words are free.
+        parser.parseParsedModule("let abort = 1\nlet resume = { abort } -> abort")
+    }
+
+    @Test
     fun `scope not allowed in let binding`() {
         val source = """
             let scope = 42

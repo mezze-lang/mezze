@@ -50,7 +50,7 @@ class ConditionEffectSpecTest : VariantSpecBase() {
             """
             use std::effects::condition::{ Condition, signal }
             impl Condition for Invents having 'ctx = Str where {
-              signal = { ctx, fallback } -> resume { val = "made up" }
+              signal = { ctx, fallback } -> cont.resume { val = "made up" }
             }
             $MAIN
             """,
@@ -68,7 +68,7 @@ class ConditionEffectSpecTest : VariantSpecBase() {
             """
             use std::effects::condition::{ Condition, signal }
             impl Condition for Mine having 'ctx = Str where {
-              signal = { ctx, fallback } -> resume { val = fallback }
+              signal = { ctx, fallback } -> cont.resume { val = fallback }
             }
             pub let total: {} -> Int <Condition> = {} -> signal { ctx = "a", fallback = 1 }
             pub let run = {} -> perform Mine in total {}
@@ -181,8 +181,8 @@ class ConditionEffectSpecTest : VariantSpecBase() {
             use std::effects::condition::{ Condition, signal }
             impl Condition for Twice having 'ctx = Str where {
               signal = { ctx, fallback } -> do
-                resume { val = fallback }
-                resume { val = fallback }
+                cont.resume { val = fallback }
+                cont.resume { val = fallback }
             }
             $MAIN
             """,

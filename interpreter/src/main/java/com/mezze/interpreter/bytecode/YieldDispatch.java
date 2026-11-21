@@ -53,7 +53,7 @@ import com.oracle.truffle.api.nodes.IndirectCallNode;
  * <h2>What resume does</h2>
  *
  * <p>{@code resume} here is <b>fall-through only</b>: calling
- * {@code resume {val = X}} returns X, and any code the impl runs AFTER
+ * {@code cont.resume {val = X}} returns X, and any code the impl runs AFTER
  * {@code resume} is discarded. There is no suspended continuation to
  * re-enter — the perform is a straight-line call.
  *
@@ -179,7 +179,7 @@ public final class YieldDispatch {
 
     // ── resume: fall-through semantics ──────────────────────────────────
     //
-    // resume is fall-through: calling resume {val = X} returns X. Anything
+    // resume is fall-through: calling cont.resume {val = X} returns X. Anything
     // the impl does AFTER calling resume is discarded. See class-doc
     // "What resume does" for the caveat.
 

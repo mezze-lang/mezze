@@ -77,7 +77,7 @@ class DeprecationWarningTest {
             effect Beep where { beep: {} -> Int <Beep> }
 
             #{ deprecated: True }
-            impl Beep for Silent where { beep = {} -> resume { val = 0 } }
+            impl Beep for Silent where { beep = {} -> cont.resume { val = 0 } }
 
             let main = {} -> perform Console in do
               let n = perform Silent in Beep.beep {}

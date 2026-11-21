@@ -18,6 +18,7 @@ import com.mezze.language.typedast.TypedPerform
 import com.mezze.language.typedast.TypedVar
 import com.mezze.language.typedast.TypedFieldAccess
 import com.mezze.language.typedast.TypedExpr
+import com.mezze.language.typedast.TypedCall
 import com.mezze.language.ast.ScopedEffectConstants
 import com.mezze.language.ast.MezzeType
 
@@ -104,4 +105,34 @@ internal fun bodyMaySuspend(body: NodeIR, lookup: (Hash) -> FunctionIR?): Boolea
     }
     walk(body, 0)
     return found
+}
+
+/** `"abort"`/`"resume"` when [fn] is `cont.abort`/`cont.resume` — the typed twin of
+ *  `ScopedEffectConstants.contHandle`. `cont` is reserved, so a TypedVar named
+ *  `cont` is always the runtime handle. */
+internal fun contHandleOf(fn: TypedExpr): String? {
+    if (fn !is TypedFieldAccess) return null
+    if ((fn.record as? TypedVar)?.name != ScopedEffectConstants.CONT) return null
+    return when (fn.field) {
+        ScopedEffectConstants.CONT_ABORT, ScopedEffectConstants.CONT_RESUME -> fn.field
+        else -> null
+    }
+}
+
+/** `cont.abort { val }` / `cont.resume { val }`: the handle itself, not a field read
+ *  off the `cont` record — the same EffectBindingIR call the bare names compiled to,
+ *  which the bytecode folds to a constant under a stable handler chain, so a
+ *  `throw`/`return` handler pays nothing for the `cont.` spelling. */
+internal fun TypedASTCompiler.compileContHandleCall(
+    expr: TypedCall, calleeMaySuspend: Boolean, argIR: NodeIR, src: SourceInfo,
+): NodeIR? {
+    val handle = contHandleOf(expr.function) ?: return null
+    return emitCallIndirect(calleeMaySuspend, com.mezze.language.truffleir.EffectBindingIR(handle, src), argIR, expr.isTailCall, src)
+}
+
+/** `scope` and `cont` — the names the runtime binds in a performer op body. NOT
+ *  `abort`/`resume`: those are ordinary identifiers now, reached as `cont.abort`. */
+internal fun isRuntimeBoundName(name: String): Boolean {
+    val kind = com.mezze.language.ast.EffectBindingKind.fromName(name)
+    return kind == com.mezze.language.ast.EffectBindingKind.SCOPE || kind == com.mezze.language.ast.EffectBindingKind.CONT
 }

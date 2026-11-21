@@ -45,7 +45,7 @@ class EffectOpAbilityConstraintTest {
         }
 
         impl Ct for CtEval where {
-          ct = { eval } -> resume { val = eval {} }
+          ct = { eval } -> cont.resume { val = eval {} }
         }
     """.trimIndent()
 

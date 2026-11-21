@@ -1299,7 +1299,7 @@ class TypeChecker(
      * own words.
      */
     /**
-     * A performer's `abort { val = … }` decides what the whole `perform` block
+     * A performer's `cont.abort { val = … }` decides what the whole `perform` block
      * yields, so it must agree with what the site does with that block.
      *
      * `ContextBuilder.extractSuspensionType` already compares them, but it types
@@ -1308,7 +1308,7 @@ class TypeChecker(
      * anything and makes the comparison vacuous. MEASURED before this check:
      *
      *     impl Ex for AbortComputed having 'error = Str where {
-     *       throw = { error } -> abort { val = make_str {} }   # make_str : {} -> Str
+     *       throw = { error } -> cont.abort { val = make_str {} }   # make_str : {} -> Str
      *     }
      *     pub let run: {} -> Int <*> = {} -> perform AbortComputed in divide { a = 10, b = 0 }
      *
@@ -1370,7 +1370,7 @@ class TypeChecker(
                             message = "Performer '$performerName' aborts with " +
                                 "${prettyPrintType(payload)}, but this `perform` block is used " +
                                 "as ${prettyPrintType(expected)}.\n" +
-                                "`abort { val = … }` decides what the whole block yields, so the " +
+                                "`cont.abort { val = … }` decides what the whole block yields, so the " +
                                 "payload and the block's type are the same thing.",
                             loc = loc,
                             code = ErrorCode.T0201_TYPE_MISMATCH,

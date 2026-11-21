@@ -37,7 +37,7 @@ class CustomEffectTest {
 
             # Define handler that converts errors to Result
             impl Error for ErrorToResult having 'e = 'err where {
-                raise = {err} -> abort {val = Err {error = err}}
+                raise = {err} -> cont.abort {val = Err {error = err}}
             }
 
             let safe_div = {a, b} ->
@@ -67,7 +67,7 @@ class CustomEffectTest {
             }
 
             impl Error for ErrorToResult having 'e = 'err where {
-                raise = {err} -> abort {val = Err {error = err}}
+                raise = {err} -> cont.abort {val = Err {error = err}}
             }
 
             let safe_div = {a, b} ->
@@ -98,7 +98,7 @@ class CustomEffectTest {
 
             # Handler that converts errors to Option (None on error)
             impl Error for ErrorToOption having 'e = 'err where {
-                raise = {err} -> abort {val = None}
+                raise = {err} -> cont.abort {val = None}
             }
 
             let safe_div = {a, b} ->
@@ -126,7 +126,7 @@ class CustomEffectTest {
             }
 
             impl Error for ErrorToOption having 'e = 'err where {
-                raise = {err} -> abort {val = None}
+                raise = {err} -> cont.abort {val = None}
             }
 
             let safe_div = {a, b} ->
@@ -158,7 +158,7 @@ class CustomEffectTest {
             }
 
             impl Error for ErrorToResult having 'e = 'err where {
-                raise = {err} -> abort {val = Err {error = err}}
+                raise = {err} -> cont.abort {val = Err {error = err}}
             }
 
             let safe_div = {a, b} ->
@@ -190,7 +190,7 @@ class CustomEffectTest {
             }
 
             impl Error for ErrorToResult having 'e = 'err where {
-                raise = {err} -> abort {val = Err {error = err}}
+                raise = {err} -> cont.abort {val = Err {error = err}}
             }
 
             let safe_div = {a, b} ->
@@ -221,7 +221,7 @@ class CustomEffectTest {
             }
 
             impl Error for ErrorToResult having 'e = 'err where {
-                raise = {err} -> abort {val = Err {error = err}}
+                raise = {err} -> cont.abort {val = Err {error = err}}
             }
 
             let safe_div = {a, b} ->
@@ -258,7 +258,7 @@ class CustomEffectTest {
             }
 
             impl Error for ErrorToResult having 'e = 'err where {
-                raise = {err} -> abort {val = Err {error = err}}
+                raise = {err} -> cont.abort {val = Err {error = err}}
             }
 
             type AppError = {code: Int, message: Str}
@@ -296,7 +296,7 @@ class CustomEffectTest {
 
             # Handler that ignores errors and returns unit
             impl Error for IgnoreError having 'e = 'err where {
-                raise = {err} -> abort {val = {}}
+                raise = {err} -> cont.abort {val = {}}
             }
 
             # Returns unit on both success and error paths
@@ -326,7 +326,7 @@ class CustomEffectTest {
             }
 
             impl Error for ErrorToResult having 'e = 'err where {
-                raise = {err} -> abort {val = Err {error = err}}
+                raise = {err} -> cont.abort {val = Err {error = err}}
             }
 
             # Define a completely different Abort effect
@@ -335,7 +335,7 @@ class CustomEffectTest {
             }
 
             impl Abort for AbortToNone where {
-                abort = {} -> abort {val = None}
+                abort = {} -> cont.abort {val = None}
             }
 
             let safe_div = {a, b} ->
@@ -375,7 +375,7 @@ class CustomEffectTest {
             }
 
             impl EarlyReturn for EarlyReturnHandler having 'r = 'result where {
-                return_early = {val} -> abort {val = val}
+                return_early = {val} -> cont.abort {val = val}
             }
 
             let find_first_even = {xs} -> do
@@ -410,7 +410,7 @@ class CustomEffectTest {
                 initialize_scope = {} -> { logs = [] },
                 finalize_scope = {} -> {},
                 warn = {msg} -> {},  # Just return unit, don't suspend
-                fail = {msg} -> abort {val = Err {error = msg}}
+                fail = {msg} -> cont.abort {val = Err {error = msg}}
             }
 
             let process = {should_fail} ->

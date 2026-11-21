@@ -553,7 +553,7 @@ data class ConstraintResult(
      * perform EXPRESSION produces.
      *
      * The other half of the computed-abort-payload check. A performer's
-     * `abort { val = … }` decides what the whole block yields, and
+     * `cont.abort { val = … }` decides what the whole block yields, and
      * `ContextBuilder.extractSuspensionType` can only type that payload when it
      * is a literal — for a call it falls back to a fresh variable, which unifies
      * with anything and makes the site comparison vacuous. The op-body solve DOES

@@ -477,15 +477,17 @@ fun ErrorCode.explain(): String = when (this) {
         "The handler handles an effect that the body doesn't perform."
 
     ErrorCode.V0503_HANDLER_BINDING_NOT_IN_TAIL_POSITION ->
-        "`resume` and `abort` must be the last thing an effect operation's body does, " +
-        "and cannot be stored or passed as values. They are not one-shot " +
-        "continuations: `resume { val = X }` hands X back as the operation's result " +
-        "and the body carries on from there, while `abort { val = X }` ends the whole " +
-        "`perform` block. So work placed after `resume` runs BEFORE the resumed " +
-        "computation, a second `resume` replaces the first value instead of running " +
-        "the body again, and anything after `abort` is unreachable. Compute what you " +
+        "`cont.resume` and `cont.abort` must be the last thing an effect operation's " +
+        "body does, and neither they nor `cont` itself can be stored or passed as " +
+        "values: the runtime holds the continuation, a handler never does. " +
+        "`cont.resume { val = X }` hands X back as the operation's result (falling off " +
+        "the body with X does the same), while `cont.abort { val = X }` ends the whole " +
+        "`perform` block. So work placed after `cont.resume` runs BEFORE the resumed " +
+        "computation, a second one replaces the first value instead of running the " +
+        "body again, and anything after `cont.abort` is unreachable. Compute what you " +
         "need first and finish with a single call. One per `match` or `if` arm is " +
-        "fine — each arm is its own tail."
+        "fine — each arm is its own tail. `cont.park` is not restricted: it is an " +
+        "ordinary call that returns a `ParkOutcome`."
 
     ErrorCode.V0510_HANDLER_UNNECESSARY ->
         "This handler is unnecessary because the effect is already handled " +

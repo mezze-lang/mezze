@@ -138,7 +138,7 @@ public final class EffectHandlerDriver {
 
     /**
      * Get the (cached) {@code abort} function for op handler bodies.
-     * Calling {@code abort {val = X}} terminates the surrounding perform
+     * Calling {@code cont.abort {val = X}} terminates the surrounding perform
      * with X as its overall result, discarding body. Implemented by
      * throwing {@link AbortPerformException}, which the enclosing BDSL
      * {@code Handle} @Operation catches.

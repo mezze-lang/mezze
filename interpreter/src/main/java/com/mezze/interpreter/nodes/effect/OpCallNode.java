@@ -342,11 +342,11 @@ public final class OpCallNode extends MezzeNode {
      * carries the effect-handle stack while the handler body runs.
      *
      * <ul>
-     *   <li>{@code resume {val = X}} → handle returns X; if the handler's
+     *   <li>{@code cont.resume {val = X}} → handle returns X; if the handler's
      *       body's last expression is the resume call, the op-call returns X
      *       (fall-through). Same as the driver's behavior when the handler
      *       resumes once and returns.</li>
-     *   <li>{@code abort {val = X}} → handle throws {@code AbortPerformException}.
+     *   <li>{@code cont.abort {val = X}} → handle throws {@code AbortPerformException}.
      *       The chain-local perform of which this handler is a part lives on
      *       the parent fiber, not here. We re-throw as
      *       {@link com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.TaskUnhandledOpException}
@@ -460,7 +460,7 @@ public final class OpCallNode extends MezzeNode {
 
     /**
      * Build a {@code resume} function for chain dispatch on a spawned
-     * thread. Calling {@code resume {val = X}} on this thread just returns
+     * thread. Calling {@code cont.resume {val = X}} on this thread just returns
      * X — the op-call's caller (the spawned task body) sees X. There's no
      * continuation to drive forward; the spawned body resumes naturally
      * via the normal Java return.

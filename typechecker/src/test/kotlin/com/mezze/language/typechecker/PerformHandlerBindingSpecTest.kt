@@ -131,7 +131,7 @@ class PerformHandlerBindingSpecTest : VariantSpecBase() {
             }
             type ValidationError = | FieldRequired { field: Str } |
             impl Exception for StringHandler having 'error = Str where {
-              throw = { error } -> abort { val = {} }
+              throw = { error } -> cont.abort { val = {} }
             }
             pub let validate: {} -> {} <Exception> = {} ->
               Exception.throw { error = FieldRequired { field = "x" } }
@@ -159,7 +159,7 @@ class PerformHandlerBindingSpecTest : VariantSpecBase() {
             use std::result
             effect Ex having 'error where { throw: { error: 'error } -> 'a <Ex> }
             impl Ex for ToResult having 'error = 'e where {
-              throw = { error } -> abort { val = Err { error } }
+              throw = { error } -> cont.abort { val = Err { error } }
             }
             pub let as_str: { b: Int } -> Int <Ex> = { b } ->
               if b == 0 then Ex.throw { error = "div0" } else b
@@ -188,7 +188,7 @@ class PerformHandlerBindingSpecTest : VariantSpecBase() {
             effect Ex having 'error where { throw: { error: 'error } -> 'a <Ex> }
             type Code = | Bad, Worse |
             impl Ex for ToResult having 'error = 'e where {
-              throw = { error } -> abort { val = Err { error } }
+              throw = { error } -> cont.abort { val = Err { error } }
             }
             pub let s: { b: Int } -> Int <Ex> = { b } -> Ex.throw { error = "a str" }
             pub let v: { b: Int } -> Int <Ex> = { b } -> Ex.throw { error = Bad }

@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 
 /**
- * `resume { val = X }` must mean exactly `X`, in every shape.
+ * `cont.resume { val = X }` must mean exactly `X`, in every shape.
  *
  * WHY THESE EXIST. `CallIndirectScalar1.doFallThroughResume` returns the
  * argument instead of calling the fall-through resume singleton, whose entire
@@ -40,7 +40,7 @@ class ResumeFallThroughSemanticsTest {
     fun `resume returns an Int payload`() {
         assertEquals(1L, MezzeTestHelper.run("""
             effect Counter where { tick: {} -> Int <Counter> }
-            impl Counter for Bump where { tick = {} -> resume { val = 1 } }
+            impl Counter for Bump where { tick = {} -> cont.resume { val = 1 } }
             perform Bump in Counter.tick {}
         """.trimIndent()))
     }
@@ -49,7 +49,7 @@ class ResumeFallThroughSemanticsTest {
     fun `resume returns a Str payload`() {
         assertEquals("hi", MezzeTestHelper.run("""
             effect Ask where { ask: {} -> Str <Ask> }
-            impl Ask for Fixed where { ask = {} -> resume { val = "hi" } }
+            impl Ask for Fixed where { ask = {} -> cont.resume { val = "hi" } }
             perform Fixed in Ask.ask {}
         """.trimIndent()))
     }
@@ -58,7 +58,7 @@ class ResumeFallThroughSemanticsTest {
     fun `resume carries the op's own argument through`() {
         assertEquals(43L, MezzeTestHelper.run("""
             effect Echo where { echo: { v: Int } -> Int <Echo> }
-            impl Echo for Inc where { echo = { v } -> resume { val = v + 1 } }
+            impl Echo for Inc where { echo = { v } -> cont.resume { val = v + 1 } }
             perform Inc in Echo.echo { v = 42 }
         """.trimIndent()))
     }
@@ -71,7 +71,7 @@ class ResumeFallThroughSemanticsTest {
                 echo = { v } -> do
                   let doubled = v * 2
                   let plus = doubled + v
-                  resume { val = plus }
+                  cont.resume { val = plus }
             }
             perform Trebled in Echo.echo { v = 10 }
         """.trimIndent()))
@@ -86,7 +86,7 @@ class ResumeFallThroughSemanticsTest {
     fun `resume with a record payload does not unwrap a level too far`() {
         assertEquals(42L, MezzeTestHelper.run("""
             effect Wrap where { get: {} -> { val: Int } <Wrap> }
-            impl Wrap for Nested where { get = {} -> resume { val = { val = 42 } } }
+            impl Wrap for Nested where { get = {} -> cont.resume { val = { val = 42 } } }
             let get_it = {} -> do
               let r = perform Nested in Wrap.get {}
               r.val
@@ -98,7 +98,7 @@ class ResumeFallThroughSemanticsTest {
     fun `resume with a two-field record payload`() {
         assertEquals(7L, MezzeTestHelper.run("""
             effect Pair where { pair: {} -> { a: Int, b: Int } <Pair> }
-            impl Pair for Mk where { pair = {} -> resume { val = { a = 3, b = 4 } } }
+            impl Pair for Mk where { pair = {} -> cont.resume { val = { a = 3, b = 4 } } }
             let get_it = {} -> do
               let p = perform Mk in Pair.pair {}
               p.a + p.b
@@ -115,7 +115,7 @@ class ResumeFallThroughSemanticsTest {
      * V0503 REFUSES this shape, and that is the decision rather than a gap.
      *
      * These two cases asserted that `resume`'s result could be used FURTHER in
-     * the handler (`let r = resume { val = 1 }` then `r + 5`). That reads as
+     * the handler (`let r = cont.resume { val = 1 }` then `r + 5`). That reads as
      * ordinary control flow and is not: resume does not transfer control, so the
      * work after it runs BEFORE the resumed computation. The rule is that
      * `resume` is the last thing an operation does — decided on the
@@ -126,11 +126,11 @@ class ResumeFallThroughSemanticsTest {
      * Converted rather than deleted when `integration/all-three` merged the two
      * branches: the shape this file was written to observe is illegal, so what it
      * now guards is that the REFUSAL holds. The identity it was really about —
-     * `resume { val = X }` means exactly `X` — is still covered by every other
+     * `cont.resume { val = X }` means exactly `X` — is still covered by every other
      * case here, in the legal tail spelling.
      *
      * The perf change this file guards is unaffected: it is about what
-     * `resume { val = X }` COSTS, not where it may appear.
+     * `cont.resume { val = X }` COSTS, not where it may appear.
      */
     @Test
     fun `resume's result may NOT be used further in the handler`() {
@@ -139,7 +139,7 @@ class ResumeFallThroughSemanticsTest {
                 effect Counter where { tick: {} -> Int <Counter> }
                 impl Counter for Bump where {
                     tick = {} -> do
-                      let r = resume { val = 1 }
+                      let r = cont.resume { val = 1 }
                       r + 5
                 }
                 perform Bump in Counter.tick {}
@@ -161,8 +161,8 @@ class ResumeFallThroughSemanticsTest {
                 second: {} -> Int <Two>
             }
             impl Two for Both where {
-                first = {} -> resume { val = 5 },
-                second = {} -> resume { val = 7 }
+                first = {} -> cont.resume { val = 5 },
+                second = {} -> cont.resume { val = 7 }
             }
             perform Both in Two.first {} + Two.second {}
         """.trimIndent()))
@@ -172,7 +172,7 @@ class ResumeFallThroughSemanticsTest {
     fun `resume inside a loop keeps returning the right value`() {
         assertEquals(500500L, MezzeTestHelper.run("""
             effect Unit1 where { one: {} -> Int <Unit1> }
-            impl Unit1 for Ones where { one = {} -> resume { val = 1 } }
+            impl Unit1 for Ones where { one = {} -> cont.resume { val = 1 } }
             let go = { i, acc } ->
               if i <= 0 then acc
               else go { i = i - Unit1.one {}, acc = acc + i }
@@ -199,7 +199,7 @@ class ResumeFallThroughSemanticsTest {
     fun `WARM - resume with a record payload does not unwrap a level too far`() {
         assertEquals(42000L, MezzeTestHelper.run("""
             effect Wrap where { get: {} -> { val: Int } <Wrap> }
-            impl Wrap for Nested where { get = {} -> resume { val = { val = 42 } } }
+            impl Wrap for Nested where { get = {} -> cont.resume { val = { val = 42 } } }
             let go = { i, acc } ->
               if i <= 0 then acc
               else do
@@ -213,7 +213,7 @@ class ResumeFallThroughSemanticsTest {
     fun `WARM - resume with a two-field record payload`() {
         assertEquals(7000L, MezzeTestHelper.run("""
             effect Pair where { pair: {} -> { a: Int, b: Int } <Pair> }
-            impl Pair for Mk where { pair = {} -> resume { val = { a = 3, b = 4 } } }
+            impl Pair for Mk where { pair = {} -> cont.resume { val = { a = 3, b = 4 } } }
             let go = { i, acc } ->
               if i <= 0 then acc
               else do
@@ -227,7 +227,7 @@ class ResumeFallThroughSemanticsTest {
     fun `WARM - resume carries the op's own argument through`() {
         assertEquals(501500L, MezzeTestHelper.run("""
             effect Echo where { echo: { v: Int } -> Int <Echo> }
-            impl Echo for Inc where { echo = { v } -> resume { val = v + 1 } }
+            impl Echo for Inc where { echo = { v } -> cont.resume { val = v + 1 } }
             let go = { i, acc } ->
               if i <= 0 then acc
               else go { i = i - 1, acc = acc + Echo.echo { v = i } }
@@ -240,7 +240,7 @@ class ResumeFallThroughSemanticsTest {
         assertEquals(2000L, MezzeTestHelper.run("""
             use std::str
             effect Ask where { ask: {} -> Str <Ask> }
-            impl Ask for Fixed where { ask = {} -> resume { val = "hi" } }
+            impl Ask for Fixed where { ask = {} -> cont.resume { val = "hi" } }
             let go = { i, acc } ->
               if i <= 0 then acc
               else go { i = i - 1, acc = acc + str::size { s = Ask.ask {} } }
@@ -258,7 +258,7 @@ class ResumeFallThroughSemanticsTest {
     fun `abort is unaffected by the resume fast path`() {
         assertEquals(99L, MezzeTestHelper.run("""
             effect Stop where { stop: {} -> Int <Stop> }
-            impl Stop for Halt where { stop = {} -> abort { val = 99 } }
+            impl Stop for Halt where { stop = {} -> cont.abort { val = 99 } }
             perform Halt in Stop.stop {}
         """.trimIndent()))
     }

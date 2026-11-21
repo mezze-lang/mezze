@@ -154,7 +154,7 @@ class EffectHandlerChurnCorrectnessTest {
         assertEquals(99L, MezzeTestHelper.run("""
             effect Pick where { pick: {} -> Int <Pick> }
             impl Pick for Ten where { pick = {} -> 10 }
-            impl Pick for Resumer where { pick = {} -> resume { val = 99 } }
+            impl Pick for Resumer where { pick = {} -> cont.resume { val = 99 } }
             let ten = {} -> perform Ten in Pick.pick {}
             let churn = { i, acc } ->
               if i <= 0 then acc

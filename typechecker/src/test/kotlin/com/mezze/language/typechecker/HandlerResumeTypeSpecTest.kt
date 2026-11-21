@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test
  * | body                          | `f` continues? | block yields |
  * |-------------------------------|----------------|--------------|
  * | `op = {..} -> 7`              | yes, with 7    | `f`'s result |
- * | `op = {..} -> abort {val = 7}`| no             | 7            |
+ * | `op = {..} -> cont.abort {val = 7}`| no             | 7            |
  *
  * So a bare value RESUMES: it is handed back at the throw site and becomes the
  * value of the `Effect.op {}` expression inside the performing function. That
@@ -113,7 +113,7 @@ class HandlerResumeTypeSpecTest : VariantSpecBase() {
             use std::result
             $exEffect
             impl Ex for ExToResult having 'error = 'e where {
-              throw = { error } -> abort { val = Err { error } }
+              throw = { error } -> cont.abort { val = Err { error } }
             }
             $MAIN
             """,
@@ -212,7 +212,7 @@ class HandlerResumeTypeSpecTest : VariantSpecBase() {
             """
             $exEffect
             impl Ex for ExAbort having 'error = Str where {
-              throw = { error } -> abort { val = 0 }
+              throw = { error } -> cont.abort { val = 0 }
             }
             pub let divide: { a: Int, b: Int } -> Int <Ex> = { a, b } ->
               if b == 0 then
@@ -223,7 +223,7 @@ class HandlerResumeTypeSpecTest : VariantSpecBase() {
             $MAIN
             """,
             "Refusing the lie is only half a rule: the author needs a spelling that " +
-                "WORKS. `abort { val = 0 }` is it — the block yields 0 and `divide` " +
+                "WORKS. `cont.abort { val = 0 }` is it — the block yields 0 and `divide` " +
                 "never returns a non-Int. Both laundering bugs this suite has found " +
                 "had no correct spelling at all, which is what made them severe.",
         )

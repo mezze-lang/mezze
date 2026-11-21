@@ -338,7 +338,7 @@ class SoundnessSweepTest {
         """
         effect Oracle where { ask: {} -> Int <Oracle> }
         impl Oracle for MyOracle where {
-          ask : {} -> Int = {} -> resume {val = 42}
+          ask : {} -> Int = {} -> cont.resume {val = 42}
         }
         let main = {} -> perform MyOracle in do
             let n = Oracle.ask {}
@@ -354,7 +354,7 @@ class SoundnessSweepTest {
         effect Oracle where { ask: {} -> Int <Oracle> }
         effect Beta where { poke: {} -> Int <Beta> }
         impl Beta for MyBeta where {
-          poke : {} -> Int = {} -> resume {val = 7}
+          poke : {} -> Int = {} -> cont.resume {val = 7}
         }
         let main = {} -> perform MyBeta in do
             let n = Oracle.ask {}

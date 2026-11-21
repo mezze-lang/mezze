@@ -44,7 +44,7 @@ class EffectHandlerBindingsTest {
             }
 
             impl Exception for ToResult where {
-              raise : {err: Str} -> 'a = {err} -> abort {val = err}
+              raise : {err: Str} -> 'a = {err} -> cont.abort {val = err}
             }
         """.trimIndent()
 
@@ -62,7 +62,7 @@ class EffectHandlerBindingsTest {
             }
 
             impl Counter for Echo where {
-              next : {} -> Int = {} -> resume {val = 42}
+              next : {} -> Int = {} -> cont.resume {val = 42}
             }
         """.trimIndent()
 
@@ -77,7 +77,7 @@ class EffectHandlerBindingsTest {
         // `abort` must not be available at top level — it's only contributed
         // inside op handler bodies of an `impl X for Y where`.
         val source = """
-            let main = {} -> abort {val = 1}
+            let main = {} -> cont.abort {val = 1}
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(source, "test.mz")
@@ -87,29 +87,23 @@ class EffectHandlerBindingsTest {
     }
 
     @Test
-    fun `let binding named abort is rejected as reserved`() {
-        // Reserving abort/resume at binding sites prevents users from
-        // accidentally shadowing the runtime-bound names. The parser
-        // rejects them in pattern position; the typechecker rejects them
-        // at semantic level. Either layer is acceptable.
+    fun `abort and resume are ordinary names`() {
+        // The handles live on `cont` (`cont.abort`, `cont.resume`), so the bare
+        // words are not reserved: a user may bind them like any identifier.
         val source = """
             let abort = 42
-            abort
+            let resume = { x: Int } -> x + abort
+            pub let main = {} -> resume { x = 1 }
         """.trimIndent()
-
-        val err = assertThrows<Throwable> {
-            val parsedModule = parser.parseParsedModule(source, "test.mz")
-            typeChecker.typeCheck(parsedModule, Paths.get("."))
-        }
-        assertTrue(err.message!!.contains("reserved"),
-            "expected 'reserved' in error, got: ${err.message}")
+        val parsedModule = parser.parseParsedModule(source, "test.mz")
+        typeChecker.typeCheck(parsedModule, Paths.get("."))
     }
 
     @Test
-    fun `let binding named resume is rejected as reserved`() {
+    fun `let binding named cont is rejected as reserved`() {
         val source = """
-            let resume = 1
-            resume
+            let cont = 1
+            cont
         """.trimIndent()
 
         val err = assertThrows<Throwable> {
@@ -124,7 +118,7 @@ class EffectHandlerBindingsTest {
     fun `let binding named scope is rejected as reserved`() {
         // `scope` is the runtime-bound name produced by `initialize_scope`
         // inside op handler bodies. Reserved at parser level alongside
-        // abort/resume.
+        // `cont`.
         val source = """
             let scope = 1
             scope
@@ -139,14 +133,14 @@ class EffectHandlerBindingsTest {
     }
 
     @Test
-    fun `performer named abort is rejected as reserved`() {
+    fun `performer named cont is rejected as reserved`() {
         val source = """
             effect Foo where {
               do_it: {} -> {} <Foo>
             }
 
-            impl Foo for abort where {
-              do_it = {} -> resume {val = {}}
+            impl Foo for cont where {
+              do_it = {} -> cont.resume {val = {}}
             }
         """.trimIndent()
 

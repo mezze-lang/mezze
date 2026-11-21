@@ -188,7 +188,7 @@ public final class MezzeSuspend implements TruffleObject {
      * <p>Body may:
      * <ul>
      *   <li>Complete normally → return ground value.</li>
-     *   <li>Fire {@code abort {val = X}} in a matched op impl →
+     *   <li>Fire {@code cont.abort {val = X}} in a matched op impl →
      *       {@link com.mezze.interpreter.nodes.builtin.EffectHandlerDriver.AbortPerformException}
      *       caught here, return the abort value.</li>
      *   <li>Perform an op with no matching handler → nested MezzeSuspend
