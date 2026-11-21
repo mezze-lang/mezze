@@ -72,6 +72,10 @@ public final class BrowserOverrides {
         // --- WebSocket ops on in-memory ends (`socket_pair`); `__native_ws_connect`
         //     is the one that needs a network and stays denied ------------------
         "__native_ws_send", "__native_ws_receive", "__native_ws_close",
+
+        // --- std::effects::net ops on in-memory handles (`mock_network`); the real
+        //     sockets (`__native_tcp_*`, `__native_udp_*`) need a network and stay denied
+        "__native_net_",
     };
 
     /**
@@ -92,6 +96,8 @@ public final class BrowserOverrides {
         {"__native_http_server_", "HelidonHttpServer"},
         {"__native_http_stream_", "SimpleHttpDownload (streamed download)"},
         {"__native_ws_connect",   "HelidonSocketClient (a real WebSocket connection)"},
+        {"__native_tcp_",         "NativeTcp / NativeTcpServer (a real TCP socket)"},
+        {"__native_udp_",         "NativeUdp (a real UDP socket)"},
         {"__native_time_",        "SystemTime.sleep"},
         {"__native_async_",       "LoomAsync"},
         {"__native_loom_",        "LoomAsync"},

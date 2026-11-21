@@ -5,6 +5,9 @@ import com.mezze.datastructures.seq.MezzeSeq;
 import com.mezze.interpreter.values.*;
 import com.oracle.truffle.api.CompilerDirectives.TruffleBoundary;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
@@ -443,15 +446,23 @@ public final class BytesNatives {
     // ==================== Conversion ====================
 
     /**
-     * Convert bytes to UTF-8 string.
-     * Returns: Result String String (Ok {val = string} or Err {error = "Invalid UTF-8"})
+     * Convert bytes to a UTF-8 string.
+     * Returns: Result String String (Ok {val = string} or Err {error = "Invalid UTF-8"}).
+     *
+     * <p>Strict on purpose: {@code new String(bytes, UTF_8)} never fails, it
+     * substitutes U+FFFD, so the `Err` this signature promises was unreachable
+     * and a caller testing for it (`net::lines`) could not tell bad bytes from text.
      */
     @TruffleBoundary
     public static MezzeVariant bytesToString(MezzeBytes bytes) {
         try {
-            String s = new String(bytes.getData(), StandardCharsets.UTF_8);
+            String s = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(bytes.getData()))
+                .toString();
             return MezzeVariant.ok(s);
-        } catch (Exception e) {
+        } catch (CharacterCodingException e) {
             return MezzeVariant.err("Invalid UTF-8");
         }
     }

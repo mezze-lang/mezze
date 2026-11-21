@@ -3453,6 +3453,27 @@ public final class NativeDispatch extends MezzeNode {
         HANDLERS.put("__native_ws_close",     (r, c) -> com.mezze.interpreter.nodes.builtin.io.SocketNatives.close(r));
         HANDLERS.put("__native_mock_ws_pair", (r, c) -> com.mezze.interpreter.nodes.builtin.io.SocketNatives.pair(r));
 
+        // std::effects::net — raw TCP/UDP. The `__native_net_*` ops dispatch on the handle
+        // (real socket or in-memory), so the mock performers work wherever these do.
+        HANDLERS.put("__native_tcp_connect",            (r, c) -> com.mezze.interpreter.nodes.builtin.io.NetNatives.tcpConnect(r));
+        HANDLERS.put("__native_tcp_bind",               (r, c) -> com.mezze.interpreter.nodes.builtin.io.NetNatives.tcpBind(r));
+        HANDLERS.put("__native_udp_bind",               (r, c) -> com.mezze.interpreter.nodes.builtin.io.NetNatives.udpBind(r));
+        HANDLERS.put("__native_net_conn_receive",       (r, c) -> com.mezze.interpreter.nodes.builtin.io.NetNatives.connReceive(r));
+        HANDLERS.put("__native_net_conn_send",          (r, c) -> com.mezze.interpreter.nodes.builtin.io.NetNatives.connSend(r));
+        HANDLERS.put("__native_net_conn_shutdown_write",(r, c) -> com.mezze.interpreter.nodes.builtin.io.NetNatives.connShutdownWrite(r));
+        HANDLERS.put("__native_net_conn_close",         (r, c) -> com.mezze.interpreter.nodes.builtin.io.NetNatives.connClose(r));
+        HANDLERS.put("__native_net_listener_accept",    (r, c) -> com.mezze.interpreter.nodes.builtin.io.NetNatives.listenerAccept(r));
+        HANDLERS.put("__native_net_listener_close",     (r, c) -> com.mezze.interpreter.nodes.builtin.io.NetNatives.listenerClose(r));
+        HANDLERS.put("__native_net_listener_port",      (r, c) -> com.mezze.interpreter.nodes.builtin.io.NetNatives.listenerPort(r));
+        HANDLERS.put("__native_net_udp_send_to",        (r, c) -> com.mezze.interpreter.nodes.builtin.io.NetNatives.udpSendTo(r));
+        HANDLERS.put("__native_net_udp_recv_from",      (r, c) -> com.mezze.interpreter.nodes.builtin.io.NetNatives.udpRecvFrom(r));
+        HANDLERS.put("__native_net_udp_close",          (r, c) -> com.mezze.interpreter.nodes.builtin.io.NetNatives.udpClose(r));
+        HANDLERS.put("__native_net_udp_port",           (r, c) -> com.mezze.interpreter.nodes.builtin.io.NetNatives.udpPort(r));
+        HANDLERS.put("__native_mock_net_new",           (r, c) -> com.mezze.interpreter.nodes.builtin.io.MockNetNatives.newNetwork(r));
+        HANDLERS.put("__native_mock_net_connect",       (r, c) -> com.mezze.interpreter.nodes.builtin.io.MockNetNatives.connect(r));
+        HANDLERS.put("__native_mock_net_bind",          (r, c) -> com.mezze.interpreter.nodes.builtin.io.MockNetNatives.bind(r));
+        HANDLERS.put("__native_mock_net_udp_bind",      (r, c) -> com.mezze.interpreter.nodes.builtin.io.MockNetNatives.udpBind(r));
+
         // === Database ===
         HANDLERS.put("__native_db_sqlite_scope_open", (r, c) -> DbNatives.dbSqliteScopeOpen(r));
         HANDLERS.put("__native_db_scope_close", (r, c) -> DbNatives.dbScopeClose(r));

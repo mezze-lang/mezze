@@ -94,7 +94,7 @@ pub let fold
   -> 'a <...>
   = { b, init, f } -> __native_bytes_fold { b = b, init = init, f = f }
 
-## Decodes as a UTF-8 string, returning a Result.
+## Decodes as UTF-8: `Err` when the bytes are not valid UTF-8 (nothing is substituted).
 pub let to_str: { b: Bytes } -> Result Str Str = { b } -> __native_bytes_to_str { b = b }
 
 ## Converts to a seq of integers (0-255).
