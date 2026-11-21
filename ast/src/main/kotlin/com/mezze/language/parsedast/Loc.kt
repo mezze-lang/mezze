@@ -34,7 +34,8 @@ data class Loc(
 }
 
 /**
- * [Loc] as its five fields, always. Inside [com.mezze.language.ast.TypeSharing]
+ * [Loc] as its five fields — or, inside [com.mezze.language.ast.Positions], as
+ * nothing at all, the fields going beside the value. Inside [com.mezze.language.ast.TypeSharing]
  * a location in the same file as the one before it writes its file as "" — and
  * a file that really is "" as [EMPTY_FILE] — so a module's thousands of
  * locations carry its path once.
@@ -51,6 +52,14 @@ object LocSerializer : KSerializer<Loc> {
     }
 
     override fun serialize(encoder: Encoder, value: Loc) {
+        val aside = com.mezze.language.ast.Positions.writing.get()
+        if (aside != null) {
+            aside.file(value.file)
+            aside.int(value.startLine); aside.int(value.startCol)
+            aside.int(value.endLine); aside.int(value.endCol)
+            encoder.encodeStructure(descriptor) {}
+            return
+        }
         val last = com.mezze.language.ast.TypeSharing.lastFile.get()
         val file = when {
             last == null -> value.file
@@ -67,6 +76,14 @@ object LocSerializer : KSerializer<Loc> {
     }
 
     override fun deserialize(decoder: Decoder): Loc {
+        val aside = com.mezze.language.ast.Positions.reading.get()
+        if (aside != null) {
+            decoder.decodeStructure(descriptor) {
+                val i = decodeElementIndex(descriptor)
+                check(i == CompositeDecoder.DECODE_DONE) { "a location written aside carries element $i inline" }
+            }
+            return Loc(aside.file(), aside.int(), aside.int(), aside.int(), aside.int())
+        }
         var file = ""
         var startLine = 0; var startCol = 0; var endLine = 0; var endCol = 0
         decoder.decodeStructure(descriptor) {

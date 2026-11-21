@@ -11,6 +11,7 @@ import java.nio.file.Paths
  * build does: the same `StorePopulator.populate` call, with the source passed so
  * declarations and signatures are written. [filePath] is recorded as the
  * module's file; point it at a real file to make source slices readable.
+ * [parsedAs] is the file every location in the module names.
  *
  * For tests that must hold against what the compiler really writes, not against
  * rows a test assembled by hand.
@@ -21,9 +22,9 @@ fun indexSource(
     module: String = "app",
     filePath: String = "$module.mz",
     root: java.nio.file.Path = Paths.get("."),
+    parsedAs: String = java.io.File(filePath).name,
 ) {
-    val file = java.io.File(filePath).name
-    val parsed = MezzeParser().parseParsedModule(source, file)
+    val parsed = MezzeParser().parseParsedModule(source, parsedAs)
     val raw = TypeChecker().checkParsedModule(parsed, root, enablePrelude = true)
     val ok = raw as? TypeChecker.TypeCheckResult.Success
         ?: error("test source did not type-check: $raw")

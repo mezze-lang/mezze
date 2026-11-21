@@ -148,7 +148,10 @@ class SQLiteMezzeStore private constructor(
         //    the macro's identity, so an unchanged call never runs it again.
         // 21: checked_modules — a module as last checked (interface + body), so
         //    an unchanged module is read back instead of checked again.
-        const val SCHEMA_VERSION = 21
+        // 22: a blob is its declaration and THEN where it was written
+        //    (`StoreSerialization.contentOf`) — files and line numbers no
+        //    longer run through the bytes stored under a content hash.
+        const val SCHEMA_VERSION = 22
 
         /** Metadata values at least this long are stored deflated. */
         private const val LARGE_METADATA = 4096

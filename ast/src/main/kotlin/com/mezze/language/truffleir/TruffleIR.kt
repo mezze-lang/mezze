@@ -1,7 +1,18 @@
 package com.mezze.language.truffleir
 
 import com.mezze.language.typedast.Hash
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.descriptors.buildClassSerialDescriptor
+import kotlinx.serialization.descriptors.element
+import kotlinx.serialization.encoding.CompositeDecoder
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.encoding.decodeStructure
+import kotlinx.serialization.encoding.encodeStructure
 
 /**
  * TruffleIR — minimal serializable representation for execution.
@@ -118,7 +129,7 @@ enum class NativeOp {
     FLAT_MAP, COUNT_ALL, SIZE,
 }
 
-@Serializable
+@Serializable(with = SourceInfoSerializer::class)
 data class SourceInfo(
     val fileIndex: Int,
     val startLine: Int,
@@ -126,6 +137,83 @@ data class SourceInfo(
     val endLine: Int,
     val endCol: Int
 )
+
+/**
+ * [SourceInfo] as its five fields — or, inside [com.mezze.language.ast.Positions],
+ * as nothing, the fields going beside the function: where a node sits in its
+ * file is no part of what the function is.
+ */
+object SourceInfoSerializer : KSerializer<SourceInfo> {
+    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("com.mezze.language.truffleir.SourceInfo") {
+        element<Int>("fileIndex")
+        element<Int>("startLine")
+        element<Int>("startCol")
+        element<Int>("endLine")
+        element<Int>("endCol")
+    }
+
+    override fun serialize(encoder: Encoder, value: SourceInfo) {
+        val aside = com.mezze.language.ast.Positions.writing.get()
+        if (aside != null) {
+            aside.int(value.fileIndex)
+            aside.int(value.startLine); aside.int(value.startCol)
+            aside.int(value.endLine); aside.int(value.endCol)
+            encoder.encodeStructure(descriptor) {}
+            return
+        }
+        encoder.encodeStructure(descriptor) {
+            encodeIntElement(descriptor, 0, value.fileIndex)
+            encodeIntElement(descriptor, 1, value.startLine)
+            encodeIntElement(descriptor, 2, value.startCol)
+            encodeIntElement(descriptor, 3, value.endLine)
+            encodeIntElement(descriptor, 4, value.endCol)
+        }
+    }
+
+    override fun deserialize(decoder: Decoder): SourceInfo {
+        val aside = com.mezze.language.ast.Positions.reading.get()
+        if (aside != null) {
+            decoder.decodeStructure(descriptor) {
+                val i = decodeElementIndex(descriptor)
+                check(i == CompositeDecoder.DECODE_DONE) { "a source position written aside carries element $i inline" }
+            }
+            return SourceInfo(aside.int(), aside.int(), aside.int(), aside.int(), aside.int())
+        }
+        var fileIndex = 0
+        var startLine = 0; var startCol = 0; var endLine = 0; var endCol = 0
+        decoder.decodeStructure(descriptor) {
+            while (true) {
+                when (val i = decodeElementIndex(descriptor)) {
+                    0 -> fileIndex = decodeIntElement(descriptor, 0)
+                    1 -> startLine = decodeIntElement(descriptor, 1)
+                    2 -> startCol = decodeIntElement(descriptor, 2)
+                    3 -> endLine = decodeIntElement(descriptor, 3)
+                    4 -> endCol = decodeIntElement(descriptor, 4)
+                    CompositeDecoder.DECODE_DONE -> break
+                    else -> error("unexpected SourceInfo element $i")
+                }
+            }
+        }
+        return SourceInfo(fileIndex, startLine, startCol, endLine, endCol)
+    }
+}
+
+/** A function's source file — beside the function inside [com.mezze.language.ast.Positions], like its positions. */
+object SourceFileSerializer : KSerializer<String> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("com.mezze.language.truffleir.SourceFile", PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: String) {
+        val aside = com.mezze.language.ast.Positions.writing.get()
+        if (aside != null) { aside.file(value); encoder.encodeString("") }
+        else encoder.encodeString(value)
+    }
+
+    override fun deserialize(decoder: Decoder): String {
+        val written = decoder.decodeString()
+        val aside = com.mezze.language.ast.Positions.reading.get() ?: return written
+        return aside.file()
+    }
+}
 
 @Serializable
 data class FileTable(
@@ -175,6 +263,7 @@ data class FunctionIR(
     val captureSlots: List<SlotKind>,
     val captureNames: List<String>,
     val body: NodeIR,
+    @Serializable(with = SourceFileSerializer::class)
     val sourceFile: String,
     val sourceSection: SourceInfo,
     /** Optional return type descriptor, populated when type info is available from Resolver */

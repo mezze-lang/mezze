@@ -25,12 +25,64 @@ object StoreSerialization {
      * that leaves the bytes identical. Distinct from `SQLiteMezzeStore.SCHEMA_VERSION`
      * (on-disk table layout) and `BuildInfo.VERSION` (toolchain release identity).
      */
-    const val IR_VERSION: Int = 1
+    const val IR_VERSION: Int = 2
 
     private val cbor = Cbor {
         ignoreUnknownKeys = true
         encodeDefaults = false
     }
+
+    // ------------------------------------------------------------------
+    // Stored declarations: what one IS, then where it was written.
+    //
+    // A blob is addressed by the hash of what its declaration means. Its file
+    // and line numbers are not part of that, so they are written after the
+    // declaration rather than through it ([Positions]): [contentOf] is the same
+    // bytes for the same declaration in any checkout, at any line.
+    // ------------------------------------------------------------------
+
+    private const val BLOB_MAGIC_0: Byte = 0x4D // 'M'
+    private const val BLOB_MAGIC_1: Byte = 0x5A // 'Z'
+    private const val BLOB_FORMAT: Byte = 1
+    private const val BLOB_HEADER = 7           // magic, format, content length
+
+    private fun <T> writeBlob(serializer: kotlinx.serialization.SerializationStrategy<T>, value: T): ByteArray {
+        val (content, positions) = Positions.write { cbor.encodeToByteArray(serializer, value) }
+        val out = ByteArray(BLOB_HEADER + content.size + positions.size)
+        out[0] = BLOB_MAGIC_0; out[1] = BLOB_MAGIC_1; out[2] = BLOB_FORMAT
+        val n = content.size
+        out[3] = (n ushr 24).toByte(); out[4] = (n ushr 16).toByte(); out[5] = (n ushr 8).toByte(); out[6] = n.toByte()
+        System.arraycopy(content, 0, out, BLOB_HEADER, n)
+        System.arraycopy(positions, 0, out, BLOB_HEADER + n, positions.size)
+        return out
+    }
+
+    /** Where a blob's content ends, having checked it is a blob this build can read. */
+    private fun contentEnd(blob: ByteArray): Int {
+        require(blob.size >= BLOB_HEADER && blob[0] == BLOB_MAGIC_0 && blob[1] == BLOB_MAGIC_1) {
+            "not a stored Mezze declaration (${blob.size} bytes) — written by another mez, or not through StoreSerialization"
+        }
+        require(blob[2] == BLOB_FORMAT) {
+            "a stored declaration in format ${blob[2]}, and this mez reads format $BLOB_FORMAT — rebuild the store"
+        }
+        val n = ((blob[3].toInt() and 0xff) shl 24) or ((blob[4].toInt() and 0xff) shl 16) or
+            ((blob[5].toInt() and 0xff) shl 8) or (blob[6].toInt() and 0xff)
+        require(n >= 0 && BLOB_HEADER + n <= blob.size) { "a stored declaration's content runs past its ${blob.size} bytes" }
+        return BLOB_HEADER + n
+    }
+
+    private fun <T> readBlob(deserializer: kotlinx.serialization.DeserializationStrategy<T>, blob: ByteArray): T {
+        val end = contentEnd(blob)
+        return Positions.read(blob.copyOfRange(end, blob.size)) {
+            cbor.decodeFromByteArray(deserializer, blob.copyOfRange(BLOB_HEADER, end))
+        }
+    }
+
+    /**
+     * What a stored declaration IS, without where it was written: equal for the
+     * same declaration whatever file it came from and whatever line it is on.
+     */
+    fun contentOf(blob: ByteArray): ByteArray = blob.copyOfRange(BLOB_HEADER, contentEnd(blob))
 
     fun serializeType(type: MezzeType): ByteArray {
         return cbor.encodeToByteArray(MezzeType.serializer(), type)
@@ -63,13 +115,11 @@ object StoreSerialization {
         return cbor.decodeFromByteArray(bytes)
     }
 
-    fun serializeFunctionIR(fn: com.mezze.language.truffleir.FunctionIR): ByteArray {
-        return cbor.encodeToByteArray(fn)
-    }
+    fun serializeFunctionIR(fn: com.mezze.language.truffleir.FunctionIR): ByteArray =
+        writeBlob(com.mezze.language.truffleir.FunctionIR.serializer(), fn)
 
-    fun deserializeFunctionIR(bytes: ByteArray): com.mezze.language.truffleir.FunctionIR {
-        return cbor.decodeFromByteArray(bytes)
-    }
+    fun deserializeFunctionIR(bytes: ByteArray): com.mezze.language.truffleir.FunctionIR =
+        readBlob(com.mezze.language.truffleir.FunctionIR.serializer(), bytes)
 
     fun serializeFunctionIRList(fns: List<com.mezze.language.truffleir.FunctionIR>): ByteArray {
         return cbor.encodeToByteArray(fns)
@@ -150,51 +200,39 @@ object StoreSerialization {
         val resultPrintType: com.mezze.language.truffleir.PrintType? = null,
     )
 
-    fun serializeTypedLetDecl(decl: com.mezze.language.typedast.TypedLetDecl): ByteArray {
-        return cbor.encodeToByteArray(decl)
-    }
+    fun serializeTypedLetDecl(decl: com.mezze.language.typedast.TypedLetDecl): ByteArray =
+        writeBlob(com.mezze.language.typedast.TypedLetDecl.serializer(), decl)
 
-    fun deserializeTypedLetDecl(bytes: ByteArray): com.mezze.language.typedast.TypedLetDecl {
-        return cbor.decodeFromByteArray(bytes)
-    }
+    fun deserializeTypedLetDecl(bytes: ByteArray): com.mezze.language.typedast.TypedLetDecl =
+        readBlob(com.mezze.language.typedast.TypedLetDecl.serializer(), bytes)
 
-    fun serializeTypedTypeDecl(decl: com.mezze.language.typedast.TypedTypeDecl): ByteArray {
-        return cbor.encodeToByteArray(decl)
-    }
+    fun serializeTypedTypeDecl(decl: com.mezze.language.typedast.TypedTypeDecl): ByteArray =
+        writeBlob(com.mezze.language.typedast.TypedTypeDecl.serializer(), decl)
 
-    fun deserializeTypedTypeDecl(bytes: ByteArray): com.mezze.language.typedast.TypedTypeDecl {
-        return cbor.decodeFromByteArray(bytes)
-    }
+    fun deserializeTypedTypeDecl(bytes: ByteArray): com.mezze.language.typedast.TypedTypeDecl =
+        readBlob(com.mezze.language.typedast.TypedTypeDecl.serializer(), bytes)
 
-    fun serializeTypedAbilityDecl(decl: com.mezze.language.typedast.TypedAbilityDecl): ByteArray {
-        return cbor.encodeToByteArray(decl)
-    }
+    fun serializeTypedAbilityDecl(decl: com.mezze.language.typedast.TypedAbilityDecl): ByteArray =
+        writeBlob(com.mezze.language.typedast.TypedAbilityDecl.serializer(), decl)
 
-    fun deserializeTypedAbilityDecl(bytes: ByteArray): com.mezze.language.typedast.TypedAbilityDecl {
-        return cbor.decodeFromByteArray(bytes)
-    }
+    fun deserializeTypedAbilityDecl(bytes: ByteArray): com.mezze.language.typedast.TypedAbilityDecl =
+        readBlob(com.mezze.language.typedast.TypedAbilityDecl.serializer(), bytes)
 
-    fun serializeTypedAbilityImpl(impl: com.mezze.language.typedast.TypedAbilityImpl): ByteArray {
-        return cbor.encodeToByteArray(impl)
-    }
+    fun serializeTypedAbilityImpl(impl: com.mezze.language.typedast.TypedAbilityImpl): ByteArray =
+        writeBlob(com.mezze.language.typedast.TypedAbilityImpl.serializer(), impl)
 
-    fun deserializeTypedAbilityImpl(bytes: ByteArray): com.mezze.language.typedast.TypedAbilityImpl {
-        return cbor.decodeFromByteArray(bytes)
-    }
+    fun deserializeTypedAbilityImpl(bytes: ByteArray): com.mezze.language.typedast.TypedAbilityImpl =
+        readBlob(com.mezze.language.typedast.TypedAbilityImpl.serializer(), bytes)
 
-    fun serializeTypedEffectDecl(decl: com.mezze.language.typedast.TypedEffectDecl): ByteArray {
-        return cbor.encodeToByteArray(decl)
-    }
+    fun serializeTypedEffectDecl(decl: com.mezze.language.typedast.TypedEffectDecl): ByteArray =
+        writeBlob(com.mezze.language.typedast.TypedEffectDecl.serializer(), decl)
 
-    fun deserializeTypedEffectDecl(bytes: ByteArray): com.mezze.language.typedast.TypedEffectDecl {
-        return cbor.decodeFromByteArray(bytes)
-    }
+    fun deserializeTypedEffectDecl(bytes: ByteArray): com.mezze.language.typedast.TypedEffectDecl =
+        readBlob(com.mezze.language.typedast.TypedEffectDecl.serializer(), bytes)
 
-    fun serializeTypedPerformerDecl(decl: com.mezze.language.typedast.TypedPerformerDecl): ByteArray {
-        return cbor.encodeToByteArray(decl)
-    }
+    fun serializeTypedPerformerDecl(decl: com.mezze.language.typedast.TypedPerformerDecl): ByteArray =
+        writeBlob(com.mezze.language.typedast.TypedPerformerDecl.serializer(), decl)
 
-    fun deserializeTypedPerformerDecl(bytes: ByteArray): com.mezze.language.typedast.TypedPerformerDecl {
-        return cbor.decodeFromByteArray(bytes)
-    }
+    fun deserializeTypedPerformerDecl(bytes: ByteArray): com.mezze.language.typedast.TypedPerformerDecl =
+        readBlob(com.mezze.language.typedast.TypedPerformerDecl.serializer(), bytes)
 }

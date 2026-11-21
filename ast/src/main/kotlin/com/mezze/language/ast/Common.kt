@@ -3,10 +3,62 @@
 package com.mezze.language.ast
 
 import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.descriptors.buildClassSerialDescriptor
+import kotlinx.serialization.descriptors.element
+import kotlinx.serialization.encoding.CompositeDecoder
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.encoding.decodeStructure
+import kotlinx.serialization.encoding.encodeStructure
 import kotlinx.serialization.json.JsonClassDiscriminator
 
-@Serializable
+/**
+ * [TypeVar] as its three fields. Inside [Positions] the `id` written is the
+ * variable's number within the declaration, and the id itself goes aside — see
+ * there. `level` is left out when it is 0, as the generated serializer left it.
+ */
+object TypeVarSerializer : KSerializer<TypeVar> {
+    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("com.mezze.language.ast.TypeVar") {
+        element<String>("name")
+        element<Int>("level", isOptional = true)
+        element<Int>("id")
+    }
+
+    override fun serialize(encoder: Encoder, value: TypeVar) {
+        val aside = Positions.writing.get()
+        val id = aside?.variable(value.id) ?: value.id
+        encoder.encodeStructure(descriptor) {
+            encodeStringElement(descriptor, 0, value.name)
+            if (value.level != 0 || shouldEncodeElementDefault(descriptor, 1)) encodeIntElement(descriptor, 1, value.level)
+            encodeIntElement(descriptor, 2, id)
+        }
+    }
+
+    override fun deserialize(decoder: Decoder): TypeVar {
+        var name: String? = null
+        var level = 0
+        var id: Int? = null
+        decoder.decodeStructure(descriptor) {
+            while (true) {
+                when (val i = decodeElementIndex(descriptor)) {
+                    0 -> name = decodeStringElement(descriptor, 0)
+                    1 -> level = decodeIntElement(descriptor, 1)
+                    2 -> id = decodeIntElement(descriptor, 2)
+                    CompositeDecoder.DECODE_DONE -> break
+                    else -> error("unexpected TypeVar element $i")
+                }
+            }
+        }
+        val written = id ?: error("a type variable was stored without its id")
+        val aside = Positions.reading.get()
+        return TypeVar(name ?: error("a type variable was stored without its name"), level, aside?.int() ?: written)
+    }
+}
+
+@Serializable(with = TypeVarSerializer::class)
 data class TypeVar(val name: String, val level: Int = 0, val id: Int) {
     /**
      * True when this variable stands for "the compiler did not determine a type

@@ -618,7 +618,7 @@ object PrecompiledStdlib {
             for (h in allHashes) {
                 try {
                     val irBytes = s.getIR(h) ?: continue
-                    functions[h] = cbor.decodeFromByteArray(irBytes)
+                    functions[h] = com.mezze.language.store.StoreSerialization.deserializeFunctionIR(irBytes)
                 } catch (e: Exception) {
                     decodeFailures.add(h to "${e.javaClass.simpleName}: ${e.message}")
                 }
@@ -690,7 +690,7 @@ object PrecompiledStdlib {
                         if (decl is TypedLetDecl) {
                             val irBytes = s.getIR(decl.hash) ?: continue
                             try {
-                                functions[decl.hash] = cbor.decodeFromByteArray(irBytes)
+                                functions[decl.hash] = com.mezze.language.store.StoreSerialization.deserializeFunctionIR(irBytes)
                             } catch (e: Exception) {
                                 irDecodeFailures++
                                 lastError = "IR ${decl.hash.hex.take(8)}: ${e.javaClass.simpleName}"
