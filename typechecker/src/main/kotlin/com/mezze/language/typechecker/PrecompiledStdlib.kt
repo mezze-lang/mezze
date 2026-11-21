@@ -22,6 +22,15 @@ import com.mezze.language.typechecker.module.ModuleLoadResult
 import com.mezze.language.typechecker.module.ModuleTypeCheckResult
 import com.mezze.language.truffleir.shapeKey
 
+/**
+ * A module as a store keeps it. The store writes one with its types shared
+ * ([com.mezze.language.ast.TypeSharing]), so it is read back the same way: read
+ * as plain CBOR, every module failed to decode, and the loaders below went on
+ * with no stdlib modules at all.
+ */
+internal fun readStoredTypedModule(bytes: ByteArray): TypedAstModule =
+    com.mezze.language.store.StoreSerialization.deserializeTypedModule(bytes)
+
 object PrecompiledStdlib {
 
     private const val STDLIB_MODULES_RESOURCE = "mezze-stdlib-modules.cbor"
@@ -649,7 +658,7 @@ object PrecompiledStdlib {
                 if (!ModulePathConventions.isStdlib(mod.path)) continue
                 val typedBlob = s.getTypedModule(mod.path, mod.sourceHash) ?: continue
                 try {
-                    val typedModule: TypedAstModule = cbor.decodeFromByteArray(typedBlob)
+                    val typedModule: TypedAstModule = readStoredTypedModule(typedBlob)
                     typedModules[typedModule.hash] = typedModule
                 } catch (e: Exception) {
                     typedModDecodeFailures++
@@ -685,7 +694,7 @@ object PrecompiledStdlib {
                 if (!ModulePathConventions.isStdlib(mod.path)) continue
                 val typedBlob = s.getTypedModule(mod.path, mod.sourceHash) ?: continue
                 try {
-                    val typedModule: TypedAstModule = cbor.decodeFromByteArray(typedBlob)
+                    val typedModule: TypedAstModule = readStoredTypedModule(typedBlob)
                     for (decl in typedModule.decls) {
                         if (decl is TypedLetDecl) {
                             val irBytes = s.getIR(decl.hash) ?: continue
