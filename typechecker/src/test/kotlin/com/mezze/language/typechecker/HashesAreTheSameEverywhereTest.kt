@@ -25,7 +25,7 @@ class HashesAreTheSameEverywhereTest {
 
     private fun dump(workingDir: File, parsedAs: String, vararg jvmArgs: String, warm: Boolean = false): List<String> {
         val java = File(System.getProperty("java.home"), "bin/java").absolutePath
-        val errors = File.createTempFile("identity-dump", ".err")
+        val errors = File.createTempFile("identity-dump", ".err").apply { deleteOnExit() }
         // Where this build's stdlib sources are — the one thing both must share.
         val root = System.getProperty("mezze.project.root") ?: error("mezze.project.root is not set for this test JVM")
         val process = ProcessBuilder(
