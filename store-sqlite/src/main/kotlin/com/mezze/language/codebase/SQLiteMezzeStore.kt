@@ -451,6 +451,14 @@ class SQLiteMezzeStore private constructor(
          * schema needs to exist so the UNION ALL parses and runs.
          */
         fun readOnly(path: File): SQLiteMezzeStore {
+            // A writable store of another schema is wiped and rebuilt on open; a
+            // read-only one cannot be, and reading it anyway meant every blob in it
+            // failing to decode, one at a time, each swallowed by whoever asked.
+            val found = schemaVersionOf(path)
+            check(found == SCHEMA_VERSION) {
+                "the store at ${path.absolutePath} is schema $found and this mez reads schema $SCHEMA_VERSION — " +
+                    "it was written by another mez; rebuild it with this one"
+            }
             val conn = DriverManager.getConnection("jdbc:sqlite:file:${path.absolutePath}?mode=ro")
             return SQLiteMezzeStore(conn, readOnly = true).also {
                 it.attachInMemoryAux()

@@ -778,17 +778,28 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         var stdlibIr = com.mezze.language.stdlib.StdlibRuntimeData.INSTANCE
                 .getPreloweredFunctions().get(hash);
         if (stdlibIr != null) return stdlibIr;
+        return readStoredFunction(hash);
+    }
+
+    /**
+     * The function the runtime store holds under [hash], or null when it holds
+     * none. A stored function that cannot be READ is not a missing function: it
+     * used to be reported as one ("function not found"), which sent whoever saw
+     * it looking for a hash that was there all along — written by another mez,
+     * or damaged. It is raised as what it is.
+     */
+    @com.oracle.truffle.api.CompilerDirectives.TruffleBoundary
+    private static com.mezze.language.truffleir.FunctionIR readStoredFunction(com.mezze.language.typedast.Hash hash) {
         var store = runtimeStore;
-        if (store != null) {
-            byte[] bytes = store.getIR(hash);
-            if (bytes != null) {
-                try {
-                    return com.mezze.language.store.StoreSerialization.INSTANCE
-                            .deserializeFunctionIR(bytes);
-                } catch (Exception ignored) { return null; }
-            }
+        if (store == null) return null;
+        byte[] bytes = store.getIR(hash);
+        if (bytes == null) return null;
+        try {
+            return com.mezze.language.store.StoreSerialization.INSTANCE.deserializeFunctionIR(bytes);
+        } catch (RuntimeException e) {
+            throw new MezzeInternalError("the stored function " + hash.getHex().substring(0, 16)
+                + "… cannot be read: " + e.getMessage(), e);
         }
-        return null;
     }
 
     // #304 — per-hash lazy stubs. Minted on demand by BDSL emit when a
@@ -854,20 +865,7 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
             ir = com.mezze.language.stdlib.StdlibRuntimeData.INSTANCE
                 .getPreloweredFunctions().get(hash);
         }
-        if (ir == null) {
-            var store = runtimeStore;
-            if (store != null) {
-                byte[] bytes = store.getIR(hash);
-                if (bytes != null) {
-                    try {
-                        ir = com.mezze.language.store.StoreSerialization.INSTANCE
-                                .deserializeFunctionIR(bytes);
-                    } catch (Exception e) {
-                        return null;
-                    }
-                }
-            }
-        }
+        if (ir == null) ir = readStoredFunction(hash);
         if (ir == null) return null;
         // Try BDSL first with a fresh instance (avoids singleton re-entry).
         // Resolver: prefer SlotTable-published CTs, then user CT cache,
@@ -948,20 +946,16 @@ public final class MezzeLanguage extends TruffleLanguage<MezzeContext> {
         //    doesn't (impl-op IRs not registered in the snapshot, or — in
         //    the future — hashes fetched from a remote registry by a
         //    ChainedStore wrapper).
-        var store = runtimeStore;
-        if (store != null) {
-            byte[] irBytes = store.getIR(hash);
-            if (irBytes != null) {
-                try {
-                    var fnIR = com.mezze.language.store.StoreSerialization.INSTANCE.deserializeFunctionIR(irBytes);
-                    var rootNode = compileOne(fnIR);
-                    ct = rootNode.getCallTarget();
-                    stdlibCallTargetCache.put(hash, ct);
-                    return ct;
-                } catch (Exception e) {
-                    // Fall through — caller will throw the standard
-                    // "Function not found" error with full context.
-                }
+        var fnIR = readStoredFunction(hash);
+        if (fnIR != null) {
+            try {
+                var rootNode = compileOne(fnIR);
+                ct = rootNode.getCallTarget();
+                stdlibCallTargetCache.put(hash, ct);
+                return ct;
+            } catch (Exception e) {
+                // Fall through — caller will throw the standard
+                // "Function not found" error with full context.
             }
         }
         return null;

@@ -33,7 +33,7 @@ abstract class DefinitionIndexContract {
         type Shape = | Circle { r: Float }, Square { side: Float }, Dot |
         type Box 'a = { item: 'a, count: Int }
         newtype Meters = Float
-        type Name = Str
+        type Step = { n: Int } -> Int
 
         ability Total for 'a where {
           total: { it: 'a } -> Int,
@@ -87,8 +87,12 @@ abstract class DefinitionIndexContract {
         val meters = definitionOf(DeclKind.TYPE, "Meters") as Definition.Newtype
         assertEquals("Meters", meters.constructor)
         assertEquals(MezzeType.FloatType, meters.wrapped)
-        val name = definitionOf(DeclKind.TYPE, "Name") as Definition.Alias
-        assertEquals(MezzeType.StringType, name.aliased)
+        // A function type: a `type` may only name a shape that has no name yet, so
+        // `type Name = Str` — what this used to alias — is refused (V0713).
+        val step = definitionOf(DeclKind.TYPE, "Step") as Definition.Alias
+        val aliased = step.aliased
+        assertTrue(aliased is MezzeType.FunctionType, "got $aliased")
+        assertEquals(MezzeType.IntType, (aliased as MezzeType.FunctionType).returnType)
     }
 
     @Test
