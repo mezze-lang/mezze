@@ -202,8 +202,8 @@ object StorePopulator {
 
             val functions = result.loweredFunctions
             if (functions.isNotEmpty()) {
-                scatterFunctionIRs(store, functions, modulePath, existing)
-                recordCodeHashes(store, functions)
+                val written = scatterFunctionIRs(store, functions, modulePath, existing)
+                recordCodeHashes(store, functions, justWritten = written)
                 // Only when this run lowered: a check-only index has no functions,
                 // and that says nothing about which ones the program still needs.
                 store.replaceBlobOwnership("lowered:$modulePath", functions.mapTo(HashSet()) { it.hash })
@@ -747,15 +747,41 @@ object StorePopulator {
      */
     /**
      * Record what each of [functions] is as code ([CodeHash]), for the ones this
-     * store holds. All of them are hashed together — a function's code hash is
-     * made of its callees' — and one outside the set is answered from what the
-     * store already recorded (the standard library's, a dependency's).
+     * store holds.
+     *
+     * A code hash is recorded WITH the function it describes and stays with it.
+     * One identity can still lower to two forms (see `StoreVerification`), and a
+     * store keeps the first: so a function it already holds is hashed from what
+     * it HOLDS, not from this run's lowering, and is not hashed again once it has
+     * a code hash — unless [rewritten] says its stored form was just replaced.
+     *
+     * All of them are hashed together, a function's code hash being made of its
+     * callees'; one outside the set is answered from what the store recorded, and
+     * failing that from the standard library this compiler carries — so a caller
+     * hashes alike whether or not a store with the library's own tier is at hand.
      */
-    fun recordCodeHashes(store: MezzeStore, functions: Collection<FunctionIR>) {
-        val codes = com.mezze.language.store.CodeHash.of(functions) { store.getCodeHash(it) }
-        for ((hash, code) in codes) {
-            if (store.ownsBlob(hash) && store.getCodeHash(hash) != code) store.putCodeHash(hash, code)
+    fun recordCodeHashes(
+        store: MezzeStore,
+        functions: Collection<FunctionIR>,
+        rewritten: Boolean = false,
+        /** Functions whose stored form IS the one in [functions]: written from it a moment ago. */
+        justWritten: Set<Hash> = emptySet(),
+    ) {
+        val toHash = if (rewritten) functions else functions.mapNotNull { fn ->
+            when {
+                store.getCodeHash(fn.hash) != null -> null
+                fn.hash in justWritten -> fn
+                else -> store.getIR(fn.hash)?.let { StoreSerialization.deserializeFunctionIR(it) }
+            }
         }
+        if (toHash.isEmpty()) return
+        val codes = com.mezze.language.store.CodeHash.of(toHash) { store.getCodeHash(it) ?: stdlibCodeHashes[it] }
+        for ((hash, code) in codes) if (store.ownsBlob(hash)) store.putCodeHash(hash, code)
+    }
+
+    /** The standard library's functions as code, from the lowering this compiler carries. Only on a miss. */
+    private val stdlibCodeHashes: Map<Hash, Hash> by lazy {
+        com.mezze.language.store.CodeHash.of(com.mezze.language.typechecker.PrecompiledStdlib.preloweredFunctions.values)
     }
 
     private fun scatterFunctionIRs(
@@ -763,7 +789,8 @@ object StorePopulator {
         functions: List<FunctionIR>,
         modulePath: String,
         preExistingWithIR: Set<Hash>
-    ) {
+    ): Set<Hash> {
+        val written = HashSet<Hash>()
         for (fn in functions) {
             // Read current blob — covers both cases:
             //   (a) blob written by scatterTypedModule moments ago (typed set, ir=null)
@@ -778,6 +805,7 @@ object StorePopulator {
                     row?.typed,
                     irBytes
                 )
+                written.add(fn.hash)
             } else verifyHeld(store, fn.hash, "lowered") { StoreSerialization.serializeFunctionIR(fn) }
 
             // Edges UNCONDITIONALLY, and after the blob exists — `edges.from_hash`
@@ -801,6 +829,7 @@ object StorePopulator {
             // Their edges are the stdlib tier's, recorded when it was built.
             if (store.ownsBlob(fn.hash)) recordEdges(store, fn)
         }
+        return written
     }
 
     /**

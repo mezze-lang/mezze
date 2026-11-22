@@ -101,13 +101,16 @@ object DeclNameSerializer : KSerializer<String> {
         val aside = Positions.writing.get()
         if (aside == null || !value.startsWith(POSITIONAL)) { encoder.encodeString(value); return }
         aside.file(value)
-        encoder.encodeString(POSITIONAL)
+        encoder.encodeString(WRITTEN)
     }
+
+    /** What stands in for a positional name. `#` cannot be in an identifier, so no declaration is called this. */
+    private const val WRITTEN = "$POSITIONAL#"
 
     override fun deserialize(decoder: Decoder): String {
         val written = decoder.decodeString()
         val aside = Positions.reading.get()
-        return if (aside != null && written == POSITIONAL) aside.file() else written
+        return if (aside != null && written == WRITTEN) aside.file() else written
     }
 }
 

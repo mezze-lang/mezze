@@ -145,7 +145,7 @@ object DepPrecompiler {
                             StoreSerialization.serializeFunctionIR(fn),
                         )
                     }
-                    com.mezze.language.codebase.StorePopulator.recordCodeHashes(store, storedHashes.mapNotNull { canonicalized[it] })
+                    com.mezze.language.codebase.StorePopulator.recordCodeHashes(store, storedHashes.mapNotNull { canonicalized[it] }, rewritten = true)
                 }
             } finally {
                 store.close()

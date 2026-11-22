@@ -848,6 +848,10 @@ class TypedASTCompiler(
         // CallDirectIR; and compileVar's MakeLambdaIR path needs to see
         // outer entries to avoid the closure-captures-null problem.
         val prevRecursiveLets = recursiveLetLambdas.toMap()
+        // A PARAMETER is a new meaning for its name. What an enclosing `let` of that
+        // name was — a recursive lambda, an alias, a constrained lambda, all looked
+        // up BY NAME — is not what a call through the name reaches in here.
+        val shadowed = shadowLocalFunctions(params.map { it.name })
 
         // Check if this function needs dictionary params (pre-scanned).
         // Dictionary params are hidden params appended after regular params,
@@ -924,6 +928,7 @@ class TypedASTCompiler(
         paramConcreteReceiverTypes.apply { clear(); putAll(prevParamConcrete) }
         recursiveLetLambdas.clear()
         recursiveLetLambdas.putAll(prevRecursiveLets)
+        shadowed()
 
         val fnIR = FunctionIR(
             hash = hash,
@@ -3886,13 +3891,21 @@ class TypedASTCompiler(
         val named = (expr as? TypedLambda)?.let { l ->
             namedByHash(l,
                 { n -> localsByName[n]?.let { plainLocalLambdaBySlot[it] } ?: currentCaptureNames[n]?.let { currentCaptureLambdaHashes[it] } },
-                { n -> listOfNotNull(recursiveLetLambdas[n]?.hash, localConstrainedLambdas[n]) })
+                { n -> listOfNotNull(recursiveLetLambdas[n]?.hash, localConstrainedLambdas[n], localFnAliases[n]) })
         }
         return lambdaHashOf(expr, salt, dictCaptures.map { it.first }, ownDicts, named.orEmpty())
             .also { lambdaHashes[expr] = salt to it }
     }
 
     private val lambdaHashes = java.util.IdentityHashMap<TypedExpr, Pair<Hash?, Hash>>()
+
+    /** Forget what [names] meant as local functions; the result puts it back. */
+    private fun shadowLocalFunctions(names: List<String>): () -> Unit {
+        val aliases = names.mapNotNull { n -> localFnAliases.remove(n)?.let { n to it } }
+        val constrained = names.mapNotNull { n -> localConstrainedLambdas.remove(n)?.let { n to it } }
+        val recursive = names.mapNotNull { n -> recursiveLetLambdas.remove(n)?.let { n to it } }
+        return { localFnAliases.putAll(aliases); localConstrainedLambdas.putAll(constrained); recursiveLetLambdas.putAll(recursive) }
+    }
 
     private fun compileLambda(expr: TypedLambda, src: SourceInfo, ownDicts: Set<String> = emptySet()): NodeIR {
         // Save parent's capture info BEFORE overwriting for the child.
@@ -4075,6 +4088,12 @@ class TypedASTCompiler(
                             localFnAliases[stmt.name] = targetHash
                         }
                     }
+                    // …and a let that is NOT one ends what the name was before it, once
+                    // its own value — which may still read the outer name — is compiled.
+                    val endsAlias = localFnAliases[stmt.name]?.let { was ->
+                        !(stmtValue is TypedVar && (stmtValue.binding as? BindingRef.ByHash)?.hash == was)
+                    } ?: false
+                    val endsRecursive = !(stmt.isRecursive && stmtValue is TypedLambda)
 
                     // `let x = x` reads the OUTER x. The slot above is allocated
                     // because StmtIR.Let needs it, but the NAME does not mean that
@@ -4103,8 +4122,12 @@ class TypedASTCompiler(
                         // If so, reference the top-level function's hash (not a re-hashed copy).
                         // Only use this optimization in the entry function (no captures/params),
                         // because nested functions need compileLambda's parent capture resolution.
+                        // THE declaration this let re-lowers (the entry function binds each
+                        // top-level declaration, value and hash, as a let) — not whichever
+                        // one shares its NAME: a do-block `let helper = …` in a function
+                        // was replaced by the module's top-level `helper`.
                         val topLevelDecl = if (currentCaptureCount == 0 && currentParamNames.isEmpty()) {
-                            declIndex?.values?.find { it.name == stmt.name }
+                            declIndex?.get(stmt.contentHash)?.takeIf { it.value === stmtValue }
                         } else null
                         if (topLevelDecl != null && topLevelDecl.value is TypedLambda) {
                             // Top-level function — reference it directly (don't re-compile)
@@ -4151,6 +4174,8 @@ class TypedASTCompiler(
                     }
                     // The let has completed: from here the name is its own slot.
                     if (!stmt.isRecursive) localsByName[stmt.name] = slot
+                    if (endsAlias) localFnAliases.remove(stmt.name)
+                    if (endsRecursive) recursiveLetLambdas.remove(stmt.name)
                     StmtIR.Let(slot, typeToSlotKind(stmt.type), stmt.name, stmt.contentHash, valueIR, locToSourceInfo(stmt.loc))
                 }
                 is TypedStatement.Expr -> StmtIR.Expr(compileExpr(stmt.expr), locToSourceInfo(stmt.loc))

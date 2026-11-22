@@ -102,22 +102,27 @@ object CodeHash {
     private class Named(val hex: String, val at: Int)
 
     /**
-     * Every hash written in [content], with where. A hash is stored as a CBOR text
-     * of exactly [HEX] lowercase hex digits — header `78 80` — and nothing else in
-     * a lowered function is; a string literal that happened to look like one would
-     * only be offered to [known], which does not know it.
+     * Every hash written in [content], with where. A [Hash] is stored as its one
+     * field: the key `hex` (`63 68 65 78`), then a CBOR text of exactly [HEX]
+     * lowercase hex digits (header `78 80`). The key is what makes it a reference:
+     * a string LITERAL of 128 hex digits — a hash a program printed or compared,
+     * folded into a constant — is a value, and rewriting it would change what the
+     * function returns.
      */
     private fun namedHashes(content: ByteArray): List<Named> {
         val found = ArrayList<Named>()
-        var i = 0
+        var i = HASH_KEY.size
         while (i + 2 + HEX <= content.size) {
-            if (content[i] == 0x78.toByte() && content[i + 1] == 0x80.toByte() && isHex(content, i + 2)) {
+            if (content[i] == 0x78.toByte() && content[i + 1] == 0x80.toByte() &&
+                HASH_KEY.indices.all { content[i - HASH_KEY.size + it] == HASH_KEY[it] } && isHex(content, i + 2)) {
                 found.add(Named(String(content, i + 2, HEX, Charsets.US_ASCII), i + 2))
                 i += 2 + HEX
             } else i++
         }
         return found
     }
+
+    private val HASH_KEY = byteArrayOf(0x63, 'h'.code.toByte(), 'e'.code.toByte(), 'x'.code.toByte())
 
     private fun isHex(bytes: ByteArray, from: Int): Boolean {
         for (i in from until from + HEX) {

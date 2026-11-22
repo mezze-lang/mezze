@@ -128,6 +128,62 @@ abstract class CodeHashContract {
     }
 }
 
+abstract class CodeHashRecordContract {
+    abstract fun open(): MezzeStore
+    private lateinit var store: MezzeStore
+    @BeforeEach fun setUp() { store = open() }
+    @AfterEach fun tearDown() { store.close() }
+
+    private val src = SourceInfo(0, 1, 1, 1, 1)
+    private fun fn(hash: Hash, work: Long) = FunctionIR(
+        hash = hash, name = "f", qualifiedName = "m::f",
+        paramSlots = emptyList(), paramNames = emptyList(),
+        localSlots = emptyList(), localNames = emptyList(),
+        captureSlots = emptyList(), captureNames = emptyList(),
+        body = LongLitIR(work, src), sourceFile = "m.mz", sourceSection = src,
+    )
+    private fun stored(hash: Hash) =
+        com.mezze.language.store.StoreSerialization.deserializeFunctionIR(store.getIR(hash)!!)
+
+    /**
+     * One identity can still lower to two forms, and the store keeps the first.
+     * Its code hash has to be the hash of the form it KEEPS: recorded from a later
+     * run's lowering, it named code the store could not hand back.
+     */
+    @Test
+    fun `a recorded code hash is the hash of the function the store holds`() {
+        val f = Hash("f".repeat(128))
+        val first = fn(f, 1)
+        store.putBlob(f, com.mezze.language.store.BlobKind.FUNCTION, com.mezze.language.store.Visibility.PRIVATE, null,
+            com.mezze.language.store.StoreSerialization.serializeFunctionIR(first))
+        StorePopulator.recordCodeHashes(store, listOf(first))
+        val recorded = store.getCodeHash(f)
+        assertEquals(CodeHash.of(first), recorded)
+
+        // The same identity lowered differently in a later run: the stored form stays, and so does its code hash.
+        StorePopulator.recordCodeHashes(store, listOf(fn(f, 2)))
+        assertEquals(recorded, store.getCodeHash(f))
+        assertEquals(CodeHash.of(stored(f)), store.getCodeHash(f))
+        assertEquals(CodeHash.of(stored(f)), CodeHash.of(
+            com.mezze.language.store.StoreSerialization.deserializeFunctionIR(store.getIRForCode(recorded!!)!!)))
+    }
+
+    @Test
+    fun `a function with no stored form gets no code hash`() {
+        val f = Hash("e".repeat(128))
+        StorePopulator.recordCodeHashes(store, listOf(fn(f, 1)))
+        assertEquals(null, store.getCodeHash(f))
+    }
+}
+
+class SQLiteCodeHashRecordTest : CodeHashRecordContract() {
+    override fun open(): MezzeStore = SQLiteMezzeStore.inMemory()
+}
+
+class InMemoryCodeHashRecordTest : CodeHashRecordContract() {
+    override fun open(): MezzeStore = InMemoryMezzeStore()
+}
+
 class SQLiteCodeHashTest : CodeHashContract() {
     override fun open(): MezzeStore = SQLiteMezzeStore.inMemory()
 }
@@ -177,6 +233,17 @@ class CodeHashGroupTest {
     fun `members no call can tell apart are one code`() {
         val codes = CodeHash.of(listOf(fn(hash('a'), 1, hash('b')), fn(hash('b'), 1, hash('a'))))
         assertEquals(codes.getValue(hash('a')), codes.getValue(hash('b')))
+    }
+
+    /** A string that merely LOOKS like a hash is a value the function returns, not a function it names. */
+    @Test
+    fun `a string literal of 128 hex digits is not a reference`() {
+        val callee = hash('c')
+        fun returning(self: Hash, text: String) = fn(self, 1, hash('0')).copy(
+            body = com.mezze.language.truffleir.StringLitIR(text, src))
+        val literal = CodeHash.of(returning(hash('a'), callee.hex)) { if (it == callee) hash('9') else null }
+        val other = CodeHash.of(returning(hash('b'), hash('9').hex)) { null }
+        assertNotEquals(literal, other, "a function returning one string became the function returning another")
     }
 
     @Test

@@ -35,8 +35,8 @@ class BlobConflict(val hash: Hash, val part: String) : IllegalStateException(
  *
  *  - a top-level value whose type is settled by ANOTHER declaration (`let e = []`
  *    is a `Seq Int` in one module and a `Seq Str` in the next, under one hash);
- *  - a call lowered inline or not according to which declaration was lowered
- *    first, and the whole-program passes that rewrite a function from its callers.
+ *  - the function a module is entered through, hashed from the declarations it
+ *    binds as a set while its body binds them in the order they are written.
  *
  * Each is an identity that does not cover what the stored form depends on, and
  * closing them is what computing identities AFTER type checking is for. Until
