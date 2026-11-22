@@ -1439,6 +1439,12 @@ class SQLiteMezzeStore private constructor(
 
     @Synchronized
     override fun putBlob(hash: Hash, kind: BlobKind, visibility: Visibility, typed: ByteArray?, ir: ByteArray?) {
+        // Across every tier: the stdlib's or a dependency's declaration under
+        // this hash is as much a claim on it as this store's own.
+        getBlob(hash)?.let { held ->
+            refuseDifferentContent(hash, "typed", held.typed, typed)
+            refuseDifferentContent(hash, "lowered", held.ir, ir)
+        }
         putBlobStmt.apply {
             setString(1, hash.hex)
             setString(2, kind.name)

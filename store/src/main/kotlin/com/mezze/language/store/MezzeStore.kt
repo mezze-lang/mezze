@@ -14,13 +14,38 @@ import com.mezze.language.typedast.Hash
  * - Append-only for blobs: INSERT OR REPLACE, never delete (orphans are harmless).
  * - Usages table is the only thing that gets cleared per-file (for LSP re-index).
  */
+/**
+ * Two different declarations under one hash. Never a user's mistake: an
+ * identity that does not cover something the declaration's stored form depends
+ * on is a defect in how identities are computed.
+ */
+class BlobConflict(val hash: Hash, val part: String) : IllegalStateException(
+    "internal: two different declarations share the identity ${hash.hex.take(16)}… — their $part forms differ. " +
+        "An identity must cover everything a declaration's stored form depends on; this one does not."
+)
+
+/** Refuse [incoming] where [stored] already holds a different declaration — see [MezzeStore.putBlob]. */
+fun refuseDifferentContent(hash: Hash, part: String, stored: ByteArray?, incoming: ByteArray?) {
+    if (stored == null || incoming == null || stored === incoming) return
+    if (!StoreSerialization.sameContent(stored, incoming)) throw BlobConflict(hash, part)
+}
+
 interface MezzeStore : AutoCloseable {
 
     // ====================================================================
     // BLOBS — content-addressed storage (the only table with actual data)
     // ====================================================================
 
-    /** Store a definition blob. INSERT OR REPLACE — idempotent. */
+    /**
+     * Store a definition blob. Idempotent: writing the same declaration again —
+     * from another file, another line, another run — replaces where it was
+     * written and nothing else.
+     *
+     * A hash names ONE declaration. Writing a DIFFERENT typed or lowered form
+     * under a hash that already holds one is refused with [BlobConflict]: two
+     * different declarations were given one identity, and whichever a reader got
+     * would depend on who wrote last. A form given as null leaves no claim.
+     */
     fun putBlob(hash: Hash, kind: BlobKind, visibility: Visibility, typed: ByteArray?, ir: ByteArray?)
 
     /** Retrieve a blob by hash. Returns null if not found. */

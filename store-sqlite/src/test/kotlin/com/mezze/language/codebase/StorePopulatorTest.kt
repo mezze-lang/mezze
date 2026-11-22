@@ -209,6 +209,14 @@ class StorePopulatorTest {
         val stdlibFn = makeHash('c')
         val leaf = makeHash('d')
         val src = SourceInfo(0, 1, 1, 1, 10)
+        fun fn(hash: Hash, calls: Hash) = FunctionIR(
+            hash = hash, name = "f", qualifiedName = "mod::f",
+            paramSlots = emptyList(), paramNames = emptyList(),
+            localSlots = emptyList(), localNames = emptyList(),
+            captureSlots = emptyList(), captureNames = emptyList(),
+            body = CallDirectIR(calls, listOf(LongLitIR(1, src)), false, src),
+            sourceFile = "test.mz", sourceSection = src,
+        )
         store.putBlob(leaf, BlobKind.FUNCTION, Visibility.PUBLIC, null, null)
         store.executeRaw { conn ->
             conn.prepareStatement(
@@ -218,18 +226,11 @@ class StorePopulatorTest {
                 stmt.setString(2, "PERFORMER")
                 stmt.setString(3, "PUBLIC")
                 stmt.setBytes(4, null)
-                stmt.setBytes(5, StoredBytes.pack("stdlib-ir".toByteArray())) // the stored format, as putBlob writes it
+                // The stdlib tier's copy of the SAME function, in the stored format, as putBlob writes it.
+                stmt.setBytes(5, StoredBytes.pack(com.mezze.language.store.StoreSerialization.serializeFunctionIR(fn(stdlibFn, leaf))))
                 stmt.executeUpdate()
             }
         }
-        fun fn(hash: Hash, calls: Hash) = FunctionIR(
-            hash = hash, name = "f", qualifiedName = "mod::f",
-            paramSlots = emptyList(), paramNames = emptyList(),
-            localSlots = emptyList(), localNames = emptyList(),
-            captureSlots = emptyList(), captureNames = emptyList(),
-            body = CallDirectIR(calls, listOf(LongLitIR(1, src)), false, src),
-            sourceFile = "test.mz", sourceSection = src,
-        )
 
         val result = TypeCheckResult(loweredFunctions = listOf(fn(user, stdlibFn), fn(stdlibFn, leaf)))
         StorePopulator.populate(store, result, "mod", "test.mz", "hash")

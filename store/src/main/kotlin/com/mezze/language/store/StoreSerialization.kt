@@ -84,6 +84,23 @@ object StoreSerialization {
      */
     fun contentOf(blob: ByteArray): ByteArray = blob.copyOfRange(BLOB_HEADER, contentEnd(blob))
 
+    private fun isStoredDeclaration(bytes: ByteArray): Boolean =
+        bytes.size >= BLOB_HEADER && bytes[0] == BLOB_MAGIC_0 && bytes[1] == BLOB_MAGIC_1
+
+    /**
+     * Whether two stored forms are the same declaration, wherever and whenever
+     * each was written. Bytes that are not a stored declaration at all are
+     * compared whole.
+     */
+    fun sameContent(a: ByteArray, b: ByteArray): Boolean {
+        if (!isStoredDeclaration(a) || !isStoredDeclaration(b)) return a.contentEquals(b)
+        val endA = contentEnd(a)
+        val endB = contentEnd(b)
+        if (endA != endB) return false
+        for (i in BLOB_HEADER until endA) if (a[i] != b[i]) return false
+        return true
+    }
+
     fun serializeType(type: MezzeType): ByteArray {
         return cbor.encodeToByteArray(MezzeType.serializer(), type)
     }

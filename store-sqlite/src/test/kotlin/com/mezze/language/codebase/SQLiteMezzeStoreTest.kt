@@ -148,14 +148,15 @@ class SQLiteMezzeStoreTest {
     }
 
     @Test
-    fun `putBlob is idempotent — INSERT OR REPLACE`() {
+    fun `putBlob is idempotent — the same declaration again replaces its row`() {
+        // A DIFFERENT declaration under a taken hash is refused: BlobConflictContract.
         val hash = Hash("d".repeat(64))
         store.putBlob(hash, BlobKind.FUNCTION, Visibility.PRIVATE, "v1".toByteArray(), null)
-        store.putBlob(hash, BlobKind.FUNCTION, Visibility.PUBLIC, "v2".toByteArray(), "ir".toByteArray())
+        store.putBlob(hash, BlobKind.FUNCTION, Visibility.PUBLIC, "v1".toByteArray(), "ir".toByteArray())
 
         val row = store.getBlob(hash)!!
         assertEquals(Visibility.PUBLIC, row.visibility)
-        assertArrayEquals("v2".toByteArray(), row.typed)
+        assertArrayEquals("v1".toByteArray(), row.typed)
         assertArrayEquals("ir".toByteArray(), row.ir)
     }
 

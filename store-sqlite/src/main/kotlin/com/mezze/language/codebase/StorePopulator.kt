@@ -621,6 +621,22 @@ object StorePopulator {
      * Skips putBlob for hashes already in the store; always re-registers names
      * and edges (cheap; cover module-level rebinding).
      */
+    /**
+     * A declaration whose hash the store already holds is not written again —
+     * that is the point of addressing by content. Under `-Dmezze.store.verify=1`
+     * it is serialized anyway and held against what is stored, so a hash that
+     * came to stand for two different declarations fails HERE instead of being
+     * skipped. Every test JVM sets it; a build does not pay for the second
+     * serialization.
+     */
+    private val verifySkipped = System.getProperty("mezze.store.verify") == "1"
+
+    private inline fun verifyHeld(store: MezzeStore, hash: Hash, part: String, form: () -> ByteArray) {
+        if (!verifySkipped) return
+        val held = store.getBlob(hash) ?: return
+        refuseDifferentContent(hash, part, if (part == "typed") held.typed else held.ir, form())
+    }
+
     private fun scatterTypedModule(
         store: MezzeStore,
         module: TypedModule,
@@ -635,7 +651,7 @@ object StorePopulator {
                 val visibility = if (decl.isPublic) Visibility.PUBLIC else Visibility.PRIVATE
                 store.putBlob(decl.hash, BlobKind.FUNCTION, visibility,
                     StoreSerialization.serializeTypedLetDecl(decl), null)
-            }
+            } else verifyHeld(store, decl.hash, "typed") { StoreSerialization.serializeTypedLetDecl(decl) }
             store.registerName(modulePath, decl.name, decl.hash)
         }
 
@@ -644,7 +660,7 @@ object StorePopulator {
                 val visibility = if (decl.isPublic) Visibility.PUBLIC else Visibility.PRIVATE
                 store.putBlob(decl.hash, BlobKind.TYPE, visibility,
                     StoreSerialization.serializeTypedTypeDecl(decl), null)
-            }
+            } else verifyHeld(store, decl.hash, "typed") { StoreSerialization.serializeTypedTypeDecl(decl) }
             store.registerName(modulePath, decl.name, decl.hash)
         }
 
@@ -652,7 +668,7 @@ object StorePopulator {
             if (decl.hash !in existing) {
                 store.putBlob(decl.hash, BlobKind.ABILITY, Visibility.PUBLIC,
                     StoreSerialization.serializeTypedAbilityDecl(decl), null)
-            }
+            } else verifyHeld(store, decl.hash, "typed") { StoreSerialization.serializeTypedAbilityDecl(decl) }
             store.registerName(modulePath, decl.name, decl.hash)
         }
 
@@ -661,7 +677,7 @@ object StorePopulator {
                 store.putBlob(impl.hash, BlobKind.ABILITY_IMPL, Visibility.PUBLIC,
                     StoreSerialization.serializeTypedAbilityImpl(impl), null)
                 store.addEdge(impl.hash, impl.abilityHash, EdgeKind.IMPLEMENTS)
-            }
+            } else verifyHeld(store, impl.hash, "typed") { StoreSerialization.serializeTypedAbilityImpl(impl) }
             // #280/F11: key the target-type index cell on the CONTENT HASH of the
             // target type(s), NOT `MezzeType.toString()`. toString() is
             // depth-truncated & lossy (two distinct types can print identically —
@@ -697,7 +713,7 @@ object StorePopulator {
             if (decl.hash !in existing) {
                 store.putBlob(decl.hash, BlobKind.EFFECT, Visibility.PUBLIC,
                     StoreSerialization.serializeTypedEffectDecl(decl), null)
-            }
+            } else verifyHeld(store, decl.hash, "typed") { StoreSerialization.serializeTypedEffectDecl(decl) }
             store.registerName(modulePath, decl.name, decl.hash)
         }
 
@@ -706,7 +722,7 @@ object StorePopulator {
                 store.putBlob(decl.hash, BlobKind.PERFORMER, Visibility.PUBLIC,
                     StoreSerialization.serializeTypedPerformerDecl(decl), null)
                 store.addEdge(decl.hash, decl.effectHash, EdgeKind.IMPLEMENTS)
-            }
+            } else verifyHeld(store, decl.hash, "typed") { StoreSerialization.serializeTypedPerformerDecl(decl) }
             store.registerName(modulePath, decl.name, decl.hash)
             store.putEffectPerformer(decl.hash, decl.effectHash, decl.name, modulePath)
         }
@@ -752,7 +768,7 @@ object StorePopulator {
                     row?.typed,
                     irBytes
                 )
-            }
+            } else verifyHeld(store, fn.hash, "lowered") { StoreSerialization.serializeFunctionIR(fn) }
 
             // Edges UNCONDITIONALLY, and after the blob exists — `edges.from_hash`
             // has a foreign key to `blobs`, so this ordering is required.

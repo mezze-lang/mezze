@@ -72,6 +72,12 @@ subprojects {
         systemProperty("junit.jupiter.execution.timeout.default", "120s")
         systemProperty("junit.jupiter.execution.timeout.mode", "disabled_on_debug")
 
+        // Every declaration a test indexes is held against what the store already
+        // has under its hash, including the ones a build skips as already stored
+        // (StorePopulator.verifyHeld): the suites are the detector for a hash that
+        // came to stand for two different declarations.
+        systemProperty("mezze.store.verify", "1")
+
         // GATE MEMORY GUARD (2026-11-20). A test task is `maxParallelForks` JVMs of
         // `maxHeapSize` each, plus ~1 GB per fork of metaspace, Truffle code and
         // off-heap. Several sessions run gates on one machine at once; when their
