@@ -22,14 +22,14 @@ import java.util.concurrent.TimeUnit
  */
 class HashesAreTheSameEverywhereTest {
 
-    private fun dump(workingDir: File, parsedAs: String, vararg jvmArgs: String): List<String> {
+    private fun dump(workingDir: File, parsedAs: String, vararg jvmArgs: String, warm: Boolean = false): List<String> {
         val java = File(System.getProperty("java.home"), "bin/java").absolutePath
         val errors = File.createTempFile("identity-dump", ".err")
         // Where this build's stdlib sources are — the one thing both must share.
         val root = System.getProperty("mezze.project.root") ?: error("mezze.project.root is not set for this test JVM")
         val process = ProcessBuilder(
             listOf(java, "-cp", System.getProperty("java.class.path"), "-Dmezze.project.root=$root") + jvmArgs +
-                listOf(IdentityDump::class.java.name, parsedAs)
+                listOf(IdentityDump::class.java.name, parsedAs) + (if (warm) listOf("warm") else emptyList())
         ).directory(workingDir).redirectError(errors).start()
         val output = process.inputStream.readBytes().toString(Charsets.UTF_8)
         assertTrue(process.waitFor(280, TimeUnit.SECONDS), "the dump JVM did not finish")
@@ -47,13 +47,14 @@ class HashesAreTheSameEverywhereTest {
             val unlike = dump(
                 elsewhere, "/srv/another/checkout/src/app.mz",
                 // Turkish casing (`"I".lowercase()` is not "i"), a one-byte default
-                // charset, the far side of the date line, and one checking thread
-                // instead of a pool — so type variables are numbered in another order.
+                // charset, the far side of the date line, another collector — and
+                // another program checked first, so every type variable this one
+                // mints has a different number and a different invented name.
                 "-Duser.language=tr", "-Duser.country=TR",
                 "-Dfile.encoding=ISO-8859-1", "-Dsun.jnu.encoding=ISO-8859-1",
                 "-Duser.timezone=Pacific/Kiritimati",
-                "-Djava.util.concurrent.ForkJoinPool.common.parallelism=1",
                 "-XX:+UseSerialGC",
+                warm = true,
             )
 
             val ids = plain.count { it.startsWith("id ") }

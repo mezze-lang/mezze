@@ -112,6 +112,22 @@ class BlobContentTest {
     }
 
     @Test
+    fun `where a bare expression stands in its file does not run through its content`() {
+        // A top-level expression is named by its position (`__toplevel_expr_3`); the
+        // same expression further down is the same declaration under the same hash.
+        val store = indexed(source, "app.mz")
+        val twice = StoreSerialization.deserializeTypedLetDecl(store.getBlob(store.resolveName("app", "twice")!!)!!.typed!!)
+        val third = StoreSerialization.serializeTypedLetDecl(twice.copy(name = "__toplevel_expr_3"))
+        val seventh = StoreSerialization.serializeTypedLetDecl(twice.copy(name = "__toplevel_expr_7"))
+        assertArrayEquals(StoreSerialization.contentOf(third), StoreSerialization.contentOf(seventh))
+        assertEquals("__toplevel_expr_3", StoreSerialization.deserializeTypedLetDecl(third).name)
+        assertEquals("__toplevel_expr_7", StoreSerialization.deserializeTypedLetDecl(seventh).name)
+        // A real name IS the declaration's: it stays in the content.
+        assertFalse(StoreSerialization.sameContent(third, StoreSerialization.serializeTypedLetDecl(twice)))
+        assertEquals("twice", StoreSerialization.deserializeTypedLetDecl(StoreSerialization.serializeTypedLetDecl(twice)).name)
+    }
+
+    @Test
     fun `no file name runs through a declaration's content`() {
         val marker = "/a-path-that-must-not-be-stored/app.mz"
         val needle = marker.toByteArray()

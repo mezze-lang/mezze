@@ -96,6 +96,7 @@ sealed interface TypedDecl {
 @Serializable
 data class TypedLetDecl(
     override val hash: Hash,
+    @Serializable(with = com.mezze.language.ast.DeclNameSerializer::class)
     val name: String,
     val typeParams: List<TypeParam>,
     val value: TypedExpr,

@@ -38,7 +38,7 @@ class InMemoryMezzeStore : MezzeStore {
     // ── BLOBS ──
 
     override fun putBlob(hash: Hash, kind: BlobKind, visibility: Visibility, typed: ByteArray?, ir: ByteArray?) {
-        blobs[hash.hex]?.let { held ->
+        if (StoreVerification.enabled) blobs[hash.hex]?.let { held ->
             refuseDifferentContent(hash, "typed", held.typed, typed)
             refuseDifferentContent(hash, "lowered", held.ir, ir)
         }

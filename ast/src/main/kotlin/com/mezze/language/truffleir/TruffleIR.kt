@@ -254,7 +254,9 @@ fun FunctionIR.shapeKey(): String =
 @Serializable
 data class FunctionIR(
     val hash: Hash,
+    @Serializable(with = com.mezze.language.ast.DeclNameSerializer::class)
     val name: String,
+    @Serializable(with = com.mezze.language.ast.DeclNameSerializer::class)
     val qualifiedName: String,
     val paramSlots: List<SlotKind>,
     val paramNames: List<String>,

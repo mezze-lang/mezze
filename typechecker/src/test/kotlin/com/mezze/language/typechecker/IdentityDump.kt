@@ -18,6 +18,7 @@ object IdentityDump {
     val program = """
         use std::effects::log::{ Console, println }
         use std::collections::seq
+        use std::abilities::default::{ Default }
 
         type Point = { x: Int, y: Int }
         ability Label for 'a where { label: { it: 'a } -> Str }
@@ -32,6 +33,12 @@ object IdentityDump {
         let apply : { x: Int, f: { v: Int } -> Int <...> } -> Int <...> = { x, f } -> f { v = x }
         let names = { xs: [Str] } -> seq::map { xs = xs, f = { x } -> "İ$(x)ı" }
         let sizes = { xs: [[Int]] } -> seq::map { xs = xs, f = { x } -> seq::map { xs = x, f = { x } -> x + 1 } }
+        let fallback = { o } -> match o is
+          Some { val } -> val
+          None -> Default.default {}
+        let bump = { xs: [Int] } -> do
+          let g = { y } -> y + 1
+          seq::map { xs = xs, f = { x } -> g { y = x } }
         let shout = { msg: Str } -> println { msg = msg }
         let main = {} -> perform Console in shout { msg = { x = 1, y = 2 }.label {} }
     """.trimIndent()
@@ -54,6 +61,17 @@ object IdentityDump {
             val modulePath = file.removeSuffix(".mz").replace("/", "::")
             val module = resolver.resolveModule(modulePath)
             out.append("id ").append(modulePath).append(' ').append(module.identity?.hex ?: "none").append('\n')
+        }
+
+        // `warm`: check something else first. Type variables are numbered and named
+        // from counters the process shares, so whatever was checked before decides
+        // which numbers and names this program's variables get.
+        if (args.getOrNull(1) == "warm") {
+            val other = MezzeParser().parseParsedModule(
+                "let swap = { p } -> { first = p.second, second = p.first }\nlet keep = { a, b, c } -> a\nlet twice_more = { x } -> x + x + x", "other.mz")
+            check(TypeChecker().checkParsedModule(other, root, enablePrelude = true) is TypeChecker.TypeCheckResult.Success) {
+                "the warm-up program did not type-check"
+            }
         }
 
         val parsed = MezzeParser().parseParsedModule(program, args.getOrElse(0) { "app.mz" })

@@ -24,7 +24,30 @@ class BlobConflict(val hash: Hash, val part: String) : IllegalStateException(
         "An identity must cover everything a declaration's stored form depends on; this one does not."
 )
 
-/** Refuse [incoming] where [stored] already holds a different declaration — see [MezzeStore.putBlob]. */
+/**
+ * Whether a store holds every write against what it already has.
+ *
+ * ON for every test JVM (`-Dmezze.store.verify=1`, root build.gradle.kts), where
+ * it is the detector for an identity that came to stand for two declarations.
+ * OFF in a build, and not for speed: "one hash, one stored form" is not yet
+ * true of everything the compiler stores, and a user's build must not fail on
+ * the cases already known —
+ *
+ *  - a top-level value whose type is settled by ANOTHER declaration (`let e = []`
+ *    is a `Seq Int` in one module and a `Seq Str` in the next, under one hash);
+ *  - a call lowered inline or not according to which declaration was lowered
+ *    first, and the whole-program passes that rewrite a function from its callers.
+ *
+ * Each is an identity that does not cover what the stored form depends on, and
+ * closing them is what computing identities AFTER type checking is for. Until
+ * then the last writer wins there, as it always did.
+ */
+object StoreVerification {
+    @JvmStatic
+    val enabled: Boolean = System.getProperty("mezze.store.verify") == "1"
+}
+
+/** Under [StoreVerification], refuse [incoming] where [stored] already holds a different declaration. */
 fun refuseDifferentContent(hash: Hash, part: String, stored: ByteArray?, incoming: ByteArray?) {
     if (stored == null || incoming == null || stored === incoming) return
     if (!StoreSerialization.sameContent(stored, incoming)) throw BlobConflict(hash, part)
@@ -41,10 +64,10 @@ interface MezzeStore : AutoCloseable {
      * from another file, another line, another run — replaces where it was
      * written and nothing else.
      *
-     * A hash names ONE declaration. Writing a DIFFERENT typed or lowered form
-     * under a hash that already holds one is refused with [BlobConflict]: two
-     * different declarations were given one identity, and whichever a reader got
-     * would depend on who wrote last. A form given as null leaves no claim.
+     * A hash names ONE declaration. Under [StoreVerification] a DIFFERENT typed
+     * or lowered form written under a hash that already holds one is refused
+     * with [BlobConflict]; otherwise the last writer wins. A form given as null
+     * makes no claim on the hash (and, as before, leaves none stored).
      */
     fun putBlob(hash: Hash, kind: BlobKind, visibility: Visibility, typed: ByteArray?, ir: ByteArray?)
 

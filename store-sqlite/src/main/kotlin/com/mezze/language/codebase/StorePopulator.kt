@@ -623,16 +623,12 @@ object StorePopulator {
      */
     /**
      * A declaration whose hash the store already holds is not written again —
-     * that is the point of addressing by content. Under `-Dmezze.store.verify=1`
-     * it is serialized anyway and held against what is stored, so a hash that
-     * came to stand for two different declarations fails HERE instead of being
-     * skipped. Every test JVM sets it; a build does not pay for the second
-     * serialization.
+     * that is the point of addressing by content. Under [StoreVerification] it is
+     * serialized anyway and held against what is stored, so a hash that came to
+     * stand for two different declarations fails HERE instead of being skipped.
      */
-    private val verifySkipped = System.getProperty("mezze.store.verify") == "1"
-
     private inline fun verifyHeld(store: MezzeStore, hash: Hash, part: String, form: () -> ByteArray) {
-        if (!verifySkipped) return
+        if (!StoreVerification.enabled) return
         val held = store.getBlob(hash) ?: return
         refuseDifferentContent(hash, part, if (part == "typed") held.typed else held.ir, form())
     }

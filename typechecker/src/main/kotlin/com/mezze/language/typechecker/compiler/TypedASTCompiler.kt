@@ -3871,64 +3871,28 @@ class TypedASTCompiler(
         return refToDictedOp(opHash, deeper, src)
     }
 
-    /** Hash for an extracted lambda's FunctionIR. TypedASTHasher.hashExpr is
-     *  type-blind, so the SAME source lambda inside a generic body and inside each
-     *  of its mono specializations would collide on one hash while compiling to
-     *  DIFFERENT FunctionIRs (capture lists and dispatch differ once types are
-     *  pinned) — last registration wins and other callers run the wrong frame
-     *  layout. Salted with the enclosing spec hash and the types the lambda is
-     *  lowered at ([loweredAtTypes]), which keeps every version distinct. */
+    /** Hash for an extracted lambda's FunctionIR — what it is made of is in
+     *  [lambdaHashOf]. This supplies what only the compile in progress knows: the
+     *  enclosing mono spec, and which other lambdas the body will name by hash. */
     private fun saltedLambdaHash(
         expr: TypedExpr,
         dictCaptures: List<Pair<String, Int>> = emptyList(),
         ownDicts: Set<String> = emptySet(),
     ): Hash {
-        val base = com.mezze.language.typedast.TypedASTHasher.hashExpr(expr)
         val salt = specLambdaSalt
-        // NOT salted by the enclosing function, though `sorted_set.mz` holds eight
-        // textually identical `{ a, b } -> if a < b …` comparators (singleton,
-        // from_list, add, remove, contains, min_by, max_by, from_seq) that all
-        // collide on one hash. Folding `currentFunctionHash` in separates them,
-        // but it also ties a nested lambda's identity to its declaration's hash,
-        // and adding a `newtype` changes that hash — so two programs identical
-        // after newtype erasure emit different IR, which NewtypeErasureIRTest
-        // rightly rejects. Tried for BUG 7 and reverted: it separated the eight
-        // and changed no behaviour, so the collision is not what picks the wrong
-        // comparator.
-        val types = (expr as? TypedLambda)?.let { loweredAtTypes(it) }
-            ?: if (salt == null && dictCaptures.isEmpty() && ownDicts.isEmpty()) return base else null
-        val b = com.mezze.language.ast.hashing.MezzeHashBuilder()
-        b.append("spec_lambda")
-        b.append(base.hex)
-        if (salt != null) b.append(salt.hex)
-        if (types != null) { b.append("at_types"); b.append(types.hex) }
-        // The expr hash is type-blind, so the capture LIST has to be folded in:
-        // two textually identical comparators that capture different dicts are
-        // different functions, and without this they collide onto one registry
-        // entry and last-registration-wins runs the wrong one — the #106 collision,
-        // environment flavor. See SeqKeyOrdTest.
-        //
-        // The names, NOT the parent frame slot they are read from. The slot is where
-        // the PARENT keeps the dict; it appears in the parent's MakeLambda capture
-        // list, never in this lambda's body or its own capture names. Folding it in
-        // gave one lambda several identities for a difference it does not contain —
-        // over-separation, and the opposite of the stated rule that identity comes
-        // from what the lambda IS. Measured on removal: zero change across the
-        // interpreter suite (6242 tests), the typechecker suite, SeqKeyOrdTest which
-        // is the test the slot was added for, and DedupeCollisionGateTest, which
-        // would fail if two differing functions started sharing a hash.
-        for ((name, _) in dictCaptures) {
-            b.append(name)
+        // Once per lambda and spec: a recursive let is hashed BEFORE its own name is
+        // registered and emitted after, and [namedByHash] must not see the difference.
+        lambdaHashes[expr]?.takeIf { it.first == salt }?.let { return it.second }
+        val named = (expr as? TypedLambda)?.let { l ->
+            namedByHash(l,
+                { n -> localsByName[n]?.let { plainLocalLambdaBySlot[it] } ?: currentCaptureNames[n]?.let { currentCaptureLambdaHashes[it] } },
+                { n -> listOfNotNull(recursiveLetLambdas[n]?.hash, localConstrainedLambdas[n]) })
         }
-        // Dictionary PARAMETERS change the function's arity, so they are part of
-        // its identity for the same reason: the hash is type-blind, and the same
-        // text unconstrained takes no such parameters.
-        if (ownDicts.isNotEmpty()) {
-            b.append("own_dict_params")
-            for (name in ownDicts.sorted()) b.append(name)
-        }
-        return Hash(b.build().toFullHexString())
+        return lambdaHashOf(expr, salt, dictCaptures.map { it.first }, ownDicts, named.orEmpty())
+            .also { lambdaHashes[expr] = salt to it }
     }
+
+    private val lambdaHashes = java.util.IdentityHashMap<TypedExpr, Pair<Hash?, Hash>>()
 
     private fun compileLambda(expr: TypedLambda, src: SourceInfo, ownDicts: Set<String> = emptySet()): NodeIR {
         // Save parent's capture info BEFORE overwriting for the child.
@@ -3941,6 +3905,9 @@ class TypedASTCompiler(
         val parentParamNames = currentParamNames
 
         val dictsToCapture = dictCapturesFor(expr, ownDicts)
+        // Hashed here, while the frame is still the PARENT's: the hash covers the
+        // helpers this lambda captures, and they are found in the parent's frame.
+        val lambdaHash = saltedLambdaHash(expr, dictsToCapture, ownDicts)
         // Register the lambda's dict needs so compileFunctionBody adds them as
         // captures (not params — params are fixed by the indirect-call ABI).
         // We DON'T put them in dictMethodsForHash here because that would make
@@ -3961,7 +3928,6 @@ class TypedASTCompiler(
         currentCaptureNames = captureNameMap
 
         // Extract lambda as a separate FunctionIR
-        val lambdaHash = saltedLambdaHash(expr, dictsToCapture, ownDicts)
         if (ownDicts.isNotEmpty()) dictMethodsForHash[lambdaHash] = ownDicts
         val lambdaCaptureInfo = expr.captures.map { c -> c.name to typeToSlotKind(c.type) } +
             dictsToCapture.map { it.first to SlotKind.OBJECT }

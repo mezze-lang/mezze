@@ -83,6 +83,34 @@ object TypeVarNameSerializer : KSerializer<String> {
     }
 }
 
+/**
+ * A declaration's name. A bare top-level expression has none of its own and is
+ * named by where it stands in its file (`__toplevel_expr_3`) — a position, not
+ * part of what it is: the same expression twice in one file is one declaration
+ * under one hash. Inside [Positions] such a name is written without its number,
+ * and the name itself goes aside.
+ */
+object DeclNameSerializer : KSerializer<String> {
+    override val descriptor: SerialDescriptor =
+        kotlinx.serialization.descriptors.PrimitiveSerialDescriptor(
+            "com.mezze.language.ast.DeclName", kotlinx.serialization.descriptors.PrimitiveKind.STRING)
+
+    private const val POSITIONAL = MagicParams.TOPLEVEL_EXPR_PREFIX
+
+    override fun serialize(encoder: Encoder, value: String) {
+        val aside = Positions.writing.get()
+        if (aside == null || !value.startsWith(POSITIONAL)) { encoder.encodeString(value); return }
+        aside.file(value)
+        encoder.encodeString(POSITIONAL)
+    }
+
+    override fun deserialize(decoder: Decoder): String {
+        val written = decoder.decodeString()
+        val aside = Positions.reading.get()
+        return if (aside != null && written == POSITIONAL) aside.file() else written
+    }
+}
+
 @Serializable(with = TypeVarSerializer::class)
 data class TypeVar(val name: String, val level: Int = 0, val id: Int) {
     /**

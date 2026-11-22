@@ -67,4 +67,28 @@ class LambdaHashCoversItsCodeTest {
             }
         }
     }
+
+    /**
+     * The same lambda text, at the same types, calling a DIFFERENT captured
+     * helper: lowering names the helper by hash, so these are two functions.
+     */
+    @Test
+    fun `a lambda that calls a captured helper is not the lambda that calls another`() {
+        fun module(helper: String) = """
+            use std::collections::seq
+
+            let f = { xs: [Int] } -> do
+              let g = { y } -> $helper
+              seq::map { xs = xs, f = { x } -> g { y = x } }
+        """.trimIndent()
+        val seen = HashMap<String, MutableMap<String, String>>()
+        for (helper in listOf("y + 1", "y + 2", "y + 3")) for (fn in lowered(module(helper))) {
+            seen.getOrPut(fn.hash.hex) { LinkedHashMap() }.putIfAbsent(content(fn), "helper `$helper`")
+        }
+        val collisions = seen.filterValues { it.size > 1 }
+        assertTrue(collisions.isEmpty()) {
+            "${collisions.size} hash(es) carry more than one function: " +
+                collisions.entries.joinToString { (hash, byContent) -> "${hash.take(10)} ← ${byContent.values}" }
+        }
+    }
 }
