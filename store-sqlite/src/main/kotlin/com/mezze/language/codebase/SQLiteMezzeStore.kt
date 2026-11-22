@@ -151,7 +151,9 @@ class SQLiteMezzeStore private constructor(
         // 22: a blob is its declaration and THEN where it was written
         //    (`StoreSerialization.contentOf`) — files and line numbers no
         //    longer run through the bytes stored under a content hash.
-        const val SCHEMA_VERSION = 22
+        // 23: every key is a hash of scheme 2 (`HashScheme`); a store keyed by
+        //    another scheme's hashes holds nothing this build would ask for.
+        const val SCHEMA_VERSION = 23
 
         /** Metadata values at least this long are stored deflated. */
         private const val LARGE_METADATA = 4096

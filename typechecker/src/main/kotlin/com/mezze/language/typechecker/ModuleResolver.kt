@@ -1189,8 +1189,14 @@ class ModuleResolver(
                 return materializeStdlibTempFile(relativeFilePath, resourceContent)
             }
 
-            val possibleRoots = listOf(
+            // The build's own root first when it is known (`mezze.project.root`, as
+            // PrecompiledStdlib reads it): the roots after it are guesses from the
+            // working directory, and a resolver started somewhere else found NO
+            // stdlib through them — its modules then resolved nothing they import,
+            // and every identity computed from them came out different.
+            val possibleRoots = listOfNotNull(
                 projectRoot,
+                System.getProperty("mezze.project.root")?.let { Paths.get(it) },
                 Paths.get("."),
                 Paths.get(".."),
                 Paths.get(".").toAbsolutePath().parent ?: Paths.get(".")

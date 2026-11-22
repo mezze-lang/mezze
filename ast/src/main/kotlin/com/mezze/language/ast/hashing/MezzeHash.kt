@@ -63,6 +63,31 @@ data class MezzeHash private constructor(
 }
 
 /**
+ * WHICH rules a hash was computed by.
+ *
+ * A hash says "this is that declaration" only to someone computing hashes the
+ * same way: what is walked, in what order, encoded how. Change any of that and
+ * the same hash would name something else, or one declaration two hashes — and
+ * two stores, or two machines, on either side of the change would disagree
+ * without either being wrong.
+ *
+ * So the scheme's number is digested into every hash. Two schemes cannot
+ * produce the same hash for different rules, and anything that compares hashes
+ * across a boundary (a store on disk, another node) compares this number first.
+ *
+ * BUMP IT when a hash can come out different for unchanged source: a change to
+ * what `DeclIdentity`, `TypedASTHasher`, the type hasher or a lambda's hash
+ * covers, to an encoding in [MezzeHashBuilder], or to the digest. Not for a new
+ * construct that existing code cannot contain.
+ *
+ *  1: SHA-512 over the walk, unversioned.
+ *  2: the scheme digested first; a lambda's hash covers the types it is lowered at.
+ */
+object HashScheme {
+    const val VERSION = 2
+}
+
+/**
  * Bytes to hash, appended a piece at a time and digested once by [build].
  *
  * Buffered: a hash is built from many small pieces (a tag, a length, a name),
@@ -117,6 +142,7 @@ class MezzeHashBuilder {
     /** The hash of everything appended since the last build; the builder starts empty again. */
     fun build(): MezzeHash {
         val d = DIGEST.get()
+        d.update(SCHEME)
         d.update(buf, 0, len)
         len = 0
         // Handed back for the next builder; this one, built, appends no more.
@@ -128,6 +154,9 @@ class MezzeHashBuilder {
     fun buildHash(): com.mezze.language.typedast.Hash = com.mezze.language.typedast.Hash(build().toFullHexString())
 
     private companion object {
+        /** What every hash starts from — see [HashScheme]. */
+        val SCHEME = byteArrayOf('M'.code.toByte(), 'Z'.code.toByte(), HashScheme.VERSION.toByte())
+
         val SPARE = ThreadLocal<ByteArray?>()
         val EMPTY = ByteArray(0)
 
