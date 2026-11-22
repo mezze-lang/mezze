@@ -23,6 +23,13 @@ import java.io.ByteArrayOutputStream
  * DECLARATION — first met is 0 — which keeps two variables apart exactly as
  * their ids did, and the id itself goes beside it. A row variable's name is
  * such a number too, and is treated the same.
+ *
+ * So is a type variable's NAME. One the compiler invents comes from a counter
+ * that is never reset (`'x882` in one run, `'c887` in the next), and a
+ * declaration binds its type parameters by that name — so every place that
+ * holds one (the variable, a `TypeParam`, an ability operation's variable)
+ * writes the name's number within the declaration, the same number wherever the
+ * same name appears, and the name goes aside.
  */
 object Positions {
     internal class Writer {
@@ -55,6 +62,14 @@ object Positions {
         fun variable(id: Int): Int {
             int(id)
             return variables.getOrPut(id) { variables.size }
+        }
+
+        private val names = HashMap<String, Int>()
+
+        /** The number of the type-variable NAME [name] within what is being written; the name itself goes aside. */
+        fun name(name: String): Int {
+            file(name)
+            return names.getOrPut(name) { names.size }
         }
 
         private val rows = HashMap<String, Int>()

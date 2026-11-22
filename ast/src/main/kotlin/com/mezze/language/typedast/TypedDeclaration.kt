@@ -124,6 +124,7 @@ data class TypeScheme(
 
 @Serializable
 data class TypeParam(
+    @Serializable(with = com.mezze.language.ast.TypeVarNameSerializer::class)
     val name: String,
     val kind: TypeKind
 )

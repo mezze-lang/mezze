@@ -16,8 +16,8 @@ import kotlinx.serialization.encoding.encodeStructure
 import kotlinx.serialization.json.JsonClassDiscriminator
 
 /**
- * [TypeVar] as its three fields. Inside [Positions] the `id` written is the
- * variable's number within the declaration, and the id itself goes aside — see
+ * [TypeVar] as its three fields. Inside [Positions] the `name` and the `id`
+ * written are numbers within the declaration, and the real ones go aside — see
  * there. `level` is left out when it is 0, as the generated serializer left it.
  */
 object TypeVarSerializer : KSerializer<TypeVar> {
@@ -29,9 +29,11 @@ object TypeVarSerializer : KSerializer<TypeVar> {
 
     override fun serialize(encoder: Encoder, value: TypeVar) {
         val aside = Positions.writing.get()
+        // Name first, then id: [deserialize] takes them back in that order.
+        val name = aside?.let { "t${it.name(value.name)}" } ?: value.name
         val id = aside?.variable(value.id) ?: value.id
         encoder.encodeStructure(descriptor) {
-            encodeStringElement(descriptor, 0, value.name)
+            encodeStringElement(descriptor, 0, name)
             if (value.level != 0 || shouldEncodeElementDefault(descriptor, 1)) encodeIntElement(descriptor, 1, value.level)
             encodeIntElement(descriptor, 2, id)
         }
@@ -52,9 +54,32 @@ object TypeVarSerializer : KSerializer<TypeVar> {
                 }
             }
         }
-        val written = id ?: error("a type variable was stored without its id")
-        val aside = Positions.reading.get()
-        return TypeVar(name ?: error("a type variable was stored without its name"), level, aside?.int() ?: written)
+        val writtenId = id ?: error("a type variable was stored without its id")
+        val writtenName = name ?: error("a type variable was stored without its name")
+        val aside = Positions.reading.get() ?: return TypeVar(writtenName, level, writtenId)
+        val realName = aside.file()
+        return TypeVar(realName, level, aside.int())
+    }
+}
+
+/**
+ * A type variable's name held as a plain string — a `TypeParam`, the variable
+ * an ability operation dispatches on. Inside [Positions] it is written as the
+ * same number [TypeVarSerializer] writes for that name, and the name goes aside.
+ */
+object TypeVarNameSerializer : KSerializer<String> {
+    override val descriptor: SerialDescriptor =
+        kotlinx.serialization.descriptors.PrimitiveSerialDescriptor(
+            "com.mezze.language.ast.TypeVarName", kotlinx.serialization.descriptors.PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: String) {
+        val aside = Positions.writing.get()
+        encoder.encodeString(if (aside == null) value else "t${aside.name(value)}")
+    }
+
+    override fun deserialize(decoder: Decoder): String {
+        val written = decoder.decodeString()
+        return Positions.reading.get()?.file() ?: written
     }
 }
 

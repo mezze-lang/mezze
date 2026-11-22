@@ -96,27 +96,19 @@ class BlobContentTest {
         )
     }
 
-    /**
-     * OPEN. A type variable the compiler names itself is named from a per-thread
-     * counter that is never reset (`'x882` in one run, `'c887` in the next), and
-     * the name is how a declaration's type parameters bind — so it runs through
-     * the typed content. This asserts the break; it fails the day emission names
-     * such variables by their place in the declaration, and is then to be folded
-     * into the tests above.
-     */
     @Test
-    fun `OPEN - a compiler-named type variable still runs through typed content`() {
-        fun double(store: MezzeStore) =
-            StoreSerialization.deserializeTypedLetDecl(store.getBlob(store.resolveName("app", "double")!!)!!.typed!!)
+    fun `a type variable the compiler named does not run through a declaration's content`() {
+        // `double` is generic in variables the compiler names from a counter that
+        // never resets (`'x882`, then `'c887`): the two runs name them differently.
+        fun double(store: MezzeStore) = store.getBlob(store.resolveName("app", "double")!!)!!.typed!!
         val a = double(indexed(source + inferred, "app.mz"))
         val b = double(indexed(source + inferred, "app.mz"))
-        assertEquals(a.hash, b.hash)
-        assertTrue(a.typeParams.isNotEmpty(), "`double` is no longer generic: ${a.scheme.type}")
-        assertFalse(
-            a.typeParams.map { it.name } == b.typeParams.map { it.name },
-            "`double`'s type parameters are now named the same in every run (${a.typeParams.map { it.name }}) — " +
-                "fold `inferred` into `source`",
-        )
+        val namesA = StoreSerialization.deserializeTypedLetDecl(a).typeParams.map { it.name }
+        val namesB = StoreSerialization.deserializeTypedLetDecl(b).typeParams.map { it.name }
+        assertTrue(namesA.isNotEmpty(), "`double` is no longer generic")
+        assertFalse(namesA == namesB, "the two runs named `double`'s variables alike ($namesA) — this no longer tests anything")
+        assertArrayEquals(StoreSerialization.contentOf(a), StoreSerialization.contentOf(b))
+        assertSameContents(indexed(source + inferred, "app.mz"), indexed(source + inferred, "app.mz"))
     }
 
     @Test

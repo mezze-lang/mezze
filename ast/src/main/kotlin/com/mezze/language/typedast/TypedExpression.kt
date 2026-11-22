@@ -49,6 +49,7 @@ sealed interface BindingRef {
     @Serializable data class AbilityOp(
         val abilityHash: Hash,
         val opName: String,
+        @Serializable(with = com.mezze.language.ast.TypeVarNameSerializer::class)
         val typeVarName: String,
     ) : BindingRef
 }
