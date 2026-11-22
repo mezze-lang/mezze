@@ -82,6 +82,23 @@ abstract class BlobConflictContract {
         assertTrue(StoreSerialization.sameContent(twice.ir!!, store.getIR(twice.hash)!!), "the refused write replaced what was stored")
     }
 
+    /**
+     * The check at work on what a build writes. `{ x } -> x` over `Int` and over
+     * `Str` lower to different functions; while a lambda's hash did not cover its
+     * types they shared one, and the second module's was skipped as "already
+     * stored". With every skipped declaration verified (`mezze.store.verify`, set
+     * for every test JVM) that is a [BlobConflict] — so indexing both is the test.
+     */
+    @Test
+    fun `two modules whose lambdas read alike but lower differently both index`() {
+        val use = "use std::collections::seq\n\n"
+        indexSource(store, use + "let f = { xs: [Int] } -> seq::map { xs = xs, f = { x } -> x }", module = "ints")
+        indexSource(store, use + "let f = { xs: [Str] } -> seq::map { xs = xs, f = { x } -> x }", module = "strs")
+        assertTrue(hashOf2("ints") != hashOf2("strs"))
+    }
+
+    private fun hashOf2(module: String) = store.resolveName(module, "f")!!
+
     @Test
     fun `a form given as null makes no claim`() {
         indexSource(store, source)
