@@ -3876,9 +3876,8 @@ class TypedASTCompiler(
      *  of its mono specializations would collide on one hash while compiling to
      *  DIFFERENT FunctionIRs (capture lists and dispatch differ once types are
      *  pinned) — last registration wins and other callers run the wrong frame
-     *  layout. Salting with the enclosing spec hash keeps every version distinct;
-     *  outside spec compilation the plain hash is unchanged (stable stdlib
-     *  prelowering, recursive-let self-references, closure keying). */
+     *  layout. Salted with the enclosing spec hash and the types the lambda is
+     *  lowered at ([loweredAtTypes]), which keeps every version distinct. */
     private fun saltedLambdaHash(
         expr: TypedExpr,
         dictCaptures: List<Pair<String, Int>> = emptyList(),
@@ -3896,11 +3895,13 @@ class TypedASTCompiler(
         // rightly rejects. Tried for BUG 7 and reverted: it separated the eight
         // and changed no behaviour, so the collision is not what picks the wrong
         // comparator.
-        if (salt == null && dictCaptures.isEmpty() && ownDicts.isEmpty()) return base
+        val types = (expr as? TypedLambda)?.let { loweredAtTypes(it) }
+            ?: if (salt == null && dictCaptures.isEmpty() && ownDicts.isEmpty()) return base else null
         val b = com.mezze.language.ast.hashing.MezzeHashBuilder()
         b.append("spec_lambda")
         b.append(base.hex)
         if (salt != null) b.append(salt.hex)
+        if (types != null) { b.append("at_types"); b.append(types.hex) }
         // The expr hash is type-blind, so the capture LIST has to be folded in:
         // two textually identical comparators that capture different dicts are
         // different functions, and without this they collide onto one registry

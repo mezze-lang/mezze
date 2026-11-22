@@ -199,11 +199,14 @@ class NewtypeErasureIRTest {
             let f = { n: Int } -> Age.(n)
             f { n = 42 }
         """)
-        // The lambda's body IR should be identical — Age.(n) erases to n.
-        // The whole __entry__ shape (call + arg) should therefore match.
-        assertTrue(
-            sameShape(plain, newtype),
-            "Wrapping the return in Age.(n) must not affect emitted IR.\n  plain=$plain\n  newtype=$newtype",
+        // The whole __entry__ shape (call + arg) matches — no wrap node — up to
+        // WHICH function the lambda is: a lambda's hash covers the types it is
+        // lowered at, and one returning an `Age` is not the one returning an
+        // `Int` (an `Age` is ordered by its own `Ord`, an `Int` directly).
+        fun shape(n: NodeIR) = stripSrc(n.toString()).replace(Regex("functionHash=[0-9a-f]+\\.\\.\\."), "functionHash=LAMBDA")
+        assertEquals(
+            shape(plain), shape(newtype),
+            "Wrapping the return in Age.(n) must not affect emitted IR.",
         )
     }
 }
