@@ -3899,8 +3899,8 @@ class TypedASTCompiler(
 
     private val lambdaHashes = java.util.IdentityHashMap<TypedExpr, Pair<Hash?, Hash>>()
 
-    /** Forget what [names] meant as local functions; the result puts it back. */
-    private fun shadowLocalFunctions(names: List<String>): () -> Unit {
+    /** Forget what [names] meant as local functions — a parameter or a pattern has bound them anew; the result puts it back. */
+    internal fun shadowLocalFunctions(names: List<String>): () -> Unit {
         val aliases = names.mapNotNull { n -> localFnAliases.remove(n)?.let { n to it } }
         val constrained = names.mapNotNull { n -> localConstrainedLambdas.remove(n)?.let { n to it } }
         val recursive = names.mapNotNull { n -> recursiveLetLambdas.remove(n)?.let { n to it } }

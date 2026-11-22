@@ -54,6 +54,9 @@ internal fun TypedASTCompiler.compileMatch(expr: TypedMatch, src: SourceInfo): N
         patternsToEmit.map { pat ->
             // Push a new scope for this match case's bindings
             val caseScope = mutableMapOf<String, Int>()
+            // A name the arm binds is a new meaning for it: what an enclosing `let`
+            // of that name was as a local function is not what the arm calls.
+            val unshadow = shadowLocalFunctions(case.bindings.map { it.name } + case.ifLetBindings.flatMap { it.bindingNames })
             val savedSlotConcreteTypesInCase = slotConcreteTypes.toMap()
             // A match-arm binding uses `forceAllocLocal`, which OVERWRITES
             // `localsByName[name]`. Snapshot it here and restore it when the arm
@@ -175,6 +178,7 @@ internal fun TypedASTCompiler.compileMatch(expr: TypedMatch, src: SourceInfo): N
             }
 
             var bodyIR = compileExpr(case.body)
+            unshadow()
 
             // Wrap guard AND body with nested destructuring let-bindings if needed.
             // For pattern `Some { val = { x = px, y = py } } if x > 0 -> x`:

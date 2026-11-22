@@ -133,9 +133,22 @@ class LetShadowsOuterBindingTest {
      * planned_features/known-bugs.md. If the answer becomes "recursion wins",
      * this test flips deliberately.
      */
-    @Test fun `a self-referencing let shadowing a top-level name refers outward`() {
+    @Test fun `a self-referencing let-bound lambda shadowing a top-level name is itself, not the outer one`() {
+        // NOT 999 any more, and it never was for the reason given above. The 999 was
+        // the entry shortcut in `compileBlock`: in a function with no parameters and
+        // no captures, a let-bound lambda was REPLACED by the top-level declaration
+        // of the same NAME — so `down { n = 3 }` ran the top-level `down` and the
+        // local one was never called at all. The same shortcut turned a local
+        // `let helper = { y } -> y * 100` into the module's `helper`
+        // (LocalFunctionNameTest). With a parameter on `go` the shortcut never
+        // applied and the answer was already 0 — the next test.
+        //
+        // So this pins what lowering has always done wherever the shortcut did not
+        // interfere: the lambda's own name, inside its body, is the lambda. That is
+        // "recursion wins" for a let-bound LAMBDA — BUG 32's question, still the
+        // language's to answer; if it becomes "refers outward", both tests flip.
         assertEquals(
-            999L,
+            0L,
             run(
                 """
                 let down: { n: Int } -> Int = { n } -> 999
@@ -143,6 +156,21 @@ class LetShadowsOuterBindingTest {
                   let down = { n: Int } -> if n <= 0 then 0 else down { n = n - 1 }
                   down { n = 3 }
                 go {}
+                """
+            ),
+        )
+    }
+
+    @Test fun `and answers the same whether or not the enclosing function has parameters`() {
+        assertEquals(
+            0L,
+            run(
+                """
+                let down: { n: Int } -> Int = { n } -> 999
+                let go: { k: Int } -> Int = { k } -> do
+                  let down = { n: Int } -> if n <= 0 then 0 else down { n = n - 1 }
+                  down { n = k }
+                go { k = 3 }
                 """
             ),
         )

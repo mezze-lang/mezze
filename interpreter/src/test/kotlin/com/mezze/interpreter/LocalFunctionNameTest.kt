@@ -73,17 +73,31 @@ class LocalFunctionNameTest {
         assertEquals(222L, MezzeTestHelper.run(src))
     }
 
-    @Test fun `a let that shadows an alias is the let`() {
+    @Test fun `a match pattern that binds an alias's name is the pattern's binding`() {
         val src = """
             $picks
             let go: {} -> Int = {} -> do
               let pick = pick_hi
-              let first = pick { a = 1, b = 2 }
-              let pick = { a: Int, b: Int } -> 7
-              first * 10 + pick { a = 1, b = 2 }
+              let box = { pick = { a, b } -> 222, other = 0 }
+              match box is
+                { pick, other } -> pick { a = 1, b = 2 }
             go {}
         """.trimIndent()
-        assertEquals(27L, MezzeTestHelper.run(src))
+        assertEquals(222L, MezzeTestHelper.run(src))
+    }
+
+    @Test fun `a match pattern that binds a recursive local lambda's name is the pattern's binding`() {
+        val src = """
+            let main: {} -> Int = {} -> do
+              let go = { n: Int } -> if n <= 0 then 111 else go { n = n - 1 }
+              let box = { go = { n } -> 333, other = 0 }
+              match box is
+                { go, other } -> do
+                  let thunk = {} -> go { n = 3 }
+                  thunk {}
+            main {}
+        """.trimIndent()
+        assertEquals(333L, MezzeTestHelper.run(src))
     }
 
     @Test fun `a parameter named like a constrained top-level function is the parameter`() {
