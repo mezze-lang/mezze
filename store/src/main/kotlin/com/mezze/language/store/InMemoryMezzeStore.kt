@@ -345,6 +345,12 @@ class InMemoryMezzeStore : MezzeStore {
 
     private val blobOwners = HashMap<String, Set<Hash>>()   // owner → hashes it produces
 
+    private val codeHashes = LinkedHashMap<Hash, Hash>()
+
+    override fun putCodeHash(hash: Hash, code: Hash) { codeHashes[hash] = code }
+    override fun getCodeHash(hash: Hash): Hash? = codeHashes[hash]
+    override fun getHashesForCode(code: Hash): List<Hash> = codeHashes.filterValues { it == code }.keys.toList()
+
     override fun replaceBlobOwnership(owner: String, hashes: Set<Hash>) {
         val dropped = (blobOwners.put(owner, hashes.toSet()) ?: emptySet()) - hashes
         val garbage = dropped.filterTo(HashSet()) { h -> blobOwners.values.none { h in it } }
@@ -356,6 +362,7 @@ class InMemoryMezzeStore : MezzeStore {
         implTargets.keys.removeAll(garbage)
         effectPerformers.removeAll { it.hash in garbage }
         monoSpecializations.keys.removeAll(hex)
+        codeHashes.keys.removeAll(garbage)
         signatures.keys.removeAll(garbage)
         definitions.keys.removeAll(garbage)
         usages.removeAll { it.fromHash in garbage }

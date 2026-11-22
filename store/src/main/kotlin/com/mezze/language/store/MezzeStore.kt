@@ -656,6 +656,26 @@ interface MezzeStore : AutoCloseable {
     fun getMonoSpecializationsForGeneric(genericHash: Hash): List<MonoSpecializationRow>
 
     // ====================================================================
+    // CODE HASHES — what a compiled function IS, by any name ([CodeHash])
+    //
+    // A declaration's hash says WHICH declaration; its code hash says what code
+    // it lowered to. Several declarations — the same function in two modules,
+    // or under two names — can share one code hash.
+    // ====================================================================
+
+    /** Record the code hash of the function stored under [hash]. INSERT OR REPLACE. */
+    fun putCodeHash(hash: Hash, code: Hash)
+
+    /** The code hash of the function stored under [hash], or null when none is recorded. */
+    fun getCodeHash(hash: Hash): Hash?
+
+    /** Every stored function whose code is [code] — any of them is that code. */
+    fun getHashesForCode(code: Hash): List<Hash>
+
+    /** The lowered function whose code is [code], or null when no stored function is. */
+    fun getIRForCode(code: Hash): ByteArray? = getHashesForCode(code).firstNotNullOfOrNull { getIR(it) }
+
+    // ====================================================================
     // LIFECYCLE
     // ====================================================================
 

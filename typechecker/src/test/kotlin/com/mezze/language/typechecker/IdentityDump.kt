@@ -12,6 +12,7 @@ import java.security.MessageDigest
  *   id    <stdlib module>  <fingerprint of every identity it declares>
  *   typed <hash>           <sha256 of the declaration's stored content>
  *   ir    <hash>           <sha256 of the lowered function's stored content>
+ *   code  <hash>           <the lowered function's code hash>
  */
 object IdentityDump {
 
@@ -85,8 +86,11 @@ object IdentityDump {
         for (fn in checked.loweredFunctions!!) {
             lowered += "ir ${fn.hash.hex} ${sha(StoreSerialization.contentOf(StoreSerialization.serializeFunctionIR(fn)))}"
         }
+        val codes = com.mezze.language.store.CodeHash.of(checked.loweredFunctions!!)
+            .map { (identity, code) -> "code ${identity.hex} ${code.hex}" }
         typed.sorted().forEach { out.append(it).append('\n') }
         lowered.sorted().forEach { out.append(it).append('\n') }
+        codes.sorted().forEach { out.append(it).append('\n') }
 
         // Raw bytes: the child may be running under any default charset.
         System.out.write(out.toString().toByteArray(Charsets.UTF_8))

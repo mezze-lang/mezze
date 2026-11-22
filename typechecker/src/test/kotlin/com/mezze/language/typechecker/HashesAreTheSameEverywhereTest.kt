@@ -18,7 +18,8 @@ import java.util.concurrent.TimeUnit
  * pool and every static counter. So this runs [IdentityDump] in two JVMs of
  * their own, as unlike each other as one machine allows, and requires the
  * output to be identical: every stdlib module's identities, and the stored
- * content of every declaration and lowered function of a program.
+ * content and the code hash of every declaration and lowered function of a
+ * program.
  */
 class HashesAreTheSameEverywhereTest {
 
@@ -60,7 +61,9 @@ class HashesAreTheSameEverywhereTest {
             val ids = plain.count { it.startsWith("id ") }
             val typed = plain.count { it.startsWith("typed ") }
             val lowered = plain.count { it.startsWith("ir ") }
-            assertTrue(ids >= 40 && typed >= 8 && lowered >= 20, "too little was compared: $ids modules, $typed typed, $lowered lowered")
+            val codes = plain.count { it.startsWith("code ") }
+            assertTrue(ids >= 40 && typed >= 8 && lowered >= 20 && codes == lowered,
+                "too little was compared: $ids modules, $typed typed, $lowered lowered, $codes code hashes")
             assertTrue(plain.none { it.endsWith(" none") }, "a stdlib module has no identity: ${plain.filter { it.endsWith(" none") }}")
 
             val differing = plain.zip(unlike).filter { (a, b) -> a != b }

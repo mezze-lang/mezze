@@ -94,6 +94,7 @@ object StoreSerialization {
      */
     fun sameContent(a: ByteArray, b: ByteArray): Boolean {
         if (!isStoredDeclaration(a) || !isStoredDeclaration(b)) return a.contentEquals(b)
+        if (a[2] != BLOB_FORMAT || b[2] != BLOB_FORMAT) return a.contentEquals(b)
         val endA = contentEnd(a)
         val endB = contentEnd(b)
         if (endA != endB) return false

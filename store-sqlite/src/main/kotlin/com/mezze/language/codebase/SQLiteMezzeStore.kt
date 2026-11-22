@@ -153,7 +153,8 @@ class SQLiteMezzeStore private constructor(
         //    longer run through the bytes stored under a content hash.
         // 23: every key is a hash of scheme 2 (`HashScheme`); a store keyed by
         //    another scheme's hashes holds nothing this build would ask for.
-        const val SCHEMA_VERSION = 23
+        // 24: code_hashes — what each stored function is as code (`CodeHash`).
+        const val SCHEMA_VERSION = 24
 
         /** Metadata values at least this long are stored deflated. */
         private const val LARGE_METADATA = 4096
@@ -854,6 +855,8 @@ class SQLiteMezzeStore private constructor(
                     type_args_cbor   BLOB NOT NULL
                 ) WITHOUT ROWID
             """.trimIndent())
+            s.executeUpdate("CREATE TABLE IF NOT EXISTS $alias.code_hashes (hash TEXT PRIMARY KEY, code_hash TEXT NOT NULL) WITHOUT ROWID")
+            s.executeUpdate("CREATE INDEX IF NOT EXISTS $alias.idx_code_hashes_code ON code_hashes(code_hash)")
         }
     }
 
@@ -1386,6 +1389,16 @@ class SQLiteMezzeStore private constructor(
                 ) WITHOUT ROWID
             """.trimIndent())
             s.executeUpdate("CREATE INDEX idx_mono_specializations_generic ON mono_specializations(generic_hash)")
+
+            // What each stored function is as CODE (`CodeHash`): several declarations
+            // can share one. Goes with its blob.
+            s.executeUpdate("""
+                CREATE TABLE code_hashes (
+                    hash      TEXT PRIMARY KEY REFERENCES blobs(hash) ON DELETE CASCADE,
+                    code_hash TEXT NOT NULL
+                ) WITHOUT ROWID
+            """.trimIndent())
+            s.executeUpdate("CREATE INDEX idx_code_hashes_code ON code_hashes(code_hash)")
 
             // ----------------------------------------------------------------
             // APP MANIFESTS — entry points for `mez build`
@@ -3560,6 +3573,27 @@ class SQLiteMezzeStore private constructor(
     // ====================================================================
     // MONO SPECIALIZATIONS
     // ====================================================================
+
+    @Synchronized
+    override fun putCodeHash(hash: Hash, code: Hash) {
+        conn.prepareStatement("INSERT OR REPLACE INTO code_hashes (hash, code_hash) VALUES (?, ?)").use { ps ->
+            ps.setString(1, hash.hex); ps.setString(2, code.hex); ps.executeUpdate()
+        }
+    }
+
+    @Synchronized
+    override fun getCodeHash(hash: Hash): Hash? =
+        conn.prepareStatement(unionAll("SELECT code_hash FROM <DB>.code_hashes WHERE hash = ?") + " LIMIT 1").use { ps ->
+            for (i in 1..3) ps.setString(i, hash.hex)
+            ps.executeQuery().use { rs -> if (rs.next()) Hash(rs.getString(1)) else null }
+        }
+
+    @Synchronized
+    override fun getHashesForCode(code: Hash): List<Hash> =
+        conn.prepareStatement(unionAll("SELECT hash FROM <DB>.code_hashes WHERE code_hash = ?")).use { ps ->
+            for (i in 1..3) ps.setString(i, code.hex)
+            ps.executeQuery().use { rs -> buildList { while (rs.next()) add(Hash(rs.getString(1))) } }.distinct()
+        }
 
     @Synchronized
     override fun putMonoSpecialization(specializedHash: Hash, genericHash: Hash, typeArgsCbor: ByteArray) {

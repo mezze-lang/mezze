@@ -333,6 +333,10 @@ class ChainedMezzeStore(
         primary.putMonoSpecialization(specializedHash, genericHash, typeArgsCbor)
     override fun getMonoSpecialization(specializedHash: Hash): MonoSpecializationRow? =
         firstNonNull { it.getMonoSpecialization(specializedHash) }
+    override fun putCodeHash(hash: Hash, code: Hash) = primary.putCodeHash(hash, code)
+    override fun getCodeHash(hash: Hash): Hash? = firstNonNull { it.getCodeHash(hash) }
+    override fun getHashesForCode(code: Hash): List<Hash> = all.flatMap { it.getHashesForCode(code) }.distinct()
+
     override fun getMonoSpecializationsForGeneric(genericHash: Hash): List<MonoSpecializationRow> =
         all.flatMap { it.getMonoSpecializationsForGeneric(genericHash) }.distinct()
 

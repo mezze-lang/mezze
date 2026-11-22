@@ -203,6 +203,7 @@ object StorePopulator {
             val functions = result.loweredFunctions
             if (functions.isNotEmpty()) {
                 scatterFunctionIRs(store, functions, modulePath, existing)
+                recordCodeHashes(store, functions)
                 // Only when this run lowered: a check-only index has no functions,
                 // and that says nothing about which ones the program still needs.
                 store.replaceBlobOwnership("lowered:$modulePath", functions.mapTo(HashSet()) { it.hash })
@@ -744,6 +745,19 @@ object StorePopulator {
      *   scatterTypedModule earlier in this same transaction with typed-only)
      *   and merge in IR.
      */
+    /**
+     * Record what each of [functions] is as code ([CodeHash]), for the ones this
+     * store holds. All of them are hashed together — a function's code hash is
+     * made of its callees' — and one outside the set is answered from what the
+     * store already recorded (the standard library's, a dependency's).
+     */
+    fun recordCodeHashes(store: MezzeStore, functions: Collection<FunctionIR>) {
+        val codes = com.mezze.language.store.CodeHash.of(functions) { store.getCodeHash(it) }
+        for ((hash, code) in codes) {
+            if (store.ownsBlob(hash) && store.getCodeHash(hash) != code) store.putCodeHash(hash, code)
+        }
+    }
+
     private fun scatterFunctionIRs(
         store: MezzeStore,
         functions: List<FunctionIR>,

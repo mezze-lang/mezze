@@ -201,6 +201,7 @@ fun main(args: Array<String>) {
                     irBytes
                 )
             }
+            com.mezze.language.codebase.StorePopulator.recordCodeHashes(store, functions.values)
 
             // Store performer records
             if (performers.isNotEmpty()) {
