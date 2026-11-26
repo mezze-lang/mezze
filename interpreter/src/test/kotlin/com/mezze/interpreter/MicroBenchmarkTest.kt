@@ -479,7 +479,7 @@ class MicroBenchmarkTest {
                   if iter == max
                     then count_down {n = $n}
                     else do
-                      let _ = count_down {n = $n}
+                      count_down {n = $n}
                       bench {iter = iter + 1, max = max}
 
                 bench {iter = 0, max = ITERATIONS}
@@ -501,7 +501,7 @@ class MicroBenchmarkTest {
                   if iter == max
                     then sum_to {acc = 0, i = 0, n = $n}
                     else do
-                      let _ = sum_to {acc = 0, i = 0, n = $n}
+                      sum_to {acc = 0, i = 0, n = $n}
                       bench {iter = iter + 1, max = max}
 
                 bench {iter = 0, max = ITERATIONS}

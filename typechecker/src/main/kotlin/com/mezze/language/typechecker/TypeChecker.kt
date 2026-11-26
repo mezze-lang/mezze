@@ -1064,9 +1064,14 @@ class TypeChecker(
                         },
                     ).map { TypeCheckWarning(message = it.message, loc = it.loc, code = it.code) }
                 }.orEmpty()
+                // A statement that is a call performing nothing: needs solved effect rows.
+                val pureStatementWarnings = emitResult.typedModule?.let { typed ->
+                    com.mezze.language.typechecker.validation.PureStatementLinter.lint(typed, substitution)
+                        .map { TypeCheckWarning(message = it.message, loc = it.loc, code = it.code) }
+                }.orEmpty()
                 return TypeCheckResult.Success(
                     substitution = substitution, importContext = importContext,
-                    warnings = warnings + validationWarnings + deprecationWarnings,
+                    warnings = warnings + validationWarnings + deprecationWarnings + pureStatementWarnings,
                     loadedModules = loadedModules,
                     abilityImpls = context.getAllAbilityImpls(),
                     typedModule = emitResult.typedModule,
@@ -1249,16 +1254,26 @@ class TypeChecker(
         constraintResults: Map<String, ConstraintResult>,
     ): List<TypeCheckWarning> {
         val unusedVarWarnings = constraintResults.values.flatMap { it.unusedVariables }.map { unused ->
-            if (unused.isParameter) TypeCheckWarning(
-                message = "Unused parameter '${unused.name}'. A parameter's name is the field its caller " +
-                    "passes, so renaming it would change what callers pass; remove it if no caller needs it.",
-                loc = unused.loc,
-                code = com.mezze.language.parsedast.diagnostics.WarningCode.W0103_UNUSED_PARAMETER
-            ) else TypeCheckWarning(
-                message = "Unused variable '${unused.name}'. Prefix with '_' to suppress this warning.",
-                loc = unused.loc,
-                code = com.mezze.language.parsedast.diagnostics.WarningCode.W0101_UNUSED_VARIABLE
-            )
+            when (unused.kind) {
+                com.mezze.language.typechecker.constraints.ConstraintResult.BindingKind.PARAMETER -> TypeCheckWarning(
+                    message = "Unused parameter '${unused.name}'. A parameter's name is the field its caller " +
+                        "passes, so renaming it would change what callers pass; remove it if no caller needs it.",
+                    loc = unused.loc,
+                    code = com.mezze.language.parsedast.diagnostics.WarningCode.W0103_UNUSED_PARAMETER
+                )
+                com.mezze.language.typechecker.constraints.ConstraintResult.BindingKind.PATTERN -> TypeCheckWarning(
+                    message = "Unused binding '${unused.name}' in this pattern. Write `_` in its place " +
+                        "(a field written `{ ${unused.name} }` becomes `{ ${unused.name} = _ }`).",
+                    loc = unused.loc,
+                    code = com.mezze.language.parsedast.diagnostics.WarningCode.W0104_UNUSED_PATTERN_BINDING
+                )
+                com.mezze.language.typechecker.constraints.ConstraintResult.BindingKind.LET -> TypeCheckWarning(
+                    message = "Unused variable '${unused.name}'. Remove the binding; if the expression must " +
+                        "still run for its effect, keep it on its own as a statement.",
+                    loc = unused.loc,
+                    code = com.mezze.language.parsedast.diagnostics.WarningCode.W0101_UNUSED_VARIABLE
+                )
+            }
         }
         val patternWarnings = constraintResults.values.flatMap { it.patternWarnings }.map { warningMsg ->
             TypeCheckWarning(message = warningMsg, loc = null)

@@ -48,7 +48,7 @@ class AsyncEffectHandlerPropagationTest {
                         # Use atomically to prove task ran
                         atomically {f = {} -> STM.write {var = flag, val = 1}}
                     }
-                    let _ = await {p = p}
+                    await {p = p}
                     deref {var = flag}
         """
         val result = eval(code)
@@ -69,7 +69,7 @@ class AsyncEffectHandlerPropagationTest {
                     let v = STM.read {var = counter}
                     STM.write {var = counter, val = v + 50}
                 }}
-                let _ = await {p = p}
+                await {p = p}
                 deref {var = counter}
         """
         val result = eval(code)
@@ -87,13 +87,13 @@ class AsyncEffectHandlerPropagationTest {
 
             perform LoomAsync in do
                 let p1 = Async.spawn {f = {} -> atomically {f = {} -> STM.write {var = counter, val = 10}}}
-                let _ = await {p = p1}
+                await {p = p1}
 
                 let p2 = Async.spawn {f = {} -> atomically {f = {} -> do
                     let v = STM.read {var = counter}
                     STM.write {var = counter, val = v + 5}
                 }}
-                let _ = await {p = p2}
+                await {p = p2}
 
                 deref {var = counter}
         """
@@ -117,7 +117,7 @@ class AsyncEffectHandlerPropagationTest {
             perform LoomAsync in do
                 let p1 = Async.spawn {f = {} -> do
                     # First level spawn - write 10
-                    let _ = atomically {f = {} -> STM.write {var = counter, val = 10}}
+                    atomically {f = {} -> STM.write {var = counter, val = 10}}
 
                     # Second level spawn - should also have handlers
                     let p2 = Async.spawn {f = {} -> atomically {f = {} -> do
@@ -126,7 +126,7 @@ class AsyncEffectHandlerPropagationTest {
                     }}
                     await {p = p2}
                 }
-                let _ = await {p = p1}
+                await {p = p1}
                 deref {var = counter}
         """
         val result = eval(code)
@@ -160,7 +160,7 @@ class AsyncEffectHandlerPropagationTest {
                             STM.write {var = result_var, val = v + 100}
                         }
                     }
-                    let _ = await {p = p}
+                    await {p = p}
                     deref {var = result_var}
         """
         val result = eval(code)
@@ -195,9 +195,9 @@ class AsyncEffectHandlerPropagationTest {
                     STM.write {var = counter, val = v + 3}
                 }}
 
-                let _ = await {p = p1}
-                let _ = await {p = p2}
-                let _ = await {p = p3}
+                await {p = p1}
+                await {p = p2}
+                await {p = p3}
 
                 deref {var = counter}
         """

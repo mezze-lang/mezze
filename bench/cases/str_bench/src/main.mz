@@ -13,9 +13,9 @@ let main = {} -> perform Console in do
     let n = 100000000
 
     ## warmup
-    let _ = bench_str_size { s = s, iters = n }
-    let _ = bench_str_size { s = s, iters = n }
-    let _ = bench_str_size { s = s, iters = n }
+    bench_str_size { s = s, iters = n }
+    bench_str_size { s = s, iters = n }
+    bench_str_size { s = s, iters = n }
 
     ## measured
     let r1 = bench_str_size { s = s, iters = n }

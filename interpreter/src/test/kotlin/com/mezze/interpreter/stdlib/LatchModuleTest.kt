@@ -39,7 +39,7 @@ class LatchModuleTest {
             use std::effects::async::latch::{latch, count_down, get_count}
 
             let l = latch {count = 3}
-            let _ = count_down {latch = l}
+            count_down {latch = l}
             get_count {latch = l}
         """)
         assertEquals(2L, result)
@@ -51,9 +51,9 @@ class LatchModuleTest {
             use std::effects::async::latch::{latch, count_down, get_count}
 
             let l = latch {count = 5}
-            let _ = count_down {latch = l}
-            let _ = count_down {latch = l}
-            let _ = count_down {latch = l}
+            count_down {latch = l}
+            count_down {latch = l}
+            count_down {latch = l}
             get_count {latch = l}
         """)
         assertEquals(2L, result)
@@ -65,8 +65,8 @@ class LatchModuleTest {
             use std::effects::async::latch::{latch, count_down, get_count}
 
             let l = latch {count = 2}
-            let _ = count_down {latch = l}
-            let _ = count_down {latch = l}
+            count_down {latch = l}
+            count_down {latch = l}
             get_count {latch = l}
         """)
         assertEquals(0L, result)
@@ -78,9 +78,9 @@ class LatchModuleTest {
             use std::effects::async::latch::{latch, count_down, get_count}
 
             let l = latch {count = 1}
-            let _ = count_down {latch = l}
-            let _ = count_down {latch = l}
-            let _ = count_down {latch = l}
+            count_down {latch = l}
+            count_down {latch = l}
+            count_down {latch = l}
             get_count {latch = l}
         """)
         assertEquals(0L, result)
@@ -94,8 +94,8 @@ class LatchModuleTest {
             use std::effects::async::latch::{latch, count_down, await_latch}
 
             let l = latch {count = 1}
-            let _ = count_down {latch = l}
-            let _ = await_latch {latch = l}
+            count_down {latch = l}
+            await_latch {latch = l}
             42
         """)
         assertEquals(42L, result)
@@ -107,7 +107,7 @@ class LatchModuleTest {
             use std::effects::async::latch::{latch, await_latch}
 
             let l = latch {count = 0}
-            let _ = await_latch {latch = l}
+            await_latch {latch = l}
             "done"
         """)
         assertEquals("done", result)
@@ -121,7 +121,7 @@ class LatchModuleTest {
             use std::effects::async::latch::{latch, count_down, await_latch_timeout}
 
             let l = latch {count = 1}
-            let _ = count_down {latch = l}
+            count_down {latch = l}
             await_latch_timeout {latch = l, ms = 1000}
         """)
         assertEquals(true, result)
@@ -158,9 +158,9 @@ class LatchModuleTest {
 
             let l = latch {count = 1}
             let before = get_count {latch = l}
-            let _ = count_down {latch = l}
+            count_down {latch = l}
             let after = get_count {latch = l}
-            let _ = await_latch {latch = l}
+            await_latch {latch = l}
             before + after
         """)
         assertEquals(1L, result)
@@ -173,8 +173,8 @@ class LatchModuleTest {
 
             let l1 = latch {count = 5}
             let l2 = latch {count = 10}
-            let _ = count_down {latch = l1}
-            let _ = count_down {latch = l1}
+            count_down {latch = l1}
+            count_down {latch = l1}
             get_count {latch = l1} + get_count {latch = l2}
         """)
         assertEquals(13L, result)

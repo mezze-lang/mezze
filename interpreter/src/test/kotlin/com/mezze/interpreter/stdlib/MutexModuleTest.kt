@@ -81,9 +81,9 @@ class MutexModuleTest {
             use std::effects::async::mutex::{mutex, lock, unlock}
 
             let m = mutex {}
-            let _ = lock {mutex = m}
+            lock {mutex = m}
             let value = 42
-            let _ = unlock {mutex = m}
+            unlock {mutex = m}
             value
         """)
         assertEquals(42L, result)
@@ -96,7 +96,7 @@ class MutexModuleTest {
 
             let m = mutex {}
             let success = try_lock {mutex = m}
-            let _ = match success is
+            match success is
                 True -> unlock {mutex = m}
                 False -> {}
             success
@@ -110,9 +110,9 @@ class MutexModuleTest {
             use std::effects::async::mutex::{mutex, lock, unlock, is_held_by_current_thread}
 
             let m = mutex {}
-            let _ = lock {mutex = m}
+            lock {mutex = m}
             let held = is_held_by_current_thread {mutex = m}
-            let _ = unlock {mutex = m}
+            unlock {mutex = m}
             held
         """)
         assertEquals(true, result)
@@ -152,12 +152,12 @@ class MutexModuleTest {
             use std::effects::async::mutex::{mutex, lock, unlock}
 
             let m = mutex {}
-            let _ = lock {mutex = m}
-            let _ = lock {mutex = m}
-            let _ = lock {mutex = m}
-            let _ = unlock {mutex = m}
-            let _ = unlock {mutex = m}
-            let _ = unlock {mutex = m}
+            lock {mutex = m}
+            lock {mutex = m}
+            lock {mutex = m}
+            unlock {mutex = m}
+            unlock {mutex = m}
+            unlock {mutex = m}
             42
         """)
         assertEquals(42L, result)

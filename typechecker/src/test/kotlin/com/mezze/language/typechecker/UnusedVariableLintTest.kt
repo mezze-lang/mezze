@@ -66,14 +66,14 @@ class UnusedVariableLintTest {
     }
 
     @Test
-    fun `underscore-prefixed do-block let is not flagged`() {
+    fun `an underscore-prefixed do-block let is an ordinary name and is flagged`() {
         val code = """
             let test = {} -> do
                 let _x = 5
                 42
         """.trimIndent()
-        assertFalse(hasUnusedWarningFor("_x", code),
-            "Should not warn — '_x' is intentionally unused. Warnings: ${warningsFor(code)}")
+        assertTrue(hasUnusedWarningFor("_x", code),
+            "`_x` is an ordinary name: an unused value is not bound at all. Warnings: ${warningsFor(code)}")
     }
 
     @Test
@@ -121,12 +121,12 @@ class UnusedVariableLintTest {
     }
 
     @Test
-    fun `underscore-prefixed lambda parameter is not flagged`() {
+    fun `an underscore-prefixed free lambda parameter is an ordinary name and is flagged`() {
         val code = """
             let test = {_x: Int} -> 42
         """.trimIndent()
-        assertFalse(hasUnusedWarningFor("_x", code),
-            "Should not warn — '_x' is intentionally unused. Warnings: ${warningsFor(code)}")
+        assertTrue(hasUnusedParamWarningFor("_x", code),
+            "`_x` is the field `_x`, not an exemption. Warnings: ${warningsFor(code)}")
     }
 
     @Test
@@ -140,8 +140,8 @@ class UnusedVariableLintTest {
                         None -> 0
                 r
         """.trimIndent()
-        assertTrue(hasUnusedWarningFor("val", code),
-            "Should warn about unused nested match binding 'val'. Warnings: ${warningsFor(code)}")
+        assertTrue(warningsFor(code).any { it.code == WarningCode.W0104_UNUSED_PATTERN_BINDING && it.message.contains("'val'") },
+            "Should warn (W0104) about unused nested match binding 'val'. Warnings: ${warningsFor(code)}")
     }
 
     @Test

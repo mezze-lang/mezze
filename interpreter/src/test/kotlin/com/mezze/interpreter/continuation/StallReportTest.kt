@@ -119,7 +119,7 @@ class StallReportTest {
                 use std::result
                 perform SystemTime, CoopAsyncWith { on_stall = Some { val = { after = duration_millis { n = 100 }, f = { waiting } -> do
                     let zero = seq::size { xs = waiting } - seq::size { xs = waiting }
-                    let _ = 1 / zero
+                    1 / zero
                     {} } } } in do
                   let t = Async.spawn { f = {} -> do
                     Async.park { predicate = {} -> False }
@@ -158,7 +158,7 @@ class StallReportTest {
                   ParkCancelled { reason } -> False,
             }
             let main = {} -> perform Console, SystemTime, Waiter in do
-              let _ = Wait.wait_ms { ms = 400 }
+              Wait.wait_ms { ms = 400 }
               println { msg = "done" }
             main {}
             """,

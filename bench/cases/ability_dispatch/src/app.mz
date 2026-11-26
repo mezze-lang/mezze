@@ -113,25 +113,25 @@ let report: { label: Str, got: Int, t0: Duration, t1: Duration } -> {} <Log> =
 let main = {} -> perform Console in perform SystemTime in do
   println { msg = "ability_dispatch: $(int::to_str { n = iters }) iterations per loop" }
 
-  let _w1 = loop_inline { n = iters, acc = 0 }
+  loop_inline { n = iters, acc = 0 }
   let a0 = monotonic {}
   let a = loop_inline { n = iters, acc = 0 }
   let a1 = monotonic {}
-  let _ = report { label = "inline   (no call)      ", got = a, t0 = a0, t1 = a1 }
+  report { label = "inline   (no call)      ", got = a, t0 = a0, t1 = a1 }
 
-  let _w2 = loop_direct { n = iters, acc = 0 }
+  loop_direct { n = iters, acc = 0 }
   let b0 = monotonic {}
   let b = loop_direct { n = iters, acc = 0 }
   let b1 = monotonic {}
-  let _ = report { label = "direct   (plain fn)     ", got = b, t0 = b0, t1 = b1 }
+  report { label = "direct   (plain fn)     ", got = b, t0 = b0, t1 = b1 }
 
-  let _w3 = loop_ability { c = cfg, n = iters, acc = 0 }
+  loop_ability { c = cfg, n = iters, acc = 0 }
   let c0 = monotonic {}
   let c = loop_ability { c = cfg, n = iters, acc = 0 }
   let c1 = monotonic {}
-  let _ = report { label = "ability  (concrete recv)", got = c, t0 = c0, t1 = c1 }
+  report { label = "ability  (concrete recv)", got = c, t0 = c0, t1 = c1 }
 
-  let _w4 = loop_dict { c = cfg, n = iters, acc = 0 }
+  loop_dict { c = cfg, n = iters, acc = 0 }
   let d0 = monotonic {}
   let d = loop_dict { c = cfg, n = iters, acc = 0 }
   let d1 = monotonic {}

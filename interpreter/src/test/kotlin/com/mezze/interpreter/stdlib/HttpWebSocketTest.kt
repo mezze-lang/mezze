@@ -48,8 +48,8 @@ class HttpWebSocketTest {
             $head
             perform NativeWebSocket in do
               let p = socket_pair {}
-              let _ = WebSocket.send { socket = p.a, msg = Text { text = "hi" } }
-              let _ = WebSocket.send { socket = p.a, msg = Binary { bytes = bytes::from_str { s = "xyz" } } }
+              WebSocket.send { socket = p.a, msg = Text { text = "hi" } }
+              WebSocket.send { socket = p.a, msg = Binary { bytes = bytes::from_str { s = "xyz" } } }
               let first = show { got = WebSocket.receive { socket = p.b } }
               let second = show { got = WebSocket.receive { socket = p.b } }
               WebSocket.close { socket = p.a }
@@ -74,11 +74,11 @@ class HttpWebSocketTest {
               match SocketClient.connect { url = "ws://example.test/chat", config = default_http_config } is
                 Err { error = _ } -> "connect failed"
                 Ok { val = s } -> do
-                  let _ = WebSocket.send { socket = s, msg = Text { text = "hello" } }
+                  WebSocket.send { socket = s, msg = Text { text = "hello" } }
                   show { got = WebSocket.receive { socket = s } }
             perform NativeWebSocket in do
               let p = socket_pair {}
-              let _ = WebSocket.send { socket = p.b, msg = Text { text = "welcome" } }
+              WebSocket.send { socket = p.b, msg = Text { text = "welcome" } }
               let out = perform MockSocketClient { socket = p.a } in greet {}
               "$(out)|$(show { got = WebSocket.receive { socket = p.b } })"
             """.trimIndent(),
@@ -94,8 +94,8 @@ class HttpWebSocketTest {
             $head
             perform NativeWebSocket in do
               let p = socket_pair {}
-              let _ = WebSocket.send { socket = p.a, msg = Text { text = "a" } }
-              let _ = WebSocket.send { socket = p.a, msg = Text { text = "b" } }
+              WebSocket.send { socket = p.a, msg = Text { text = "a" } }
+              WebSocket.send { socket = p.a, msg = Text { text = "b" } }
               WebSocket.close { socket = p.a }
               messages { socket = p.b, init = "", f = { acc, msg } -> match msg is
                 Text { text } -> "$(acc)$(text)"
@@ -116,7 +116,7 @@ class HttpWebSocketTest {
             $head
             let app = router { path = "" }.websocket { path = "/echo", handler = { m, socket } ->
               messages { socket = socket, init = {}, f = { acc, msg } -> do
-                let _ = WebSocket.send { socket = socket, msg = msg }
+                WebSocket.send { socket = socket, msg = msg }
                 {} } }
             let go: {} -> Str <*> = {} ->
               perform NativeWebSocket in
@@ -129,9 +129,9 @@ class HttpWebSocketTest {
                       Err { error = SocketConnectFailed { url = _, reason } } -> "connect failed: $(reason)"
                       Err { error = SocketClosed } -> "closed"
                       Ok { val = s } -> do
-                        let _ = WebSocket.send { socket = s, msg = Text { text = "ping" } }
+                        WebSocket.send { socket = s, msg = Text { text = "ping" } }
                         let first = show { got = WebSocket.receive { socket = s } }
-                        let _ = WebSocket.send { socket = s, msg = Binary { bytes = bytes::from_str { s = "abc" } } }
+                        WebSocket.send { socket = s, msg = Binary { bytes = bytes::from_str { s = "abc" } } }
                         let second = show { got = WebSocket.receive { socket = s } }
                         WebSocket.close { socket = s }
                         "$(first)|$(second)"
@@ -151,7 +151,7 @@ class HttpWebSocketTest {
             """
             $head
             let app = router { path = "/ws" }.websocket { path = "/who", handler = { m, socket } -> do
-              let _ = WebSocket.send { socket = socket, msg = Text { text = "$(m.req.url)|$(match map::get { m = m.req.headers, k = "upgrade" } is
+              WebSocket.send { socket = socket, msg = Text { text = "$(m.req.url)|$(match map::get { m = m.req.headers, k = "upgrade" } is
                 Some { val } -> str::to_lower { s = val }
                 None -> "no-upgrade-header")" } }
               {} }

@@ -257,14 +257,15 @@ internal fun ExpressionConstraintGenerator.generateMatch(expr: ParsedMatch, cont
 
         val usedVarsInBody = caseBodyResult.usedVariables + guardUsedVariables + altGuardUsedVariables
         for ((varName, _) in patternResult.bindings) {
-            if (!varName.startsWith("_") && varName !in usedVarsInBody) {
+            if (varName !in usedVarsInBody) {
                 val patternLocation = patternResult.bindingLocations[varName]
                     ?: matchCase.body.loc
                     ?: expr.loc
                 unusedVars.add(
                     ConstraintResult.UnusedVariable(
                         name = varName,
-                        loc = patternLocation
+                        loc = patternLocation,
+                        kind = ConstraintResult.BindingKind.PATTERN,
                     )
                 )
             }
@@ -524,12 +525,11 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                 // in THIS function scope — the enclosing lambda's param, or an
                 // earlier `let` in this same do-block — silently overwrites it.
                 // Reject it (T0306), the same class of mistake as a duplicate
-                // lambda param (#79). `_`-prefixed names opt out (a throwaway
-                // may legitimately repeat). Shadowing an outer param/global name
+                // lambda param (#79). A `_`-prefixed name is an ordinary name and
+                // does not opt out; `_` itself binds nothing. Shadowing an outer param/global name
                 // is in neither set, so it stays legal (case B); a nested
                 // do-block's own lets are tracked in a fresh `blockLets`.
                 for (varName in variableNames) {
-                    if (varName.startsWith("_")) continue
                     if (varName in currentContext.currentScopeBindings || varName in blockLets) {
                         throw TypeCheckError(
                             message = "'$varName' is already bound in this scope. This `let` " +
@@ -803,12 +803,10 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                 }
 
                 // #84 linter: remember this let's bound names to check for use
-                // once the whole block is generated. Skip `_`-prefixed names
-                // (intentionally unused) here so they never warn.
+                // once the whole block is generated. No name is exempt: an unused
+                // value is not bound at all (write the expression as a statement).
                 for (varName in variableNames) {
-                    if (!varName.startsWith("_")) {
-                        letBindings.add(varName to (patternResult.bindingLocations[varName] ?: stmt.loc))
-                    }
+                    letBindings.add(varName to (patternResult.bindingLocations[varName] ?: stmt.loc))
                 }
             }
             is ParsedStatement.Expr -> {

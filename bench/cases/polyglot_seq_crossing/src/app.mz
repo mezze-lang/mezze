@@ -86,9 +86,9 @@ let ms_between: { t0: Duration, t1: Duration } -> Int =
 let run_size: { n: Int } -> {} <Log, Js, Time> = { n } -> do
   let xs = build { i = 1, n = n, acc = [] }
 
-  let _w = repeat_source { xs = xs, n = 300, acc = 0 }
+  repeat_source { xs = xs, n = 300, acc = 0 }
   let a0 = monotonic {}
-  let _a = repeat_source { xs = xs, n = reps, acc = 0 }
+  repeat_source { xs = xs, n = reps, acc = 0 }
   let a1 = monotonic {}
 
   let src_us = ms_between { t0 = a0, t1 = a1 } / reps
@@ -96,6 +96,6 @@ let run_size: { n: Int } -> {} <Log, Js, Time> = { n } -> do
 
 let main = {} -> perform Console in perform SystemTime in perform GraalJs in do
   println { msg = "seq -> guest, $(int::to_str { n = reps }) reps each" }
-  let _ = run_size { n = 3 }
-  let _ = run_size { n = 100 }
+  run_size { n = 3 }
+  run_size { n = 100 }
   run_size { n = 1000 }

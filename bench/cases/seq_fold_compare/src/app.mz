@@ -20,7 +20,7 @@ let time_k = {xs, k, acc} -> if k == 0
       time_k {xs = xs, k = k - 1, acc = seq::push {xs = acc, x = r.ns}}
 
 let stats = {label, xs} -> perform Console in perform SystemTime in do
-    let _w = time_k {xs = xs, k = 3, acc = []}
+    time_k {xs = xs, k = 3, acc = []}
     let times = time_k {xs = xs, k = 10, acc = []}
     let sorted = seq::sort {xs = times}
     let n_times = seq::size {xs = sorted}

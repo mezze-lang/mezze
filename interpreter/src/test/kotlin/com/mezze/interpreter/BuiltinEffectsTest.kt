@@ -486,7 +486,7 @@ class BuiltinEffectsTest {
             use std::effects::stdin::{Stdin, MockStdin}
 
             perform MockStdin { lines = ["ab", "cd"] } in do
-                let _c = Stdin.read_char {}
+                Stdin.read_char {}
                 Stdin.read_line {}
         """.trimIndent()
 

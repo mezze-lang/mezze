@@ -36,15 +36,15 @@ let main = {} -> perform Console in perform GraalPy in do
   # math.sqrt / math.pi — module-level constants + trig.
   println { msg = "math module:" }
   let sqrt2 = Python.eval { source = "__import__('math').sqrt(2.0)" }
-  let _ = show_float { label = "sqrt(2) ", r = sqrt2 }
+  show_float { label = "sqrt(2) ", r = sqrt2 }
 
   let pi_r = Python.eval { source = "__import__('math').pi" }
-  let _ = show_float { label = "pi      ", r = pi_r }
+  show_float { label = "pi      ", r = pi_r }
 
   let sin_r = Python.eval {
     source = "__import__('math').sin(__import__('math').pi / 2)"
   }
-  let _ = show_float { label = "sin(pi/2)", r = sin_r }
+  show_float { label = "sin(pi/2)", r = sin_r }
 
   # statistics — reductions from the stdlib. Same shape as the numpy
   # demo's reductions but backed by Python only.
@@ -53,17 +53,17 @@ let main = {} -> perform Console in perform GraalPy in do
   let mean_r = Python.eval {
     source = "__import__('statistics').mean([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])"
   }
-  let _ = show_float { label = "mean   ", r = mean_r }
+  show_float { label = "mean   ", r = mean_r }
 
   let median_r = Python.eval {
     source = "__import__('statistics').median([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])"
   }
-  let _ = show_float { label = "median ", r = median_r }
+  show_float { label = "median ", r = median_r }
 
   let stdev_r = Python.eval {
     source = "__import__('statistics').pstdev([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])"
   }
-  let _ = show_float { label = "pstdev ", r = stdev_r }
+  show_float { label = "pstdev ", r = stdev_r }
 
   # itertools / functools — a compute pipeline in pure Python.
   println { msg = "" }
@@ -71,7 +71,7 @@ let main = {} -> perform Console in perform GraalPy in do
   let fact_r = Python.eval {
     source = "__import__('functools').reduce(lambda a, b: a * b, range(1, 11))"
   }
-  let _ = show_int { label = "10!", r = fact_r }
+  show_int { label = "10!", r = fact_r }
 
   println { msg = "" }
   println { msg = "== done ==" }

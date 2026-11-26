@@ -57,8 +57,9 @@ class PolymorphicAbilityInHofTest {
                 xs = xs,
                 init = 0,
                 f = { acc, x } -> do
-                  let _: Json = x.encode { config = json_default }
-                  acc + 1,
+                  let encoded: Json = x.encode { config = json_default }
+                  match encoded is
+                    _ -> acc + 1,
               }
 
             count_encoded { xs = ["a", "b", "c"] }

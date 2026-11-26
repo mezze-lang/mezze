@@ -39,7 +39,7 @@ class AutoCancelSiblingsTest {
               let fast = {} -> 42
               let slow = {} -> do
                 sleep { ms = 200 }
-                let _ = reset { atom = counter, val = 1 }
+                reset { atom = counter, val = 1 }
                 0
               let pf = Async.spawn { f = fast }
               let ps = Async.spawn { f = slow }
@@ -111,9 +111,9 @@ class AutoCancelSiblingsTest {
             perform SystemTime in perform LoomAsync in do
               let counter = atom { val = 0 }
               let bump = {} -> do
-                let _ = swap { atom = counter, f = { current } -> current + 1 }
+                swap { atom = counter, f = { current } -> current + 1 }
                 0
-              let _ = join { l = bump, r = bump }
+              join { l = bump, r = bump }
               deref { atom = counter }
         """.trimIndent()
         assertEquals(2L, eval(source))
@@ -159,9 +159,9 @@ class AutoCancelSiblingsTest {
             perform SystemTime in perform LoomAsync in do
               let counter = atom { val = 0 }
               let bump = {} -> do
-                let _ = swap { atom = counter, f = { current } -> current + 1 }
+                swap { atom = counter, f = { current } -> current + 1 }
                 0
-              let _ = join3 { a = bump, b = bump, c = bump }
+              join3 { a = bump, b = bump, c = bump }
               deref { atom = counter }
         """.trimIndent()
         assertEquals(3L, eval(source))

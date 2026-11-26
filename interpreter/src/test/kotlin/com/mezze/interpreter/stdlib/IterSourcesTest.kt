@@ -60,7 +60,7 @@ class IterSourcesTest {
     fun `with_lines folds over every line`() {
         val code = prog(
             """
-            let _ = write_text { path = "/f", text = "alpha\nbeta\ngamma\n" }
+            write_text { path = "/f", text = "alpha\nbeta\ngamma\n" }
             count_lines { path = "/f", chunk_bytes = 64 }
             """,
         )
@@ -72,7 +72,7 @@ class IterSourcesTest {
     fun `with_lines counts a final line that has no newline`() {
         val code = prog(
             """
-            let _ = write_text { path = "/f", text = "alpha\nbeta\ngamma" }
+            write_text { path = "/f", text = "alpha\nbeta\ngamma" }
             count_lines { path = "/f", chunk_bytes = 64 }
             """,
         )
@@ -84,7 +84,7 @@ class IterSourcesTest {
     fun `with_lines strips the newline`() {
         val code = prog(
             """
-            let _ = write_text { path = "/f", text = "alpha\nbeta\n" }
+            write_text { path = "/f", text = "alpha\nbeta\n" }
             join_lines { path = "/f", chunk_bytes = 64 }
             """,
         )
@@ -101,7 +101,7 @@ class IterSourcesTest {
     fun `with_lines reassembles a line split across chunks`() {
         val code = prog(
             """
-            let _ = write_text { path = "/f", text = "aaaaa\nbbbbb\nccccc\n" }
+            write_text { path = "/f", text = "aaaaa\nbbbbb\nccccc\n" }
             join_lines { path = "/f", chunk_bytes = 4 }
             """,
         )
@@ -113,7 +113,7 @@ class IterSourcesTest {
     fun `with_lines on an empty file answers init`() {
         val code = prog(
             """
-            let _ = write_text { path = "/f", text = "" }
+            write_text { path = "/f", text = "" }
             count_lines { path = "/f", chunk_bytes = 64 }
             """,
         )
@@ -125,7 +125,7 @@ class IterSourcesTest {
     fun `with_lines keeps blank lines`() {
         val code = prog(
             """
-            let _ = write_text { path = "/f", text = "a\n\nb\n" }
+            write_text { path = "/f", text = "a\n\nb\n" }
             count_lines { path = "/f", chunk_bytes = 64 }
             """,
         )
@@ -142,16 +142,16 @@ class IterSourcesTest {
         val code = prog(
             """
             let body = seq::fold { xs = seq::range { start = 0, end = 200 }, init = "", f = { acc, x } -> "$(acc)line\n" }
-            let _ = write_text { path = "/f", text = body }
+            write_text { path = "/f", text = body }
             match FileStreaming.open { path = "/f", mode = Read } is
               Err { error = _ } -> "open-failed"
               Ok { val = h } -> do
                 let n = perform EarlyReturn in
                   lines { handle = h, chunk_bytes = 16, init = 0, f = { acc, x } -> if acc + 1 == 2 then return { val = 2 } else acc + 1 }
-                let _ = FileStreaming.close { handle = h }
+                FileStreaming.close { handle = h }
                 match FileStreaming.open { path = "/f", mode = Read } is
                   Ok { val = h2 } -> do
-                    let _ = FileStreaming.close { handle = h2 }
+                    FileStreaming.close { handle = h2 }
                     "$(int::to_str { n = n }) lines, reopened-fine"
                   Err { error = _ } -> "reopen-failed"
             """,
@@ -165,11 +165,11 @@ class IterSourcesTest {
     fun `with_lines closes the handle when done`() {
         val code = prog(
             """
-            let _ = write_text { path = "/f", text = "a\nb\nc\nd\n" }
+            write_text { path = "/f", text = "a\nb\nc\nd\n" }
             match with_lines { path = "/f", chunk_bytes = 64, init = {}, f = { acc, x } -> {} } is
               Ok { val = _ } -> match FileStreaming.open { path = "/f", mode = Read } is
                 Ok { val = h2 } -> do
-                  let _ = FileStreaming.close { handle = h2 }
+                  FileStreaming.close { handle = h2 }
                   "reopened-fine"
                 Err { error = _ } -> "reopen-failed"
               Err { error = _ } -> "with_lines-failed"
@@ -184,7 +184,7 @@ class IterSourcesTest {
         val code = """
             use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, with_lines, write_text }
             perform LocalFileSystem in perform LocalFileStreaming in do
-              let _ = write_text { path = "$f", text = "alpha\nbeta\ngamma\n" }
+              write_text { path = "$f", text = "alpha\nbeta\ngamma\n" }
               match with_lines { path = "$f", chunk_bytes = 4, init = "", f = { acc, x } -> "$(acc)[$(x)]" } is
                 Ok { val = s } -> s
                 Err { error = _ } -> "failed"
@@ -205,13 +205,13 @@ class IterSourcesTest {
         val code = """
             $watchHead
             perform MemoryFileSystem in perform MemoryFileWatch in do
-              let _ = FileSystem.create_directory { path = "/d" }
+              FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> 0 - 1
                 Ok { val = h } -> do
-                  let _ = write_text { path = "/d/a", text = "1" }
-                  let _ = write_text { path = "/d/b", text = "2" }
-                  let _ = write_text { path = "/d/c", text = "3" }
+                  write_text { path = "/d/a", text = "1" }
+                  write_text { path = "/d/b", text = "2" }
+                  write_text { path = "/d/c", text = "3" }
                   watch { handle = h, timeout_ms = 0, init = 0, f = { acc, x } -> acc + 1 }
         """.trimIndent()
         assertEquals(3L, eval(code))
@@ -223,7 +223,7 @@ class IterSourcesTest {
         val code = """
             $watchHead
             perform MemoryFileSystem in perform MemoryFileWatch in do
-              let _ = FileSystem.create_directory { path = "/d" }
+              FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> 0 - 1
                 Ok { val = h } -> watch { handle = h, timeout_ms = 0, init = 0, f = { acc, x } -> acc + 1 }
@@ -237,11 +237,11 @@ class IterSourcesTest {
         val code = """
             $watchHead
             perform MemoryFileSystem in perform MemoryFileWatch in do
-              let _ = FileSystem.create_directory { path = "/d" }
+              FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> "watch-failed"
                 Ok { val = h } -> do
-                  let _ = write_text { path = "/d/only", text = "1" }
+                  write_text { path = "/d/only", text = "1" }
                   watch { handle = h, timeout_ms = 0, init = "", f = { acc, x } -> match x is
                     Created { path = p } -> "$(acc)created:$(p)"
                     Modified { path = _ } -> "$(acc)modified"

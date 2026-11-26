@@ -32,7 +32,7 @@ let ticks = route { method = Get, path = "/ticks", handler = { m } -> sse { f = 
 # A WebSocket echo endpoint: the handler folds incoming messages and sends each back.
 let echo = router { path = "" }.websocket { path = "/echo", handler = { m, socket } ->
     messages { socket = socket, init = {}, f = { acc, msg } -> do
-        let _ = WebSocket.send { socket = socket, msg = msg }
+        WebSocket.send { socket = socket, msg = msg }
         {} } }
 
 let table = routes { of = [echo.table {}, ticks, route { method = Get, path = "/hello/:name", handler = { m } -> do
@@ -81,7 +81,7 @@ let main = {} -> perform Console in
             let echoed = match SocketClient.connect { url = "ws://127.0.0.1:$(int::to_str { n = h.port })/echo", config = default_http_config } is
                 Err { error = _ } -> "connect-failed"
                 Ok { val = s } -> do
-                    let _ = WebSocket.send { socket = s, msg = Text { text = "ws-ok" } }
+                    WebSocket.send { socket = s, msg = Text { text = "ws-ok" } }
                     let got = match WebSocket.receive { socket = s } is
                         Some { val = Text { text } } -> text
                         Some { val = Binary { bytes = _ } } -> "binary"

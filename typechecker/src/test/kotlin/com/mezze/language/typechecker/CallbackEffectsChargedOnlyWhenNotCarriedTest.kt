@@ -38,7 +38,7 @@ class CallbackEffectsChargedOnlyWhenNotCarriedTest : VariantSpecBase() {
             use std::effects::http::{ router, RouteGroup, not_found }
             $tick
             pub let g: {} -> RouteGroup = {} -> router { path = "" }.get { path = "/x", handler = { m } -> do
-              let _ = Tick.tick {}
+              Tick.tick {}
               not_found { body = "x" } }
             $MAIN
             """,
@@ -53,7 +53,7 @@ class CallbackEffectsChargedOnlyWhenNotCarriedTest : VariantSpecBase() {
             use std::effects::http::{ router, RouteGroup, Message, WebSocket, Socket, Matched, messages }
             pub let g: {} -> RouteGroup = {} -> router { path = "" }.websocket { path = "/echo", handler = { m, socket } ->
               messages { socket = socket, init = {}, f = { acc, msg } -> do
-                let _ = WebSocket.send { socket = socket, msg = msg }
+                WebSocket.send { socket = socket, msg = msg }
                 {} } }
             $MAIN
             """,

@@ -238,7 +238,7 @@ class ChannelModuleTest {
 
                     # Receive
                     let received = recv { ch = ch }
-                    let _ = await { p = p }
+                    await { p = p }
                     received
         """)
         assertEquals(42L, result)
@@ -265,7 +265,7 @@ class ChannelModuleTest {
                     let b = recv { ch = ch }
                     let c = recv { ch = ch }
 
-                    let _ = await { p = producer }
+                    await { p = producer }
                     a + b + c
         """)
         assertEquals(60L, result)

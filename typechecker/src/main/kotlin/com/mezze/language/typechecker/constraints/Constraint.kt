@@ -673,9 +673,18 @@ data class ConstraintResult(
     data class UnusedVariable(
         val name: String,
         val loc: Loc?,
-        /** A lambda parameter: its name is the field callers pass, so `_`-prefixing is no fix (W0103). */
-        val isParameter: Boolean = false,
+        /** Which kind of binding: each has its own fix, and none of them is a `_` prefix. */
+        val kind: BindingKind = BindingKind.LET,
     )
+
+    /**
+     * `_` has ONE meaning: a pattern wildcard that binds nothing. A `_`-prefixed
+     * name is an ordinary name, so the fix for an unused binding is never "prefix
+     * it": a `let` is removed (its expression kept as a statement if it must run),
+     * a pattern binding becomes `_`, a free-standing parameter is removed (its name
+     * is the field callers pass).
+     */
+    enum class BindingKind { LET, PATTERN, PARAMETER }
 
     /**
      * BUG 3: a handler in a `perform` list whose effect the body never performs.

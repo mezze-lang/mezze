@@ -176,8 +176,8 @@ class PolyAuditProbeTest {
             let f = {} -> do
               let p = 5
               let k = { ignore } -> p
-              let _a = k { ignore = 1 }
-              let _b = k { ignore = "s" }
+              k { ignore = 1 }
+              k { ignore = "s" }
               p
         """), "a do-block lambda capturing a concrete outer binding must still generalize over its own param")
     }

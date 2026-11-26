@@ -278,7 +278,7 @@ pub let serve_on
     Err { error = NetClosed } -> Ok { val = {} }
     Err { error } -> Err { error = error }
     Ok { val = a } -> do
-      let _ = Async.spawn { f = {} -> do
+      Async.spawn { f = {} -> do
         handler { conn = a.conn, peer = a.peer }
         Tcp.close { conn = a.conn } }
       serve_on { listener = listener, handler = handler }

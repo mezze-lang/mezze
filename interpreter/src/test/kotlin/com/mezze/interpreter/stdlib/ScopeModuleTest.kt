@@ -84,7 +84,7 @@ class ScopeModuleTest {
             perform LoomAsync in do
                 scoped { f = { sc } -> do
                     let p = scope_spawn { sc = sc, f = {} -> 100 }
-                    let _ = result::get_or { result = await { p = p }, def = -1 }
+                    result::get_or { result = await { p = p }, def = -1 }
                     "completed"
                 }
         """)

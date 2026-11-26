@@ -73,7 +73,7 @@ let nth_or_zero = { xs, i } -> match seq::get { xs = xs, i = i } is
   None -> 0
 
 let min_of = { thunk, warm, k } -> do
-  let _w = time_k_go { thunk = thunk, k = warm, acc = [] }
+  time_k_go { thunk = thunk, k = warm, acc = [] }
   let sorted = seq::sort { xs = time_k_go { thunk = thunk, k = k, acc = [] } }
   let half = seq::size { xs = sorted } / 2
   { min = nth_or_zero { xs = sorted, i = 0 }, med = nth_or_zero { xs = sorted, i = half } }

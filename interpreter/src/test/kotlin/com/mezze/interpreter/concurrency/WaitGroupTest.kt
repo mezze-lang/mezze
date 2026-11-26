@@ -64,7 +64,7 @@ class WaitGroupTest {
             $waitGroupSetup
 
             let wg = wait_group {}
-            let _ = add {wg = wg, delta = 3}
+            add {wg = wg, delta = 3}
             get_count_wg {wg = wg}
         """
         val result = eval(code)
@@ -77,8 +77,8 @@ class WaitGroupTest {
             $waitGroupSetup
 
             let wg = wait_group {}
-            let _ = add {wg = wg, delta = 3}
-            let _ = done {wg = wg}
+            add {wg = wg, delta = 3}
+            done {wg = wg}
             get_count_wg {wg = wg}
         """
         val result = eval(code)
@@ -91,9 +91,9 @@ class WaitGroupTest {
             $waitGroupSetup
 
             let wg = wait_group {}
-            let _ = add {wg = wg, delta = 2}
-            let _ = done {wg = wg}
-            let _ = done {wg = wg}
+            add {wg = wg, delta = 2}
+            done {wg = wg}
+            done {wg = wg}
             get_count_wg {wg = wg}
         """
         val result = eval(code)
@@ -106,7 +106,7 @@ class WaitGroupTest {
             $waitGroupSetup
 
             let wg = wait_group {}
-            let _ = wait {wg = wg}
+            wait {wg = wg}
             True
         """
         val result = eval(code)
@@ -131,7 +131,7 @@ class WaitGroupTest {
             $waitGroupSetup
 
             let wg = wait_group {}
-            let _ = add {wg = wg, delta = 1}
+            add {wg = wg, delta = 1}
             # Don't call done, so it should timeout
             wait_timeout {wg = wg, ms = 50}
         """
@@ -145,9 +145,9 @@ class WaitGroupTest {
             $waitGroupSetup
 
             let wg = wait_group {}
-            let _ = add {wg = wg, delta = 1}
-            let _ = add {wg = wg, delta = 2}
-            let _ = add {wg = wg, delta = 3}
+            add {wg = wg, delta = 1}
+            add {wg = wg, delta = 2}
+            add {wg = wg, delta = 3}
             get_count_wg {wg = wg}
         """
         val result = eval(code)
@@ -169,24 +169,24 @@ class WaitGroupTest {
             let counter = atom {val = 0}
 
             # Add 3 tasks
-            let _ = add {wg = wg, delta = 3}
+            add {wg = wg, delta = 3}
 
             # Spawn 3 workers
             let p1 = Async.spawn {f = {} -> do
-                let _ = swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
                 done {wg = wg}
             }
             let p2 = Async.spawn {f = {} -> do
-                let _ = swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
                 done {wg = wg}
             }
             let p3 = Async.spawn {f = {} -> do
-                let _ = swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
                 done {wg = wg}
             }
 
             # Wait for all workers to finish
-            let _ = wait {wg = wg}
+            wait {wg = wg}
 
             # Counter should be 3
             deref {atom = counter}
@@ -206,26 +206,26 @@ class WaitGroupTest {
             let counter = atom {val = 0}
 
             # Add tasks one at a time
-            let _ = add {wg = wg, delta = 1}
+            add {wg = wg, delta = 1}
             let p1 = Async.spawn {f = {} -> do
-                let _ = swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
                 done {wg = wg}
             }
 
-            let _ = add {wg = wg, delta = 1}
+            add {wg = wg, delta = 1}
             let p2 = Async.spawn {f = {} -> do
-                let _ = swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
                 done {wg = wg}
             }
 
-            let _ = add {wg = wg, delta = 1}
+            add {wg = wg, delta = 1}
             let p3 = Async.spawn {f = {} -> do
-                let _ = swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
                 done {wg = wg}
             }
 
             # Wait for all
-            let _ = wait {wg = wg}
+            wait {wg = wg}
 
             deref {atom = counter}
         """
@@ -243,24 +243,24 @@ class WaitGroupTest {
             let wg = wait_group {}
             let result = atom {val = 0}
 
-            let _ = add {wg = wg, delta = 1}
+            add {wg = wg, delta = 1}
 
             # Thread 1: Wait for waitgroup, then set result
             let p1 = Async.spawn {f = {} -> do
-                let _ = wait {wg = wg}
+                wait {wg = wg}
                 swap {atom = result, f = {current} -> 42}
             }
 
             # Give thread 1 time to start waiting
-            let _ = sleep {ms = 20}
+            sleep {ms = 20}
 
             # Result should still be 0 (thread 1 is blocked)
             let before = deref {atom = result}
 
             # Done to release thread 1
-            let _ = done {wg = wg}
+            done {wg = wg}
 
-            let _ = perform CrashException in unwrap { result = await {p = p1} }
+            perform CrashException in unwrap { result = await {p = p1} }
 
             {before = before, after = deref {atom = result}}
         """

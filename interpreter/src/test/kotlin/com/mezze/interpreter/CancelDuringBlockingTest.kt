@@ -136,7 +136,7 @@ class CancelDuringBlockingTest {
             perform SystemTime in perform LoomAsync in do
               let c = chan {}
               let waiter = Async.spawn { f = {} -> do
-                let _ = recv { ch = c }
+                recv { ch = c }
                 "ran"
               }
               sleep { ms = 50 }

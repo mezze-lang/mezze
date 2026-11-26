@@ -391,7 +391,7 @@ class PerformanceBenchmarkTest {
                 appendLine("let loop : { n: Int } -> Int = { n } ->")
                 appendLine("    if n <= 0 then 0")
                 appendLine("    else do")
-                appendLine("        let _ = try_throw {}")
+                appendLine("        try_throw {}")
                 appendLine("        loop { n = n - 1 }")
                 appendLine()
                 appendLine("loop { n = $n }")

@@ -48,8 +48,8 @@ class NetTest {
 
         ## A line-echo handler for `serve_on`: every line comes back prefixed.
         let echo_lines: { conn: TcpConn, peer: Addr } -> {} <Tcp> = { conn, peer } -> do
-          let _ = lines { conn = conn, init = {}, f = { acc, x } -> do
-            let _ = send_str { conn = conn, s = "echo:$(x)\n" }
+          lines { conn = conn, init = {}, f = { acc, x } -> do
+            send_str { conn = conn, s = "echo:$(x)\n" }
             {} }
           {}
 
@@ -57,8 +57,8 @@ class NetTest {
         let echo_round_trip: { l: TcpListener, addr: Addr } -> Str <Tcp, TcpServer, Async> = { l, addr } -> do
           let server = Async.spawn { f = {} -> serve_on { listener = l, handler = echo_lines } }
           let out = with_conn { addr = addr, config = default_tcp_config, f = { conn } -> do
-            let _ = send_str { conn = conn, s = "one\ntwo\r\n" }
-            let _ = Tcp.shutdown_write { conn = conn }
+            send_str { conn = conn, s = "one\ntwo\r\n" }
+            Tcp.shutdown_write { conn = conn }
             lines { conn = conn, init = "", f = { acc, x } -> "$(acc)[$(x)]" } }
           TcpServer.close { listener = l }
           let served = match await { p = server } is
@@ -104,12 +104,12 @@ class NetTest {
                   Ok { val = c } -> match TcpServer.accept { listener = l } is
                     Err { error } -> show_err { e = error }
                     Ok { val = a } -> do
-                      let _ = send_str { conn = c, s = "hello world" }
+                      send_str { conn = c, s = "hello world" }
                       let first = show { got = Tcp.receive { conn = a.conn, max_bytes = 5 } }
                       let second = show { got = Tcp.receive { conn = a.conn, max_bytes = 100 } }
-                      let _ = Tcp.shutdown_write { conn = c }
+                      Tcp.shutdown_write { conn = c }
                       let third = show { got = Tcp.receive { conn = a.conn, max_bytes = 100 } }
-                      let _ = send_str { conn = a.conn, s = "still open" }
+                      send_str { conn = a.conn, s = "still open" }
                       let back = show { got = Tcp.receive { conn = c, max_bytes = 100 } }
                       let after_shut = sent { r = send_str { conn = c, s = "late" } }
                       Tcp.close { conn = a.conn }
@@ -152,7 +152,7 @@ class NetTest {
                     Err { error } -> show_err { e = error }
                     Ok { val = a } -> do
                       let waited = show { got = Tcp.receive { conn = c, max_bytes = 10 } }
-                      let _ = send_str { conn = a.conn, s = "ok" }
+                      send_str { conn = a.conn, s = "ok" }
                       let got = show { got = Tcp.receive { conn = c, max_bytes = 10 } }
                       TcpServer.close { listener = l }
                       "$(waited)|$(got)"
@@ -183,18 +183,18 @@ class NetTest {
                     Ok { val = c } -> match TcpServer.accept { listener = l } is
                       Err { error } -> show_err { e = error }
                       Ok { val = a } -> do
-                        let _ = Tcp.send { conn = a.conn, data = bytes::take { b = all, n = 3 } }
-                        let _ = Tcp.send { conn = a.conn, data = bytes::slice { b = all, start = 3, end = 10 } }
-                        let _ = Tcp.send { conn = a.conn, data = bytes::drop { b = all, n = 10 } }
-                        let _ = Tcp.shutdown_write { conn = a.conn }
+                        Tcp.send { conn = a.conn, data = bytes::take { b = all, n = 3 } }
+                        Tcp.send { conn = a.conn, data = bytes::slice { b = all, start = 3, end = 10 } }
+                        Tcp.send { conn = a.conn, data = bytes::drop { b = all, n = 10 } }
+                        Tcp.shutdown_write { conn = a.conn }
                         collect { conn = c }
                   let cut = match Tcp.connect { addr = local { port = 3 }, config = default_tcp_config } is
                     Err { error } -> show_err { e = error }
                     Ok { val = c } -> match TcpServer.accept { listener = l } is
                       Err { error } -> show_err { e = error }
                       Ok { val = a } -> do
-                        let _ = Tcp.send { conn = a.conn, data = bytes::take { b = all, n = 6 } }
-                        let _ = Tcp.shutdown_write { conn = a.conn }
+                        Tcp.send { conn = a.conn, data = bytes::take { b = all, n = 6 } }
+                        Tcp.shutdown_write { conn = a.conn }
                         collect { conn = c }
                   TcpServer.close { listener = l }
                   "$(whole)|$(cut)"
@@ -222,18 +222,18 @@ class NetTest {
                   let framed = match pair { l = l, port = 4 } is
                     None -> "no pair"
                     Some { val = p } -> do
-                      let _ = send_str { conn = p.a, s = "a::bb::ccc" }
-                      let _ = Tcp.shutdown_write { conn = p.a }
+                      send_str { conn = p.a, s = "a::bb::ccc" }
+                      Tcp.shutdown_write { conn = p.a }
                       match delimited { conn = p.c, delim = bytes::from_str { s = "::" }, init = "", f = { acc, x } -> "$(acc)<$(text { b = x })>" } is
                         Ok { val = s } -> s
                         Err { error } -> show_err { e = error }
                   let bad = match pair { l = l, port = 4 } is
                     None -> "no pair"
                     Some { val = p } -> do
-                      let _ = send_str { conn = p.a, s = "fine\n" }
-                      let _ = Tcp.send { conn = p.a, data = bytes::from_seq { arr = [255, 254, 10] } }
-                      let _ = send_str { conn = p.a, s = "after\n" }
-                      let _ = Tcp.shutdown_write { conn = p.a }
+                      send_str { conn = p.a, s = "fine\n" }
+                      Tcp.send { conn = p.a, data = bytes::from_seq { arr = [255, 254, 10] } }
+                      send_str { conn = p.a, s = "after\n" }
+                      Tcp.shutdown_write { conn = p.a }
                       match lines { conn = p.c, init = "", f = { acc, x } -> "$(acc)<$(x)>" } is
                         Ok { val = s } -> s
                         Err { error = NetIo { reason } } -> if str::starts_with { s = reason, prefix = "a line is not UTF-8" } then "bad utf-8" else reason
@@ -281,9 +281,9 @@ class NetTest {
                 Ok { val = a } -> match Udp.bind { addr = local { port = 0 }, receive_timeout_ms = 20 } is
                   Err { error } -> show_err { e = error }
                   Ok { val = b } -> do
-                    let _ = Udp.send_to { sock = a, addr = local { port = udp_port { sock = b } }, data = bytes::from_str { s = "ping" } }
+                    Udp.send_to { sock = a, addr = local { port = udp_port { sock = b } }, data = bytes::from_str { s = "ping" } }
                     let got = show_dg { r = Udp.recv_from { sock = b, max_bytes = 100 }, from_port = udp_port { sock = a } }
-                    let _ = Udp.send_to { sock = b, addr = local { port = udp_port { sock = a } }, data = bytes::from_str { s = "pong!" } }
+                    Udp.send_to { sock = b, addr = local { port = udp_port { sock = a } }, data = bytes::from_str { s = "pong!" } }
                     let cut = show_dg { r = Udp.recv_from { sock = a, max_bytes = 4 }, from_port = udp_port { sock = b } }
                     let nobody = sent { r = Udp.send_to { sock = a, addr = local { port = 9 }, data = bytes::from_str { s = "lost" } } }
                     let waited = show_dg { r = Udp.recv_from { sock = a, max_bytes = 100 }, from_port = 0 }
@@ -392,7 +392,7 @@ class NetTest {
                 Ok { val = a } -> match Udp.bind { addr = local { port = 0 }, receive_timeout_ms = 200 } is
                   Err { error } -> show_err { e = error }
                   Ok { val = b } -> do
-                    let _ = Udp.send_to { sock = a, addr = local { port = udp_port { sock = b } }, data = bytes::from_str { s = "ping" } }
+                    Udp.send_to { sock = a, addr = local { port = udp_port { sock = b } }, data = bytes::from_str { s = "ping" } }
                     let got = show_dg { r = Udp.recv_from { sock = b, max_bytes = 100 }, from_port = udp_port { sock = a } }
                     let waited = show_dg { r = Udp.recv_from { sock = a, max_bytes = 100 }, from_port = 0 }
                     Udp.close { sock = a }

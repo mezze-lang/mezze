@@ -405,7 +405,7 @@ pub let create_directories: { path: Str } -> Result {} FsError <FileSystem> = { 
     Ok { val = True } -> Ok { val = {} }
     Ok { val = False } -> do
       let parent_path = fs::parent { path = path }
-      let _ = create_directories { path = parent_path }
+      create_directories { path = parent_path }
       FileSystem.create_directory { path = path }
     Err { error } -> Err { error = error }
 
@@ -423,7 +423,7 @@ pub let ensure_directory: { path: Str } -> Result {} FsError <FileSystem> = { pa
 ## Write text, creating parent directories if needed.
 pub let write_text_mkdirs: { path: Str, text: Str } -> Result {} FsError <FileSystem> = { path, text } ->
   do
-    let _ = create_directories { path = fs::parent { path = path } }
+    create_directories { path = fs::parent { path = path } }
     write_text { path = path, text = text }
 
 # Recursive delete — list_with_stat avoids re-statting each child.
@@ -460,7 +460,7 @@ pub let with_read
   = { path, f } -> match FileStreaming.open { path = path, mode = Read } is
     Ok { val = h } -> do
       let result = f { handle = h }
-      let _ = FileStreaming.close { handle = h }
+      FileStreaming.close { handle = h }
       Ok { val = result }
     Err { error } -> Err { error = error }
 
@@ -511,7 +511,7 @@ pub let with_lines
   = { path, chunk_bytes, init, f } -> match FileStreaming.open { path = path, mode = Read } is
     Ok { val = h } -> do
       let out = lines { handle = h, chunk_bytes = chunk_bytes, init = init, f = f }
-      let _ = FileStreaming.close { handle = h }
+      FileStreaming.close { handle = h }
       Ok { val = out }
     Err { error } -> Err { error = error }
 
@@ -534,6 +534,6 @@ pub let with_write
   = { path, mode, f } -> match FileStreaming.open { path = path, mode = mode } is
     Ok { val = h } -> do
       let result = f { handle = h }
-      let _ = FileStreaming.close { handle = h }
+      FileStreaming.close { handle = h }
       Ok { val = result }
     Err { error } -> Err { error = error }

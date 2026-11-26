@@ -74,7 +74,7 @@ class WithTimeoutDistinguishesOutcomesTest {
               let p = Async.spawn { f = {} -> do
                 sleep { ms = 10000 }
                 1 }
-              let _ = cancel { p = p, reason = CancelUserRequested { msg = "mine" } }
+              cancel { p = p, reason = CancelUserRequested { msg = "mine" } }
               match with_timeout { ms = 5000, p = p } is
                 Ok { val = _ } -> "unexpectedly-ok"
                 Err { error = AsyncTimedOut { ms = _ } } -> "timed-out"

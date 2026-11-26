@@ -44,6 +44,7 @@ class VirtualThreadEffectIntegrationTest {
     private fun eval(body: String): Any {
         val code = """
 use std::effects::async::{ Async, LoomAsync, await as await_result, sleep as async_sleep }
+use std::effects::time::{ SystemTime }
 
 let unwrap_async = {r} -> match r is
     Ok { val } -> val
@@ -53,7 +54,8 @@ let spawn = {f} -> Async.spawn {f = f}
 let await = {p} -> unwrap_async {r = await_result {p = p}}
 let sleep = {ms} -> async_sleep {ms = ms}
 
-perform LoomAsync in do
+# `sleep` performs Time: without a clock the old `let _ = sleep {…}` silently never slept.
+perform SystemTime in perform LoomAsync in do
 $body
         """.trimIndent()
         return MezzeTestHelper.run(code)
@@ -122,23 +124,23 @@ $body
 
             # Spawn 5 threads that each do some work
             let t1 = spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+                sleep {ms = 10}
                 1
             }
             let t2 = spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+                sleep {ms = 10}
                 2
             }
             let t3 = spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+                sleep {ms = 10}
                 3
             }
             let t4 = spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+                sleep {ms = 10}
                 4
             }
             let t5 = spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+                sleep {ms = 10}
                 5
             }
 
@@ -163,15 +165,15 @@ $body
         val code = """
 
             let t1 = spawn {f = {} -> do
-                let _ = sleep {ms = 50}
+                sleep {ms = 50}
                 1
             }
             let t2 = spawn {f = {} -> do
-                let _ = sleep {ms = 50}
+                sleep {ms = 50}
                 2
             }
             let t3 = spawn {f = {} -> do
-                let _ = sleep {ms = 50}
+                sleep {ms = 50}
                 3
             }
 
@@ -282,9 +284,9 @@ $body
             let value = 21
 
             let thread = spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+                sleep {ms = 10}
                 let doubled = value * 2
-                let _ = sleep {ms = 10}
+                sleep {ms = 10}
                 doubled
             }
 
@@ -326,15 +328,15 @@ $body
 
             # Fork: spawn multiple workers
             let worker1 = spawn {f = {} -> do
-                let _ = sleep {ms = 5}
+                sleep {ms = 5}
                 10
             }
             let worker2 = spawn {f = {} -> do
-                let _ = sleep {ms = 5}
+                sleep {ms = 5}
                 20
             }
             let worker3 = spawn {f = {} -> do
-                let _ = sleep {ms = 5}
+                sleep {ms = 5}
                 12
             }
 
@@ -401,7 +403,7 @@ $body
         val code = """
 
             let thread = spawn {f = {} -> {}}
-            let _ = await {p = thread}
+            await {p = thread}
             42
         """
         val result = eval(code)

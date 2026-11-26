@@ -132,11 +132,12 @@ class SameScopeShadowTest {
     }
 
     @Test
-    fun `_-prefixed repeated name opts out`() {
-        expectOk("""
+    fun `a _-prefixed name is an ordinary name and does not opt out`() {
+        // `_` has one meaning, the pattern wildcard; `_x` is just a name.
+        expectT0306("""
             let f = {_x: Int} -> do
               let _x = 99
-              42
+              _x
         """.trimIndent())
     }
 }

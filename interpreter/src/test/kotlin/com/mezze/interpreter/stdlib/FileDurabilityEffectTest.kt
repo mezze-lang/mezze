@@ -42,10 +42,10 @@ class FileDurabilityEffectTest {
             use std::effects::filesystem::{ FileSystem, FileDurability, MemoryFileSystem, MemoryFileDurability, FileStreaming, MemoryFileStreaming, LocalFileStreaming, OpenMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in perform MemoryFileDurability in do
-              let _ = FileSystem.create_directory { path = "/d" }
+              FileSystem.create_directory { path = "/d" }
               match FileStreaming.open { path = "/d/wal", mode = Write } is
                 Ok { val = h } -> do
-                  let _ = FileStreaming.write_chunk {
+                  FileStreaming.write_chunk {
                     handle = h, bytes = bytes::from_str { s = "entry" }
                   }
                   match FileDurability.fsync { handle = h } is
@@ -68,13 +68,13 @@ class FileDurabilityEffectTest {
             use std::effects::filesystem::{ FileSystem, FileDurability, MemoryFileSystem, MemoryFileDurability, FileStreaming, MemoryFileStreaming, LocalFileStreaming, OpenMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in perform MemoryFileDurability in do
-              let _ = FileSystem.create_directory { path = "/d" }
+              FileSystem.create_directory { path = "/d" }
               match FileStreaming.open { path = "/d/wal", mode = Write } is
                 Ok { val = h } -> do
-                  let _ = FileStreaming.write_chunk {
+                  FileStreaming.write_chunk {
                     handle = h, bytes = bytes::from_str { s = "committed" }
                   }
-                  let _ = FileDurability.fsync { handle = h }
+                  FileDurability.fsync { handle = h }
                   # Deliberately NOT closed: the read must see the synced bytes.
                   match FileSystem.read_bytes { path = "/d/wal" } is
                     Ok { val = b } -> match bytes::to_str { b = b } is
@@ -91,7 +91,7 @@ class FileDurabilityEffectTest {
         val code = """
             use std::effects::filesystem::{ FileSystem, FileDurability, MemoryFileSystem, MemoryFileDurability }
             perform MemoryFileSystem in perform MemoryFileDurability in do
-              let _ = FileSystem.create_directory { path = "/d" }
+              FileSystem.create_directory { path = "/d" }
               let here = match FileDurability.fsync_dir { path = "/d" } is
                 Ok { val = _ } -> "ok"
                 Err { error = _ } -> "err"
@@ -114,13 +114,13 @@ class FileDurabilityEffectTest {
             perform LocalFileSystem in perform LocalFileStreaming in perform LocalFileDurability in do
               match FileStreaming.open { path = "$path", mode = Write } is
                 Ok { val = h } -> do
-                  let _ = FileStreaming.write_chunk {
+                  FileStreaming.write_chunk {
                     handle = h, bytes = bytes::from_str { s = "durable" }
                   }
                   let synced = match FileDurability.fsync { handle = h } is
                     Ok { val = _ } -> "synced"
                     Err { error = _ } -> "fsync-failed"
-                  let _ = FileStreaming.close { handle = h }
+                  FileStreaming.close { handle = h }
                   synced
                 Err { error = _ } -> "open-failed"
         """.trimIndent()
@@ -135,7 +135,7 @@ class FileDurabilityEffectTest {
             perform LocalFileSystem in perform LocalFileStreaming in perform LocalFileDurability in do
               match FileStreaming.open { path = "$path", mode = Write } is
                 Ok { val = h } -> do
-                  let _ = FileStreaming.close { handle = h }
+                  FileStreaming.close { handle = h }
                   match FileDurability.fsync { handle = h } is
                     Ok { val = _ } -> "unexpectedly-ok"
                     Err { error = FsClosedHandle { path = _ } } -> "closed"

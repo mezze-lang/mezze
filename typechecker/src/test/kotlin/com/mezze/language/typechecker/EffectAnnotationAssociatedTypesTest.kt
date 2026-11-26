@@ -178,7 +178,7 @@ class EffectAnnotationAssociatedTypesTest {
 
             let combined: {} -> Int <State having 'state = Int, Reader having 'env = Str> = {} ->
                 do
-                    let _ = Reader.ask {}
+                    Reader.ask {}
                     State.get {}
         """.trimIndent()
 

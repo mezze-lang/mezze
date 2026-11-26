@@ -149,7 +149,7 @@ class STMModuleTest {
 
             let v = tvar {init = 100}
             perform SequentialSTM in do
-                let _ = STM.swap {var = v, val = 200}
+                STM.swap {var = v, val = 200}
                 {}
             deref {var = v}
         """)
@@ -193,7 +193,7 @@ class STMModuleTest {
 
             let alice = tvar {init = 1000}
             let bob = tvar {init = 500}
-            let _ = perform SequentialSTM in transfer {from = alice, to = bob, amount = 300}
+            perform SequentialSTM in transfer {from = alice, to = bob, amount = 300}
             deref {var = alice}
         """)
         assertEquals(700L, result)
@@ -206,7 +206,7 @@ class STMModuleTest {
 
             let alice = tvar {init = 1000}
             let bob = tvar {init = 500}
-            let _ = perform SequentialSTM in transfer {from = alice, to = bob, amount = 300}
+            perform SequentialSTM in transfer {from = alice, to = bob, amount = 300}
             deref {var = bob}
         """)
         assertEquals(800L, result)
@@ -281,7 +281,7 @@ class STMModuleTest {
 
             let mv = tmvar {init = 42}
             perform SequentialSTM in do
-                let _ = take_tmvar {var = mv}
+                take_tmvar {var = mv}
                 is_empty_tmvar {var = mv}
         """)
         assertEquals(true, result)

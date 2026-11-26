@@ -3091,9 +3091,10 @@ class LspFeaturesTest {
     }
 
     @Test
-    fun `unused variable warning offers a Prefix-with-underscore quick-fix`() {
-        // #95: W0101 carries its WarningCode to the LSP, and the codeAction
-        // handler turns it into a one-click "Prefix with `_`" fix.
+    fun `unused variable warning offers a Remove-the-binding quick-fix`() {
+        // #95: W0101 carries its WarningCode to the LSP, and the codeAction handler
+        // turns it into a one-click fix. Not "prefix with `_`": a `_`-prefixed name is
+        // an ordinary name. The fix deletes `let x =` and keeps the expression.
         val (uri, _) = openSingleFile("""
             let f = {} -> do
               let x = 5
@@ -3112,10 +3113,12 @@ class LspFeaturesTest {
         }).get(5, TimeUnit.SECONDS) ?: emptyList()
 
         val titles = actions.mapNotNull { e -> if (e.isRight) e.right.title else null }
-        assertTrue(
-            titles.any { it.contains("Prefix with") && it.contains("_") },
-            "expected a 'Prefix with `_`' code action, got: $titles"
-        )
+        assertTrue(titles.any { it == "Remove the binding" }, "expected 'Remove the binding', got: $titles")
+        val edit = actions.first { it.isRight && it.right.title == "Remove the binding" }.right.edit.changes[uri]!!.single()
+        assertEquals("", edit.newText)
+        assertEquals(1, edit.range.start.line)
+        assertEquals("  ".length, edit.range.start.character, "the edit starts at `let`")
+        assertEquals("  let x = ".length, edit.range.end.character, "and ends where the expression begins")
     }
 
     // ===== Cross-module go-to-definition (in-memory fallback) =========

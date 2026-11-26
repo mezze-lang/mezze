@@ -241,7 +241,7 @@ class PolyglotCoreTest {
             use std::polyglot::jvm::{ from_int }
             let main = {} -> do
               let list = jvm::class { name = "java.util.ArrayList" }.new { args = [] }
-              let _ = list.method { name = "add", args = [from_int { val = 100 }] }
+              list.method { name = "add", args = [from_int { val = 100 }] }
               list.method { name = "size", args = [] }.int {}
             main {}
             """.trimIndent()
@@ -276,7 +276,7 @@ class PolyglotCoreTest {
             use std::polyglot::jvm::{ from_int }
             let main = {} -> do
               let list = jvm::class { name = "java.util.ArrayList" }.new { args = [] }
-              let _ = list.method { name = "add", args = [from_int { val = 42 }] }
+              list.method { name = "add", args = [from_int { val = 42 }] }
               list.at { index = 0 }.int {}
             main {}
             """.trimIndent()
@@ -386,7 +386,7 @@ class PolyglotCoreTest {
             use std::polyglot::jvm::{ from_str, from_int }
             let main = {} -> do
               let map = jvm::class { name = "java.util.HashMap" }.new { args = [] }
-              let _ = map.method { name = "put", args = [from_str { val = "k" }, from_int { val = 99 }] }
+              map.method { name = "put", args = [from_str { val = "k" }, from_int { val = 99 }] }
               map.method { name = "get", args = [from_str { val = "k" }] }.int {}
             main {}
             """.trimIndent()
@@ -497,8 +497,8 @@ class PolyglotCoreTest {
             use std::polyglot::jvm::{ from_int }
             let main = {} -> do
               let list = jvm::class { name = "java.util.ArrayList" }.new { args = [] }
-              let _ = list.method { name = "add", args = [from_int { val = 7 }] }
-              let _ = list.method { name = "add", args = [from_int { val = 8 }] }
+              list.method { name = "add", args = [from_int { val = 7 }] }
+              list.method { name = "add", args = [from_int { val = 8 }] }
               list.len {}
             main {}
             """.trimIndent()
@@ -529,9 +529,9 @@ class PolyglotCoreTest {
             use std::collections::seq
             let main = {} -> do
               let set = jvm::class { name = "java.util.HashSet" }.new { args = [] }
-              let _ = set.method { name = "add", args = [from_int { val = 10 }] }
-              let _ = set.method { name = "add", args = [from_int { val = 20 }] }
-              let _ = set.method { name = "add", args = [from_int { val = 30 }] }
+              set.method { name = "add", args = [from_int { val = 10 }] }
+              set.method { name = "add", args = [from_int { val = 20 }] }
+              set.method { name = "add", args = [from_int { val = 30 }] }
               match set.to_seq {} is
                 Ok  { val = xs }  -> seq::size { xs = xs }
                 Err { error = _ } -> -1

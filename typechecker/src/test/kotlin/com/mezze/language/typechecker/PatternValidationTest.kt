@@ -365,8 +365,8 @@ class PatternValidationTest {
         val (result, warnings) = parseAndTypeCheckWithWarnings(code)
         assertNotNull(result)
         // Check warnings contain unused variable
-        assertTrue(warnings.any { it.contains("Unused variable") && it.contains("val") },
-            "Should warn about unused variable 'val'. Warnings: $warnings")
+        assertTrue(warnings.any { it.contains("Unused binding 'val'") && it.contains("{ val = _ }") },
+            "Should warn about unused binding 'val' and say `{ val = _ }`. Warnings: $warnings")
     }
 
     @Test
@@ -383,16 +383,20 @@ class PatternValidationTest {
         val (result, warnings) = parseAndTypeCheckWithWarnings(code)
         assertNotNull(result)
         // Should not warn since 'val' is used
-        assertTrue(warnings.none { it.contains("Unused variable") && it.contains("val") },
+        assertTrue(warnings.none { it.contains("Unused binding 'val'") },
             "Should not warn about 'val' since it's used. Warnings: $warnings")
     }
 
     @Test
-    fun `underscore prefix suppresses unused variable warning`() {
+    fun `the wildcard binds nothing and is not warned about - a _-prefixed name is`() {
         val code = """
             type Maybe = | Just { val: Int }, Nothing |
 
             let test = {opt: Maybe} ->
+                match opt is
+                    Just { val = _ } -> 42
+                    Nothing -> 0
+            let named = {opt: Maybe} ->
                 match opt is
                     Just { val = _unused } -> 42
                     Nothing -> 0
@@ -400,9 +404,9 @@ class PatternValidationTest {
 
         val (result, warnings) = parseAndTypeCheckWithWarnings(code)
         assertNotNull(result)
-        // Variables starting with _ should not produce warnings
-        assertTrue(warnings.none { it.contains("_unused") },
-            "Should not warn about '_unused'. Warnings: $warnings")
+        assertTrue(warnings.any { it.contains("'_unused'") && it.contains("Write `_`") },
+            "`_unused` is an ordinary name: unused, so it must warn and say to write `_`. Warnings: $warnings")
+        assertTrue(warnings.none { it.contains("'val'") }, "the wildcard binds nothing. Warnings: $warnings")
     }
 
     // ========== FLOAT LITERAL PATTERN WARNING ==========

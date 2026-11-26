@@ -34,12 +34,12 @@ let main = {} -> perform Console in perform SystemTime in do
     println { msg = "== steady_state_probe (10 cold iters per size, no warmup) ==" }
 
     println { msg = "-- N=1000 --" }
-    let _a = loop_iters {n = 1000, k = 10, i = 0}
+    loop_iters {n = 1000, k = 10, i = 0}
 
     println { msg = "-- N=100000 --" }
-    let _b = loop_iters {n = 100000, k = 10, i = 0}
+    loop_iters {n = 100000, k = 10, i = 0}
 
     println { msg = "-- N=10000000 --" }
-    let _c = loop_iters {n = 10000000, k = 10, i = 0}
+    loop_iters {n = 10000000, k = 10, i = 0}
 
     println { msg = "== done ==" }

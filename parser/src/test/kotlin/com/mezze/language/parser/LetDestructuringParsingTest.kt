@@ -37,17 +37,16 @@ class LetDestructuringParsingTest {
     // ========== Wildcard Pattern in Let ==========
 
     @Test
-    fun `parse let binding with wildcard pattern`() {
-        val code = """
-            let _ = sideEffect { }
-            1
-        """.trimIndent()
-
-        val module = parser.parseParsedModule(code)
-        assertNotNull(module)
-
-        val letBinding = module.decls.first() as ParsedLetDecl
-        assertTrue(letBinding.pattern is ParsedWildcardPattern)
+    fun `a let of the bare wildcard is rejected - it binds nothing`() {
+        // `_` is a pattern wildcard; a whole `let _ = e` binds nothing. In a block the
+        // statement `e` is the spelling; at the top level there is nothing to run.
+        for (code in listOf("let _ = 1", "let f = {} -> do\n  let _ = 1\n  2")) {
+            val err = kotlin.runCatching { parser.parseParsedModule(code) }.exceptionOrNull()
+            assertNotNull(err, "`$code` must not parse")
+            assertTrue(err!!.message.orEmpty().contains("binds nothing"), "got: ${err.message}")
+        }
+        // A wildcard INSIDE a destructuring is still a wildcard.
+        assertNotNull(parser.parseParsedModule("let f = { r } -> do\n  let { a, b = _ } = r\n  a"))
     }
 
     // ========== Record Pattern in Let ==========

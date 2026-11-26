@@ -69,7 +69,7 @@ class IterCursorTest {
             use std::bool
             do
               let c = iter::cursor { it = iter::range { start = 0, end = 1 } }
-              let _ = iter::cursor_next { c = c }
+              iter::cursor_next { c = c }
               let second = iter::cursor_next { c = c }
               let third = iter::cursor_next { c = c }
               let a = match second is
@@ -95,8 +95,8 @@ class IterCursorTest {
               let src = iter::range { start = 0, end = 5 }
               let a = iter::cursor { it = src }
               let b = iter::cursor { it = src }
-              let _ = iter::cursor_next { c = a }
-              let _ = iter::cursor_next { c = a }
+              iter::cursor_next { c = a }
+              iter::cursor_next { c = a }
               match iter::cursor_next { c = a } is
                 Some { val = x } -> match iter::cursor_next { c = b } is
                   Some { val = y } -> "$(int::to_str { n = x })-$(int::to_str { n = y })"
@@ -115,8 +115,8 @@ class IterCursorTest {
             $head
             do
               let c = iter::cursor { it = $naturals }
-              let _ = iter::cursor_next { c = c }
-              let _ = iter::cursor_next { c = c }
+              iter::cursor_next { c = c }
+              iter::cursor_next { c = c }
               match iter::cursor_next { c = c } is
                 Some { val = x } -> x
                 None -> 0 - 1
@@ -288,9 +288,9 @@ class IterCursorTest {
             use std::effects::early_return::{ EarlyReturn, return }
             use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text, WriteMode }
             perform MemoryFileSystem in perform LoomAsync in do
-              let _ = FileSystem.create_directory { path = "/seen" }
-              let _ = perform EarlyReturn in do
-                let _ = fold_concurrent_ordered {
+              FileSystem.create_directory { path = "/seen" }
+              perform EarlyReturn in do
+                fold_concurrent_ordered {
                   it = $naturals,
                   f = { x } -> write_text { path = "/seen/$(int::to_str { n = x })", text = "1" },
                   max_in_flight = 2,
@@ -319,8 +319,8 @@ class IterCursorTest {
             use std::effects::filesystem::{ FileSystem, MemoryFileSystem, read_text, write_text, WriteMode }
             use std::str
             perform MemoryFileSystem in perform LoomAsync in do
-              let _ = FileSystem.create_directory { path = "/in" }
-              let _ = seq::for_each { xs = seq::range { start = 0, end = 5 }, f = { x } -> write_text { path = "/in/$(int::to_str { n = x })", text = "ab" } }
+              FileSystem.create_directory { path = "/in" }
+              seq::for_each { xs = seq::range { start = 0, end = 5 }, f = { x } -> write_text { path = "/in/$(int::to_str { n = x })", text = "ab" } }
               fold_concurrent_ordered {
                 it = iter::range { start = 0, end = 5 },
                 f = { x } -> match read_text { path = "/in/$(int::to_str { n = x })" } is

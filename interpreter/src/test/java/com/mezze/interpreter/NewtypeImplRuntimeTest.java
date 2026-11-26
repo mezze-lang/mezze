@@ -74,7 +74,7 @@ class NewtypeImplRuntimeTest {
             Object result = MezzeTestHelper.run("""
                 use std::effects::async::atom::{Atom, atom}
                 let a = atom {val = 10}
-                let _ = a.reset {val = 20}
+                a.reset {val = 20}
                 a.deref {}
                 """);
             assertEquals(20L, result);
@@ -85,7 +85,7 @@ class NewtypeImplRuntimeTest {
             Object result = MezzeTestHelper.run("""
                 use std::effects::async::atom::{Atom, atom}
                 let a = atom {val = 5}
-                let _ = a.swap {f = {current} -> current + 10}
+                a.swap {f = {current} -> current + 10}
                 a.deref {}
                 """);
             assertEquals(15L, result);
@@ -126,9 +126,9 @@ class NewtypeImplRuntimeTest {
             Object result = MezzeTestHelper.run("""
                 use std::effects::async::waitgroup::{WaitGroup, wait_group, add}
                 let wg = wait_group {}
-                let _ = add {wg = wg, delta = 1}
-                let _ = wg.done {}
-                let _ = wg.wait {}
+                add {wg = wg, delta = 1}
+                wg.done {}
+                wg.wait {}
                 42
                 """);
             assertEquals(42L, result);
@@ -168,8 +168,8 @@ class NewtypeImplRuntimeTest {
             Object result = MezzeTestHelper.run("""
                 use std::effects::async::latch::{Latch, latch}
                 let l = latch {count = 1}
-                let _ = l.count_down {}
-                let _ = l.await {}
+                l.count_down {}
+                l.await {}
                 100
                 """);
             assertEquals(100L, result);
@@ -180,7 +180,7 @@ class NewtypeImplRuntimeTest {
             Object result = MezzeTestHelper.run("""
                 use std::effects::async::latch::{Latch, latch}
                 let l = latch {count = 3}
-                let _ = l.count_down {}
+                l.count_down {}
                 l.get_count {}
                 """);
             assertEquals(2L, result);
@@ -220,8 +220,8 @@ class NewtypeImplRuntimeTest {
             Object result = MezzeTestHelper.run("""
                 use std::effects::async::semaphore::{Semaphore, semaphore}
                 let s = semaphore {permits = 2}
-                let _ = s.acquire {}
-                let _ = s.release {}
+                s.acquire {}
+                s.release {}
                 77
                 """);
             assertEquals(77L, result);
@@ -261,8 +261,8 @@ class NewtypeImplRuntimeTest {
             Object result = MezzeTestHelper.run("""
                 use std::effects::async::mutex::{Mutex, mutex}
                 let m = mutex {}
-                let _ = m.lock {}
-                let _ = m.unlock {}
+                m.lock {}
+                m.unlock {}
                 55
                 """);
             assertEquals(55L, result);
@@ -305,7 +305,7 @@ class NewtypeImplRuntimeTest {
                 use std::effects::async::{ Async, CancellationToken, LoomAsync, await, token }
                 perform LoomAsync in do
                     let t = token {}
-                    let _ = t.cancel_token {reason = "done"}
+                    t.cancel_token {reason = "done"}
                     t.is_token_cancelled {}
                 """);
             assertEquals(true, result);
@@ -409,7 +409,7 @@ class NewtypeImplRuntimeTest {
                 let main = {} -> perform LoomAsync in do
                     let p = Async.spawn {f = {} -> 42}
                     let same = p == p
-                    let _ = await {p = p}
+                    await {p = p}
                     same
                 main {}
                 """);
@@ -436,7 +436,7 @@ class NewtypeImplRuntimeTest {
                 use std::effects::async::{ Async, LoomAsync, Promise, await }
                 let main = {} -> perform LoomAsync in do
                     let p = Async.spawn {f = {} -> 99}
-                    let _ = await {p = p}
+                    await {p = p}
                     p.is_done {}
                 main {}
                 """);

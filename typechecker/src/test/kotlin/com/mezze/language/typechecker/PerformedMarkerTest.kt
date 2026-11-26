@@ -330,7 +330,7 @@ class PerformedMarkerTest {
             }
 
             let seqPerform = {} -> do
-                let _ = perform Console in Log.println { msg = "first" }
+                perform Console in Log.println { msg = "first" }
                 perform IntState in State.get {}
         """.trimIndent()
 
@@ -500,7 +500,7 @@ class PerformedMarkerTest {
                 if cond
                 then perform Console in Log.println { msg = "true branch" }
                 else perform IntState in do
-                    let _ = State.get {}
+                    State.get {}
                     {}
         """.trimIndent()
 
@@ -539,7 +539,7 @@ class PerformedMarkerTest {
             let matchPerform = {opt} -> match opt is
                 Some {val} -> perform Console in Log.println { msg = "some" }
                 None -> perform IntState in do
-                    let _ = State.get {}
+                    State.get {}
                     {}
         """.trimIndent()
 

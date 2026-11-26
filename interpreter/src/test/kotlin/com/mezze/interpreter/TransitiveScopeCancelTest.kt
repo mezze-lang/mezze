@@ -34,7 +34,7 @@ class TransitiveScopeCancelTest {
               let nested_ready = atom { val = False }
               scoped { f = { sc } -> do
                 let parent_sc = sc
-                let _child = scope_spawn { sc = parent_sc, f = {} ->
+                scope_spawn { sc = parent_sc, f = {} ->
                   scoped { f = { sc } -> do
                     let nested_sc = sc
                     reset { atom = nested_ready, val = True }

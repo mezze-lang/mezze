@@ -37,7 +37,7 @@ let main = {} -> perform Console in perform SystemTime in do
     let xs = build {n = n, acc = list::empty {}}
 
     # Warmup — 3 folds, discard timing
-    let _w = time_k {xs = xs, k = 3, acc = []}
+    time_k {xs = xs, k = 3, acc = []}
 
     # Measured — 10 folds
     let times = time_k {xs = xs, k = 10, acc = []}

@@ -165,7 +165,7 @@ class MapWalkPairingTest {
           let m = build { i = 100, m = map::empty {} }
           let calls = atom { val = 0 }
           let bump = { } -> swap { atom = calls, f = { current } -> current + 1 }
-          let _ = $op
+          $op
           deref { atom = calls }
         main {}
     """

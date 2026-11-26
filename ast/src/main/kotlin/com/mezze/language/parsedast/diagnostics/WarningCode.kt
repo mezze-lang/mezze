@@ -23,6 +23,7 @@ enum class WarningCode {
     W0101_UNUSED_VARIABLE,   // a bound name (let / match binding) is never used
     W0102_UNUSED_IMPORT,     // an imported name is never referenced
     W0103_UNUSED_PARAMETER,  // a free-standing lambda's parameter is never used (its name is the field callers pass)
+    W0104_UNUSED_PATTERN_BINDING, // a name bound by a match pattern is never used (write `_` instead)
 
     // ─── Redundant / dead code (W03xx) ───────────────────────────────────
     W0301_DISCARDED_VALUE,   // a non-unit expression's result is computed then thrown away

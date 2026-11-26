@@ -1880,7 +1880,6 @@ let 'add = {a, b} -> a + b
 let Typed = {a: Int, b: Str, c} -> a
 
 # === 420
-let _ = sideEffect { }
 1
 
 # === 421
@@ -7120,7 +7119,7 @@ let x = _1 + 1
 
 # === 1651
 let x = do
-    let _ = println { msg = "hello" }
+    println { msg = "hello" }
     42
 
 # === 1652

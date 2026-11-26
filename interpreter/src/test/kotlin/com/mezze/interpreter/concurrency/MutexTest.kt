@@ -90,9 +90,9 @@ class MutexTest {
             $mutexSetup
 
             let m = mutex {}
-            let _ = lock {mutex = m}
+            lock {mutex = m}
             let held = is_held_by_current_thread {mutex = m}
-            let _ = unlock {mutex = m}
+            unlock {mutex = m}
             held
         """
         val result = eval(code)
@@ -118,7 +118,7 @@ class MutexTest {
 
             let m = mutex {}
             let acquired = try_lock {mutex = m}
-            let _ = if acquired then unlock {mutex = m} else {}
+            if acquired then unlock {mutex = m} else {}
             acquired
         """
         val result = eval(code)
@@ -131,11 +131,11 @@ class MutexTest {
             $mutexSetup
 
             let m = mutex {}
-            let _ = lock {mutex = m}
-            let _ = lock {mutex = m}  # Reentrant - should succeed
+            lock {mutex = m}
+            lock {mutex = m}  # Reentrant - should succeed
             let held = is_held_by_current_thread {mutex = m}
-            let _ = unlock {mutex = m}
-            let _ = unlock {mutex = m}
+            unlock {mutex = m}
+            unlock {mutex = m}
             held
         """
         val result = eval(code)
@@ -159,10 +159,10 @@ class MutexTest {
             # Function that increments counter 5 times with mutex protection
             let increment_5 = {} -> do
                 with_lock {mutex = m, f = {} -> do
-                    let _ = reset {atom = counter, val = deref {atom = counter} + 1}
-                    let _ = reset {atom = counter, val = deref {atom = counter} + 1}
-                    let _ = reset {atom = counter, val = deref {atom = counter} + 1}
-                    let _ = reset {atom = counter, val = deref {atom = counter} + 1}
+                    reset {atom = counter, val = deref {atom = counter} + 1}
+                    reset {atom = counter, val = deref {atom = counter} + 1}
+                    reset {atom = counter, val = deref {atom = counter} + 1}
+                    reset {atom = counter, val = deref {atom = counter} + 1}
                     reset {atom = counter, val = deref {atom = counter} + 1}
                 }
 
@@ -171,9 +171,9 @@ class MutexTest {
             let p2 = Async.spawn {f = increment_5}
             let p3 = Async.spawn {f = increment_5}
 
-            let _ = unwrap { result = await {p = p1} }
-            let _ = unwrap { result = await {p = p2} }
-            let _ = unwrap { result = await {p = p3} }
+            unwrap { result = await {p = p1} }
+            unwrap { result = await {p = p2} }
+            unwrap { result = await {p = p3} }
 
             deref {atom = counter}
         """
@@ -197,7 +197,7 @@ class MutexTest {
             }
 
             # Wait for first to finish
-            let _ = unwrap { result = await {p = p1} }
+            unwrap { result = await {p = p1} }
 
             # Second thread should be able to acquire lock
             let p2 = Async.spawn {f = {} ->
@@ -222,23 +222,23 @@ class MutexTest {
 
             # Thread 1 holds lock for a while
             let p1 = Async.spawn {f = {} -> do
-                let _ = lock {mutex = m}
-                let _ = sleep {ms = 100}
+                lock {mutex = m}
+                sleep {ms = 100}
                 unlock {mutex = m}
             }
 
             # Give thread 1 time to acquire
-            let _ = sleep {ms = 20}
+            sleep {ms = 20}
 
             # Thread 2 tries to acquire - should fail
             let p2 = Async.spawn {f = {} -> do
                 let acquired = try_lock {mutex = m}
-                let _ = reset {atom = try_result, val = acquired}
+                reset {atom = try_result, val = acquired}
                 if acquired then unlock {mutex = m} else {}
             }
 
-            let _ = unwrap { result = await {p = p2} }
-            let _ = unwrap { result = await {p = p1} }
+            unwrap { result = await {p = p2} }
+            unwrap { result = await {p = p1} }
 
             deref {atom = try_result}
         """

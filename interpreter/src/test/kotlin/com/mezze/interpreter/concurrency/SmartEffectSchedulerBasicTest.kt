@@ -112,17 +112,17 @@ class SmartEffectSchedulerBasicTest {
             let b = atom {val = 0}
 
             let op1 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+                sleep {ms = 10}
                 reset {atom = a, val = 1}
             }
 
             let op2 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+                sleep {ms = 10}
                 reset {atom = b, val = 2}
             }
 
-            let _ = unwrap { result = await {p = op1} }
-            let _ = unwrap { result = await {p = op2} }
+            unwrap { result = await {p = op1} }
+            unwrap { result = await {p = op2} }
 
             deref {atom = a} + deref {atom = b}
         """
@@ -148,7 +148,7 @@ class SmartEffectSchedulerBasicTest {
             let op1 = Async.spawn {f = {} -> reset {atom = shared, val = 42}}
 
             # Wait for op1 to complete before op2 reads
-            let _ = unwrap { result = await {p = op1} }
+            unwrap { result = await {p = op1} }
 
             # op2 reads from shared (depends on op1)
             let op2 = Async.spawn {f = {} -> deref {atom = shared}}
@@ -170,11 +170,11 @@ class SmartEffectSchedulerBasicTest {
 
             # Sequence: write x, then read x
             let writer = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 5}
+                sleep {ms = 5}
                 reset {atom = x, val = 100}
             }
 
-            let _ = unwrap { result = await {p = writer} }
+            unwrap { result = await {p = writer} }
 
             let reader = Async.spawn {f = {} -> deref {atom = x}}
             unwrap { result = await {p = reader} }
@@ -201,18 +201,18 @@ class SmartEffectSchedulerBasicTest {
 
             # op1: writes x
             let op1 = Async.spawn {f = {} -> reset {atom = x, val = 1}}
-            let _ = unwrap { result = await {p = op1} }
+            unwrap { result = await {p = op1} }
 
             # op2: reads x, writes y (depends on op1)
             let op2 = Async.spawn {f = {} -> do
                 let xVal = deref {atom = x}
                 reset {atom = y, val = xVal + 1}
             }
-            let _ = unwrap { result = await {p = op2} }
+            unwrap { result = await {p = op2} }
 
             # op3: writes z (independent of op1, op2)
             let op3 = Async.spawn {f = {} -> reset {atom = z, val = 10}}
-            let _ = unwrap { result = await {p = op3} }
+            unwrap { result = await {p = op3} }
 
             # Verify final state
             deref {atom = x} + deref {atom = y} + deref {atom = z}
@@ -267,9 +267,9 @@ class SmartEffectSchedulerBasicTest {
             let op2 = Async.spawn {f = {} -> reset {atom = b, val = 20}}
             let op3 = Async.spawn {f = {} -> reset {atom = c, val = 30}}
 
-            let _ = unwrap { result = await {p = op1} }
-            let _ = unwrap { result = await {p = op2} }
-            let _ = unwrap { result = await {p = op3} }
+            unwrap { result = await {p = op1} }
+            unwrap { result = await {p = op2} }
+            unwrap { result = await {p = op3} }
 
             deref {atom = a} + deref {atom = b} + deref {atom = c}
         """
@@ -289,7 +289,7 @@ class SmartEffectSchedulerBasicTest {
 
             # First group: write x
             let group1Op = Async.spawn {f = {} -> swap {atom = x, f = {current} -> current * 2}}
-            let _ = unwrap { result = await {p = group1Op} }
+            unwrap { result = await {p = group1Op} }
 
             # Second group: read x and use it (must come after first group)
             let group2Op = Async.spawn {f = {} -> deref {atom = x} * 3}
@@ -391,8 +391,8 @@ class SmartEffectSchedulerBasicTest {
             let op1 = Async.spawn {f = {} -> reset {atom = a, val = 5}}
             let op2 = Async.spawn {f = {} -> reset {atom = b, val = 10}}
 
-            let _ = unwrap { result = await {p = op1} }
-            let _ = unwrap { result = await {p = op2} }
+            unwrap { result = await {p = op1} }
+            unwrap { result = await {p = op2} }
 
             # op3 reads from a, so cannot merge with op1's group
             let op3 = Async.spawn {f = {} -> deref {atom = a} + deref {atom = b}}

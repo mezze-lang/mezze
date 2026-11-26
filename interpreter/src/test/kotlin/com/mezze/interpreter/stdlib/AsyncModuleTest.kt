@@ -77,7 +77,7 @@ class AsyncModuleTest {
     fun `test is_done on completed promise`() {
         val result = eval(withLoomAsync("""
             let p = Async.spawn {f = {} -> 42}
-            let _ = result::get_or { result = await {p = p}, def = -1 }
+            result::get_or { result = await {p = p}, def = -1 }
             is_done {p = p}
         """))
         assertEquals(true, result)

@@ -87,10 +87,10 @@ let main = {} -> perform Console, GraalPy, GraalJs in do
       let std_r = Python.eval {
         source = "float(__import__('numpy').random.default_rng(42).normal(0.0, 1.0, 1000).std())"
       }.float {}
-      let _ = match mean_r is
+      match mean_r is
         Ok  { val = m } -> println { msg = "    mean = $(float::to_str { n = m })" }
         Err { error = _ } -> println { msg = "    mean: coerce failed" }
-      let _ = match std_r is
+      match std_r is
         Ok  { val = s } -> println { msg = "    std  = $(float::to_str { n = s })" }
         Err { error = _ } -> println { msg = "    std : coerce failed" }
       let n_bytes = str::size { s = json_blob }
@@ -104,7 +104,7 @@ let main = {} -> perform Console, GraalPy, GraalJs in do
       println { msg = "[2] asciichart (via GraalJS `require('asciichart')`):" }
       println { msg = "" }
       let chart_r = Js.eval { source = js_chart_src { json_blob = json_blob } }.str {}
-      let _ = match chart_r is
+      match chart_r is
         Ok  { val = chart } -> println { msg = chart }
         Err { error } -> match error is
           InteropNotFound { name = n } -> println { msg = "  js: not found: $(n)" }

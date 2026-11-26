@@ -36,7 +36,7 @@ class FileStreamingEffectTest {
             use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
-              let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "/f", mode = Read } is
                 Err { error = _ } -> "open-failed"
                 Ok { val = h } -> match FileStreaming.read_at { handle = h, offset = 3, max_bytes = 4 } is
@@ -59,12 +59,12 @@ class FileStreamingEffectTest {
             use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
-              let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "/f", mode = Read } is
                 Err { error = _ } -> "open-failed"
                 Ok { val = h } -> do
-                  let _ = FileStreaming.read_chunk { handle = h, max_bytes = 2 }
-                  let _ = FileStreaming.read_at { handle = h, offset = 8, max_bytes = 2 }
+                  FileStreaming.read_chunk { handle = h, max_bytes = 2 }
+                  FileStreaming.read_at { handle = h, offset = 8, max_bytes = 2 }
                   match FileStreaming.read_chunk { handle = h, max_bytes = 2 } is
                     Ok { val = b } -> match bytes::to_str { b = b } is
                       Ok { val } -> val
@@ -80,7 +80,7 @@ class FileStreamingEffectTest {
             use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
-              let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "abc" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "abc" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "/f", mode = Read } is
                 Err { error = _ } -> 0 - 1
                 Ok { val = h } -> match FileStreaming.read_at { handle = h, offset = 99, max_bytes = 4 } is
@@ -96,12 +96,12 @@ class FileStreamingEffectTest {
             use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
-              let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "aaaa" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "aaaa" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "/f", mode = Write } is
                 Err { error = _ } -> "open-failed"
                 Ok { val = h } -> do
-                  let _ = FileStreaming.write_at { handle = h, offset = 1, bytes = bytes::from_str { s = "bb" } }
-                  let _ = FileStreaming.close { handle = h }
+                  FileStreaming.write_at { handle = h, offset = 1, bytes = bytes::from_str { s = "bb" } }
+                  FileStreaming.close { handle = h }
                   match FileSystem.read_bytes { path = "/f" } is
                     Ok { val = b } -> match bytes::to_str { b = b } is
                       Ok { val } -> val
@@ -122,12 +122,12 @@ class FileStreamingEffectTest {
             use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
-              let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "ab" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "ab" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "/f", mode = Write } is
                 Err { error = _ } -> 0 - 1
                 Ok { val = h } -> do
-                  let _ = FileStreaming.write_at { handle = h, offset = 5, bytes = bytes::from_str { s = "z" } }
-                  let _ = FileStreaming.close { handle = h }
+                  FileStreaming.write_at { handle = h, offset = 5, bytes = bytes::from_str { s = "z" } }
+                  FileStreaming.close { handle = h }
                   match FileSystem.stat { path = "/f", follow_symlinks = True } is
                     Ok { val = s } -> s.size
                     Err { error = _ } -> 0 - 1
@@ -141,12 +141,12 @@ class FileStreamingEffectTest {
             use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
-              let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "/f", mode = Append } is
                 Err { error = _ } -> 0 - 1
                 Ok { val = h } -> do
-                  let _ = FileStreaming.truncate { handle = h, size = 4 }
-                  let _ = FileStreaming.close { handle = h }
+                  FileStreaming.truncate { handle = h, size = 4 }
+                  FileStreaming.close { handle = h }
                   match FileSystem.stat { path = "/f", follow_symlinks = True } is
                     Ok { val = s } -> s.size
                     Err { error = _ } -> 0 - 1
@@ -161,12 +161,12 @@ class FileStreamingEffectTest {
             use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
-              let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "abc" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "abc" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "/f", mode = Append } is
                 Err { error = _ } -> 0 - 1
                 Ok { val = h } -> do
-                  let _ = FileStreaming.truncate { handle = h, size = 100 }
-                  let _ = FileStreaming.close { handle = h }
+                  FileStreaming.truncate { handle = h, size = 100 }
+                  FileStreaming.close { handle = h }
                   match FileSystem.stat { path = "/f", follow_symlinks = True } is
                     Ok { val = s } -> s.size
                     Err { error = _ } -> 0 - 1
@@ -180,11 +180,11 @@ class FileStreamingEffectTest {
             use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
-              let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "/f", mode = Read } is
                 Err { error = _ } -> "open-failed"
                 Ok { val = h } -> do
-                  let _ = FileStreaming.seek { handle = h, offset = 7 }
+                  FileStreaming.seek { handle = h, offset = 7 }
                   match FileStreaming.read_chunk { handle = h, max_bytes = 3 } is
                     Ok { val = b } -> match bytes::to_str { b = b } is
                       Ok { val } -> val
@@ -200,7 +200,7 @@ class FileStreamingEffectTest {
             use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
-              let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "abc" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "abc" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "/f", mode = Read } is
                 Err { error = _ } -> "open-failed"
                 Ok { val = h } -> match FileStreaming.read_at { handle = h, offset = 0 - 1, max_bytes = 2 } is
@@ -217,7 +217,7 @@ class FileStreamingEffectTest {
             use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
-              let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "abc" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "abc" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "/f", mode = Write } is
                 Err { error = _ } -> "open-failed"
                 Ok { val = h } -> match FileStreaming.read_at { handle = h, offset = 0, max_bytes = 2 } is
@@ -236,7 +236,7 @@ class FileStreamingEffectTest {
             use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileStreaming in do
-              let _ = FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "$path", mode = Read } is
                 Err { error = _ } -> "open-failed"
                 Ok { val = h } -> match FileStreaming.read_at { handle = h, offset = 3, max_bytes = 4 } is
@@ -255,12 +255,12 @@ class FileStreamingEffectTest {
             use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileStreaming in do
-              let _ = FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "$path", mode = Read } is
                 Err { error = _ } -> "open-failed"
                 Ok { val = h } -> do
-                  let _ = FileStreaming.read_chunk { handle = h, max_bytes = 2 }
-                  let _ = FileStreaming.read_at { handle = h, offset = 8, max_bytes = 2 }
+                  FileStreaming.read_chunk { handle = h, max_bytes = 2 }
+                  FileStreaming.read_at { handle = h, offset = 8, max_bytes = 2 }
                   match FileStreaming.read_chunk { handle = h, max_bytes = 2 } is
                     Ok { val = b } -> match bytes::to_str { b = b } is
                       Ok { val } -> val
@@ -277,12 +277,12 @@ class FileStreamingEffectTest {
             use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileStreaming in do
-              let _ = FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "aaaa" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "aaaa" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "$path", mode = Write } is
                 Err { error = _ } -> "open-failed"
                 Ok { val = h } -> do
-                  let _ = FileStreaming.write_at { handle = h, offset = 1, bytes = bytes::from_str { s = "bb" } }
-                  let _ = FileStreaming.close { handle = h }
+                  FileStreaming.write_at { handle = h, offset = 1, bytes = bytes::from_str { s = "bb" } }
+                  FileStreaming.close { handle = h }
                   match FileSystem.read_bytes { path = "$path" } is
                     Ok { val = b } -> match bytes::to_str { b = b } is
                       Ok { val } -> val
@@ -302,12 +302,12 @@ class FileStreamingEffectTest {
             use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileStreaming in do
-              let _ = FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "$path", mode = Append } is
                 Err { error = _ } -> 0 - 1
                 Ok { val = h } -> do
-                  let _ = FileStreaming.truncate { handle = h, size = 4 }
-                  let _ = FileStreaming.close { handle = h }
+                  FileStreaming.truncate { handle = h, size = 4 }
+                  FileStreaming.close { handle = h }
                   match FileSystem.stat { path = "$path", follow_symlinks = True } is
                     Ok { val = s } -> s.size
                     Err { error = _ } -> 0 - 1
@@ -322,11 +322,11 @@ class FileStreamingEffectTest {
             use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileStreaming in do
-              let _ = FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "$path", mode = Read } is
                 Err { error = _ } -> "open-failed"
                 Ok { val = h } -> do
-                  let _ = FileStreaming.seek { handle = h, offset = 7 }
+                  FileStreaming.seek { handle = h, offset = 7 }
                   match FileStreaming.read_chunk { handle = h, max_bytes = 3 } is
                     Ok { val = b } -> match bytes::to_str { b = b } is
                       Ok { val } -> val
@@ -343,11 +343,11 @@ class FileStreamingEffectTest {
             use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, OpenMode, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileStreaming in do
-              let _ = FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "abc" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "abc" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "$path", mode = Read } is
                 Err { error = _ } -> "open-failed"
                 Ok { val = h } -> do
-                  let _ = FileStreaming.close { handle = h }
+                  FileStreaming.close { handle = h }
                   match FileStreaming.read_at { handle = h, offset = 0, max_bytes = 1 } is
                     Ok { val = _ } -> "unexpectedly-ok"
                     Err { error = FsClosedHandle { path = _ } } -> "closed"
@@ -380,7 +380,7 @@ class FileStreamingEffectTest {
               match FileStreaming.open { path = "/wal", mode = WriteSync } is
                 Err { error = _ } -> "open-failed"
                 Ok { val = h } -> do
-                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "record-1" } }
+                FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "record-1" } }
                 match read_text { path = "/wal" } is
                   Ok { val = t } -> t
                   Err { error = _ } -> "read-failed"
@@ -398,7 +398,7 @@ class FileStreamingEffectTest {
               match FileStreaming.open { path = "$f", mode = WriteSync } is
                 Err { error = _ } -> "open-failed"
                 Ok { val = h } -> do
-                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "record-1" } }
+                FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "record-1" } }
                 match read_text { path = "$f" } is
                   Ok { val = t } -> t
                   Err { error = _ } -> "read-failed"
@@ -422,7 +422,7 @@ class FileStreamingEffectTest {
               match FileStreaming.open { path = "/buffered", mode = Write } is
                 Err { error = _ } -> 0 - 1
                 Ok { val = h } -> do
-                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "record-1" } }
+                FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "record-1" } }
                 match read_text { path = "/buffered" } is
                   Ok { val = t } -> str::size { s = t }
                   Err { error = _ } -> 0 - 1
@@ -440,10 +440,10 @@ class FileStreamingEffectTest {
               match FileStreaming.open { path = "/wal", mode = WriteSync } is
                 Err { error = _ } -> "open-failed"
                 Ok { val = h } -> do
-                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "a" } }
-                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "b" } }
-                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "c" } }
-                let _ = FileStreaming.close { handle = h }
+                FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "a" } }
+                FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "b" } }
+                FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "c" } }
+                FileStreaming.close { handle = h }
                 match read_text { path = "/wal" } is
                   Ok { val = t } -> t
                   Err { error = _ } -> "read-failed"
@@ -461,10 +461,10 @@ class FileStreamingEffectTest {
               match FileStreaming.open { path = "$f", mode = WriteSync } is
                 Err { error = _ } -> "open-failed"
                 Ok { val = h } -> do
-                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "a" } }
-                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "b" } }
-                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "c" } }
-                let _ = FileStreaming.close { handle = h }
+                FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "a" } }
+                FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "b" } }
+                FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "c" } }
+                FileStreaming.close { handle = h }
                 match read_text { path = "$f" } is
                   Ok { val = t } -> t
                   Err { error = _ } -> "read-failed"
@@ -479,12 +479,12 @@ class FileStreamingEffectTest {
             use std::effects::filesystem::{ FileSystem, FileStreaming, MemoryFileSystem, MemoryFileStreaming, write_text, read_text, OpenMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in do
-              let _ = write_text { path = "/f", text = "old-and-long" }
+              write_text { path = "/f", text = "old-and-long" }
               match FileStreaming.open { path = "/f", mode = WriteSync } is
                 Err { error = _ } -> "open-failed"
                 Ok { val = h } -> do
-                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "new" } }
-                let _ = FileStreaming.close { handle = h }
+                FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "new" } }
+                FileStreaming.close { handle = h }
                 match read_text { path = "/f" } is
                   Ok { val = t } -> t
                   Err { error = _ } -> "read-failed"
@@ -499,12 +499,12 @@ class FileStreamingEffectTest {
             use std::effects::filesystem::{ FileSystem, FileStreaming, LocalFileSystem, LocalFileStreaming, write_text, read_text, OpenMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileStreaming in do
-              let _ = write_text { path = "$f", text = "old-and-long" }
+              write_text { path = "$f", text = "old-and-long" }
               match FileStreaming.open { path = "$f", mode = WriteSync } is
                 Err { error = _ } -> "open-failed"
                 Ok { val = h } -> do
-                let _ = FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "new" } }
-                let _ = FileStreaming.close { handle = h }
+                FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "new" } }
+                FileStreaming.close { handle = h }
                 match read_text { path = "$f" } is
                   Ok { val = t } -> t
                   Err { error = _ } -> "read-failed"

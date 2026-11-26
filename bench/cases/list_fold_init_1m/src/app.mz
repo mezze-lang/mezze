@@ -28,6 +28,6 @@ let main = {} -> perform Console in perform SystemTime in do
     let n = 1000000
     println { msg = "== list_fold_init N=$(n.to_str{}) 3 warmup + 5 measured ==" }
     let xs = build_list {n = n, acc = list::empty {}}
-    let _w = loop_iters {xs = xs, k = 3, i = 0, warmup = True}
-    let _m = loop_iters {xs = xs, k = 5, i = 0, warmup = False}
+    loop_iters {xs = xs, k = 3, i = 0, warmup = True}
+    loop_iters {xs = xs, k = 5, i = 0, warmup = False}
     println { msg = "== done ==" }

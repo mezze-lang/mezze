@@ -85,19 +85,19 @@ let run_demo: { mod: WasmForeign } -> {} <Log, *>
       name = "add",
       args = [from_int { val = 3 }, from_int { val = 4 }],
     }
-    let _ = show_int { label = "add(3, 4)  ", r = a }
+    show_int { label = "add(3, 4)  ", r = a }
 
     let b = mod.call_export {
       name = "mul",
       args = [from_int { val = 6 }, from_int { val = 7 }],
     }
-    let _ = show_int { label = "mul(6, 7)  ", r = b }
+    show_int { label = "mul(6, 7)  ", r = b }
 
     let c = mod.call_export {
       name = "sub",
       args = [from_int { val = 100 }, from_int { val = 42 }],
     }
-    let _ = show_int { label = "sub(100,42)", r = c }
+    show_int { label = "sub(100,42)", r = c }
 
     # ---- Composed: mul(add(3, 4), sub(10, 3)) ----
     # `a` (the add result) and the sub result are bare WasmForeigns; feed them
@@ -105,7 +105,7 @@ let run_demo: { mod: WasmForeign } -> {} <Log, *>
     # the final `.int{}` in `show_int` surfaces any error.
     println { msg = "" }
     println { msg = "Composed calc — mul(add(3, 4), sub(10, 3)):" }
-    let _ = show_int {
+    show_int {
       label = "final     ",
       r = mod.call_export {
         name = "mul",
@@ -122,11 +122,11 @@ let run_demo: { mod: WasmForeign } -> {} <Log, *>
 ## Byte-oriented memory round-trip: write ASCII bytes, read them back.
 let run_memory_demo: { mem: WasmForeign } -> {} <Log, *>
   = { mem } -> do
-    let _ = match mem.memory_size{} is
+    match mem.memory_size{} is
       Ok  { val = n }   -> println { msg = "  memory_size = $(int::to_str { n = n })" }
       Err { error = _ } -> println { msg = "  memory_size: failed" }
     let payload = bytes::from_seq { arr = [72, 105, 44, 32, 87, 65, 83, 77, 33] }
-    let _ = show_write {
+    show_write {
       label = "write \"Hi, WASM!\" at offset 0",
       # `memory_write` is a fluent producer (yields the receiver handle); `.check{}`
       # crosses it to `Result {}` so success/failure can be reported.
@@ -145,7 +145,7 @@ let main = {} -> perform Console in perform GraalWasm in do
   println { msg = "Module: $(int::to_str { n = bytes::size { b = wasm_bytes } }) bytes" }
   println { msg = "" }
 
-  let _ = match Wasm.load_module { bytes = wasm_bytes, name = "arith" } is
+  match Wasm.load_module { bytes = wasm_bytes, name = "arith" } is
     Err { error = _ } -> println { msg = "load_module failed" }
     Ok { val = mod } -> run_demo { mod = mod }
 

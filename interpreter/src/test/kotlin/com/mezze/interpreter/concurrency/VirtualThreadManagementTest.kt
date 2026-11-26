@@ -98,31 +98,31 @@ class VirtualThreadManagementTest {
 
             # Spawn multiple threads that each sleep briefly and increment counter
             let t1 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 50}
+                sleep {ms = 50}
                 swap {atom = results, f = {current} -> current + 1}
             }
             let t2 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 50}
+                sleep {ms = 50}
                 swap {atom = results, f = {current} -> current + 1}
             }
             let t3 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 50}
+                sleep {ms = 50}
                 swap {atom = results, f = {current} -> current + 1}
             }
             let t4 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 50}
+                sleep {ms = 50}
                 swap {atom = results, f = {current} -> current + 1}
             }
             let t5 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 50}
+                sleep {ms = 50}
                 swap {atom = results, f = {current} -> current + 1}
             }
 
-            let _ = unwrap { result = await {p = t1} }
-            let _ = unwrap { result = await {p = t2} }
-            let _ = unwrap { result = await {p = t3} }
-            let _ = unwrap { result = await {p = t4} }
-            let _ = unwrap { result = await {p = t5} }
+            unwrap { result = await {p = t1} }
+            unwrap { result = await {p = t2} }
+            unwrap { result = await {p = t3} }
+            unwrap { result = await {p = t4} }
+            unwrap { result = await {p = t5} }
 
             deref {atom = results}
         """
@@ -167,9 +167,9 @@ class VirtualThreadManagementTest {
                 swap {atom = contextCounter, f = {current} -> current + 1}
             }
 
-            let _ = unwrap { result = await {p = t1} }
-            let _ = unwrap { result = await {p = t2} }
-            let _ = unwrap { result = await {p = t3} }
+            unwrap { result = await {p = t1} }
+            unwrap { result = await {p = t2} }
+            unwrap { result = await {p = t3} }
 
             deref {atom = contextCounter}
         """
@@ -195,21 +195,21 @@ class VirtualThreadManagementTest {
 
             # Spawn threads that complete independently
             let t1 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+                sleep {ms = 10}
                 swap {atom = successCounter, f = {current} -> current + 1}
             }
             let t2 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 20}
+                sleep {ms = 20}
                 swap {atom = successCounter, f = {current} -> current + 1}
             }
             let t3 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 30}
+                sleep {ms = 30}
                 swap {atom = successCounter, f = {current} -> current + 1}
             }
 
-            let _ = unwrap { result = await {p = t1} }
-            let _ = unwrap { result = await {p = t2} }
-            let _ = unwrap { result = await {p = t3} }
+            unwrap { result = await {p = t1} }
+            unwrap { result = await {p = t2} }
+            unwrap { result = await {p = t3} }
 
             deref {atom = successCounter}
         """
@@ -234,41 +234,41 @@ class VirtualThreadManagementTest {
             let totalCompleted = atom {val = 0}
 
             # Track spawning and completion
-            let _ = swap {atom = totalSpawned, f = {current} -> current + 1}
+            swap {atom = totalSpawned, f = {current} -> current + 1}
             let t1 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 20}
+                sleep {ms = 20}
                 swap {atom = totalCompleted, f = {current} -> current + 1}
             }
 
-            let _ = swap {atom = totalSpawned, f = {current} -> current + 1}
+            swap {atom = totalSpawned, f = {current} -> current + 1}
             let t2 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 20}
+                sleep {ms = 20}
                 swap {atom = totalCompleted, f = {current} -> current + 1}
             }
 
-            let _ = swap {atom = totalSpawned, f = {current} -> current + 1}
+            swap {atom = totalSpawned, f = {current} -> current + 1}
             let t3 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 20}
+                sleep {ms = 20}
                 swap {atom = totalCompleted, f = {current} -> current + 1}
             }
 
-            let _ = swap {atom = totalSpawned, f = {current} -> current + 1}
+            swap {atom = totalSpawned, f = {current} -> current + 1}
             let t4 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 20}
+                sleep {ms = 20}
                 swap {atom = totalCompleted, f = {current} -> current + 1}
             }
 
-            let _ = swap {atom = totalSpawned, f = {current} -> current + 1}
+            swap {atom = totalSpawned, f = {current} -> current + 1}
             let t5 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 20}
+                sleep {ms = 20}
                 swap {atom = totalCompleted, f = {current} -> current + 1}
             }
 
-            let _ = unwrap { result = await {p = t1} }
-            let _ = unwrap { result = await {p = t2} }
-            let _ = unwrap { result = await {p = t3} }
-            let _ = unwrap { result = await {p = t4} }
-            let _ = unwrap { result = await {p = t5} }
+            unwrap { result = await {p = t1} }
+            unwrap { result = await {p = t2} }
+            unwrap { result = await {p = t3} }
+            unwrap { result = await {p = t4} }
+            unwrap { result = await {p = t5} }
 
             let spawned = deref {atom = totalSpawned}
             let completed = deref {atom = totalCompleted}
@@ -296,17 +296,17 @@ class VirtualThreadManagementTest {
             let childValue = atom {val = 0}
 
             let parent = Async.spawn {f = {} -> do
-                let _ = reset {atom = parentValue, val = 10}
+                reset {atom = parentValue, val = 10}
 
                 let child = Async.spawn {f = {} -> do
-                    let _ = reset {atom = childValue, val = 20}
+                    reset {atom = childValue, val = 20}
                     "child done"
                 }
-                let _ = unwrap { result = await {p = child} }
+                unwrap { result = await {p = child} }
                 "parent done"
             }
 
-            let _ = unwrap { result = await {p = parent} }
+            unwrap { result = await {p = parent} }
 
             let pv = deref {atom = parentValue}
             let cv = deref {atom = childValue}
@@ -377,26 +377,26 @@ class VirtualThreadManagementTest {
             let t19 = Async.spawn {f = {} -> swap {atom = counter, f = {current} -> current + 1}}
             let t20 = Async.spawn {f = {} -> swap {atom = counter, f = {current} -> current + 1}}
 
-            let _ = unwrap { result = await {p = t1} }
-            let _ = unwrap { result = await {p = t2} }
-            let _ = unwrap { result = await {p = t3} }
-            let _ = unwrap { result = await {p = t4} }
-            let _ = unwrap { result = await {p = t5} }
-            let _ = unwrap { result = await {p = t6} }
-            let _ = unwrap { result = await {p = t7} }
-            let _ = unwrap { result = await {p = t8} }
-            let _ = unwrap { result = await {p = t9} }
-            let _ = unwrap { result = await {p = t10} }
-            let _ = unwrap { result = await {p = t11} }
-            let _ = unwrap { result = await {p = t12} }
-            let _ = unwrap { result = await {p = t13} }
-            let _ = unwrap { result = await {p = t14} }
-            let _ = unwrap { result = await {p = t15} }
-            let _ = unwrap { result = await {p = t16} }
-            let _ = unwrap { result = await {p = t17} }
-            let _ = unwrap { result = await {p = t18} }
-            let _ = unwrap { result = await {p = t19} }
-            let _ = unwrap { result = await {p = t20} }
+            unwrap { result = await {p = t1} }
+            unwrap { result = await {p = t2} }
+            unwrap { result = await {p = t3} }
+            unwrap { result = await {p = t4} }
+            unwrap { result = await {p = t5} }
+            unwrap { result = await {p = t6} }
+            unwrap { result = await {p = t7} }
+            unwrap { result = await {p = t8} }
+            unwrap { result = await {p = t9} }
+            unwrap { result = await {p = t10} }
+            unwrap { result = await {p = t11} }
+            unwrap { result = await {p = t12} }
+            unwrap { result = await {p = t13} }
+            unwrap { result = await {p = t14} }
+            unwrap { result = await {p = t15} }
+            unwrap { result = await {p = t16} }
+            unwrap { result = await {p = t17} }
+            unwrap { result = await {p = t18} }
+            unwrap { result = await {p = t19} }
+            unwrap { result = await {p = t20} }
 
             deref {atom = counter}
         """
@@ -425,16 +425,16 @@ class VirtualThreadManagementTest {
 
             let thread = Async.spawn {f = {} -> do
                 # Set context value before suspension
-                let _ = reset {atom = contextValue, val = "test-value"}
+                reset {atom = contextValue, val = "test-value"}
 
                 # Suspension point 1
-                let _ = sleep {ms = 50}
+                sleep {ms = 50}
 
                 # Check context is preserved
                 let beforeValue = deref {atom = contextValue}
 
                 # Suspension point 2
-                let _ = sleep {ms = 25}
+                sleep {ms = 25}
 
                 # Check context is still preserved
                 let afterValue = deref {atom = contextValue}
@@ -458,11 +458,11 @@ class VirtualThreadManagementTest {
             let testKey = "test-value"
             let thread = Async.spawn {f = {} -> do
                 # First suspension point
-                let _ = sleep {ms = 50}
+                sleep {ms = 50}
                 let before = testKey
 
                 # Second suspension point
-                let _ = sleep {ms = 25}
+                sleep {ms = 25}
                 let after = testKey
 
                 # Closure values should be preserved
@@ -498,7 +498,7 @@ class VirtualThreadManagementTest {
             $loomSetup
 
             let thread = Async.spawn {f = {} -> {}}
-            let _ = unwrap { result = await {p = thread} }
+            unwrap { result = await {p = thread} }
             True
         """
         val result = eval(code)
@@ -530,7 +530,7 @@ class VirtualThreadManagementTest {
             $loomSetup
 
             let thread = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 0}
+                sleep {ms = 0}
                 42
             }
             unwrap { result = await {p = thread} }

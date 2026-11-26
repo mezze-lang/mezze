@@ -260,7 +260,7 @@ class AsyncMicroBench {
                 use std::collections::seq
 
                 let drive = {} -> do
-                    let _ = seq::map {
+                    seq::map {
                         xs = seq::range { start = 1, end = $n + 1 },
                         f = { x } -> Async.spawn { f = {} -> x },
                     }

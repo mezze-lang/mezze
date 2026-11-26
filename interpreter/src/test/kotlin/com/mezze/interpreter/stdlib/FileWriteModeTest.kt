@@ -60,8 +60,8 @@ class FileWriteModeTest {
         val code = """
             $memHead
             perform MemoryFileSystem in do
-              let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "aaaaaa" }, mode = CreateOrTruncate }
-              let _ = FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "bb" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "aaaaaa" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "bb" }, mode = CreateOrTruncate }
               match read_text { path = "/f" } is
                 Ok { val } -> val
                 Err { error = _ } -> "read-failed"
@@ -75,8 +75,8 @@ class FileWriteModeTest {
         val code = """
             $localHead
             perform LocalFileSystem in do
-              let _ = FileSystem.write_bytes { path = "$f", bytes = bytes::from_str { s = "aaaaaa" }, mode = CreateOrTruncate }
-              let _ = FileSystem.write_bytes { path = "$f", bytes = bytes::from_str { s = "bb" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "$f", bytes = bytes::from_str { s = "aaaaaa" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "$f", bytes = bytes::from_str { s = "bb" }, mode = CreateOrTruncate }
               match read_text { path = "$f" } is
                 Ok { val } -> val
                 Err { error = _ } -> "read-failed"
@@ -91,7 +91,7 @@ class FileWriteModeTest {
         val code = """
             $memHead
             perform MemoryFileSystem in do
-              let _ = FileSystem.write_bytes { path = "/new", bytes = bytes::from_str { s = "hi" }, mode = CreateNew }
+              FileSystem.write_bytes { path = "/new", bytes = bytes::from_str { s = "hi" }, mode = CreateNew }
               match read_text { path = "/new" } is
                 Ok { val } -> val
                 Err { error = _ } -> "read-failed"
@@ -105,7 +105,7 @@ class FileWriteModeTest {
         val code = """
             $memHead
             perform MemoryFileSystem in do
-              let _ = write_text { path = "/f", text = "first" }
+              write_text { path = "/f", text = "first" }
               match FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "second" }, mode = CreateNew } is
                 Ok { val = _ } -> "overwrote"
                 Err { error = FsAlreadyExists { path = _ } } -> "refused"
@@ -120,7 +120,7 @@ class FileWriteModeTest {
         val code = """
             $localHead
             perform LocalFileSystem in do
-              let _ = write_text { path = "$f", text = "first" }
+              write_text { path = "$f", text = "first" }
               match FileSystem.write_bytes { path = "$f", bytes = bytes::from_str { s = "second" }, mode = CreateNew } is
                 Ok { val = _ } -> "overwrote"
                 Err { error = FsAlreadyExists { path = _ } } -> "refused"
@@ -136,8 +136,8 @@ class FileWriteModeTest {
         val code = """
             $localHead
             perform LocalFileSystem in do
-              let _ = write_text { path = "$f", text = "original" }
-              let _ = FileSystem.write_bytes { path = "$f", bytes = bytes::from_str { s = "clobbered" }, mode = CreateNew }
+              write_text { path = "$f", text = "original" }
+              FileSystem.write_bytes { path = "$f", bytes = bytes::from_str { s = "clobbered" }, mode = CreateNew }
               match read_text { path = "$f" } is
                 Ok { val } -> val
                 Err { error = _ } -> "read-failed"
@@ -192,9 +192,9 @@ class FileWriteModeTest {
         val code = """
             $memHead
             perform MemoryFileSystem in do
-              let _ = write_text { path = "/log", text = "one\n" }
-              let _ = FileSystem.write_bytes { path = "/log", bytes = bytes::from_str { s = "two\n" }, mode = CreateOrAppend }
-              let _ = FileSystem.write_bytes { path = "/log", bytes = bytes::from_str { s = "three\n" }, mode = CreateOrAppend }
+              write_text { path = "/log", text = "one\n" }
+              FileSystem.write_bytes { path = "/log", bytes = bytes::from_str { s = "two\n" }, mode = CreateOrAppend }
+              FileSystem.write_bytes { path = "/log", bytes = bytes::from_str { s = "three\n" }, mode = CreateOrAppend }
               match read_text { path = "/log" } is
                 Ok { val } -> val
                 Err { error = _ } -> "read-failed"
@@ -208,9 +208,9 @@ class FileWriteModeTest {
         val code = """
             $localHead
             perform LocalFileSystem in do
-              let _ = write_text { path = "$f", text = "one\n" }
-              let _ = FileSystem.write_bytes { path = "$f", bytes = bytes::from_str { s = "two\n" }, mode = CreateOrAppend }
-              let _ = FileSystem.write_bytes { path = "$f", bytes = bytes::from_str { s = "three\n" }, mode = CreateOrAppend }
+              write_text { path = "$f", text = "one\n" }
+              FileSystem.write_bytes { path = "$f", bytes = bytes::from_str { s = "two\n" }, mode = CreateOrAppend }
+              FileSystem.write_bytes { path = "$f", bytes = bytes::from_str { s = "three\n" }, mode = CreateOrAppend }
               match read_text { path = "$f" } is
                 Ok { val } -> val
                 Err { error = _ } -> "read-failed"
@@ -224,7 +224,7 @@ class FileWriteModeTest {
         val code = """
             $memHead
             perform MemoryFileSystem in do
-              let _ = FileSystem.write_bytes { path = "/fresh", bytes = bytes::from_str { s = "x" }, mode = CreateOrAppend }
+              FileSystem.write_bytes { path = "/fresh", bytes = bytes::from_str { s = "x" }, mode = CreateOrAppend }
               match read_text { path = "/fresh" } is
                 Ok { val } -> val
                 Err { error = _ } -> "read-failed"
@@ -238,7 +238,7 @@ class FileWriteModeTest {
         val code = """
             $localHead
             perform LocalFileSystem in do
-              let _ = FileSystem.write_bytes { path = "$f", bytes = bytes::from_str { s = "x" }, mode = CreateOrAppend }
+              FileSystem.write_bytes { path = "$f", bytes = bytes::from_str { s = "x" }, mode = CreateOrAppend }
               match read_text { path = "$f" } is
                 Ok { val } -> val
                 Err { error = _ } -> "read-failed"
@@ -260,9 +260,9 @@ class FileWriteModeTest {
         val code = """
             $memHead
             perform MemoryFileSystem in do
-              let _ = write_text { path = "/log", text = "a" }
-              let _ = append_text { path = "/log", text = "b" }
-              let _ = append_text { path = "/log", text = "c" }
+              write_text { path = "/log", text = "a" }
+              append_text { path = "/log", text = "b" }
+              append_text { path = "/log", text = "c" }
               match read_text { path = "/log" } is
                 Ok { val } -> val
                 Err { error = _ } -> "read-failed"
@@ -277,8 +277,8 @@ class FileWriteModeTest {
         val code = """
             $memHead
             perform MemoryFileSystem in do
-              let _ = write_text { path = "/a", text = "from-a" }
-              let _ = write_text { path = "/b", text = "from-b" }
+              write_text { path = "/a", text = "from-a" }
+              write_text { path = "/b", text = "from-b" }
               match FileSystem.copy_file { src = "/a", dest = "/b", replace_existing = False, preserve_attrs = False, follow_symlinks = True } is
                 Ok { val = _ } -> "replaced"
                 Err { error = FsAlreadyExists { path = _ } } -> "refused"
@@ -292,9 +292,9 @@ class FileWriteModeTest {
         val code = """
             $memHead
             perform MemoryFileSystem in do
-              let _ = write_text { path = "/a", text = "from-a" }
-              let _ = write_text { path = "/b", text = "from-b" }
-              let _ = FileSystem.copy_file { src = "/a", dest = "/b", replace_existing = True, preserve_attrs = False, follow_symlinks = True }
+              write_text { path = "/a", text = "from-a" }
+              write_text { path = "/b", text = "from-b" }
+              FileSystem.copy_file { src = "/a", dest = "/b", replace_existing = True, preserve_attrs = False, follow_symlinks = True }
               match read_text { path = "/b" } is
                 Ok { val } -> val
                 Err { error = _ } -> "read-failed"
@@ -309,9 +309,9 @@ class FileWriteModeTest {
         val code = """
             $localHead
             perform LocalFileSystem in do
-              let _ = write_text { path = "$a", text = "from-a" }
-              let _ = write_text { path = "$b", text = "from-b" }
-              let _ = FileSystem.copy_file { src = "$a", dest = "$b", replace_existing = True, preserve_attrs = False, follow_symlinks = True }
+              write_text { path = "$a", text = "from-a" }
+              write_text { path = "$b", text = "from-b" }
+              FileSystem.copy_file { src = "$a", dest = "$b", replace_existing = True, preserve_attrs = False, follow_symlinks = True }
               match read_text { path = "$b" } is
                 Ok { val } -> val
                 Err { error = _ } -> "read-failed"
@@ -326,8 +326,8 @@ class FileWriteModeTest {
         val code = """
             $localHead
             perform LocalFileSystem in do
-              let _ = write_text { path = "$a", text = "from-a" }
-              let _ = write_text { path = "$b", text = "from-b" }
+              write_text { path = "$a", text = "from-a" }
+              write_text { path = "$b", text = "from-b" }
               match FileSystem.copy_file { src = "$a", dest = "$b", replace_existing = False, preserve_attrs = False, follow_symlinks = True } is
                 Ok { val = _ } -> "replaced"
                 Err { error = FsAlreadyExists { path = _ } } -> "refused"
@@ -346,9 +346,9 @@ class FileWriteModeTest {
             use std::effects::filesystem::{ FileSystem, FilePermissions, MemoryFileSystem, MemoryFilePermissions, write_text }
             use std::bool
             perform MemoryFileSystem in perform MemoryFilePermissions in do
-              let _ = write_text { path = "/a", text = "x" }
-              let _ = FilePermissions.set_mode { path = "/a", mode = { owner_read = True, owner_write = True, owner_exec = True, group_read = False, group_write = False, group_exec = False, other_read = False, other_write = False, other_exec = False } }
-              let _ = FileSystem.copy_file { src = "/a", dest = "/b", replace_existing = False, preserve_attrs = True, follow_symlinks = True }
+              write_text { path = "/a", text = "x" }
+              FilePermissions.set_mode { path = "/a", mode = { owner_read = True, owner_write = True, owner_exec = True, group_read = False, group_write = False, group_exec = False, other_read = False, other_write = False, other_exec = False } }
+              FileSystem.copy_file { src = "/a", dest = "/b", replace_existing = False, preserve_attrs = True, follow_symlinks = True }
               match FilePermissions.get_mode { path = "/b" } is
                 Ok { val = m } -> "$(bool::to_str { b = m.owner_exec })-$(bool::to_str { b = m.group_read })"
                 Err { error = _ } -> "get-mode-failed"
@@ -363,8 +363,8 @@ class FileWriteModeTest {
         val code = """
             $memHead
             perform MemoryFileSystem in do
-              let _ = write_text { path = "/a", text = "from-a" }
-              let _ = write_text { path = "/b", text = "from-b" }
+              write_text { path = "/a", text = "from-a" }
+              write_text { path = "/b", text = "from-b" }
               match FileSystem.move_file { src = "/a", dest = "/b", replace_existing = False, require_atomic = False } is
                 Ok { val = _ } -> "replaced"
                 Err { error = FsAlreadyExists { path = _ } } -> "refused"
@@ -380,9 +380,9 @@ class FileWriteModeTest {
             use std::bool
             use std::effects::filesystem::{ exists }
             perform MemoryFileSystem in do
-              let _ = write_text { path = "/a", text = "from-a" }
-              let _ = write_text { path = "/b", text = "from-b" }
-              let _ = FileSystem.move_file { src = "/a", dest = "/b", replace_existing = True, require_atomic = False }
+              write_text { path = "/a", text = "from-a" }
+              write_text { path = "/b", text = "from-b" }
+              FileSystem.move_file { src = "/a", dest = "/b", replace_existing = True, require_atomic = False }
               match read_text { path = "/b" } is
                 Ok { val = t } -> match exists { path = "/a" } is
                   Ok { val = still } -> "$(t)-$(bool::to_str { b = still })"
@@ -399,9 +399,9 @@ class FileWriteModeTest {
         val code = """
             $localHead
             perform LocalFileSystem in do
-              let _ = write_text { path = "$a", text = "from-a" }
-              let _ = write_text { path = "$b", text = "from-b" }
-              let _ = FileSystem.move_file { src = "$a", dest = "$b", replace_existing = True, require_atomic = False }
+              write_text { path = "$a", text = "from-a" }
+              write_text { path = "$b", text = "from-b" }
+              FileSystem.move_file { src = "$a", dest = "$b", replace_existing = True, require_atomic = False }
               match read_text { path = "$b" } is
                 Ok { val } -> val
                 Err { error = _ } -> "read-failed"
@@ -423,7 +423,7 @@ class FileWriteModeTest {
         val code = """
             $localHead
             perform LocalFileSystem in do
-              let _ = write_text { path = "$a", text = "payload" }
+              write_text { path = "$a", text = "payload" }
               match FileSystem.move_file { src = "$a", dest = "$b", replace_existing = False, require_atomic = True } is
                 Ok { val = _ } -> match read_text { path = "$b" } is
                   Ok { val } -> val
@@ -448,7 +448,7 @@ class FileWriteModeTest {
         val code = """
             use std::effects::filesystem::{ FileSystem, FileSymlinks, LocalFileSystem, LocalFileSymlinks }
             perform LocalFileSystem in perform LocalFileSymlinks in do
-              let _ = FileSymlinks.create_symlink { link = "$link", target = "$missing" }
+              FileSymlinks.create_symlink { link = "$link", target = "$missing" }
               match FileSystem.stat { path = "$link", follow_symlinks = False } is
                 Ok { val = unfollowed } -> match FileSystem.stat { path = "$link", follow_symlinks = True } is
                   Ok { val = followed } -> match unfollowed.kind is
@@ -467,7 +467,7 @@ class FileWriteModeTest {
         val code = """
             use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFileSystem, MemoryFileSymlinks }
             perform MemoryFileSystem in perform MemoryFileSymlinks in do
-              let _ = FileSymlinks.create_symlink { link = "/link", target = "/nowhere" }
+              FileSymlinks.create_symlink { link = "/link", target = "/nowhere" }
               match FileSystem.stat { path = "/link", follow_symlinks = False } is
                 Ok { val = unfollowed } -> match FileSystem.stat { path = "/link", follow_symlinks = True } is
                   Ok { val = followed } -> match unfollowed.kind is
@@ -489,8 +489,8 @@ class FileWriteModeTest {
         val code = """
             use std::effects::filesystem::{ FileSystem, FileSymlinks, LocalFileSystem, LocalFileSymlinks, write_text }
             perform LocalFileSystem in perform LocalFileSymlinks in do
-              let _ = write_text { path = "$target", text = "12345" }
-              let _ = FileSymlinks.create_symlink { link = "$link", target = "$target" }
+              write_text { path = "$target", text = "12345" }
+              FileSymlinks.create_symlink { link = "$link", target = "$target" }
               match FileSystem.stat { path = "$link", follow_symlinks = True } is
                 Ok { val = s } -> s.size
                 Err { error = _ } -> 0 - 1
@@ -505,9 +505,9 @@ class FileWriteModeTest {
             use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFileSystem, MemoryFileSymlinks, write_text, exists }
             use std::bool
             perform MemoryFileSystem in perform MemoryFileSymlinks in do
-              let _ = write_text { path = "/real", text = "x" }
-              let _ = FileSymlinks.create_symlink { link = "/live", target = "/real" }
-              let _ = FileSymlinks.create_symlink { link = "/dead", target = "/gone" }
+              write_text { path = "/real", text = "x" }
+              FileSymlinks.create_symlink { link = "/live", target = "/real" }
+              FileSymlinks.create_symlink { link = "/dead", target = "/gone" }
               match exists { path = "/live" } is
                 Ok { val = a } -> match exists { path = "/dead" } is
                   Ok { val = b } -> "$(bool::to_str { b = a })-$(bool::to_str { b = b })"
@@ -543,7 +543,7 @@ class FileWriteModeTest {
             use std::collections::{ bytes, iter, seq }
             use std::str
             perform MemoryFileSystem in perform LoomAsync in do
-              let _ = write_text { path = "/log", text = "" }
+              write_text { path = "/log", text = "" }
               let ps = seq::map {
                 xs = seq::range { start = 0, end = 8 },
                 f = { x } -> Async.spawn { f = { } -> seq::for_each {
@@ -551,8 +551,8 @@ class FileWriteModeTest {
                   f = { x } -> FileSystem.write_bytes { path = "/log", bytes = bytes::from_str { s = "abcd" }, mode = CreateOrAppend }
                 } }
               }
-              let _ = seq::for_each { xs = ps, f = { x } -> do
-                let _ = await { p = x }
+              seq::for_each { xs = ps, f = { x } -> do
+                await { p = x }
                 {}
               }
               match read_text { path = "/log" } is
@@ -577,7 +577,7 @@ class FileWriteModeTest {
         val code = """
             use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text }
             perform MemoryFileSystem in do
-              let _ = write_text { path = "/a", text = "payload" }
+              write_text { path = "/a", text = "payload" }
               match FileSystem.move_file { src = "/a", dest = "/b", replace_existing = False, require_atomic = True } is
                 Ok { val = _ } -> "claimed-atomic"
                 Err { error = FsNotSupported { path = _, operation = _ } } -> "declined"
@@ -592,8 +592,8 @@ class FileWriteModeTest {
         val code = """
             use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text, read_text }
             perform MemoryFileSystem in do
-              let _ = write_text { path = "/a", text = "payload" }
-              let _ = FileSystem.move_file { src = "/a", dest = "/b", replace_existing = False, require_atomic = False }
+              write_text { path = "/a", text = "payload" }
+              FileSystem.move_file { src = "/a", dest = "/b", replace_existing = False, require_atomic = False }
               match read_text { path = "/b" } is
                 Ok { val } -> val
                 Err { error = _ } -> "read-failed"
@@ -612,10 +612,10 @@ class FileWriteModeTest {
         val code = """
             use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFileSystem, MemoryFileSymlinks, write_text }
             perform MemoryFileSystem in perform MemoryFileSymlinks in do
-              let _ = write_text { path = "/real", text = "12345" }
-              let _ = FileSymlinks.create_symlink { link = "/one", target = "/real" }
-              let _ = FileSymlinks.create_symlink { link = "/two", target = "/one" }
-              let _ = FileSymlinks.create_symlink { link = "/three", target = "/two" }
+              write_text { path = "/real", text = "12345" }
+              FileSymlinks.create_symlink { link = "/one", target = "/real" }
+              FileSymlinks.create_symlink { link = "/two", target = "/one" }
+              FileSymlinks.create_symlink { link = "/three", target = "/two" }
               match FileSystem.stat { path = "/three", follow_symlinks = True } is
                 Ok { val = s } -> s.size
                 Err { error = _ } -> 0 - 1
@@ -632,10 +632,10 @@ class FileWriteModeTest {
         val code = """
             use std::effects::filesystem::{ FileSystem, FileSymlinks, LocalFileSystem, LocalFileSymlinks, write_text }
             perform LocalFileSystem in perform LocalFileSymlinks in do
-              let _ = write_text { path = "$real", text = "12345" }
-              let _ = FileSymlinks.create_symlink { link = "$one", target = "$real" }
-              let _ = FileSymlinks.create_symlink { link = "$two", target = "$one" }
-              let _ = FileSymlinks.create_symlink { link = "$three", target = "$two" }
+              write_text { path = "$real", text = "12345" }
+              FileSymlinks.create_symlink { link = "$one", target = "$real" }
+              FileSymlinks.create_symlink { link = "$two", target = "$one" }
+              FileSymlinks.create_symlink { link = "$three", target = "$two" }
               match FileSystem.stat { path = "$three", follow_symlinks = True } is
                 Ok { val = s } -> s.size
                 Err { error = _ } -> 0 - 1
@@ -653,8 +653,8 @@ class FileWriteModeTest {
         val code = """
             use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFileSystem, MemoryFileSymlinks }
             perform MemoryFileSystem in perform MemoryFileSymlinks in do
-              let _ = FileSymlinks.create_symlink { link = "/a", target = "/b" }
-              let _ = FileSymlinks.create_symlink { link = "/b", target = "/a" }
+              FileSymlinks.create_symlink { link = "/a", target = "/b" }
+              FileSymlinks.create_symlink { link = "/b", target = "/a" }
               match FileSystem.stat { path = "/a", follow_symlinks = True } is
                 Ok { val = _ } -> "unexpectedly-ok"
                 Err { error = FsIOError { path = _, message = _ } } -> "loop-reported"
@@ -685,7 +685,7 @@ class FileWriteModeTest {
         val code = """
             use std::effects::filesystem::{ FileSystem, LocalFileSystem, write_text }
             perform LocalFileSystem in do
-              let _ = write_text { path = "$src", text = "payload" }
+              write_text { path = "$src", text = "payload" }
               match FileSystem.move_file { src = "$src", dest = "$dest", replace_existing = False, require_atomic = True } is
                 Ok { val = _ } -> "claimed-atomic"
                 Err { error = FsNotSupported { path = _, operation = _ } } -> "declined"
@@ -707,7 +707,7 @@ class FileWriteModeTest {
         val code = """
             use std::effects::filesystem::{ FileSystem, LocalFileSystem, write_text, read_text }
             perform LocalFileSystem in do
-              let _ = write_text { path = "$src", text = "payload" }
+              write_text { path = "$src", text = "payload" }
               match FileSystem.move_file { src = "$src", dest = "$dest", replace_existing = False, require_atomic = False } is
                 Ok { val = _ } -> match read_text { path = "$dest" } is
                   Ok { val } -> val
@@ -751,9 +751,9 @@ class FileWriteModeTest {
             use std::effects::filesystem::{ FileSystem, FilePermissions, LocalFileSystem, LocalFilePermissions, write_text }
             use std::bool
             perform LocalFileSystem in perform LocalFilePermissions in do
-              let _ = write_text { path = "$a", text = "x" }
-              let _ = FilePermissions.set_mode { path = "$a", mode = { owner_read = True, owner_write = True, owner_exec = True, group_read = False, group_write = False, group_exec = False, other_read = False, other_write = False, other_exec = False } }
-              let _ = FileSystem.copy_file { src = "$a", dest = "$b", replace_existing = False, preserve_attrs = True, follow_symlinks = True }
+              write_text { path = "$a", text = "x" }
+              FilePermissions.set_mode { path = "$a", mode = { owner_read = True, owner_write = True, owner_exec = True, group_read = False, group_write = False, group_exec = False, other_read = False, other_write = False, other_exec = False } }
+              FileSystem.copy_file { src = "$a", dest = "$b", replace_existing = False, preserve_attrs = True, follow_symlinks = True }
               match FilePermissions.get_mode { path = "$b" } is
                 Ok { val = m } -> "$(bool::to_str { b = m.owner_exec })-$(bool::to_str { b = m.group_read })"
                 Err { error = _ } -> "get-mode-failed"
@@ -778,9 +778,9 @@ class FileWriteModeTest {
             use std::effects::filesystem::{ FileSystem, FilePermissions, LocalFileSystem, LocalFilePermissions, write_text }
             use std::bool
             perform LocalFileSystem in perform LocalFilePermissions in do
-              let _ = write_text { path = "$a", text = "x" }
-              let _ = FilePermissions.set_mode { path = "$a", mode = { owner_read = True, owner_write = True, owner_exec = True, group_read = False, group_write = False, group_exec = False, other_read = False, other_write = False, other_exec = False } }
-              let _ = FileSystem.copy_file { src = "$a", dest = "$b", replace_existing = False, preserve_attrs = False, follow_symlinks = True }
+              write_text { path = "$a", text = "x" }
+              FilePermissions.set_mode { path = "$a", mode = { owner_read = True, owner_write = True, owner_exec = True, group_read = False, group_write = False, group_exec = False, other_read = False, other_write = False, other_exec = False } }
+              FileSystem.copy_file { src = "$a", dest = "$b", replace_existing = False, preserve_attrs = False, follow_symlinks = True }
               match FilePermissions.get_mode { path = "$b" } is
                 Ok { val = m } -> bool::to_str { b = m.owner_exec }
                 Err { error = _ } -> "get-mode-failed"
@@ -795,9 +795,9 @@ class FileWriteModeTest {
             use std::effects::filesystem::{ FileSystem, FilePermissions, MemoryFileSystem, MemoryFilePermissions, write_text }
             use std::bool
             perform MemoryFileSystem in perform MemoryFilePermissions in do
-              let _ = write_text { path = "/a", text = "x" }
-              let _ = FilePermissions.set_mode { path = "/a", mode = { owner_read = True, owner_write = True, owner_exec = True, group_read = False, group_write = False, group_exec = False, other_read = False, other_write = False, other_exec = False } }
-              let _ = FileSystem.copy_file { src = "/a", dest = "/b", replace_existing = False, preserve_attrs = False, follow_symlinks = True }
+              write_text { path = "/a", text = "x" }
+              FilePermissions.set_mode { path = "/a", mode = { owner_read = True, owner_write = True, owner_exec = True, group_read = False, group_write = False, group_exec = False, other_read = False, other_write = False, other_exec = False } }
+              FileSystem.copy_file { src = "/a", dest = "/b", replace_existing = False, preserve_attrs = False, follow_symlinks = True }
               match FilePermissions.get_mode { path = "/b" } is
                 Ok { val = m } -> bool::to_str { b = m.owner_exec }
                 Err { error = _ } -> "get-mode-failed"
@@ -820,13 +820,13 @@ class FileWriteModeTest {
             use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, write_text, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
-              let _ = FileSystem.create_directory { path = "/d" }
-              let _ = write_text { path = "/d/existing", text = "a" }
+              FileSystem.create_directory { path = "/d" }
+              write_text { path = "/d/existing", text = "a" }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> "watch-failed"
                 Ok { val = h } -> do
-                let _ = FileSystem.write_bytes { path = "/d/existing", bytes = bytes::from_str { s = "b" }, mode = CreateOrAppend }
-                let _ = FileSystem.write_bytes { path = "/d/brand-new", bytes = bytes::from_str { s = "c" }, mode = CreateNew }
+                FileSystem.write_bytes { path = "/d/existing", bytes = bytes::from_str { s = "b" }, mode = CreateOrAppend }
+                FileSystem.write_bytes { path = "/d/brand-new", bytes = bytes::from_str { s = "c" }, mode = CreateNew }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> match seq::first { xs = evs } is
                     Some { val = Modified { path = _ } } -> match seq::last { xs = evs } is
@@ -847,12 +847,12 @@ class FileWriteModeTest {
             use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, write_text, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
-              let _ = FileSystem.create_directory { path = "/d" }
-              let _ = write_text { path = "/d/taken", text = "a" }
+              FileSystem.create_directory { path = "/d" }
+              write_text { path = "/d/taken", text = "a" }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> 0 - 1
                 Ok { val = h } -> do
-                let _ = FileSystem.write_bytes { path = "/d/taken", bytes = bytes::from_str { s = "b" }, mode = CreateNew }
+                FileSystem.write_bytes { path = "/d/taken", bytes = bytes::from_str { s = "b" }, mode = CreateNew }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> seq::size { xs = evs }
                   Err { error = _ } -> 0 - 1

@@ -74,7 +74,7 @@ let nth_or_zero = {xs, i} -> match seq::get {xs = xs, i = i} is
     None -> 0
 
 let min_of = {thunk, warm, k} -> do
-    let _w = time_k_go {thunk = thunk, k = warm, acc = [], last = 0}
+    time_k_go {thunk = thunk, k = warm, acc = [], last = 0}
     let run = time_k_go {thunk = thunk, k = k, acc = [], last = 0}
     let sorted = seq::sort {xs = run.times}
     let half = seq::size {xs = sorted} / 2

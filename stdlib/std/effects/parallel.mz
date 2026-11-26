@@ -72,7 +72,7 @@ pub let map: { xs: ['a], f: { x: 'a } -> 'b <...> } -> ['b] <Parallel, ...> = { 
 ## Run f on each element in parallel, discarding results.
 pub let for_each: { xs: ['a], f: { x: 'a } -> {} <...> } -> {} <Parallel, ...> = { xs, f } ->
   do
-    let _ = map { xs = xs, f = { x } -> do
+    map { xs = xs, f = { x } -> do
       f { x = x }
       0 }
     {}

@@ -49,17 +49,17 @@ let main = {} -> perform Console, JvmHost, GraalPy, GraalJs in do
 
   # Python: sum(range(1, 11)) = 55
   let py_sum = Python.eval { source = "float(sum(range(1, 11)))" }
-  let _ = show_py_float { label = "PY   sum(1..10) ", r = py_sum }
+  show_py_float { label = "PY   sum(1..10) ", r = py_sum }
 
   # JS: [1..10].reduce sum
   let js_sum = Js.eval { source = "Array.from({length: 10}, (_, i) => i + 1).reduce((a, b) => a + b, 0)" }
-  let _ = show_js_float { label = "JS   sum(1..10) ", r = js_sum }
+  show_js_float { label = "JS   sum(1..10) ", r = js_sum }
 
   # JVM: Math.multiplyExact(10, 11) = 110 — host arithmetic. `Jvm.class` mints a bare
   # JvmForeign; `.method{}` chains on it (an errored handle short-circuits untouched).
   let jvm_prod = Jvm.class { name = "java.lang.Math" }
     .method { name = "multiplyExact", args = [jvm_from_int { val = 10 }, jvm_from_int { val = 11 }] }
-  let _ = show_jvm_int { label = "JVM  10*11      ", r = jvm_prod }
+  show_jvm_int { label = "JVM  10*11      ", r = jvm_prod }
 
   println { msg = "" }
   println { msg = "Language-specific idioms:" }
@@ -69,15 +69,15 @@ let main = {} -> perform Console, JvmHost, GraalPy, GraalJs in do
   let uuid_str = Jvm.class { name = "java.util.UUID" }
     .method { name = "randomUUID", args = [] }
     .method { name = "toString", args = [] }
-  let _ = show_jvm_str { label = "JVM  UUID       ", r = uuid_str }
+  show_jvm_str { label = "JVM  UUID       ", r = uuid_str }
 
   # Python: statistics.pvariance([1..10]) — pure stdlib
   let py_var = Python.eval { source = "__import__('statistics').pvariance([1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0])" }
-  let _ = show_py_float { label = "PY   pvariance  ", r = py_var }
+  show_py_float { label = "PY   pvariance  ", r = py_var }
 
   # JS: JSON.stringify a nested object
   let js_json = Js.eval { source = "JSON.stringify({greeting: 'hello', langs: ['JVM', 'Python', 'JS']})" }
-  let _ = show_js_str { label = "JS   stringify  ", r = js_json }
+  show_js_str { label = "JS   stringify  ", r = js_json }
 
   println { msg = "" }
   println { msg = "== done ==" }

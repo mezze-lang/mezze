@@ -152,7 +152,7 @@ pub let from_fn3: { f: { a: JvmForeign, b: JvmForeign, c: JvmForeign } -> 'r } -
 ## event-loop library whose callbacks must do real Mezze work, not just complete a promise.
 pub let from_fn_task: { f: { x: JvmForeign } -> {} <...> } -> JvmForeign <Async, ...> = { f } ->
   __native_polyglot_box_fn { f = { x } -> do
-      let _ = Async.spawn { f = {} -> f { x = x } }
+      Async.spawn { f = {} -> f { x = x } }
       {}, lang = "jvm", arity = 1, under = True }
 pub let null_val:   {}            -> JvmForeign = {} ->
   __native_polyglot_box_null  { lang = "jvm" }

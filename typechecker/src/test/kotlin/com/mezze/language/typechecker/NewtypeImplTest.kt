@@ -150,8 +150,8 @@ class NewtypeImplTest {
             checkPasses("""
                 use std::effects::async::waitgroup::{WaitGroup, wait_group}
                 let wg = wait_group {}
-                let _ = wg.done {}
-                let _ = wg.wait {}
+                wg.done {}
+                wg.wait {}
             """.trimIndent(), "WaitGroup .done/.wait")
         }
 
@@ -160,8 +160,8 @@ class NewtypeImplTest {
             checkPasses("""
                 use std::effects::async::waitgroup::{WaitGroup, wait_group, add}
                 let wg = wait_group {}
-                let _ = add {wg = wg, delta = 1}
-                let _ = wg.wait {}
+                add {wg = wg, delta = 1}
+                wg.wait {}
             """.trimIndent(), "WaitGroup add + .wait")
         }
     }
@@ -187,8 +187,8 @@ class NewtypeImplTest {
             checkPasses("""
                 use std::effects::async::latch::{Latch, latch}
                 let l = latch {count = 1}
-                let _ = l.count_down {}
-                let _ = l.await {}
+                l.count_down {}
+                l.await {}
             """.trimIndent(), "Latch .count_down/.await")
         }
     }
@@ -214,8 +214,8 @@ class NewtypeImplTest {
             checkPasses("""
                 use std::effects::async::semaphore::{Semaphore, semaphore}
                 let s = semaphore {permits = 3}
-                let _ = s.acquire {}
-                let _ = s.release {}
+                s.acquire {}
+                s.release {}
             """.trimIndent(), "Semaphore .acquire/.release")
         }
     }
@@ -241,8 +241,8 @@ class NewtypeImplTest {
             checkPasses("""
                 use std::effects::async::mutex::{Mutex, mutex}
                 let m = mutex {}
-                let _ = m.lock {}
-                let _ = m.unlock {}
+                m.lock {}
+                m.unlock {}
             """.trimIndent(), "Mutex .lock/.unlock")
         }
     }
@@ -340,7 +340,7 @@ class NewtypeImplTest {
                 use std::effects::async::{ Async, CancellationToken, LoomAsync, await, token }
                 let main = {} -> perform LoomAsync in do
                     let t = token {}
-                    let _ = t.cancel_token {reason = "done"}
+                    t.cancel_token {reason = "done"}
                     let cancelled = t.is_token_cancelled {}
                     cancelled
             """.trimIndent(), "CancellationToken .cancel_token/.is_token_cancelled")

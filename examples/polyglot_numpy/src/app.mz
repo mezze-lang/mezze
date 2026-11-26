@@ -45,17 +45,17 @@ let main = {} -> perform Console in perform GraalPy in do
   let mean_r = Python.eval {
     source = "float(__import__('numpy').array([1.0, 2.0, 3.0, 4.0, 5.0]).mean())"
   }
-  let _ = show_float { label = "mean", r = mean_r }
+  show_float { label = "mean", r = mean_r }
 
   let sum_r = Python.eval {
     source = "float(__import__('numpy').array([1.0, 2.0, 3.0, 4.0, 5.0]).sum())"
   }
-  let _ = show_float { label = "sum ", r = sum_r }
+  show_float { label = "sum ", r = sum_r }
 
   let std_r = Python.eval {
     source = "float(__import__('numpy').array([1.0, 2.0, 3.0, 4.0, 5.0]).std())"
   }
-  let _ = show_float { label = "std ", r = std_r }
+  show_float { label = "std ", r = std_r }
 
   # ---- arange + first / last ----
   println { msg = "" }
@@ -63,11 +63,11 @@ let main = {} -> perform Console in perform GraalPy in do
   let first_r = Python.eval {
     source = "int(__import__('numpy').arange(10)[0])"
   }
-  let _ = show_int { label = "first", r = first_r }
+  show_int { label = "first", r = first_r }
   let last_r = Python.eval {
     source = "int(__import__('numpy').arange(10)[-1])"
   }
-  let _ = show_int { label = "last ", r = last_r }
+  show_int { label = "last ", r = last_r }
 
   # ---- Linear algebra: dot product ----
   println { msg = "" }
@@ -75,7 +75,7 @@ let main = {} -> perform Console in perform GraalPy in do
   let dot_r = Python.eval {
     source = "float(__import__('numpy').dot([1.0, 2.0, 3.0], [4.0, 5.0, 6.0]))"
   }
-  let _ = show_float { label = "dot ", r = dot_r }
+  show_float { label = "dot ", r = dot_r }
 
   # ---- Element-wise arithmetic ----
   println { msg = "" }
@@ -83,7 +83,7 @@ let main = {} -> perform Console in perform GraalPy in do
   let ew_r = Python.eval {
     source = "float((__import__('numpy').array([1.0, 2.0, 3.0]) + __import__('numpy').array([10.0, 20.0, 30.0])).sum())"
   }
-  let _ = show_float { label = "sum ", r = ew_r }
+  show_float { label = "sum ", r = ew_r }
 
   println { msg = "" }
   println { msg = "== done ==" }

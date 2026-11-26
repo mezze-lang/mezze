@@ -51,8 +51,8 @@ class CrossEffectCompositionTest {
             let v3 = recv { ch = ch }
             atomically { f = {} -> STM.write { var = total, val = v1 + v2 + v3 } }
           }
-          let _ = await { p = producer }
-          let _ = await { p = consumer }
+          await { p = producer }
+          await { p = consumer }
           deref { var = total }
     """.trimIndent()
 
@@ -84,7 +84,7 @@ class CrossEffectCompositionTest {
             atomically { f = {} -> write_tqueue { q = q, val = 2 } }
             atomically { f = {} -> write_tqueue { q = q, val = 3 } }
           }
-          let _ = await { p = producer }
+          await { p = producer }
           match await { p = reader } is
             Ok { val } -> val
             Err { error = _ } -> -1
@@ -109,7 +109,7 @@ class CrossEffectCompositionTest {
             atomically { f = {} -> put_tmvar { var = signal, val = 42 } }
           }
           let v = atomically { f = {} -> take_tmvar { var = signal } }
-          let _ = await { p = producer }
+          await { p = producer }
           v
     """.trimIndent()
 
@@ -137,9 +137,9 @@ class CrossEffectCompositionTest {
           let p1 = Async.spawn { f = bump }
           let p2 = Async.spawn { f = bump }
           let p3 = Async.spawn { f = bump }
-          let _ = await { p = p1 }
-          let _ = await { p = p2 }
-          let _ = await { p = p3 }
+          await { p = p1 }
+          await { p = p2 }
+          await { p = p3 }
           deref { var = v }
     """.trimIndent()
 
@@ -165,7 +165,7 @@ class CrossEffectCompositionTest {
           let make_producer = { tag } -> {} -> do
             lock_async { mutex = m }
             let v = deref { atom = counter }
-            let _ = reset { atom = counter, val = v + 1 }
+            reset { atom = counter, val = v + 1 }
             unlock { mutex = m }
             send { ch = ch, val = tag }
           let p1 = Async.spawn { f = make_producer { tag = 1 } }
@@ -174,9 +174,9 @@ class CrossEffectCompositionTest {
           let a = recv { ch = ch }
           let b = recv { ch = ch }
           let c = recv { ch = ch }
-          let _ = await { p = p1 }
-          let _ = await { p = p2 }
-          let _ = await { p = p3 }
+          await { p = p1 }
+          await { p = p2 }
+          await { p = p3 }
           a + b + c + deref { atom = counter }
     """.trimIndent()
 
@@ -208,9 +208,9 @@ class CrossEffectCompositionTest {
           let b = recv { ch = ch }
           let c = recv { ch = ch }
           wait_async { wg = wg }
-          let _ = await { p = p1 }
-          let _ = await { p = p2 }
-          let _ = await { p = p3 }
+          await { p = p1 }
+          await { p = p2 }
+          await { p = p3 }
           a + b + c
     """.trimIndent()
 
@@ -243,7 +243,7 @@ class CrossEffectCompositionTest {
             recv { ch = ch }
           }
           let v = await { p = consumer }
-          let _ = await { p = producer }
+          await { p = producer }
           match v is
             Ok { val } -> val
             Err { error = _ } -> -1
@@ -276,9 +276,9 @@ class CrossEffectCompositionTest {
           let a = recv { ch = ch }
           let b = recv { ch = ch }
           let c = recv { ch = ch }
-          let _ = await { p = p1 }
-          let _ = await { p = p2 }
-          let _ = await { p = p3 }
+          await { p = p1 }
+          await { p = p2 }
+          await { p = p3 }
           a + b + c
     """.trimIndent()
 
@@ -308,7 +308,7 @@ class CrossEffectCompositionTest {
             send { ch = ch, val = 1 }
             Exception.throw { error = "from-spawned" }
           }
-          let _ = recv { ch = ch }
+          recv { ch = ch }
           let r = match await { p = t } is
             Ok { val = _ } -> "ok"
             Err { error = _ } -> "err"

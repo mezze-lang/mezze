@@ -49,10 +49,30 @@ class DeadCodeLintTest {
     }
 
     @Test
-    fun `a function call statement is NOT flagged (may have effects)`() {
-        assertFalse(has(WarningCode.W0301_DISCARDED_VALUE, """
+    fun `a call that performs nothing, its result dropped, is flagged`() {
+        // `g`'s arrow has a closed empty row: the statement has no effect at all.
+        assertTrue(has(WarningCode.W0301_DISCARDED_VALUE, """
             let g = {} -> 0
             let f = {} -> do
+              g {}
+              42
+        """.trimIndent()))
+    }
+
+    @Test
+    fun `a call that performs an effect is NOT flagged - it runs for the effect`() {
+        assertFalse(has(WarningCode.W0301_DISCARDED_VALUE, """
+            effect Count where { bump: {} -> Int <Count> }
+            let f = {} -> do
+              Count.bump {}
+              42
+        """.trimIndent()))
+    }
+
+    @Test
+    fun `a call through a callback with an open row is NOT flagged - it may perform`() {
+        assertFalse(has(WarningCode.W0301_DISCARDED_VALUE, """
+            let run: { g: {} -> Int <...> } -> Int <...> = { g } -> do
               g {}
               42
         """.trimIndent()))

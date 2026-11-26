@@ -39,7 +39,7 @@ class SemaphoreModuleTest {
             use std::effects::async::semaphore::{semaphore, acquire, available}
 
             let sem = semaphore {permits = 3}
-            let _ = acquire {sem = sem}
+            acquire {sem = sem}
             available {sem = sem}
         """)
         assertEquals(2L, result)
@@ -51,8 +51,8 @@ class SemaphoreModuleTest {
             use std::effects::async::semaphore::{semaphore, acquire, release, available}
 
             let sem = semaphore {permits = 3}
-            let _ = acquire {sem = sem}
-            let _ = release {sem = sem}
+            acquire {sem = sem}
+            release {sem = sem}
             available {sem = sem}
         """)
         assertEquals(3L, result)
@@ -64,9 +64,9 @@ class SemaphoreModuleTest {
             use std::effects::async::semaphore::{semaphore, acquire, available}
 
             let sem = semaphore {permits = 5}
-            let _ = acquire {sem = sem}
-            let _ = acquire {sem = sem}
-            let _ = acquire {sem = sem}
+            acquire {sem = sem}
+            acquire {sem = sem}
+            acquire {sem = sem}
             available {sem = sem}
         """)
         assertEquals(2L, result)
@@ -80,7 +80,7 @@ class SemaphoreModuleTest {
             use std::effects::async::semaphore::{semaphore, acquire_n, available}
 
             let sem = semaphore {permits = 10}
-            let _ = acquire_n {sem = sem, permits = 4}
+            acquire_n {sem = sem, permits = 4}
             available {sem = sem}
         """)
         assertEquals(6L, result)
@@ -92,8 +92,8 @@ class SemaphoreModuleTest {
             use std::effects::async::semaphore::{semaphore, acquire_n, release_n, available}
 
             let sem = semaphore {permits = 10}
-            let _ = acquire_n {sem = sem, permits = 5}
-            let _ = release_n {sem = sem, permits = 3}
+            acquire_n {sem = sem, permits = 5}
+            release_n {sem = sem, permits = 3}
             available {sem = sem}
         """)
         assertEquals(8L, result)
@@ -108,7 +108,7 @@ class SemaphoreModuleTest {
 
             let sem = semaphore {permits = 1}
             let success = try_acquire {sem = sem}
-            let _ = match success is
+            match success is
                 True -> release {sem = sem}
                 False -> {}
             success
@@ -122,7 +122,7 @@ class SemaphoreModuleTest {
             use std::effects::async::semaphore::{semaphore, acquire, try_acquire}
 
             let sem = semaphore {permits = 1}
-            let _ = acquire {sem = sem}
+            acquire {sem = sem}
             try_acquire {sem = sem}
         """)
         assertEquals(false, result)
@@ -135,7 +135,7 @@ class SemaphoreModuleTest {
 
             let sem = semaphore {permits = 5}
             let success = try_acquire_n {sem = sem, permits = 3}
-            let _ = match success is
+            match success is
                 True -> release_n {sem = sem, permits = 3}
                 False -> {}
             success
@@ -149,7 +149,7 @@ class SemaphoreModuleTest {
             use std::effects::async::semaphore::{semaphore, acquire_n, try_acquire_n}
 
             let sem = semaphore {permits = 5}
-            let _ = acquire_n {sem = sem, permits = 4}
+            acquire_n {sem = sem, permits = 4}
             try_acquire_n {sem = sem, permits = 3}
         """)
         assertEquals(false, result)
@@ -174,7 +174,7 @@ class SemaphoreModuleTest {
             use std::effects::async::semaphore::{semaphore, with_permit, available}
 
             let sem = semaphore {permits = 3}
-            let _ = with_permit {sem = sem, f = {} -> "done"}
+            with_permit {sem = sem, f = {} -> "done"}
             available {sem = sem}
         """)
         assertEquals(3L, result)
@@ -217,8 +217,8 @@ class SemaphoreModuleTest {
 
             let sem1 = semaphore {permits = 5}
             let sem2 = semaphore {permits = 10}
-            let _ = acquire {sem = sem1}
-            let _ = acquire {sem = sem1}
+            acquire {sem = sem1}
+            acquire {sem = sem1}
             available {sem = sem1} + available {sem = sem2}
         """)
         assertEquals(13L, result)
@@ -230,8 +230,8 @@ class SemaphoreModuleTest {
             use std::effects::async::semaphore::{semaphore, release, available}
 
             let sem = semaphore {permits = 1}
-            let _ = release {sem = sem}
-            let _ = release {sem = sem}
+            release {sem = sem}
+            release {sem = sem}
             available {sem = sem}
         """)
         assertEquals(3L, result)

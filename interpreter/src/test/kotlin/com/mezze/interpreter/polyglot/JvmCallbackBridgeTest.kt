@@ -252,9 +252,9 @@ class JvmCallbackBridgeTest {
               let p = promise_from { setup = { complete, fail, on_cancel } -> do
                 cf.method { name = "thenAccept", args = [ from_fn { f = { x } -> complete { val = x } } ] }
                 on_cancel { hook = { reason } -> do
-                  let _ = cf.method { name = "cancel", args = [ from_bool { val = True } ] }
+                  cf.method { name = "cancel", args = [ from_bool { val = True } ] }
                   {} } }
-              let _ = Async.cancel { p = p, reason = CancelUserRequested { msg = "bye" } }
+              Async.cancel { p = p, reason = CancelUserRequested { msg = "bye" } }
               cf.method { name = "isCancelled", args = [] }.bool{}
             """,
         )

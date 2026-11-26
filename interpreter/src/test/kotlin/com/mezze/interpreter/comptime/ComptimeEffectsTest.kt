@@ -41,7 +41,7 @@ class ComptimeEffectsTest {
             (perform ComptimeEval in Comptime.comptime { eval = {} ->
                 perform LocalMut in do
                     let c = int_to_mut { n = 11 }
-                    let _ = incr1 { n = c }
+                    incr1 { n = c }
                     read_int { n = c }
             })
         """))

@@ -52,7 +52,7 @@ pub let send_off: { agent: Agent 'a, f: { current: 'a } -> 'a } -> {} <Async> = 
 
 ## Wait until all pending actions have completed.
 pub let await_agent: { agent: Agent 'a } -> {} <Async> = { agent } -> do
-  let _ = __native_agent_await { agent = agent, timeout_ms = 0 }
+  __native_agent_await { agent = agent, timeout_ms = 0 }
   {}
 
 ## Wait with a timeout. Returns True if completed, False if timed out.

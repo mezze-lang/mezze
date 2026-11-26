@@ -55,11 +55,11 @@ class IterEffectBoundaryTest {
         val code = """
             $head
             perform MemoryFileSystem in do
-              let _ = FileSystem.create_directory { path = "/d" }
-              let _ = iter::for_each {
+              FileSystem.create_directory { path = "/d" }
+              iter::for_each {
                 it = iter::range { start = 0, end = 5 },
                 f = { x } -> do
-                  let _ = FileSystem.write_bytes { path = "/d/f$(int::to_str { n = x })", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
+                  FileSystem.write_bytes { path = "/d/f$(int::to_str { n = x })", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
                   {}
               }
               match FileSystem.list { path = "/d" } is
@@ -75,12 +75,12 @@ class IterEffectBoundaryTest {
         val code = """
             $head
             perform MemoryFileSystem in do
-              let _ = FileSystem.create_directory { path = "/d" }
+              FileSystem.create_directory { path = "/d" }
               let total = iter::fold {
                 it = iter::range { start = 1, end = 5 },
                 init = 0,
                 f = { acc, x } -> do
-                  let _ = FileSystem.write_bytes { path = "/d/f$(int::to_str { n = x })", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
+                  FileSystem.write_bytes { path = "/d/f$(int::to_str { n = x })", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
                   acc + x
               }
               total
@@ -98,9 +98,9 @@ class IterEffectBoundaryTest {
         val code = """
             $head
             perform MemoryFileSystem in do
-              let _ = FileSystem.create_directory { path = "/keep" }
-              let _ = FileSystem.write_bytes { path = "/keep/4", bytes = bytes::from_str { s = "y" }, mode = CreateOrTruncate }
-              let _ = FileSystem.write_bytes { path = "/keep/8", bytes = bytes::from_str { s = "y" }, mode = CreateOrTruncate }
+              FileSystem.create_directory { path = "/keep" }
+              FileSystem.write_bytes { path = "/keep/4", bytes = bytes::from_str { s = "y" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "/keep/8", bytes = bytes::from_str { s = "y" }, mode = CreateOrTruncate }
               iter::fold {
                 it = iter::filter { it = iter::map { it = iter::range { start = 0, end = 6 }, f = { x } -> x * 2 }, p = { x } -> x > 2 },
                 init = 0,
@@ -119,8 +119,8 @@ class IterEffectBoundaryTest {
         val code = """
             $head
             perform MemoryFileSystem in do
-              let _ = FileSystem.create_directory { path = "/keep" }
-              let _ = FileSystem.write_bytes { path = "/keep/3", bytes = bytes::from_str { s = "y" }, mode = CreateOrTruncate }
+              FileSystem.create_directory { path = "/keep" }
+              FileSystem.write_bytes { path = "/keep/3", bytes = bytes::from_str { s = "y" }, mode = CreateOrTruncate }
               iter::any {
                 it = iter::range { start = 0, end = 6 },
                 p = { x } -> match exists { path = "/keep/$(int::to_str { n = x })" } is
@@ -137,7 +137,7 @@ class IterEffectBoundaryTest {
         val code = """
             $head
             perform MemoryFileSystem in do
-              let _ = FileSystem.create_directory { path = "/keep" }
+              FileSystem.create_directory { path = "/keep" }
               iter::any {
                 it = iter::range { start = 0, end = 6 },
                 p = { x } -> match exists { path = "/keep/$(int::to_str { n = x })" } is
@@ -194,12 +194,12 @@ class IterEffectBoundaryTest {
             $head
             use std::effects::exception::{ Exception, ExceptionToOption }
             perform MemoryFileSystem in do
-              let _ = FileSystem.create_directory { path = "/d" }
-              let _ = perform ExceptionToOption in do
-                let _ = iter::for_each {
+              FileSystem.create_directory { path = "/d" }
+              perform ExceptionToOption in do
+                iter::for_each {
                   it = iter::range { start = 0, end = 10 },
                   f = { x } -> if x == 4 then Exception.throw { error = "stop" } else do
-                    let _ = FileSystem.write_bytes { path = "/d/f$(int::to_str { n = x })", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
+                    FileSystem.write_bytes { path = "/d/f$(int::to_str { n = x })", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
                     {}
                 }
                 Some { val = {} }

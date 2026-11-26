@@ -50,7 +50,7 @@ class AtomModuleTest {
             use std::effects::async::atom::{atom, deref, reset}
 
             let counter = atom {val = 0}
-            let _ = reset {atom = counter, val = 100}
+            reset {atom = counter, val = 100}
             deref {atom = counter}
         """)
         assertEquals(100L, result)
@@ -75,7 +75,7 @@ class AtomModuleTest {
             use std::effects::async::atom::{atom, deref, swap}
 
             let counter = atom {val = 10}
-            let _ = swap {atom = counter, f = {current} -> current + 1}
+            swap {atom = counter, f = {current} -> current + 1}
             deref {atom = counter}
         """)
         assertEquals(11L, result)
@@ -98,9 +98,9 @@ class AtomModuleTest {
             use std::effects::async::atom::{atom, deref, swap}
 
             let counter = atom {val = 0}
-            let _ = swap {atom = counter, f = {current} -> current + 1}
-            let _ = swap {atom = counter, f = {current} -> current + 1}
-            let _ = swap {atom = counter, f = {current} -> current + 1}
+            swap {atom = counter, f = {current} -> current + 1}
+            swap {atom = counter, f = {current} -> current + 1}
+            swap {atom = counter, f = {current} -> current + 1}
             deref {atom = counter}
         """)
         assertEquals(3L, result)
@@ -112,7 +112,7 @@ class AtomModuleTest {
             use std::effects::async::atom::{atom, deref, swap}
 
             let state = atom {val = {count = 0}}
-            let _ = swap {atom = state, f = {current} -> {count = current.count + 5}}
+            swap {atom = state, f = {current} -> {count = current.count + 5}}
             let final = deref {atom = state}
             final.count
         """)
@@ -127,7 +127,7 @@ class AtomModuleTest {
             use std::effects::async::atom::{atom, deref, swap_with}
 
             let counter = atom {val = 10}
-            let _ = swap_with {atom = counter, f = {current, arg} -> current + arg, arg = 5}
+            swap_with {atom = counter, f = {current, arg} -> current + arg, arg = 5}
             deref {atom = counter}
         """)
         assertEquals(15L, result)
@@ -139,7 +139,7 @@ class AtomModuleTest {
             use std::effects::async::atom::{atom, deref, swap_with}
 
             let state = atom {val = "Hello"}
-            let _ = swap_with {atom = state, f = {current, arg} -> current, arg = " World"}
+            swap_with {atom = state, f = {current, arg} -> current, arg = " World"}
             deref {atom = state}
         """)
         assertEquals("Hello", result)
@@ -175,7 +175,7 @@ class AtomModuleTest {
             use std::effects::async::atom::{atom, deref, compare_and_set}
 
             let counter = atom {val = 0}
-            let _ = compare_and_set {atom = counter, expected = 0, new = 42}
+            compare_and_set {atom = counter, expected = 0, new = 42}
             deref {atom = counter}
         """)
         assertEquals(42L, result)
@@ -187,7 +187,7 @@ class AtomModuleTest {
             use std::effects::async::atom::{atom, deref, compare_and_set}
 
             let counter = atom {val = 5}
-            let _ = compare_and_set {atom = counter, expected = 0, new = 42}
+            compare_and_set {atom = counter, expected = 0, new = 42}
             deref {atom = counter}
         """)
         assertEquals(5L, result)
@@ -240,7 +240,7 @@ class AtomModuleTest {
 
             match atom_validated {val = 10, validator = {val} -> val >= 0} is
               Ok { val = counter } -> do
-                let _ = swap_validated {atom = counter, f = {current} -> current + 5}
+                swap_validated {atom = counter, f = {current} -> current + 5}
                 deref_validated {atom = counter}
               Err { error = _ } -> 0-1
         """)
@@ -255,7 +255,7 @@ class AtomModuleTest {
             use std::effects::async::atom::{atom, deref, swap}
 
             let flag = atom {val = False}
-            let _ = swap {atom = flag, f = {current} -> True}
+            swap {atom = flag, f = {current} -> True}
             deref {atom = flag}
         """)
         assertEquals(true, result)
@@ -280,8 +280,8 @@ class AtomModuleTest {
             use std::effects::async::atom::{atom, deref, reset}
 
             let a = atom {val = 1}
-            let _ = reset {atom = a, val = 2}
-            let _ = reset {atom = a, val = 3}
+            reset {atom = a, val = 2}
+            reset {atom = a, val = 3}
             deref {atom = a}
         """)
         assertEquals(3L, result)
@@ -295,9 +295,9 @@ class AtomModuleTest {
             use std::effects::async::atom::{atom, deref, reset, add_watch, remove_watch}
 
             let counter = atom {val = 0}
-            let _ = add_watch {atom = counter, key = "test", f = {key, old, new} -> {}}
-            let _ = reset {atom = counter, val = 10}
-            let _ = remove_watch {atom = counter, key = "test"}
+            add_watch {atom = counter, key = "test", f = {key, old, new} -> {}}
+            reset {atom = counter, val = 10}
+            remove_watch {atom = counter, key = "test"}
             deref {atom = counter}
         """)
         assertEquals(10L, result)

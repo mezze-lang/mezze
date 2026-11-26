@@ -613,7 +613,8 @@ class MezzeTextDocumentService(
                         val code = warning.code
                         val isUnused = code == WarningCode.W0101_UNUSED_VARIABLE ||
                             code == WarningCode.W0102_UNUSED_IMPORT ||
-                            code == WarningCode.W0103_UNUSED_PARAMETER
+                            code == WarningCode.W0103_UNUSED_PARAMETER ||
+                            code == WarningCode.W0104_UNUSED_PATTERN_BINDING
                         val diag = createDiagnostic(
                             message = warning.message,
                             severity = if (isUnused) DiagnosticSeverity.Hint else DiagnosticSeverity.Warning,
@@ -3459,7 +3460,9 @@ class MezzeTextDocumentService(
      * WarningCode carried on the diagnostic. The diagnostic's own range already
      * spans the offending token, so edits are computed from it — no message
      * parsing, no AST re-walk.
-     *   - W0101 unused variable → "Prefix with `_`" (insert `_` at the name).
+     *   - W0101 unused `let` → "Remove the binding" (delete `let x =`, keep the expression).
+     *   - W0104 unused pattern binding → "Replace with `_`" (`{ val }` → `{ val = _ }`).
+     *   - W0103 unused parameter → no quick fix: removing it changes every caller.
      *   - W0102 unused import   → "Remove import" (delete the `use` line).
      */
     private fun warningQuickFixes(
@@ -3482,9 +3485,36 @@ class MezzeTextDocumentService(
 
         when (code) {
             WarningCode.W0101_UNUSED_VARIABLE.display() -> {
-                // Insert `_` at the start of the flagged name (zero-width edit).
-                val at = Range(diagnostic.range.start, diagnostic.range.start)
-                out.add(Either.forRight(quickFix("Prefix with `_`", listOf(TextEdit(at, "_")))))
+                // Delete `let <name> =` (and the spaces after it), keeping the expression as
+                // a statement: it still runs, its value is dropped. Only for the plain
+                // one-name form on one line; a destructuring `let` has no single edit.
+                val lineNo = diagnostic.range.start.line
+                val line = state.content.lines().getOrNull(lineNo)
+                val col = diagnostic.range.start.character
+                if (line != null) {
+                    val m = Regex("""\blet\s+([A-Za-z_][A-Za-z0-9_]*)\s*(:[^=]*)?=\s*""").find(line)
+                    if (m != null && m.groups[1]!!.range.first == col) {
+                        val range = Range(Position(lineNo, m.range.first), Position(lineNo, m.range.last + 1))
+                        out.add(Either.forRight(quickFix("Remove the binding", listOf(TextEdit(range, "")))))
+                    }
+                }
+            }
+            WarningCode.W0104_UNUSED_PATTERN_BINDING.display() -> {
+                // `_` binds nothing. A punned record field `{ val }` keeps its label: `{ val = _ }`.
+                val lineNo = diagnostic.range.start.line
+                val line = state.content.lines().getOrNull(lineNo)
+                val col = diagnostic.range.start.character
+                val name = line?.let { Regex("""[A-Za-z_][A-Za-z0-9_]*""").find(it, col)?.takeIf { m -> m.range.first == col } }
+                if (line != null && name != null) {
+                    val after = line.substring(name.range.last + 1).trimStart()
+                    val before = line.substring(0, col).trimEnd()
+                    val punned = (before.endsWith("{") || before.endsWith(",")) &&
+                        (after.startsWith(",") || after.startsWith("}")) &&
+                        line.lastIndexOf('[', col) <= line.lastIndexOf('{', col)
+                    val range = Range(Position(lineNo, name.range.first), Position(lineNo, name.range.last + 1))
+                    val text = if (punned) "${name.value} = _" else "_"
+                    out.add(Either.forRight(quickFix("Replace with `_`", listOf(TextEdit(range, text)))))
+                }
             }
             WarningCode.W0102_UNUSED_IMPORT.display() -> {
                 val startLine = diagnostic.range.start.line

@@ -265,6 +265,15 @@ its parameter `it` too. A `let it` or a pattern binding `it` is an error.
 
 The [Handlers](/concepts#handlers) page covers `cont` and `scope`.
 
+### `_`
+
+`_` is the pattern wildcard. It matches anything and binds nothing:
+`Err { error = _ }`, a catch-all arm `_ -> …`, or `let { a, b = _ } = r`. It is
+not a name, so `let _ = …` is an error. To run something only for its effect,
+write it as a statement on its own line in a `do` block; its value is dropped.
+A name that starts with `_`, like `_x`, is an ordinary name with no special
+meaning.
+
 ## All of it together
 
 <!--mezze-editor

@@ -230,7 +230,7 @@ class HttpStreamedResponseTest {
                 perform MemoryFileStreaming in
                   perform HelidonHttpServerWith { config = listen_on_any_port } in
                     perform SimpleHttpClient in do
-                      let _ = write_text { path = "/big.txt", text = "abcdefghijklmno" }
+                      write_text { path = "/big.txt", text = "abcdefghijklmno" }
                       let h = match HttpServer.serve { handler = app } is
                         Ok { val = hh } -> hh
                         Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }

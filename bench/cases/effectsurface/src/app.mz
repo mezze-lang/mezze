@@ -244,7 +244,7 @@ let k_depth = { n } -> perform Ones {} in perform P1 {} in perform P2 {} in perf
 let churn = { i } -> if i <= 0 then 0 else churn { i = i - one_installed {} }
 
 let k_after_churn = { n } -> do
-  let _c = churn { i = 32 }
+  churn { i = 32 }
   perform Ones {} in go_o { i = n, acc = 0 }
 
 ## 10. WHICH ASSUMPTION COSTS THE 31x? There are two, invalidated together by
@@ -268,7 +268,7 @@ let churn_other = { i } -> if i <= 0 then 0
   else churn_other { i = i - 1 - pad_installed {} }
 
 let k_churn_other = { n } -> do
-  let _c = churn_other { i = 32 }
+  churn_other { i = 32 }
   perform Ones {} in go_o { i = n, acc = 0 }
 
 let report = { name, n, r } ->

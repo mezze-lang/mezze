@@ -426,7 +426,7 @@ class ChannelTest {
                     let a9 = recv { ch = ch }
                     let a10 = recv { ch = ch }
 
-                    let _ = await { p = producer }
+                    await { p = producer }
 
                     # Sum should be 1+2+3+4+5+6+7+8+9+10 = 55
                     a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10
@@ -472,9 +472,9 @@ class ChannelTest {
                     let v5 = recv { ch = ch }
                     let v6 = recv { ch = ch }
 
-                    let _ = await { p = p1 }
-                    let _ = await { p = p2 }
-                    let _ = await { p = p3 }
+                    await { p = p1 }
+                    await { p = p2 }
+                    await { p = p3 }
 
                     # Sum should be 1+2+10+20+100+200 = 333
                     v1 + v2 + v3 + v4 + v5 + v6
@@ -499,7 +499,7 @@ class ChannelTest {
 
                     # Receive
                     let received = recv { ch = ch }
-                    let _ = await { p = p }
+                    await { p = p }
                     received
         """)
         assertEquals(42L, result)
@@ -524,7 +524,7 @@ class ChannelTest {
 
                     # Receiver will block until value is available
                     let received = recv { ch = ch }
-                    let _ = await { p = sender }
+                    await { p = sender }
                     received
         """)
         assertEquals(42L, result)

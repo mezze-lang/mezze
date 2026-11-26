@@ -68,7 +68,7 @@ class FileLockEffectTest {
             perform MemoryFileLock in
               match FileLock.lock { path = "/l", kind = Exclusive, blocking = False } is
                 Ok { val = h } -> do
-                  let _ = FileLock.unlock { handle = h }
+                  FileLock.unlock { handle = h }
                   match FileLock.lock { path = "/l", kind = Exclusive, blocking = False } is
                     Ok { val = _ } -> "reacquired"
                     Err { error = _ } -> "still-held"
@@ -105,7 +105,7 @@ class FileLockEffectTest {
                 Ok { val = h1 } ->
                   match FileLock.lock { path = "/l", kind = Shared, blocking = False } is
                     Ok { val = _ } -> do
-                      let _ = FileLock.unlock { handle = h1 }
+                      FileLock.unlock { handle = h1 }
                       match FileLock.lock { path = "/l", kind = Exclusive, blocking = False } is
                         Ok { val = _ } -> "released-too-much"
                         Err { error = _ } -> "still-held-by-second"
@@ -139,7 +139,7 @@ class FileLockEffectTest {
             perform MemoryFileLock in
               match FileLock.lock { path = "/l", kind = Exclusive, blocking = False } is
                 Ok { val = h } -> do
-                  let _ = FileLock.unlock { handle = h }
+                  FileLock.unlock { handle = h }
                   match FileLock.unlock { handle = h } is
                     Ok { val = _ } -> "idempotent"
                     Err { error = _ } -> "second-unlock-failed"

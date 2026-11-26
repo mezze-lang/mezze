@@ -91,7 +91,7 @@ class ScopedConcurrencyTest {
             perform LoomAsync in do
                 scoped {f = {sc} -> do
                     let p = scope_spawn {sc = sc, f = {} -> 100}
-                    let _ = match await {p = p} is
+                    match await {p = p} is
                         Ok {val} -> val
                         Err {error = _} -> -1
                     "done"

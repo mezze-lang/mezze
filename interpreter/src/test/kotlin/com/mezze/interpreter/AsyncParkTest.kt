@@ -33,7 +33,7 @@ class AsyncParkTest {
 
             perform LoomAsync in do
               let flag = atom { val = 0 }
-              let _ = Async.spawn { f = {} -> reset { atom = flag, val = 1 } }
+              Async.spawn { f = {} -> reset { atom = flag, val = 1 } }
               park { predicate = {} -> deref { atom = flag } == 1 }
               deref { atom = flag }
         """.trimIndent()

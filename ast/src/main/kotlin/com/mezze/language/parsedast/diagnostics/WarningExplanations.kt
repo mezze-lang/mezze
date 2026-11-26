@@ -3,8 +3,15 @@ package com.mezze.language.parsedast.diagnostics
 /** Human-readable explanation for each [WarningCode], surfaced by `mez explain`. */
 fun WarningCode.explain(): String = when (this) {
     WarningCode.W0101_UNUSED_VARIABLE ->
-        "A bound name (a `let` or a match binding) is never used. Remove it, or " +
-        "prefix it with `_` (e.g. `_x`) to say it's intentionally unused."
+        "A `let` binds a name that is never used. Remove the binding. If the expression " +
+        "must still run for its effect, keep it on its own as a statement: a statement's " +
+        "value is dropped and its effects still happen. (`let _ = …` is not a thing: " +
+        "`_` is only a pattern wildcard.)"
+
+    WarningCode.W0104_UNUSED_PATTERN_BINDING ->
+        "A pattern binds a name that is never used. Write `_` in its place — the wildcard " +
+        "binds nothing. A field written in short form `{ val }` becomes `{ val = _ }`. " +
+        "A `_`-prefixed name like `_x` is an ordinary name and is not exempt."
 
     WarningCode.W0103_UNUSED_PARAMETER ->
         "A lambda's parameter is never used. A parameter is not a free name: a " +

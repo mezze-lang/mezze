@@ -76,7 +76,7 @@ class LatchTest {
             $latchSetup
 
             let l = latch {count = 3}
-            let _ = count_down {latch = l}
+            count_down {latch = l}
             get_count {latch = l}
         """
         val result = eval(code)
@@ -89,8 +89,8 @@ class LatchTest {
             $latchSetup
 
             let l = latch {count = 2}
-            let _ = count_down {latch = l}
-            let _ = count_down {latch = l}
+            count_down {latch = l}
+            count_down {latch = l}
             get_count {latch = l}
         """
         val result = eval(code)
@@ -103,9 +103,9 @@ class LatchTest {
             $latchSetup
 
             let l = latch {count = 1}
-            let _ = count_down {latch = l}
-            let _ = count_down {latch = l}  # Extra count_down
-            let _ = count_down {latch = l}  # Another extra
+            count_down {latch = l}
+            count_down {latch = l}  # Extra count_down
+            count_down {latch = l}  # Another extra
             get_count {latch = l}
         """
         val result = eval(code)
@@ -118,7 +118,7 @@ class LatchTest {
             $latchSetup
 
             let l = latch {count = 0}
-            let _ = await_latch {latch = l}
+            await_latch {latch = l}
             True
         """
         val result = eval(code)
@@ -166,20 +166,20 @@ class LatchTest {
 
             # Spawn 3 workers that each count down
             let p1 = Async.spawn {f = {} -> do
-                let _ = swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
                 count_down {latch = l}
             }
             let p2 = Async.spawn {f = {} -> do
-                let _ = swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
                 count_down {latch = l}
             }
             let p3 = Async.spawn {f = {} -> do
-                let _ = swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
                 count_down {latch = l}
             }
 
             # Wait for all workers to finish
-            let _ = await_latch {latch = l}
+            await_latch {latch = l}
 
             # Counter should be 3
             deref {atom = counter}
@@ -200,20 +200,20 @@ class LatchTest {
 
             # Thread 1: Wait for latch, then set result
             let p1 = Async.spawn {f = {} -> do
-                let _ = await_latch {latch = l}
+                await_latch {latch = l}
                 swap {atom = result, f = {current} -> 42}
             }
 
             # Give thread 1 time to start waiting
-            let _ = sleep {ms = 20}
+            sleep {ms = 20}
 
             # Result should still be 0 (thread 1 is blocked)
             let before = deref {atom = result}
 
             # Count down to release thread 1
-            let _ = count_down {latch = l}
+            count_down {latch = l}
 
-            let _ = unwrap { result = await {p = p1} }
+            unwrap { result = await {p = p1} }
 
             {before = before, after = deref {atom = result}}
         """
@@ -234,27 +234,27 @@ class LatchTest {
 
             # Spawn 3 threads all waiting on the same latch
             let p1 = Async.spawn {f = {} -> do
-                let _ = await_latch {latch = l}
+                await_latch {latch = l}
                 swap {atom = counter, f = {current} -> current + 1}
             }
             let p2 = Async.spawn {f = {} -> do
-                let _ = await_latch {latch = l}
+                await_latch {latch = l}
                 swap {atom = counter, f = {current} -> current + 1}
             }
             let p3 = Async.spawn {f = {} -> do
-                let _ = await_latch {latch = l}
+                await_latch {latch = l}
                 swap {atom = counter, f = {current} -> current + 1}
             }
 
             # Give threads time to start waiting
-            let _ = sleep {ms = 20}
+            sleep {ms = 20}
 
             # Release all threads at once
-            let _ = count_down {latch = l}
+            count_down {latch = l}
 
-            let _ = unwrap { result = await {p = p1} }
-            let _ = unwrap { result = await {p = p2} }
-            let _ = unwrap { result = await {p = p3} }
+            unwrap { result = await {p = p1} }
+            unwrap { result = await {p = p2} }
+            unwrap { result = await {p = p3} }
 
             # All threads should have incremented
             deref {atom = counter}

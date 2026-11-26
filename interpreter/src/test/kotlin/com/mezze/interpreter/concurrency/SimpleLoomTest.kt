@@ -40,6 +40,7 @@ class SimpleLoomTest {
     private fun eval(body: String): Any {
         val code = """
 use std::effects::async::{ Async, LoomAsync, await as await_result, sleep as async_sleep }
+use std::effects::time::{ SystemTime }
 
 let unwrap_async = {r} -> match r is
     Ok { val } -> val
@@ -49,7 +50,8 @@ let spawn = {f} -> Async.spawn {f = f}
 let await = {p} -> unwrap_async {r = await_result {p = p}}
 let sleep = {ms} -> async_sleep {ms = ms}
 
-perform LoomAsync in do
+# `sleep` performs Time: without a clock the old `let _ = sleep {…}` silently never slept.
+perform SystemTime in perform LoomAsync in do
 $body
         """.trimIndent()
         return MezzeTestHelper.run(code)
@@ -104,7 +106,7 @@ $body
         val code = """
 
             let thread = spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+                sleep {ms = 10}
                 "Completed after sleep"
             }
             await {p = thread}
@@ -180,15 +182,15 @@ $body
 
             # Spawn threads that each sleep briefly
             let t1 = spawn {f = {} -> do
-                let _ = sleep {ms = 5}
+                sleep {ms = 5}
                 1
             }
             let t2 = spawn {f = {} -> do
-                let _ = sleep {ms = 5}
+                sleep {ms = 5}
                 2
             }
             let t3 = spawn {f = {} -> do
-                let _ = sleep {ms = 5}
+                sleep {ms = 5}
                 3
             }
 
@@ -286,7 +288,7 @@ $body
         val code = """
 
             let thread = spawn {f = {} -> {}}
-            let _ = await {p = thread}
+            await {p = thread}
             True
         """
         val result = eval(code)
@@ -298,7 +300,7 @@ $body
         val code = """
 
             let thread = spawn {f = {} -> do
-                let _ = sleep {ms = 0}
+                sleep {ms = 0}
                 42
             }
             await {p = thread}

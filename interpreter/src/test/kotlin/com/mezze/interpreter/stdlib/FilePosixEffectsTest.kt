@@ -37,11 +37,11 @@ class FilePosixEffectsTest {
             use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFileSystem, MemoryFileSymlinks, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileSymlinks in do
-              let _ = FileSystem.create_directory { path = "/d" }
-              let _ = FileSystem.write_bytes {
+              FileSystem.create_directory { path = "/d" }
+              FileSystem.write_bytes {
                 path = "/d/real", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate
               }
-              let _ = FileSymlinks.create_symlink { link = "/d/link", target = "/d/real" }
+              FileSymlinks.create_symlink { link = "/d/link", target = "/d/real" }
               match FileSymlinks.read_symlink { path = "/d/link" } is
                 Ok { val = t } -> t
                 Err { error = _ } -> "read-failed"
@@ -55,7 +55,7 @@ class FilePosixEffectsTest {
         val code = """
             use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFileSystem, MemoryFileSymlinks, WriteMode }
             perform MemoryFileSystem in perform MemoryFileSymlinks in do
-              let _ = FileSystem.create_directory { path = "/d" }
+              FileSystem.create_directory { path = "/d" }
               match FileSymlinks.create_symlink { link = "/d/next", target = "/d/not-yet" } is
                 Ok { val = _ } -> match FileSymlinks.is_symlink { path = "/d/next" } is
                   Ok { val = b } -> if b then "dangling-ok" else "not-a-link"
@@ -71,8 +71,8 @@ class FilePosixEffectsTest {
             use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFileSystem, MemoryFileSymlinks, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileSymlinks in do
-              let _ = FileSystem.create_directory { path = "/d" }
-              let _ = FileSystem.write_bytes {
+              FileSystem.create_directory { path = "/d" }
+              FileSystem.write_bytes {
                 path = "/d/plain", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate
               }
               match FileSymlinks.read_symlink { path = "/d/plain" } is
@@ -90,11 +90,11 @@ class FilePosixEffectsTest {
             use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFileSystem, MemoryFileSymlinks, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileSymlinks in do
-              let _ = FileSystem.create_directory { path = "/d" }
-              let _ = FileSystem.write_bytes {
+              FileSystem.create_directory { path = "/d" }
+              FileSystem.write_bytes {
                 path = "/d/a", bytes = bytes::from_str { s = "shared" }, mode = CreateOrTruncate
               }
-              let _ = FileSymlinks.create_hardlink { link = "/d/b", target = "/d/a" }
+              FileSymlinks.create_hardlink { link = "/d/b", target = "/d/a" }
               match FileSystem.read_bytes { path = "/d/b" } is
                 Ok { val = b } -> match bytes::to_str { b = b } is
                   Ok { val } -> val
@@ -109,7 +109,7 @@ class FilePosixEffectsTest {
         val code = """
             use std::effects::filesystem::{ FileSystem, FileSymlinks, MemoryFileSystem, MemoryFileSymlinks, WriteMode }
             perform MemoryFileSystem in perform MemoryFileSymlinks in do
-              let _ = FileSystem.create_directory { path = "/d" }
+              FileSystem.create_directory { path = "/d" }
               match FileSymlinks.create_hardlink { link = "/d/b", target = "/d/nope" } is
                 Ok { val = _ } -> "unexpectedly-ok"
                 Err { error = FsNotFound { path = _ } } -> "not-found"
@@ -124,9 +124,9 @@ class FilePosixEffectsTest {
         val code = """
             use std::effects::filesystem::{ FileSystem, FileSymlinks, FilePermissions, MemoryFileSystem, MemoryFileSymlinks, MemoryFilePermissions, WriteMode }
             perform MemoryFileSystem in perform MemoryFileSymlinks in perform MemoryFilePermissions in do
-              let _ = FileSystem.create_directory { path = "/d" }
-              let _ = FileSymlinks.create_symlink { link = "/d/a", target = "/d/b" }
-              let _ = FileSymlinks.create_symlink { link = "/d/b", target = "/d/a" }
+              FileSystem.create_directory { path = "/d" }
+              FileSymlinks.create_symlink { link = "/d/a", target = "/d/b" }
+              FileSymlinks.create_symlink { link = "/d/b", target = "/d/a" }
               match FilePermissions.real_path { path = "/d/a", follow_symlinks = True } is
                 Ok { val = _ } -> "unexpectedly-resolved"
                 Err { error = _ } -> "cycle-refused"
@@ -142,12 +142,12 @@ class FilePosixEffectsTest {
             use std::effects::filesystem::{ FileSystem, FilePermissions, MemoryFileSystem, MemoryFilePermissions, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFilePermissions in do
-              let _ = FileSystem.create_directory { path = "/d" }
-              let _ = FileSystem.write_bytes {
+              FileSystem.create_directory { path = "/d" }
+              FileSystem.write_bytes {
                 path = "/d/secret", bytes = bytes::from_str { s = "s" }, mode = CreateOrTruncate
               }
               # 0600 — the mode a deployed secret should have.
-              let _ = FilePermissions.set_mode { path = "/d/secret", mode = { owner_read = True, owner_write = True, owner_exec = False, group_read = False, group_write = False, group_exec = False, other_read = False, other_write = False, other_exec = False } }
+              FilePermissions.set_mode { path = "/d/secret", mode = { owner_read = True, owner_write = True, owner_exec = False, group_read = False, group_write = False, group_exec = False, other_read = False, other_write = False, other_exec = False } }
               match FilePermissions.get_mode { path = "/d/secret" } is
                 Ok { val = m } -> "$(m.owner_read)$(m.owner_write)$(m.group_read)$(m.other_read)"
                 Err { error = _ } -> "get-failed"
@@ -161,11 +161,11 @@ class FilePosixEffectsTest {
             use std::effects::filesystem::{ FileSystem, FilePermissions, MemoryFileSystem, MemoryFilePermissions, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFilePermissions in do
-              let _ = FileSystem.create_directory { path = "/d" }
-              let _ = FileSystem.write_bytes {
+              FileSystem.create_directory { path = "/d" }
+              FileSystem.write_bytes {
                 path = "/d/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate
               }
-              let _ = FilePermissions.set_owner {
+              FilePermissions.set_owner {
                 path = "/d/f", owner = { user = "deploy", group = "web" }
               }
               match FilePermissions.get_owner { path = "/d/f" } is
@@ -181,11 +181,11 @@ class FilePosixEffectsTest {
             use std::effects::filesystem::{ FileSystem, FilePermissions, MemoryFileSystem, MemoryFilePermissions, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFilePermissions in do
-              let _ = FileSystem.create_directory { path = "/d" }
-              let _ = FileSystem.write_bytes {
+              FileSystem.create_directory { path = "/d" }
+              FileSystem.write_bytes {
                 path = "/d/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate
               }
-              let _ = FilePermissions.set_modified { path = "/d/f", millis = 1234567 }
+              FilePermissions.set_modified { path = "/d/f", millis = 1234567 }
               match FileSystem.stat { path = "/d/f", follow_symlinks = True } is
                 Ok { val = s } -> s.modified
                 Err { error = _ } -> 0
@@ -216,10 +216,10 @@ class FilePosixEffectsTest {
             use std::effects::filesystem::{ FileSystem, FileSymlinks, LocalFileSystem, LocalFileSymlinks, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileSymlinks in do
-              let _ = FileSystem.write_bytes {
+              FileSystem.write_bytes {
                 path = "$real", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate
               }
-              let _ = FileSymlinks.create_symlink { link = "$link", target = "$real" }
+              FileSymlinks.create_symlink { link = "$link", target = "$real" }
               match FileSymlinks.read_symlink { path = "$link" } is
                 Ok { val = t } -> match FileSymlinks.is_symlink { path = "$link" } is
                   Ok { val = b } -> if b then t else "not-a-link"
@@ -250,10 +250,10 @@ class FilePosixEffectsTest {
             use std::effects::filesystem::{ FileSystem, FilePermissions, LocalFileSystem, LocalFilePermissions, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFilePermissions in do
-              let _ = FileSystem.write_bytes {
+              FileSystem.write_bytes {
                 path = "$path", bytes = bytes::from_str { s = "s" }, mode = CreateOrTruncate
               }
-              let _ = FilePermissions.set_mode { path = "$path", mode = { owner_read = True, owner_write = True, owner_exec = False, group_read = False, group_write = False, group_exec = False, other_read = False, other_write = False, other_exec = False } }
+              FilePermissions.set_mode { path = "$path", mode = { owner_read = True, owner_write = True, owner_exec = False, group_read = False, group_write = False, group_exec = False, other_read = False, other_write = False, other_exec = False } }
               match FilePermissions.get_mode { path = "$path" } is
                 Ok { val = m } -> "$(m.owner_read)$(m.owner_write)$(m.group_read)$(m.other_read)"
                 Err { error = _ } -> "get-failed"
@@ -269,10 +269,10 @@ class FilePosixEffectsTest {
             use std::effects::filesystem::{ FileSystem, FileSymlinks, FilePermissions, LocalFileSystem, LocalFileSymlinks, LocalFilePermissions, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileSymlinks in perform LocalFilePermissions in do
-              let _ = FileSystem.write_bytes {
+              FileSystem.write_bytes {
                 path = "$real", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate
               }
-              let _ = FileSymlinks.create_symlink { link = "$link", target = "$real" }
+              FileSymlinks.create_symlink { link = "$link", target = "$real" }
               match FilePermissions.real_path { path = "$link", follow_symlinks = True } is
                 Ok { val = p } -> if p == "$real" then "resolved" else "unexpected: $(p)"
                 Err { error = _ } -> "real-path-failed"
@@ -287,10 +287,10 @@ class FilePosixEffectsTest {
             use std::effects::filesystem::{ FileSystem, FilePermissions, LocalFileSystem, LocalFilePermissions, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFilePermissions in do
-              let _ = FileSystem.write_bytes {
+              FileSystem.write_bytes {
                 path = "$path", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate
               }
-              let _ = FilePermissions.set_modified { path = "$path", millis = 1700000000000 }
+              FilePermissions.set_modified { path = "$path", millis = 1700000000000 }
               match FileSystem.stat { path = "$path", follow_symlinks = True } is
                 Ok { val = s } -> s.modified
                 Err { error = _ } -> 0

@@ -218,7 +218,7 @@ class AsyncExtendedTest {
 
             perform LoomAsync in do
                 let xs = [1, 2, 3]
-                let _ = result::get_or { result = try_par_for_each {xs = xs, f = {x} -> {}}, def = {} }
+                result::get_or { result = try_par_for_each {xs = xs, f = {x} -> {}}, def = {} }
                 # Return a known value to verify completion
                 42
         """
@@ -234,7 +234,7 @@ class AsyncExtendedTest {
 
             perform LoomAsync in do
                 let xs: [Int] = []
-                let _ = result::get_or { result = try_par_for_each {xs = xs, f = {x} -> {}}, def = {} }
+                result::get_or { result = try_par_for_each {xs = xs, f = {x} -> {}}, def = {} }
                 # Return a known value to verify completion
                 42
         """
@@ -544,7 +544,7 @@ class AsyncExtendedTest {
                 # Filter evens
                 let evens = result::get_or { result = try_par_filter {xs = xs, f = {x} -> x % 2 == 0}, def = [] }
                 # For each should process 3 items (2, 4, 6)
-                let _ = result::get_or { result = try_par_for_each {xs = evens, f = {x} -> {}}, def = {} }
+                result::get_or { result = try_par_for_each {xs = evens, f = {x} -> {}}, def = {} }
                 # Return count of evens by pattern matching
                 match evens is
                     [_, _, _] -> 3

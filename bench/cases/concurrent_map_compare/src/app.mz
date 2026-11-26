@@ -62,8 +62,8 @@ let chunked = { xs: [Int] } -> perform LoomParallel in chunk_fold {
 
 let time_it = { label: Str, f: {} -> Int } -> perform Console in perform SystemTime in do
   ## 2 warmup, 3 measured — enough to see a 2x, not enough to pretend at 5%.
-  let _w0 = f {}
-  let _w1 = f {}
+  f {}
+  f {}
   let t0 = monotonic {}
   let r0 = f {}
   let e0 = duration_to_nanos { d = sub_duration { a = monotonic {}, b = t0 } }
@@ -80,7 +80,7 @@ let time_it = { label: Str, f: {} -> Int } -> perform Console in perform SystemT
 ## costs nothing, so this is where bounded concurrency should win and where
 ## the integer mill above is no evidence at all.
 let io_work = { x: Int } -> perform SystemTime in do
-  let _ = sleep { ms = 2 }
+  sleep { ms = 2 }
   x
 
 let io_sequential = { xs: [Int] } -> seq::fold {
@@ -121,14 +121,14 @@ let main = {} -> perform Console in perform SystemTime in do
   let n = 20000
   let xs = seq::range { start = 0, end = n }
   println { msg = "== concurrent_map_compare N=$(int::to_str { n = n }), 400 ops/item, 2 warmup + 3 measured ==" }
-  let _ = time_it { label = "sequential", f = {} -> sequential { xs = xs } }
-  let _ = time_it { label = "par_map(16)", f = {} -> forked { xs = xs } }
-  let _ = time_it { label = "chunk_fold ", f = {} -> chunked { xs = xs } }
+  time_it { label = "sequential", f = {} -> sequential { xs = xs } }
+  time_it { label = "par_map(16)", f = {} -> forked { xs = xs } }
+  time_it { label = "chunk_fold ", f = {} -> chunked { xs = xs } }
   let m = 160
   let ys = seq::range { start = 0, end = m }
   println { msg = "== io-shaped (sleep 2ms) N=$(int::to_str { n = m }) ==" }
-  let _ = time_it { label = "io sequential", f = {} -> io_sequential { xs = ys } }
-  let _ = time_it { label = "io par_map(16)", f = {} -> io_forked { xs = ys } }
-  let _ = time_it { label = "io chunk_fold ", f = {} -> io_chunked { xs = ys } }
-  let _ = time_it { label = "io chunk(mc=1)", f = {} -> io_chunked_fine { xs = ys } }
+  time_it { label = "io sequential", f = {} -> io_sequential { xs = ys } }
+  time_it { label = "io par_map(16)", f = {} -> io_forked { xs = ys } }
+  time_it { label = "io chunk_fold ", f = {} -> io_chunked { xs = ys } }
+  time_it { label = "io chunk(mc=1)", f = {} -> io_chunked_fine { xs = ys } }
   println { msg = "== done ==" }

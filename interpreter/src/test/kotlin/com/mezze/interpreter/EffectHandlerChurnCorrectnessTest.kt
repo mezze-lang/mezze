@@ -91,7 +91,7 @@ class EffectHandlerChurnCorrectnessTest {
               if i <= 0 then acc
               else alternate { i = i - 1, acc = acc + ten {} + twenty {} }
             do
-              let _c = churn { i = 2000, acc = 0 }
+              churn { i = 2000, acc = 0 }
               alternate { i = 2000, acc = 0 }
         """.trimIndent()))
     }
@@ -119,7 +119,7 @@ class EffectHandlerChurnCorrectnessTest {
               let inner = perform Twenty in Pick.pick {}
               outer + inner
             do
-              let _c = churn { i = 2000, acc = 0 }
+              churn { i = 2000, acc = 0 }
               both {}
         """.trimIndent()))
     }
@@ -139,7 +139,7 @@ class EffectHandlerChurnCorrectnessTest {
               if i <= 0 then acc
               else churn { i = i - 1, acc = acc + ten {} }
             do
-              let _c = churn { i = 2000, acc = 0 }
+              churn { i = 2000, acc = 0 }
               perform Seven in Other.other {}
         """.trimIndent()))
     }
@@ -160,7 +160,7 @@ class EffectHandlerChurnCorrectnessTest {
               if i <= 0 then acc
               else churn { i = i - 1, acc = acc + ten {} }
             do
-              let _c = churn { i = 2000, acc = 0 }
+              churn { i = 2000, acc = 0 }
               perform Resumer in Pick.pick {}
         """.trimIndent()))
     }

@@ -6,9 +6,25 @@ import com.mezze.language.parser.*
 import com.mezze.language.parser.internal.lib.*
 // Let binding pattern parser (for irrefutable patterns in let bindings)
 internal val MezzeParser.letBindingPattern: Parser<ParsedPattern>
-    get() = { stream ->
+    get() = parser@{ stream ->
+        // `let _ = expr` binds nothing. `_` is a PATTERN wildcard (`Err { error = _ }`,
+        // `_ -> …`, `let { a, b = _ } = r`); a whole `let` of it is either an
+        // expression statement wearing a binding (in a `do`, write the expression on
+        // its own: its effects run and its value is dropped) or, at the top level,
+        // nothing at all (the top level is for definitions and performs no effects).
+        if (stream.current()?.type == TokenType.PLACEHOLDER) {
+            return@parser ParseResult.Failure(
+                "`let _ = …` binds nothing. Inside a `do`, write the expression on its own line: " +
+                    "it still runs, and its value is dropped. At the top level there is nothing to " +
+                    "run, so remove it. `_` is for patterns: `Err { error = _ }`, `_ -> …`.",
+                stream.getSourcePosition(),
+                stream.getSourceLine(),
+                stream.getSourceColumn(),
+                isFatal = true,
+                code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0128_INVALID_LET_BINDING_TARGET,
+            )
+        }
         when (val r = Parsers.oneOf(
-            wildcardPattern,
             standaloneRecordPattern,
             variablePatternForLet
         )(stream)) {
@@ -25,7 +41,7 @@ internal val MezzeParser.letBindingPattern: Parser<ParsedPattern>
                 // pattern failed mid-way — and that error is the right one to keep.
                 if (r.isFatal || r.position > stream.getSourcePosition()) r
                 else stream.failure(
-                    "A `let` binds a name, a wildcard `_`, or a `{ … }` destructuring " +
+                    "A `let` binds a name or a `{ … }` destructuring " +
                         "pattern, but got ${com.mezze.language.parser.tokenGotDescription(stream.current())}",
                     code = com.mezze.language.parsedast.diagnostics.ErrorCode.P0128_INVALID_LET_BINDING_TARGET,
                     hints = listOf("name the binding, e.g. `let x = ...`")

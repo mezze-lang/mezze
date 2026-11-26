@@ -100,7 +100,7 @@ internal fun MezzeParser.parseLetBindingWithVisibility(stream: TokenStream, visi
         // Where <pattern> can be:
         //   - identifier (simple binding): let x = ...
         //   - record pattern (destructuring): let { x, y } = ...
-        //   - wildcard: let _ = ... (discard value)
+        //   (`let _ = …` is rejected by letBindingPattern: it binds nothing)
         val letToken = tok(TokenType.LET)(stream)
         return when (letToken) {
             is ParseResult.Success -> {

@@ -320,7 +320,7 @@ class CoopAsyncSchedulerTest {
               println { msg = "any=${'$'}((seq::any { xs = ps, p = { x } -> settled { p = x } == 20 }).to_dbg {})" }
               println { msg = "find=${'$'}((seq::find { xs = ps, p = { x } -> settled { p = x } == 30 }).map { f = { val } -> settled { p = val } }.to_dbg {})" }
               seq::for_each { xs = ps, f = { x } -> do
-                let _ = settled { p = x }
+                settled { p = x }
                 {} }
               println { msg = "for_each=done" }
         """)),
@@ -378,8 +378,8 @@ class CoopAsyncSchedulerTest {
             perform Console, SystemTime, CoopAsync in do
               let a = Async.spawn { f = {} -> worker { name = "a" } }
               let b = Async.spawn { f = {} -> worker { name = "b" } }
-              let _ = await { p = a }
-              let _ = await { p = b }
+              await { p = a }
+              await { p = b }
               println { msg = "end" }
         """)),
     )

@@ -413,7 +413,7 @@ class OSThreadConcurrencyTest {
             $setupCode
 
             perform SystemTime in perform OSThreadAsync in do
-                let _ = sleep {ms = 10}
+                sleep {ms = 10}
                 42
         """
         val result = eval(code)
@@ -427,7 +427,7 @@ class OSThreadConcurrencyTest {
 
             perform SystemTime in perform OSThreadAsync in do
                 let p = Async.spawn {f = {} -> 42}
-                let _ = match await {p = p} is
+                match await {p = p} is
                     Ok { val } -> val
                     Err { error = _ } -> -1
                 is_done {p = p}

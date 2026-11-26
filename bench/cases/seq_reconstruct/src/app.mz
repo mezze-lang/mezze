@@ -37,37 +37,37 @@ let time_list = {xs} -> perform SystemTime in do
 let loop_pass : {xs: [Int], k: Int, i: Int, tag: Str} -> Int <*> = {xs, k, i, tag} -> perform Console in perform SystemTime in
     if i == k then 0 else do
         let out = time_pass {xs = xs}
-        let _p = println { msg = "  [pass][$(tag)] iter=$(i.to_str{}) ns=$(out.ns.to_str{}) r=$(out.r.to_str{})" }
+        println { msg = "  [pass][$(tag)] iter=$(i.to_str{}) ns=$(out.ns.to_str{}) r=$(out.r.to_str{})" }
         loop_pass {xs = xs, k = k, i = i + 1, tag = tag}
 
 let loop_set : {xs: [Int], k: Int, i: Int, tag: Str} -> Int <*> = {xs, k, i, tag} -> perform Console in perform SystemTime in
     if i == k then 0 else do
         let out = time_set {xs = xs}
-        let _p = println { msg = "  [set][$(tag)] iter=$(i.to_str{}) ns=$(out.ns.to_str{}) r=$(out.r.to_str{})" }
+        println { msg = "  [set][$(tag)] iter=$(i.to_str{}) ns=$(out.ns.to_str{}) r=$(out.r.to_str{})" }
         loop_set {xs = xs, k = k, i = i + 1, tag = tag}
 
 let loop_sset : {xs: [Int], k: Int, i: Int, tag: Str} -> Int <*> = {xs, k, i, tag} -> perform Console in perform SystemTime in
     if i == k then 0 else do
         let out = time_sset {xs = xs}
-        let _p = println { msg = "  [sset][$(tag)] iter=$(i.to_str{}) ns=$(out.ns.to_str{}) r=$(out.r.to_str{})" }
+        println { msg = "  [sset][$(tag)] iter=$(i.to_str{}) ns=$(out.ns.to_str{}) r=$(out.r.to_str{})" }
         loop_sset {xs = xs, k = k, i = i + 1, tag = tag}
 
 let loop_list : {xs: [Int], k: Int, i: Int, tag: Str} -> Int <*> = {xs, k, i, tag} -> perform Console in perform SystemTime in
     if i == k then 0 else do
         let out = time_list {xs = xs}
-        let _p = println { msg = "  [list][$(tag)] iter=$(i.to_str{}) ns=$(out.ns.to_str{}) r=$(out.r.to_str{})" }
+        println { msg = "  [list][$(tag)] iter=$(i.to_str{}) ns=$(out.ns.to_str{}) r=$(out.r.to_str{})" }
         loop_list {xs = xs, k = k, i = i + 1, tag = tag}
 
 let main = {} -> perform Console in perform SystemTime in do
     let n = 1000000
-    let _h = println { msg = "== seq_reconstruct N=$(n.to_str{}) (3 warmup + 5 measure per target) ==" }
+    println { msg = "== seq_reconstruct N=$(n.to_str{}) (3 warmup + 5 measure per target) ==" }
     let xs = seq::range { start = 0, end = n }
-    let _w0 = loop_pass {xs = xs, k = 3, i = 0, tag = "warmup"}
-    let _m0 = loop_pass {xs = xs, k = 5, i = 0, tag = "measure"}
-    let _w1 = loop_set {xs = xs, k = 3, i = 0, tag = "warmup"}
-    let _m1 = loop_set {xs = xs, k = 5, i = 0, tag = "measure"}
-    let _w2 = loop_sset {xs = xs, k = 3, i = 0, tag = "warmup"}
-    let _m2 = loop_sset {xs = xs, k = 5, i = 0, tag = "measure"}
-    let _w3 = loop_list {xs = xs, k = 3, i = 0, tag = "warmup"}
-    let _m3 = loop_list {xs = xs, k = 5, i = 0, tag = "measure"}
+    loop_pass {xs = xs, k = 3, i = 0, tag = "warmup"}
+    loop_pass {xs = xs, k = 5, i = 0, tag = "measure"}
+    loop_set {xs = xs, k = 3, i = 0, tag = "warmup"}
+    loop_set {xs = xs, k = 5, i = 0, tag = "measure"}
+    loop_sset {xs = xs, k = 3, i = 0, tag = "warmup"}
+    loop_sset {xs = xs, k = 5, i = 0, tag = "measure"}
+    loop_list {xs = xs, k = 3, i = 0, tag = "warmup"}
+    loop_list {xs = xs, k = 5, i = 0, tag = "measure"}
     println { msg = "== done ==" }

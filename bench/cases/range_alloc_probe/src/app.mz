@@ -9,9 +9,9 @@ use std::collections::seq
 let main = {} -> perform Console in perform SystemTime in do
     let n = 10000000
     # 3 warmup
-    let _w1 = seq::range { start = 0, end = n }
-    let _w2 = seq::range { start = 0, end = n }
-    let _w3 = seq::range { start = 0, end = n }
+    seq::range { start = 0, end = n }
+    seq::range { start = 0, end = n }
+    seq::range { start = 0, end = n }
     # measured
     let t0 = monotonic {}
     let r1 = seq::range { start = 0, end = n }

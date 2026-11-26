@@ -75,7 +75,7 @@ class AtomTest {
             $atomSetup
 
             let counter = atom {val = 0}
-            let _ = reset {atom = counter, val = 100}
+            reset {atom = counter, val = 100}
             deref {atom = counter}
         """
         val result = eval(code)
@@ -116,7 +116,7 @@ class AtomTest {
             $atomSetup
 
             let counter = atom {val = 5}
-            let _ = swap {atom = counter, f = {current} -> current * 2}
+            swap {atom = counter, f = {current} -> current * 2}
             deref {atom = counter}
         """
         val result = eval(code)
@@ -129,9 +129,9 @@ class AtomTest {
             $atomSetup
 
             let counter = atom {val = 0}
-            let _ = swap {atom = counter, f = {current} -> current + 1}
-            let _ = swap {atom = counter, f = {current} -> current + 1}
-            let _ = swap {atom = counter, f = {current} -> current + 1}
+            swap {atom = counter, f = {current} -> current + 1}
+            swap {atom = counter, f = {current} -> current + 1}
+            swap {atom = counter, f = {current} -> current + 1}
             deref {atom = counter}
         """
         val result = eval(code)
@@ -144,8 +144,8 @@ class AtomTest {
             $atomSetup
 
             let counter = atom {val = 1}
-            let _ = swap {atom = counter, f = {current} -> (current + 1) * 2}  # (1 + 1) * 2 = 4
-            let _ = swap {atom = counter, f = {current} -> (current + 1) * 2}  # (4 + 1) * 2 = 10
+            swap {atom = counter, f = {current} -> (current + 1) * 2}  # (1 + 1) * 2 = 4
+            swap {atom = counter, f = {current} -> (current + 1) * 2}  # (4 + 1) * 2 = 10
             deref {atom = counter}
         """
         val result = eval(code)
@@ -186,7 +186,7 @@ class AtomTest {
             $atomSetup
 
             let counter = atom {val = 10}
-            let _ = compare_and_set {atom = counter, expected = 10, new = 20}
+            compare_and_set {atom = counter, expected = 10, new = 20}
             deref {atom = counter}
         """
         val result = eval(code)
@@ -199,7 +199,7 @@ class AtomTest {
             $atomSetup
 
             let counter = atom {val = 10}
-            let _ = compare_and_set {atom = counter, expected = 999, new = 20}
+            compare_and_set {atom = counter, expected = 999, new = 20}
             deref {atom = counter}
         """
         val result = eval(code)
@@ -219,15 +219,15 @@ class AtomTest {
 
             # Helper to increment N times using explicit iteration
             let increment_10 = {} -> do
-                let _ = swap {atom = counter, f = {current} -> current + 1}
-                let _ = swap {atom = counter, f = {current} -> current + 1}
-                let _ = swap {atom = counter, f = {current} -> current + 1}
-                let _ = swap {atom = counter, f = {current} -> current + 1}
-                let _ = swap {atom = counter, f = {current} -> current + 1}
-                let _ = swap {atom = counter, f = {current} -> current + 1}
-                let _ = swap {atom = counter, f = {current} -> current + 1}
-                let _ = swap {atom = counter, f = {current} -> current + 1}
-                let _ = swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
                 swap {atom = counter, f = {current} -> current + 1}
 
             # Spawn multiple threads that each increment 10 times
@@ -235,9 +235,9 @@ class AtomTest {
             let p2 = Async.spawn {f = increment_10}
             let p3 = Async.spawn {f = increment_10}
 
-            let _ = await {p = p1}
-            let _ = await {p = p2}
-            let _ = await {p = p3}
+            await {p = p1}
+            await {p = p2}
+            await {p = p3}
 
             deref {atom = counter}
         """
@@ -264,8 +264,8 @@ class AtomTest {
             $atomSetup
 
             let state = atom {val = {count = 0}}
-            let _ = swap {atom = state, f = {current} -> {count = current.count + 1}}
-            let _ = swap {atom = state, f = {current} -> {count = current.count + 1}}
+            swap {atom = state, f = {current} -> {count = current.count + 1}}
+            swap {atom = state, f = {current} -> {count = current.count + 1}}
             let result = deref {atom = state}
             result.count
         """
@@ -286,16 +286,16 @@ class AtomTest {
             let log = atom {val = 0}
 
             # Add a watch that records the sum of old + new
-            let _ = add_watch {
+            add_watch {
                 atom = counter,
                 key = "logger",
                 f = {key, old, new} -> do
-                    let _ = reset {atom = log, val = old + new}
+                    reset {atom = log, val = old + new}
                     {}
             }
 
             # swap should trigger the watch
-            let _ = swap {atom = counter, f = {current} -> current + 10}
+            swap {atom = counter, f = {current} -> current + 10}
 
             # Watch should have recorded 0 + 10 = 10
             deref {atom = log}
@@ -312,16 +312,16 @@ class AtomTest {
             let counter = atom {val = 5}
             let log = atom {val = 0}
 
-            let _ = add_watch {
+            add_watch {
                 atom = counter,
                 key = "logger",
                 f = {key, old, new} -> do
-                    let _ = reset {atom = log, val = old + new}
+                    reset {atom = log, val = old + new}
                     {}
             }
 
             # reset should trigger the watch
-            let _ = reset {atom = counter, val = 15}
+            reset {atom = counter, val = 15}
 
             # Watch should have recorded 5 + 15 = 20
             deref {atom = log}
@@ -339,23 +339,23 @@ class AtomTest {
             let log1 = atom {val = 0}
             let log2 = atom {val = 0}
 
-            let _ = add_watch {
+            add_watch {
                 atom = counter,
                 key = "watch1",
                 f = {key, old, new} -> do
-                    let _ = reset {atom = log1, val = new}
+                    reset {atom = log1, val = new}
                     {}
             }
 
-            let _ = add_watch {
+            add_watch {
                 atom = counter,
                 key = "watch2",
                 f = {key, old, new} -> do
-                    let _ = reset {atom = log2, val = new * 2}
+                    reset {atom = log2, val = new * 2}
                     {}
             }
 
-            let _ = swap {atom = counter, f = {current} -> current + 5}
+            swap {atom = counter, f = {current} -> current + 5}
 
             # Both watches should have been called
             deref {atom = log1} + deref {atom = log2}
@@ -373,22 +373,22 @@ class AtomTest {
             let counter = atom {val = 0}
             let log = atom {val = 0}
 
-            let _ = add_watch {
+            add_watch {
                 atom = counter,
                 key = "logger",
                 f = {key, old, new} -> do
-                    let _ = swap {atom = log, f = {current} -> current + 1}
+                    swap {atom = log, f = {current} -> current + 1}
                     {}
             }
 
             # First swap should trigger watch
-            let _ = swap {atom = counter, f = {current} -> current + 1}
+            swap {atom = counter, f = {current} -> current + 1}
 
             # Remove the watch
-            let _ = remove_watch {atom = counter, key = "logger"}
+            remove_watch {atom = counter, key = "logger"}
 
             # Second swap should NOT trigger watch
-            let _ = swap {atom = counter, f = {current} -> current + 1}
+            swap {atom = counter, f = {current} -> current + 1}
 
             # Log should be 1 (only first swap triggered watch)
             deref {atom = log}
@@ -405,15 +405,15 @@ class AtomTest {
             let counter = atom {val = 0}
             let key_log = atom {val = "none"}
 
-            let _ = add_watch {
+            add_watch {
                 atom = counter,
                 key = "my_watch_key",
                 f = {key, old, new} -> do
-                    let _ = reset {atom = key_log, val = key}
+                    reset {atom = key_log, val = key}
                     {}
             }
 
-            let _ = swap {atom = counter, f = {current} -> current + 1}
+            swap {atom = counter, f = {current} -> current + 1}
 
             deref {atom = key_log}
         """
@@ -429,18 +429,18 @@ class AtomTest {
             let counter = atom {val = 0}
             let call_count = atom {val = 0}
 
-            let _ = add_watch {
+            add_watch {
                 atom = counter,
                 key = "counter",
                 f = {key, old, new} -> do
-                    let _ = swap {atom = call_count, f = {current} -> current + 1}
+                    swap {atom = call_count, f = {current} -> current + 1}
                     {}
             }
 
             # Three swaps should trigger watch three times
-            let _ = swap {atom = counter, f = {current} -> current + 1}
-            let _ = swap {atom = counter, f = {current} -> current + 1}
-            let _ = swap {atom = counter, f = {current} -> current + 1}
+            swap {atom = counter, f = {current} -> current + 1}
+            swap {atom = counter, f = {current} -> current + 1}
+            swap {atom = counter, f = {current} -> current + 1}
 
             deref {atom = call_count}
         """
@@ -502,7 +502,7 @@ class AtomTest {
 
             match atom_validated {val = 10, validator = {val} -> val >= 0} is
               Ok { val = a } -> do
-                let _ = swap_validated {atom = a, f = {current} -> current + 7}
+                swap_validated {atom = a, f = {current} -> current + 7}
                 deref_validated {atom = a}
               Err { error = _ } -> 0-1
         """
@@ -517,7 +517,7 @@ class AtomTest {
 
             match atom_validated {val = 5, validator = {val} -> val >= 0} is
               Ok { val = positive } -> do
-                let _ = swap_validated {atom = positive, f = {current} -> current + 10}
+                swap_validated {atom = positive, f = {current} -> current + 10}
                 deref_validated {atom = positive}
               Err { error = _ } -> 0-1
         """
@@ -550,7 +550,7 @@ class AtomTest {
 
             match atom_validated {val = 5, validator = {val} -> val >= 0} is
               Ok { val = positive } -> do
-                let _ = swap_validated {atom = positive, f = {current} -> current - 100}
+                swap_validated {atom = positive, f = {current} -> current - 100}
                 deref_validated {atom = positive}
               Err { error = _ } -> 0-1
         """
@@ -598,7 +598,7 @@ class AtomTest {
             match atom_validated {val = 10, validator = {val} -> val < 100} is
               Ok { val = counter } -> do
                 # Allowed: 10 + 50 = 60 < 100
-                let _ = swap_validated {atom = counter, f = {current} -> current + 50}
+                swap_validated {atom = counter, f = {current} -> current + 50}
                 deref_validated {atom = counter}
               Err { error = _ } -> 0-1
         """
@@ -628,7 +628,7 @@ class AtomTest {
             $atomSetup
 
             let counter = atom {val = 0}
-            let _ = swap {atom = counter, f = {current} -> current - 1000}
+            swap {atom = counter, f = {current} -> current - 1000}
             deref {atom = counter}
         """
         val result = eval(code)
@@ -643,7 +643,7 @@ class AtomTest {
 
             match atom_validated {val = 5, validator = {val} -> val >= 0} is
               Ok { val = positive } -> do
-                let _ = swap_validated {atom = positive, f = {current} -> current + 1}
+                swap_validated {atom = positive, f = {current} -> current + 1}
                 deref_validated {atom = positive}
               Err { error = _ } -> 0-1
         """

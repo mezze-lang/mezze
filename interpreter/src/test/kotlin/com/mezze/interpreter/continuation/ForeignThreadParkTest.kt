@@ -104,7 +104,7 @@ class ForeignThreadParkTest {
             perform SystemTime, CoopAsync in do
               let flag = atom { val = 0 }
               perform LoomAsync in do
-                let _ = Async.spawn { f = {} -> do
+                Async.spawn { f = {} -> do
                   sleep { ms = 30 }
                   reset { atom = flag, val = 1 } }
                 {}
@@ -177,7 +177,7 @@ class ForeignThreadParkTest {
             use std::result
             perform SystemTime, CoopAsync in do
               let p = promise_from { setup = { complete, fail, on_cancel } -> perform LoomAsync in do
-                let _ = Async.spawn { f = {} -> do
+                Async.spawn { f = {} -> do
                   sleep { ms = 30 }
                   complete { val = 42 } }
                 {} }

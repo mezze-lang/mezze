@@ -43,7 +43,7 @@ pub let recv: { ch: Chan 'a } -> 'a <Async, ...> = { ch } -> do
   let slot = atom { val = None }
   park { predicate = wait_on { on = ch, test = {} -> match __native_channel_try_recv { ch = ch } is
     Some { val } -> do
-      let _ = reset { atom = slot, val = Some { val = val } }
+      reset { atom = slot, val = Some { val = val } }
       True
     None -> False } }
   match deref { atom = slot } is

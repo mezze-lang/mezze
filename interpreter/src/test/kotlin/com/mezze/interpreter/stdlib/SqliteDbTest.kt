@@ -36,7 +36,7 @@ class SqliteDbTest {
               Db.apply { q = sql { text = "create table users (id integer primary key, name text, score real, active integer)" } }
 
             let main = {} -> perform SqliteDb { path = ":memory:" } in do
-              let _ = setup {}
+              setup {}
             """.trimIndent() + "\n" +
             body.trimIndent().prependIndent("  ") + "\n" +
             "main {}\n",
@@ -65,7 +65,7 @@ class SqliteDbTest {
         // its own type, not spliced into text.
         val r = onMemory(
             """
-            let _ = Db.apply { q = sql { text = "insert into users (name) values (?)" }
+            Db.apply { q = sql { text = "insert into users (name) values (?)" }
                      .bind { v = DbStr { val = "ada" } } }
             match Db.run { q = sql { text = "select name from users" } } is
               Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
@@ -84,7 +84,7 @@ class SqliteDbTest {
         val r = onMemory(
             """
             let nasty = "'); drop table users; --"
-            let _ = Db.apply { q = sql { text = "insert into users (name) values (?)" }
+            Db.apply { q = sql { text = "insert into users (name) values (?)" }
                      .bind { v = DbStr { val = nasty } } }
             match Db.run { q = sql { text = "select name from users" } } is
               Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
@@ -100,7 +100,7 @@ class SqliteDbTest {
     fun `a result set carries its column names once`() {
         val r = onMemory(
             """
-            let _ = Db.apply { q = sql { text = "insert into users (name) values ('ada')" } }
+            Db.apply { q = sql { text = "insert into users (name) values ('ada')" } }
             match Db.run { q = sql { text = "select id, name, score from users" } } is
               Ok { val = rows } -> str::join { strings = rows.cols, separator = "," }
               Err { error = _ } -> "failed"
@@ -125,7 +125,7 @@ class SqliteDbTest {
     fun `several rows come back in order`() {
         val r = onMemory(
             """
-            let _ = Db.apply { q = sql { text = "insert into users (id, name) values (1, 'a'), (2, 'b'), (3, 'c')" } }
+            Db.apply { q = sql { text = "insert into users (id, name) values (1, 'a'), (2, 'b'), (3, 'c')" } }
             match Db.run { q = sql { text = "select id from users order by id" } } is
               Ok { val = rows } -> seq::fold { xs = rows.rows, init = 0, f = { acc, x } ->
                 match seq::get { xs = x, i = 0 } is
@@ -143,7 +143,7 @@ class SqliteDbTest {
     fun `an integer column decodes as DbInt and a real column as DbFloat`() {
         val r = onMemory(
             """
-            let _ = Db.apply { q = sql { text = "insert into users (id, score) values (7, 2.5)" } }
+            Db.apply { q = sql { text = "insert into users (id, score) values (7, 2.5)" } }
             match Db.run { q = sql { text = "select id, score from users" } } is
               Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                 Some { val = DbInt { val = n } } -> match value_at { rows = rows, row = 0, col = 1 } is
@@ -160,7 +160,7 @@ class SqliteDbTest {
     fun `a NULL column decodes as DbNull, not as a missing value`() {
         val r = onMemory(
             """
-            let _ = Db.apply { q = sql { text = "insert into users (id, name) values (1, null)" } }
+            Db.apply { q = sql { text = "insert into users (id, name) values (1, null)" } }
             match Db.run { q = sql { text = "select name from users" } } is
               Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                 Some { val = DbNull } -> 1
@@ -176,7 +176,7 @@ class SqliteDbTest {
     fun `a bound null writes a NULL`() {
         val r = onMemory(
             """
-            let _ = Db.apply { q = sql { text = "insert into users (id, name) values (1, ?)" }
+            Db.apply { q = sql { text = "insert into users (id, name) values (1, ?)" }
                      .bind { v = DbNull } }
             match Db.run { q = sql { text = "select count(*) from users where name is null" } } is
               Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
@@ -195,8 +195,8 @@ class SqliteDbTest {
             $head
             use std::collections::bytes
             let main = {} -> perform SqliteDb { path = ":memory:" } in do
-              let _ = Db.apply { q = sql { text = "create table b (v blob)" } }
-              let _ = Db.apply { q = sql { text = "insert into b (v) values (?)" }
+              Db.apply { q = sql { text = "create table b (v blob)" } }
+              Db.apply { q = sql { text = "insert into b (v) values (?)" }
                        .bind { v = DbBytes { val = bytes::from_str { s = "hi" } } } }
               match Db.run { q = sql { text = "select v from b" } } is
                 Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
@@ -233,7 +233,7 @@ class SqliteDbTest {
         // the program keeps going and the next query still works.
         val r = onMemory(
             """
-            let _ = Db.run { q = sql { text = "select * from no_such_table" } }
+            Db.run { q = sql { text = "select * from no_such_table" } }
             match Db.run { q = sql { text = "select 1" } } is
               Ok { val = rows } -> row_count { rows = rows }
               Err { error = _ } -> -1
@@ -267,9 +267,9 @@ class SqliteDbTest {
     fun `a transaction that succeeds commits`() {
         val r = onMemory(
             """
-            let _ = Db.tx { body = {} -> do
-              let _ = Db.apply { q = sql { text = "insert into users (id, name) values (1, 'a')" } }
-              let _ = Db.apply { q = sql { text = "insert into users (id, name) values (2, 'b')" } }
+            Db.tx { body = {} -> do
+              Db.apply { q = sql { text = "insert into users (id, name) values (1, 'a')" } }
+              Db.apply { q = sql { text = "insert into users (id, name) values (2, 'b')" } }
               Ok { val = {} } }
             match Db.run { q = sql { text = "select count(*) from users" } } is
               Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
@@ -287,8 +287,8 @@ class SqliteDbTest {
         // body returns Err it must be gone.
         val r = onMemory(
             """
-            let _ = Db.tx { body = {} -> do
-              let _ = Db.apply { q = sql { text = "insert into users (id, name) values (1, 'a')" } }
+            Db.tx { body = {} -> do
+              Db.apply { q = sql { text = "insert into users (id, name) values (1, 'a')" } }
               Err { error = DbConflict { msg = "the body decided to stop" } } }
             match Db.run { q = sql { text = "select count(*) from users" } } is
               Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
@@ -331,8 +331,8 @@ class SqliteDbTest {
         // fails, the inner body's write goes too.
         val r = onMemory(
             """
-            let _ = Db.tx { body = {} -> do
-              let _ = Db.tx { body = {} ->
+            Db.tx { body = {} -> do
+              Db.tx { body = {} ->
                 Db.apply { q = sql { text = "insert into users (id, name) values (1, 'inner')" } } }
               Err { error = DbConflict { msg = "outer stops" } } }
             match Db.run { q = sql { text = "select count(*) from users" } } is
@@ -349,8 +349,8 @@ class SqliteDbTest {
     fun `a nested transaction that both bodies complete commits once`() {
         val r = onMemory(
             """
-            let _ = Db.tx { body = {} -> do
-              let _ = Db.tx { body = {} ->
+            Db.tx { body = {} -> do
+              Db.tx { body = {} ->
                 Db.apply { q = sql { text = "insert into users (id, name) values (1, 'inner')" } } }
               Db.apply { q = sql { text = "insert into users (id, name) values (2, 'outer')" } } }
             match Db.run { q = sql { text = "select count(*) from users" } } is
@@ -381,7 +381,7 @@ class SqliteDbTest {
                 Err { error = _ } -> -1
 
             let main = {} -> do
-              let _ = perform SqliteDb { path = ":memory:" } in
+              perform SqliteDb { path = ":memory:" } in
                 Db.apply { q = sql { text = "create table leftover (a int)" } }
               perform SqliteDb { path = ":memory:" } in count_tables {}
             main {}
@@ -403,7 +403,7 @@ class SqliteDbTest {
                 Err { error = _ } -> -1
 
             let main = {} -> perform SqliteDb { path = ":memory:" } in do
-              let _ = Db.apply { q = sql { text = "create table outer_t (a int)" } }
+              Db.apply { q = sql { text = "create table outer_t (a int)" } }
               ## The inner scope is a different database, so it does not see it.
               let inner = perform SqliteDb { path = ":memory:" } in has_table {}
               ## And the outer connection is still open after the inner closed.
@@ -424,8 +424,8 @@ class SqliteDbTest {
             """
             $head
             let main = {} -> do
-              let _ = perform SqliteDb { path = "$path" } in do
-                let _ = Db.apply { q = sql { text = "create table kept (a int)" } }
+              perform SqliteDb { path = "$path" } in do
+                Db.apply { q = sql { text = "create table kept (a int)" } }
                 Db.apply { q = sql { text = "insert into kept (a) values (7)" } }
               perform SqliteDb { path = "$path" } in
                 match Db.run { q = sql { text = "select a from kept" } } is
@@ -481,8 +481,8 @@ class SqliteDbTest {
                   perform SqliteDb { path = ":memory:" } in
                     perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_print_log = Off } } in
                       perform SimpleHttpClient in do
-                        let _ = Db.apply { q = sql { text = "create table t (a int)" } }
-                        let _ = Db.apply { q = sql { text = "insert into t values (1), (2)" } }
+                        Db.apply { q = sql { text = "create table t (a int)" } }
+                        Db.apply { q = sql { text = "insert into t values (1), (2)" } }
                         let h = match HttpServer.serve { handler = handler } is
                           Ok { val = hh } -> hh
                           Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
@@ -504,7 +504,7 @@ class SqliteDbTest {
             head + "\n" + serverHead + "\n" +
                 """
                 let handler: { req: Request } -> Response <Db> = { req } -> do
-                  let _ = Db.apply { q = sql { text = "insert into t values (1)" } }
+                  Db.apply { q = sql { text = "insert into t values (1)" } }
                   match Db.run { q = sql { text = "select count(*) from t" } } is
                     Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                       Some { val = DbInt { val = n } } -> reply { code = 200, text = int::to_str { n = n }, url = req.url }
@@ -515,7 +515,7 @@ class SqliteDbTest {
                   perform SqliteDb { path = ":memory:" } in
                     perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_print_log = Off } } in
                       perform SimpleHttpClient in do
-                        let _ = Db.apply { q = sql { text = "create table t (a int)" } }
+                        Db.apply { q = sql { text = "create table t (a int)" } }
                         let h = match HttpServer.serve { handler = handler } is
                           Ok { val = hh } -> hh
                           Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
@@ -540,7 +540,7 @@ class SqliteDbTest {
                 """
                 let handler: { req: Request } -> Response <Db> = { req } ->
                   match Db.tx { body = {} -> do
-                    let _ = Db.apply { q = sql { text = "insert into t values (1)" } }
+                    Db.apply { q = sql { text = "insert into t values (1)" } }
                     Db.run { q = sql { text = "select count(*) from t" } } } is
                     Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                       Some { val = DbInt { val = n } } -> reply { code = 200, text = int::to_str { n = n }, url = req.url }
@@ -551,7 +551,7 @@ class SqliteDbTest {
                   perform SqliteDb { path = ":memory:" } in
                     perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_print_log = Off } } in
                       perform SimpleHttpClient in do
-                        let _ = Db.apply { q = sql { text = "create table t (a int)" } }
+                        Db.apply { q = sql { text = "create table t (a int)" } }
                         let h = match HttpServer.serve { handler = handler } is
                           Ok { val = hh } -> hh
                           Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
@@ -583,7 +583,7 @@ class SqliteDbTest {
 
                 let handler: { req: Request } -> Response <Db> = { req } ->
                   match Db.tx { body = {} -> do
-                    let _ = Db.apply { q = sql { text = "insert into t values (1)" } }
+                    Db.apply { q = sql { text = "insert into t values (1)" } }
                     Db.run { q = sql { text = "select count(*) from t" } } } is
                     Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                       Some { val = DbInt { val = n } } -> reply { code = 200, text = int::to_str { n = n }, url = req.url }
@@ -595,7 +595,7 @@ class SqliteDbTest {
                     perform LoomParallel in
                       perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 8, stream_bodies = False, helidon_print_log = Off } } in
                         perform SimpleHttpClient in do
-                          let _ = Db.apply { q = sql { text = "create table t (a int)" } }
+                          Db.apply { q = sql { text = "create table t (a int)" } }
                           let h = match HttpServer.serve { handler = handler } is
                             Ok { val = hh } -> hh
                             Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
@@ -638,7 +638,7 @@ class SqliteDbTest {
                   perform SqliteDb { path = ":memory:" } in do
                     ## The outer scope is used, so it is a real second scope and
                     ## not something the typechecker folds into the inner one.
-                    let _ = Db.apply { q = sql { text = "create table t (a int)" } }
+                    Db.apply { q = sql { text = "create table t (a int)" } }
                     perform SqliteDb { path = ":memory:" } in
                       perform HelidonHttpServerWith { config = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_print_log = Off } } in
                         perform SimpleHttpClient in do
@@ -668,8 +668,8 @@ class SqliteDbTest {
             use std::effects::db::{ RowC, row_c }
 
             let main = {} -> perform SqliteDb { path = ":memory:" } in do
-              let _ = Db.apply { q = sql { text = "create table users (id integer, name text)" } }
-              let _ = Db.apply { q = sql { text = "insert into users values (1, 'ada'), (2, 'grace')" } }
+              Db.apply { q = sql { text = "create table users (id integer, name text)" } }
+              Db.apply { q = sql { text = "insert into users values (1, 'ada'), (2, 'grace')" } }
               match Db.run { q = sql { text = "select id, name from users order by id" } } is
                 Ok { val = rows } -> do
                   let decoded: Result [{ id: Int, name: Str }] DecodeError = rows.decode { config = row_c }

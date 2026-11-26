@@ -94,17 +94,17 @@ class LoomConcurrencyManagerTest {
 
             # Submit multiple tasks
             let t1 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+                sleep {ms = 10}
                 swap {atom = results, f = {current} -> current + 1}
                 2
             }
             let t2 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+                sleep {ms = 10}
                 swap {atom = results, f = {current} -> current + 1}
                 4
             }
             let t3 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+                sleep {ms = 10}
                 swap {atom = results, f = {current} -> current + 1}
                 6
             }
@@ -135,31 +135,31 @@ class LoomConcurrencyManagerTest {
 
             # Spawn 5 tasks that each increment counter
             let t1 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 20}
+                sleep {ms = 20}
                 swap {atom = counter, f = {current} -> current + 1}
             }
             let t2 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 20}
+                sleep {ms = 20}
                 swap {atom = counter, f = {current} -> current + 1}
             }
             let t3 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 20}
+                sleep {ms = 20}
                 swap {atom = counter, f = {current} -> current + 1}
             }
             let t4 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 20}
+                sleep {ms = 20}
                 swap {atom = counter, f = {current} -> current + 1}
             }
             let t5 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 20}
+                sleep {ms = 20}
                 swap {atom = counter, f = {current} -> current + 1}
             }
 
-            let _ = unwrap { result = await {p = t1} }
-            let _ = unwrap { result = await {p = t2} }
-            let _ = unwrap { result = await {p = t3} }
-            let _ = unwrap { result = await {p = t4} }
-            let _ = unwrap { result = await {p = t5} }
+            unwrap { result = await {p = t1} }
+            unwrap { result = await {p = t2} }
+            unwrap { result = await {p = t3} }
+            unwrap { result = await {p = t4} }
+            unwrap { result = await {p = t5} }
 
             deref {atom = counter}
         """
@@ -177,23 +177,23 @@ class LoomConcurrencyManagerTest {
 
             # Spawn 5 tasks that each sleep for 20ms
             let t1 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 20}
+                sleep {ms = 20}
                 1
             }
             let t2 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 20}
+                sleep {ms = 20}
                 2
             }
             let t3 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 20}
+                sleep {ms = 20}
                 3
             }
             let t4 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 20}
+                sleep {ms = 20}
                 4
             }
             let t5 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 20}
+                sleep {ms = 20}
                 5
             }
 
@@ -231,27 +231,27 @@ class LoomConcurrencyManagerTest {
             let totalCompleted = atom {val = 0}
 
             # Track spawning
-            let _ = swap {atom = totalSpawned, f = {current} -> current + 1}
+            swap {atom = totalSpawned, f = {current} -> current + 1}
             let t1 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+                sleep {ms = 10}
                 swap {atom = totalCompleted, f = {current} -> current + 1}
             }
 
-            let _ = swap {atom = totalSpawned, f = {current} -> current + 1}
+            swap {atom = totalSpawned, f = {current} -> current + 1}
             let t2 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+                sleep {ms = 10}
                 swap {atom = totalCompleted, f = {current} -> current + 1}
             }
 
-            let _ = swap {atom = totalSpawned, f = {current} -> current + 1}
+            swap {atom = totalSpawned, f = {current} -> current + 1}
             let t3 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+                sleep {ms = 10}
                 swap {atom = totalCompleted, f = {current} -> current + 1}
             }
 
-            let _ = unwrap { result = await {p = t1} }
-            let _ = unwrap { result = await {p = t2} }
-            let _ = unwrap { result = await {p = t3} }
+            unwrap { result = await {p = t1} }
+            unwrap { result = await {p = t2} }
+            unwrap { result = await {p = t3} }
 
             let spawned = deref {atom = totalSpawned}
             let completed = deref {atom = totalCompleted}
@@ -277,17 +277,17 @@ class LoomConcurrencyManagerTest {
             let childValue = atom {val = 0}
 
             let parent = Async.spawn {f = {} -> do
-                let _ = reset {atom = parentValue, val = 10}
+                reset {atom = parentValue, val = 10}
 
                 let child = Async.spawn {f = {} -> do
-                    let _ = reset {atom = childValue, val = 20}
+                    reset {atom = childValue, val = 20}
                     "child done"
                 }
-                let _ = unwrap { result = await {p = child} }
+                unwrap { result = await {p = child} }
                 "parent done"
             }
 
-            let _ = unwrap { result = await {p = parent} }
+            unwrap { result = await {p = parent} }
 
             let pv = deref {atom = parentValue}
             let cv = deref {atom = childValue}
@@ -368,24 +368,24 @@ class LoomConcurrencyManagerTest {
 
             # Spawn 10 threads that each increment 10 times
             let increment_10 = {} -> do
-                let _ = swap {atom = counter, f = {current} -> current + 1}
-                let _ = swap {atom = counter, f = {current} -> current + 1}
-                let _ = swap {atom = counter, f = {current} -> current + 1}
-                let _ = swap {atom = counter, f = {current} -> current + 1}
-                let _ = swap {atom = counter, f = {current} -> current + 1}
-                let _ = swap {atom = counter, f = {current} -> current + 1}
-                let _ = swap {atom = counter, f = {current} -> current + 1}
-                let _ = swap {atom = counter, f = {current} -> current + 1}
-                let _ = swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
+                swap {atom = counter, f = {current} -> current + 1}
                 swap {atom = counter, f = {current} -> current + 1}
 
             let t1 = Async.spawn {f = increment_10}
             let t2 = Async.spawn {f = increment_10}
             let t3 = Async.spawn {f = increment_10}
 
-            let _ = unwrap { result = await {p = t1} }
-            let _ = unwrap { result = await {p = t2} }
-            let _ = unwrap { result = await {p = t3} }
+            unwrap { result = await {p = t1} }
+            unwrap { result = await {p = t2} }
+            unwrap { result = await {p = t3} }
 
             deref {atom = counter}
         """
@@ -457,7 +457,7 @@ class LoomConcurrencyManagerTest {
             $loomSetup
 
             let thread = Async.spawn {f = {} -> {}}
-            let _ = unwrap { result = await {p = thread} }
+            unwrap { result = await {p = thread} }
             True
         """
         val result = eval(code)
@@ -487,7 +487,7 @@ class LoomConcurrencyManagerTest {
             $loomSetup
 
             let thread = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 0}
+                sleep {ms = 0}
                 42
             }
             unwrap { result = await {p = thread} }

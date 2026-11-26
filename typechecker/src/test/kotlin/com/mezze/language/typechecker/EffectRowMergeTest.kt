@@ -172,7 +172,7 @@ class EffectRowMergeTest {
                     B -> do
                         State.get {}
                     C -> do
-                        let _ = FileSystem.read {path = "/tmp/test"}
+                        FileSystem.read {path = "/tmp/test"}
                         3
         """.trimIndent()
 

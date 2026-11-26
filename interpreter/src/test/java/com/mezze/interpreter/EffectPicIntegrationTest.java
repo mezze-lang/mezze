@@ -77,7 +77,7 @@ class EffectPicIntegrationTest {
             let outer : { n: Int, acc: Int } -> Int <*> = { n, acc } ->
                 if n <= 0 then acc
                 else do
-                    let _ = perform ExceptionToResult in Exception.throw { error = "x" }
+                    perform ExceptionToResult in Exception.throw { error = "x" }
                     outer { n = n - 1, acc = acc + 1 }
 
             let main = {} -> do

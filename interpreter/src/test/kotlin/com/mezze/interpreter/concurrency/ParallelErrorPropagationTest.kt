@@ -117,20 +117,20 @@ class ParallelErrorPropagationTest {
             let execution_count = atom {val = 0}
 
             let p1 = Async.spawn {f = {} -> do
-                let _ = swap {atom = execution_count, f = {current} -> current + 1}
-                let _ = sleep {ms = 100}
+                swap {atom = execution_count, f = {current} -> current + 1}
+                sleep {ms = 100}
                 10
             }
 
             let p2 = Async.spawn {f = {} -> do
-                let _ = swap {atom = execution_count, f = {current} -> current + 1}
-                let _ = sleep {ms = 50}
+                swap {atom = execution_count, f = {current} -> current + 1}
+                sleep {ms = 50}
                 crash { msg = "Operation 2 failed" }
             }
 
             let p3 = Async.spawn {f = {} -> do
-                let _ = swap {atom = execution_count, f = {current} -> current + 1}
-                let _ = sleep {ms = 200}
+                swap {atom = execution_count, f = {current} -> current + 1}
+                sleep {ms = 200}
                 30
             }
 
@@ -243,12 +243,12 @@ class ParallelErrorPropagationTest {
             $loomSetup
 
             let slow_op = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 1000}
+                sleep {ms = 1000}
                 42
             }
 
             # Cancel the slow operation
-            let _ = cancel {p = slow_op, reason = CancelUserRequested { msg = "test" }}
+            cancel {p = slow_op, reason = CancelUserRequested { msg = "test" }}
 
             # Use settle to see the cancelled state
             let results = settle {ps = [slow_op]}
@@ -272,7 +272,7 @@ class ParallelErrorPropagationTest {
             $loomSetup
 
             let fast_op = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 10}
+                sleep {ms = 10}
                 42
             }
 
@@ -296,14 +296,14 @@ class ParallelErrorPropagationTest {
             $loomSetup
 
             let op = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 2000}
+                sleep {ms = 2000}
                 42
             }
 
             # Cancel before it completes
-            let _ = cancel {p = op, reason = CancelUserRequested { msg = "test" }}
+            cancel {p = op, reason = CancelUserRequested { msg = "test" }}
 
-            let _ = sleep {ms = 50}
+            sleep {ms = 50}
 
             # Check if is_done - cancelled operations should be done
             is_done {p = op}
@@ -321,16 +321,16 @@ class ParallelErrorPropagationTest {
             let executed = atom {val = False}
 
             let op = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 500}
-                let _ = reset {atom = executed, val = True}
+                sleep {ms = 500}
+                reset {atom = executed, val = True}
                 42
             }
 
             # Cancel immediately
-            let _ = cancel {p = op, reason = CancelUserRequested { msg = "test" }}
+            cancel {p = op, reason = CancelUserRequested { msg = "test" }}
 
             # Wait a bit to ensure operation would have run if not cancelled
-            let _ = sleep {ms = 100}
+            sleep {ms = 100}
 
             deref {atom = executed}
         """
@@ -421,12 +421,12 @@ class ParallelErrorPropagationTest {
             $loomSetup
 
             let p1 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 50}
+                sleep {ms = 50}
                 "p1"
             }
 
             let p2 = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 5}
+                sleep {ms = 5}
                 "p2"
             }
 
@@ -449,7 +449,7 @@ class ParallelErrorPropagationTest {
             $loomSetup
 
             let op = Async.spawn {f = {} -> 42}
-            let _ = unwrap { result = await {p = op} }
+            unwrap { result = await {p = op} }
             is_done {p = op}
         """
         val result = eval(code)
@@ -462,7 +462,7 @@ class ParallelErrorPropagationTest {
             $loomSetup
 
             let op = Async.spawn {f = {} -> do
-                let _ = sleep {ms = 500}
+                sleep {ms = 500}
                 42
             }
 
@@ -470,7 +470,7 @@ class ParallelErrorPropagationTest {
             let done_before = is_done {p = op}
 
             # Wait for completion
-            let _ = unwrap { result = await {p = op} }
+            unwrap { result = await {p = op} }
             let done_after = is_done {p = op}
 
             {before = done_before, after = done_after}

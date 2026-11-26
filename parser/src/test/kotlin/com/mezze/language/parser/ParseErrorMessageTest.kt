@@ -144,7 +144,7 @@ class ParseErrorMessageTest {
     fun `do block with expression statements should parse`() {
         val code = """
             let x = do
-                let _ = println { msg = "hello" }
+                println { msg = "hello" }
                 42
         """.trimIndent()
         // Should not throw - do block with side effect and result

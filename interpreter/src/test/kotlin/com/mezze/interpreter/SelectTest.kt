@@ -51,7 +51,7 @@ class SelectTest {
 
             perform LoomAsync in do
               let flag = atom { val = 0 }
-              let _ = Async.spawn { f = {} -> reset { atom = flag, val = 1 } }
+              Async.spawn { f = {} -> reset { atom = flag, val = 1 } }
               let r = park_any { predicates = [
                 {} -> deref { atom = flag } == 99,
                 {} -> deref { atom = flag } == 1,
@@ -106,7 +106,7 @@ class SelectTest {
 
             perform LoomAsync in do
               let ch = chan_bounded { cap = 1 }
-              let _ = Async.spawn { f = {} -> send { ch = ch, val = 7 } }
+              Async.spawn { f = {} -> send { ch = ch, val = 7 } }
               let unused = chan_bounded { cap = 1 }
               let pa = Async.spawn { f = {} -> recv { ch = unused } }
               let pb = Async.spawn { f = {} -> recv { ch = ch } }
@@ -146,7 +146,7 @@ class SelectTest {
 
             perform LoomAsync in do
               let flag = atom { val = 0 }
-              let _ = Async.spawn { f = {} -> reset { atom = flag, val = 5 } }
+              Async.spawn { f = {} -> reset { atom = flag, val = 5 } }
               let r = park_any { predicates = [
                 {} -> deref { atom = flag } == 99,
                 {} -> deref { atom = flag } == 5,

@@ -72,7 +72,7 @@ class IterStageCallbacksArePureTest : VariantSpecBase() {
             $eff
             pub let run: {} -> {} <*> = {} -> perform Ticker in
               for_each { it = map { it = from_seq { xs = [1, 2] }, f = { x } -> x * 2 }, f = { x } -> do
-                let _ = Tick.tick {}
+                Tick.tick {}
                 {} }
             $MAIN
             """,

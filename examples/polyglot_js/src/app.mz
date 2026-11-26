@@ -48,43 +48,43 @@ let main = {} -> perform Console in perform GraalJs in do
   # ---- Math builtins ----
   println { msg = "Math:" }
   let pi_r    = Js.eval { source = "Math.PI" }
-  let _       = show_float { label = "PI     ", r = pi_r }
+  show_float { label = "PI     ", r = pi_r }
 
   let sqrt_r  = Js.eval { source = "Math.sqrt(2)" }
-  let _       = show_float { label = "sqrt(2)", r = sqrt_r }
+  show_float { label = "sqrt(2)", r = sqrt_r }
 
   let sin_r   = Js.eval { source = "Math.sin(Math.PI / 2)" }
-  let _       = show_float { label = "sin(pi/2)", r = sin_r }
+  show_float { label = "sin(pi/2)", r = sin_r }
 
   # ---- JSON parse ----
   println { msg = "" }
   println { msg = "JSON.parse(...):" }
   let name_r  = Js.eval { source = "JSON.parse('{\"name\": \"Alice\", \"age\": 30}').name" }
-  let _       = show_str { label = "name", r = name_r }
+  show_str { label = "name", r = name_r }
 
   let age_r   = Js.eval { source = "JSON.parse('{\"name\": \"Alice\", \"age\": 30}').age" }
-  let _       = show_int { label = "age ", r = age_r }
+  show_int { label = "age ", r = age_r }
 
   # ---- Array reductions via method dispatch ----
   println { msg = "" }
   println { msg = "Array reductions on [1..5]:" }
   let sum_r   = Js.eval { source = "[1, 2, 3, 4, 5].reduce((a, b) => a + b, 0)" }
-  let _       = show_int { label = "sum  ", r = sum_r }
+  show_int { label = "sum  ", r = sum_r }
 
   let prod_r  = Js.eval { source = "[1, 2, 3, 4, 5].reduce((a, b) => a * b, 1)" }
-  let _       = show_int { label = "prod ", r = prod_r }
+  show_int { label = "prod ", r = prod_r }
 
   let max_r   = Js.eval { source = "Math.max(...[3, 7, 2, 5])" }
-  let _       = show_int { label = "max  ", r = max_r }
+  show_int { label = "max  ", r = max_r }
 
   # ---- String methods ----
   println { msg = "" }
   println { msg = "String methods:" }
   let upper_r = Js.eval { source = "'hello, world'.toUpperCase()" }
-  let _       = show_str { label = "upper ", r = upper_r }
+  show_str { label = "upper ", r = upper_r }
 
   let slice_r = Js.eval { source = "'JavaScript is fun'.slice(0, 10)" }
-  let _       = show_str { label = "slice ", r = slice_r }
+  show_str { label = "slice ", r = slice_r }
 
   # ---- Date via .new{} ----
   # A flat chain on the `Result JsForeign` mirror impl: eval the `Date`
@@ -92,7 +92,7 @@ let main = {} -> perform Console in perform GraalJs in do
   # `Result`, so no `match` is needed between steps; `show_int` coerces at the end.
   println { msg = "" }
   println { msg = "Date via .new{}:" }
-  let _ = show_int {
+  show_int {
     label = "getFullYear",
     r = Js.eval { source = "Date" }
       .new { args = [] }

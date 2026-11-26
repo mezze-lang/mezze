@@ -496,7 +496,7 @@ pub let run: { f: {} -> 'a <...> } -> Result 'a AsyncError <Async, ...> = { f } 
 
 ## Spawn and detach (fire and forget).
 pub let go: { f: {} -> 'a <...> } -> {} <Async, ...> = { f } -> do
-  let _ = Async.spawn { f = f }
+  Async.spawn { f = f }
   {}
 
 ## Park-based helpers — derived from spawn + park + await primitives.
@@ -516,7 +516,7 @@ pub let go: { f: {} -> 'a <...> } -> {} <Async, ...> = { f } -> do
 let each_parking = { xs, f } -> match xs is
   [] -> {}
   [x, ...rest] -> do
-    let _ = f { x = x }
+    f { x = x }
     each_parking { xs = rest, f = f }
 
 let map_parking_acc = { xs, f, acc } -> match xs is
@@ -604,13 +604,13 @@ pub let for_each_concurrent
         else match seq::first { xs = w } is
           Some { val = oldest } -> do
             # Await the OLDEST before spawning the next, so the count stays at the limit.
-            let _ = await { p = oldest }
+            await { p = oldest }
             seq::tail { xs = w }
           None -> w
     }
     ## Drain what the window still holds when the source ran out.
     each_parking { xs = leftover, f = { x } -> do
-      let _ = await { p = x }
+      await { p = x }
       {}
     }
 

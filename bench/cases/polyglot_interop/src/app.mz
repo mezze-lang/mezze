@@ -128,7 +128,7 @@ let eval_loop: { n: Int, src: Str } -> Int <Js> =
   { n, src } ->
     if n <= 0 then 0
     else do
-      let _ = Js.eval { source = src }
+      Js.eval { source = src }
       eval_loop { n = n - 1, src = src }
 
 ## CONTROL — the same SHAPE with no guest at all: two natives that return a
@@ -181,7 +181,7 @@ let best_chain: { obj: JsForeign, reps: Int, acc: Int } -> Int <Js, Time> =
     if reps <= 0 then acc
     else do
       let t0 = monotonic {}
-      let _r = read_chain { obj = obj, n = iters, acc = 0 }
+      read_chain { obj = obj, n = iters, acc = 0 }
       let t1 = monotonic {}
       best_chain { obj = obj, reps = reps - 1, acc = min_int { a = acc, b = ns_per { n = iters, t0 = t0, t1 = t1 } } }
 
@@ -191,7 +191,7 @@ let best_matched: { obj: JsForeign, reps: Int, acc: Int } -> Int <Js, Time> =
     if reps <= 0 then acc
     else do
       let t0 = monotonic {}
-      let _r = read_matched { obj = obj, n = iters, acc = 0 }
+      read_matched { obj = obj, n = iters, acc = 0 }
       let t1 = monotonic {}
       best_matched { obj = obj, reps = reps - 1, acc = min_int { a = acc, b = ns_per { n = iters, t0 = t0, t1 = t1 } } }
 
@@ -201,7 +201,7 @@ let best_control: { reps: Int, acc: Int } -> Int <Time> =
     if reps <= 0 then acc
     else do
       let t0 = monotonic {}
-      let _r = control_loop { s = "hello", n = iters, acc = 0 }
+      control_loop { s = "hello", n = iters, acc = 0 }
       let t1 = monotonic {}
       best_control { reps = reps - 1, acc = min_int { a = acc, b = ns_per { n = iters, t0 = t0, t1 = t1 } } }
 
@@ -211,13 +211,13 @@ let main = {} -> perform Console in perform SystemTime in perform GraalJs in do
   let e0 = monotonic {}
   let warm = Js.eval { source = "1" }
   let e1 = monotonic {}
-  let _ = println { msg = "  guest init (first eval)       $(int::to_str { n = duration_to_nanos { d = sub_duration { a = e1, b = e0 } } / 1000000 }) ms" }
+  println { msg = "  guest init (first eval)       $(int::to_str { n = duration_to_nanos { d = sub_duration { a = e1, b = e0 } } / 1000000 }) ms" }
   # Same source 200x: if parsed Sources are cached, this is ~free after the
   # first. If it re-parses every call, each one pays full JS parse+compile.
   let e2 = monotonic {}
-  let _r1 = eval_loop { n = eval_iters, src = "1 + 1" }
+  eval_loop { n = eval_iters, src = "1 + 1" }
   let e3 = monotonic {}
-  let _ = println { msg = "  eval (same source)          $(int::to_str { n = duration_to_nanos { d = sub_duration { a = e3, b = e2 } } / (eval_iters * 1000) }) us/iter" }
+  println { msg = "  eval (same source)          $(int::to_str { n = duration_to_nanos { d = sub_duration { a = e3, b = e2 } } / (eval_iters * 1000) }) us/iter" }
 
   match Js.eval { source = "({ v: 7, get: function () { return 7; } })" } is
     Ok { val = obj } -> do
@@ -229,11 +229,11 @@ let main = {} -> perform Console in perform SystemTime in perform GraalJs in do
       let chain_ns   = best_chain   { obj = obj, reps = 5, acc = big }
       let matched_ns = best_matched { obj = obj, reps = 5, acc = big }
       let control_ns = best_control { reps = 5, acc = big }
-      let _ = println { msg = "  -- best of 5 timed runs each --" }
-      let _ = println { msg = "  control (no guest)  $(int::to_str { n = control_ns }) ns/iter" }
-      let _ = println { msg = "  read  (matched)     $(int::to_str { n = matched_ns }) ns/iter" }
-      let _ = println { msg = "  read  (chain)       $(int::to_str { n = chain_ns }) ns/iter" }
-      let _ = println { msg = "  chain - matched     $(int::to_str { n = chain_ns - matched_ns }) ns/iter" }
+      println { msg = "  -- best of 5 timed runs each --" }
+      println { msg = "  control (no guest)  $(int::to_str { n = control_ns }) ns/iter" }
+      println { msg = "  read  (matched)     $(int::to_str { n = matched_ns }) ns/iter" }
+      println { msg = "  read  (chain)       $(int::to_str { n = chain_ns }) ns/iter" }
+      println { msg = "  chain - matched     $(int::to_str { n = chain_ns - matched_ns }) ns/iter" }
 
       let i0 = monotonic {}
       let c  = invoke_loop { obj = obj, n = iters, acc = 0 }

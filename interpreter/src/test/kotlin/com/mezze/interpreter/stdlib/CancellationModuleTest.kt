@@ -158,7 +158,7 @@ class CancellationModuleTest {
                     cancel_token {token = ct, reason = "from async"}
                     42
                 }
-                let _ = await {p = p}
+                await {p = p}
                 is_token_cancelled {token = ct}
         """)
         assertEquals(true, result)

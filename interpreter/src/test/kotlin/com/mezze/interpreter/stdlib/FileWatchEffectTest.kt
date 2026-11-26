@@ -41,11 +41,11 @@ class FileWatchEffectTest {
             use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
-              let _ = FileSystem.create_directory { path = "/d" }
+              FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> "watch-failed"
                 Ok { val = h } -> do
-                let _ = FileSystem.write_bytes { path = "/d/new", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
+                FileSystem.write_bytes { path = "/d/new", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> match seq::first { xs = evs } is
                     Some { val = Created { path = p } } -> p
@@ -62,12 +62,12 @@ class FileWatchEffectTest {
             use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
-              let _ = FileSystem.create_directory { path = "/d" }
-              let _ = FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "a" }, mode = CreateOrTruncate }
+              FileSystem.create_directory { path = "/d" }
+              FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "a" }, mode = CreateOrTruncate }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> "watch-failed"
                 Ok { val = h } -> do
-                let _ = FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "b" }, mode = CreateOrTruncate }
+                FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "b" }, mode = CreateOrTruncate }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> match seq::first { xs = evs } is
                     Some { val = Modified { path = _ } } -> "modified"
@@ -85,12 +85,12 @@ class FileWatchEffectTest {
             use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
-              let _ = FileSystem.create_directory { path = "/d" }
-              let _ = FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "a" }, mode = CreateOrTruncate }
+              FileSystem.create_directory { path = "/d" }
+              FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "a" }, mode = CreateOrTruncate }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> "watch-failed"
                 Ok { val = h } -> do
-                let _ = FileSystem.delete { path = "/d/f" }
+                FileSystem.delete { path = "/d/f" }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> match seq::first { xs = evs } is
                     Some { val = Deleted { path = p } } -> p
@@ -108,12 +108,12 @@ class FileWatchEffectTest {
             use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
-              let _ = FileSystem.create_directory { path = "/d" }
+              FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> 0 - 1
                 Ok { val = h } -> do
-                let _ = FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
-                let _ = FileWatch.poll { handle = h, timeout_ms = 0 }
+                FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
+                FileWatch.poll { handle = h, timeout_ms = 0 }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> seq::size { xs = evs }
                   Err { error = _ } -> 0 - 1
@@ -128,12 +128,12 @@ class FileWatchEffectTest {
             use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
-              let _ = FileSystem.create_directory { path = "/d" }
-              let _ = FileSystem.create_directory { path = "/d/sub" }
+              FileSystem.create_directory { path = "/d" }
+              FileSystem.create_directory { path = "/d/sub" }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> 0 - 1
                 Ok { val = h } -> do
-                let _ = FileSystem.write_bytes { path = "/d/sub/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
+                FileSystem.write_bytes { path = "/d/sub/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> seq::size { xs = evs }
                   Err { error = _ } -> 0 - 1
@@ -147,12 +147,12 @@ class FileWatchEffectTest {
             use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
-              let _ = FileSystem.create_directory { path = "/d" }
-              let _ = FileSystem.create_directory { path = "/d/sub" }
+              FileSystem.create_directory { path = "/d" }
+              FileSystem.create_directory { path = "/d/sub" }
               match FileWatch.watch { path = "/d", recursive = True } is
                 Err { error = _ } -> 0 - 1
                 Ok { val = h } -> do
-                let _ = FileSystem.write_bytes { path = "/d/sub/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
+                FileSystem.write_bytes { path = "/d/sub/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> seq::size { xs = evs }
                   Err { error = _ } -> 0 - 1
@@ -178,11 +178,11 @@ class FileWatchEffectTest {
         val code = """
             use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             perform MemoryFileSystem in perform MemoryFileWatch in do
-              let _ = FileSystem.create_directory { path = "/d" }
+              FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> "watch-failed"
                 Ok { val = h } -> do
-                let _ = FileWatch.unwatch { handle = h }
+                FileWatch.unwatch { handle = h }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = _ } -> "still-polling"
                   Err { error = _ } -> "unregistered"
@@ -207,7 +207,7 @@ class FileWatchEffectTest {
               match FileWatch.watch { path = "${tmp.toString()}", recursive = False } is
                 Err { error = _ } -> "watch-failed"
                 Ok { val = h } -> do
-                let _ = FileWatch.poll { handle = h, timeout_ms = 0 }
+                FileWatch.poll { handle = h, timeout_ms = 0 }
                 match FileWatch.unwatch { handle = h } is
                   Ok { val = _ } -> "ok"
                   Err { error = _ } -> "unwatch-failed"
@@ -222,7 +222,7 @@ class FileWatchEffectTest {
             use std::effects::filesystem::{ FileSystem, FileWatch, LocalFileSystem, LocalFileWatch, WriteMode }
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileWatch in do
-              let _ = FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
+              FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
               match FileWatch.watch { path = "$path", recursive = False } is
                 Ok { val = _ } -> "unexpectedly-ok"
                 Err { error = FsNotADirectory { path = _ } } -> "not-a-directory"
@@ -239,7 +239,7 @@ class FileWatchEffectTest {
               match FileWatch.watch { path = "${tmp.toString()}", recursive = False } is
                 Err { error = _ } -> "watch-failed"
                 Ok { val = h } -> do
-                let _ = FileWatch.unwatch { handle = h }
+                FileWatch.unwatch { handle = h }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = _ } -> "still-polling"
                   Err { error = FsClosedHandle { path = _ } } -> "closed"
@@ -318,11 +318,11 @@ class FileWatchEffectTest {
             use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
-              let _ = FileSystem.create_directory { path = "/d" }
+              FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> "watch-failed"
                 Ok { val = h } -> do
-                let _ = seq::for_each { xs = seq::range { start = 0, end = 1100 }, f = { x } -> FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate } }
+                seq::for_each { xs = seq::range { start = 0, end = 1100 }, f = { x } -> FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate } }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> match seq::first { xs = evs } is
                     Some { val = Overflow } -> "overflow"
@@ -345,11 +345,11 @@ class FileWatchEffectTest {
             use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
-              let _ = FileSystem.create_directory { path = "/d" }
+              FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> 0 - 1
                 Ok { val = h } -> do
-                let _ = seq::for_each { xs = seq::range { start = 0, end = 1100 }, f = { x } -> FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate } }
+                seq::for_each { xs = seq::range { start = 0, end = 1100 }, f = { x } -> FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate } }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> seq::size { xs = evs }
                   Err { error = _ } -> 0 - 1
@@ -367,13 +367,13 @@ class FileWatchEffectTest {
             use std::effects::filesystem::{ FileSystem, FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             use std::collections::{ bytes, seq }
             perform MemoryFileSystem in perform MemoryFileWatch in do
-              let _ = FileSystem.create_directory { path = "/d" }
+              FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
                 Err { error = _ } -> "watch-failed"
                 Ok { val = h } -> do
-                let _ = seq::for_each { xs = seq::range { start = 0, end = 1100 }, f = { x } -> FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate } }
-                let _ = FileWatch.poll { handle = h, timeout_ms = 0 }
-                let _ = FileSystem.write_bytes { path = "/d/after", bytes = bytes::from_str { s = "y" }, mode = CreateOrTruncate }
+                seq::for_each { xs = seq::range { start = 0, end = 1100 }, f = { x } -> FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate } }
+                FileWatch.poll { handle = h, timeout_ms = 0 }
+                FileSystem.write_bytes { path = "/d/after", bytes = bytes::from_str { s = "y" }, mode = CreateOrTruncate }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> match seq::first { xs = evs } is
                     Some { val = Created { path = p } } -> p

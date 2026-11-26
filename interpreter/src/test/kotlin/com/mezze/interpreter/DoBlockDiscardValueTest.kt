@@ -11,14 +11,9 @@ import org.junit.jupiter.api.Assertions.*
  *       some_effectful_call_returning_int {}   ## value discarded
  *       42
  *
- * vs the alternative that requires explicit binding:
- *
- *     do
- *       let _ = some_effectful_call_returning_int {}
- *       42
- *
- * These tests pin down what the typechecker + interpreter currently
- * accept.
+ * A bare statement is THE way to run something for its effect: `let _ = …`
+ * is rejected (it binds nothing; `_` is only a pattern wildcard). These tests
+ * pin down that a statement's value is dropped and its effects still run.
  */
 class DoBlockDiscardValueTest {
     private fun eval(source: String): Any = MezzeTestHelper.run(source)
@@ -50,7 +45,7 @@ class DoBlockDiscardValueTest {
         val code = """
             let f = {} -> 7
             do
-              let _ = f {}
+              f {}
               42
         """.trimIndent()
         assertEquals(42L, eval(code))
@@ -102,18 +97,16 @@ class DoBlockDiscardValueTest {
     }
 
     @Test
-    fun `let underscore wraps the same shape`() {
-        // Same as above but with explicit let _ = — for comparison.
+    fun `let underscore is rejected - write the statement on its own`() {
         val code = """
             let take_thunk = { f: {} -> Bool } -> f {}
-            let xs = [1, 2, 3]
-            do
+            let main = {} -> do
               let _ = take_thunk { f = {} -> True }
-              match xs is
-                [a, b, c] -> a + b + c
-                _         -> -1
+              1
         """.trimIndent()
-        assertEquals(6L, eval(code))
+        val err = assertThrows(Throwable::class.java) { eval(code) }
+        assertTrue(err.message.orEmpty().contains("binds nothing"),
+            "expected the `let _` explanation, got: ${err.message}")
     }
 
     @Test

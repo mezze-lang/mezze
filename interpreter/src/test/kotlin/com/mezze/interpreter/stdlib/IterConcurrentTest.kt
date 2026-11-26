@@ -60,8 +60,8 @@ class IterConcurrentTest {
             use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform LoomAsync in do
-              let _ = FileSystem.create_directory { path = "/d" }
-              let _ = for_each_concurrent {
+              FileSystem.create_directory { path = "/d" }
+              for_each_concurrent {
                 it = iter::range { start = 0, end = 20 },
                 f = { x } -> write_text { path = "/d/f$(int::to_str { n = x })", text = "x" },
                 max_in_flight = 4,
@@ -109,18 +109,18 @@ class IterConcurrentTest {
             use std::collections::bytes
             use std::bool
             perform MemoryFileSystem in perform LoomAsync in perform SystemTime in do
-              let _ = FileSystem.create_directory { path = "/live" }
-              let _ = FileSystem.create_directory { path = "/peak" }
-              let _ = for_each_concurrent {
+              FileSystem.create_directory { path = "/live" }
+              FileSystem.create_directory { path = "/peak" }
+              for_each_concurrent {
                 it = iter::range { start = 0, end = 24 },
                 f = { x } -> do
                   let me = "/live/$(int::to_str { n = x })"
-                  let _ = write_text { path = me, text = "1" }
+                  write_text { path = me, text = "1" }
                   let n = match FileSystem.list { path = "/live" } is
                     Ok { val = names } -> seq::size { xs = names }
                     Err { error = _ } -> 0 - 1
-                  let _ = write_text { path = "/peak/$(int::to_str { n = n })", text = "1" }
-                  let _ = sleep { ms = 5 }
+                  write_text { path = "/peak/$(int::to_str { n = n })", text = "1" }
+                  sleep { ms = 5 }
                   FileSystem.delete { path = me }
                 ,
                 max_in_flight = 4,
@@ -158,8 +158,8 @@ class IterConcurrentTest {
             use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform LoomAsync in do
-              let _ = FileSystem.create_directory { path = "/d" }
-              let _ = for_each_concurrent {
+              FileSystem.create_directory { path = "/d" }
+              for_each_concurrent {
                 it = iter::take {
                   it = iter::unfold { state = 0, step = { s } -> Yield { val = s, next = s + 1 } },
                   n = 9,
@@ -183,8 +183,8 @@ class IterConcurrentTest {
             use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform LoomAsync in do
-              let _ = FileSystem.create_directory { path = "/d" }
-              let _ = for_each_concurrent {
+              FileSystem.create_directory { path = "/d" }
+              for_each_concurrent {
                 it = iter::range { start = 0, end = 2 },
                 f = { x } -> write_text { path = "/d/f$(int::to_str { n = x })", text = "x" },
                 max_in_flight = 16,
@@ -205,8 +205,8 @@ class IterConcurrentTest {
             use std::effects::filesystem::{ FileSystem, MemoryFileSystem, write_text, WriteMode }
             use std::collections::bytes
             perform MemoryFileSystem in perform LoomAsync in do
-              let _ = FileSystem.create_directory { path = "/d" }
-              let _ = for_each_concurrent {
+              FileSystem.create_directory { path = "/d" }
+              for_each_concurrent {
                 it = iter::range { start = 0, end = 0 },
                 f = { x } -> write_text { path = "/d/f$(int::to_str { n = x })", text = "x" },
                 max_in_flight = 4,
@@ -274,7 +274,7 @@ class IterConcurrentTest {
                 xs = map_concurrent {
                   it = iter::range { start = 0, end = 5 },
                   f = { x } -> do
-                    let _ = sleep { ms = (5 - x) * 10 }
+                    sleep { ms = (5 - x) * 10 }
                     x
                   ,
                   max_in_flight = 5,
@@ -356,8 +356,8 @@ class IterConcurrentTest {
             use std::collections::bytes
             use std::str
             perform MemoryFileSystem in perform LoomAsync in do
-              let _ = FileSystem.create_directory { path = "/in" }
-              let _ = seq::for_each { xs = seq::range { start = 0, end = 6 }, f = { x } -> write_text { path = "/in/$(int::to_str { n = x })", text = "ab" } }
+              FileSystem.create_directory { path = "/in" }
+              seq::for_each { xs = seq::range { start = 0, end = 6 }, f = { x } -> write_text { path = "/in/$(int::to_str { n = x })", text = "ab" } }
               seq::fold {
                 xs = map_concurrent {
                   it = iter::range { start = 0, end = 6 },

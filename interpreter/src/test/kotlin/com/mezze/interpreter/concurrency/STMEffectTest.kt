@@ -894,7 +894,7 @@ class STMEffectTest {
                 let s1 = size_tbqueue {q = q}
                 write_tbqueue {q = q, val = 2}
                 let s2 = size_tbqueue {q = q}
-                let _ = read_tbqueue {q = q}
+                read_tbqueue {q = q}
                 let s3 = size_tbqueue {q = q}
                 {s0 = s0, s1 = s1, s2 = s2, s3 = s3}
         """
@@ -954,7 +954,7 @@ class STMEffectTest {
 
             let counter = tvar {init = 0}
 
-            let _ = atomically {f = {} -> do
+            atomically {f = {} -> do
                 let v = STM.read {var = counter}
                 STM.write {var = counter, val = v + 10}
             }
@@ -975,7 +975,7 @@ class STMEffectTest {
             let bob = tvar {init = 500}
 
             # Transfer 100 from alice to bob
-            let _ = atomically {f = {} -> do
+            atomically {f = {} -> do
                 let a = STM.read {var = alice}
                 let b = STM.read {var = bob}
                 STM.write {var = alice, val = a - 100}
@@ -1009,7 +1009,7 @@ class STMEffectTest {
                 let p = Async.spawn {f = {} -> atomically {f = {} ->
                     STM.write {var = counter, val = 42}
                 }}
-                let _ = await {p = p}
+                await {p = p}
                 deref {var = counter}
         """
         val result = eval(code)
@@ -1036,7 +1036,7 @@ class STMEffectTest {
                         # Use atomically to update the tvar
                         atomically {f = {} -> STM.write {var = result_var, val = 123}}
                     }
-                    let _ = await {p = p}
+                    await {p = p}
                     deref {var = result_var}
         """
         val result = eval(code)
@@ -1061,8 +1061,8 @@ class STMEffectTest {
                     let v = STM.read {var = counter}
                     STM.write {var = counter, val = v + 5}
                 }}
-                let _ = await {p = p1}
-                let _ = await {p = p2}
+                await {p = p1}
+                await {p = p2}
                 deref {var = counter}
         """
         val result = eval(code)
@@ -1098,8 +1098,8 @@ class STMEffectTest {
                     STM.write {var = charlie, val = c + 50}
                 }}
 
-                let _ = await {p = t1}
-                let _ = await {p = t2}
+                await {p = t1}
+                await {p = t2}
 
                 let final_alice = deref {var = alice}
                 let final_bob = deref {var = bob}

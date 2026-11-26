@@ -65,7 +65,7 @@ class SemaphoreTest {
             $semaphoreSetup
 
             let sem = semaphore {permits = 3}
-            let _ = acquire {sem = sem}
+            acquire {sem = sem}
             available {sem = sem}
         """
         val result = eval(code)
@@ -78,8 +78,8 @@ class SemaphoreTest {
             $semaphoreSetup
 
             let sem = semaphore {permits = 1}
-            let _ = acquire {sem = sem}
-            let _ = release {sem = sem}
+            acquire {sem = sem}
+            release {sem = sem}
             available {sem = sem}
         """
         val result = eval(code)
@@ -92,9 +92,9 @@ class SemaphoreTest {
             $semaphoreSetup
 
             let sem = semaphore {permits = 5}
-            let _ = acquire_n {sem = sem, permits = 3}
+            acquire_n {sem = sem, permits = 3}
             let after_acquire = available {sem = sem}
-            let _ = release_n {sem = sem, permits = 2}
+            release_n {sem = sem, permits = 2}
             let after_release = available {sem = sem}
             {acquired = after_acquire, released = after_release}
         """
@@ -110,7 +110,7 @@ class SemaphoreTest {
 
             let sem = semaphore {permits = 1}
             let acquired = try_acquire {sem = sem}
-            let _ = if acquired then release {sem = sem} else {}
+            if acquired then release {sem = sem} else {}
             acquired
         """
         val result = eval(code)
@@ -162,17 +162,17 @@ class SemaphoreTest {
 
             # Function that tracks concurrent execution
             let work = {} -> do
-                let _ = acquire {sem = sem}
+                acquire {sem = sem}
                 # Increment current count
                 let now = swap {atom = current, f = {current} -> current + 1}
                 # Update max if needed
-                let _ = swap {atom = max_concurrent, f = {current} ->
+                swap {atom = max_concurrent, f = {current} ->
                     if now > current then now else current
                 }
                 # Small delay to overlap with other threads
-                let _ = sleep {ms = 20}
+                sleep {ms = 20}
                 # Decrement current count
-                let _ = swap {atom = current, f = {current} -> current - 1}
+                swap {atom = current, f = {current} -> current - 1}
                 release {sem = sem}
 
             # Spawn 5 threads
@@ -182,11 +182,11 @@ class SemaphoreTest {
             let p4 = Async.spawn {f = work}
             let p5 = Async.spawn {f = work}
 
-            let _ = unwrap { result = await {p = p1} }
-            let _ = unwrap { result = await {p = p2} }
-            let _ = unwrap { result = await {p = p3} }
-            let _ = unwrap { result = await {p = p4} }
-            let _ = unwrap { result = await {p = p5} }
+            unwrap { result = await {p = p1} }
+            unwrap { result = await {p = p2} }
+            unwrap { result = await {p = p3} }
+            unwrap { result = await {p = p4} }
+            unwrap { result = await {p = p5} }
 
             # Max concurrent should be <= 2
             deref {atom = max_concurrent}
@@ -207,20 +207,20 @@ class SemaphoreTest {
 
             # Thread 1: Wait for permit, then set result
             let p1 = Async.spawn {f = {} -> do
-                let _ = acquire {sem = sem}
+                acquire {sem = sem}
                 swap {atom = result, f = {current} -> 42}
             }
 
             # Give thread 1 time to start waiting
-            let _ = sleep {ms = 20}
+            sleep {ms = 20}
 
             # Result should still be 0 (thread 1 is blocked)
             let before_release = deref {atom = result}
 
             # Release a permit to unblock thread 1
-            let _ = release {sem = sem}
+            release {sem = sem}
 
-            let _ = unwrap { result = await {p = p1} }
+            unwrap { result = await {p = p1} }
 
             {before = before_release, after = deref {atom = result}}
         """

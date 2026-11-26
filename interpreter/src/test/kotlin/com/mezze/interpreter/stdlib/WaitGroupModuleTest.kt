@@ -39,7 +39,7 @@ class WaitGroupModuleTest {
             use std::effects::async::waitgroup::{wait_group, add, get_count_wg}
 
             let wg = wait_group {}
-            let _ = add {wg = wg, delta = 3}
+            add {wg = wg, delta = 3}
             get_count_wg {wg = wg}
         """)
         assertEquals(3L, result)
@@ -51,8 +51,8 @@ class WaitGroupModuleTest {
             use std::effects::async::waitgroup::{wait_group, add, done, get_count_wg}
 
             let wg = wait_group {}
-            let _ = add {wg = wg, delta = 3}
-            let _ = done {wg = wg}
+            add {wg = wg, delta = 3}
+            done {wg = wg}
             get_count_wg {wg = wg}
         """)
         assertEquals(2L, result)
@@ -64,11 +64,11 @@ class WaitGroupModuleTest {
             use std::effects::async::waitgroup::{wait_group, add, done, get_count_wg}
 
             let wg = wait_group {}
-            let _ = add {wg = wg, delta = 5}
-            let _ = done {wg = wg}
-            let _ = done {wg = wg}
-            let _ = add {wg = wg, delta = 2}
-            let _ = done {wg = wg}
+            add {wg = wg, delta = 5}
+            done {wg = wg}
+            done {wg = wg}
+            add {wg = wg, delta = 2}
+            done {wg = wg}
             get_count_wg {wg = wg}
         """)
         assertEquals(4L, result)
@@ -82,7 +82,7 @@ class WaitGroupModuleTest {
             use std::effects::async::waitgroup::{wait_group, wait}
 
             let wg = wait_group {}
-            let _ = wait {wg = wg}
+            wait {wg = wg}
             42
         """)
         assertEquals(42L, result)
@@ -94,10 +94,10 @@ class WaitGroupModuleTest {
             use std::effects::async::waitgroup::{wait_group, add, done, wait}
 
             let wg = wait_group {}
-            let _ = add {wg = wg, delta = 2}
-            let _ = done {wg = wg}
-            let _ = done {wg = wg}
-            let _ = wait {wg = wg}
+            add {wg = wg, delta = 2}
+            done {wg = wg}
+            done {wg = wg}
+            wait {wg = wg}
             "done"
         """)
         assertEquals("done", result)
@@ -122,7 +122,7 @@ class WaitGroupModuleTest {
             use std::effects::async::waitgroup::{wait_group, add, wait_timeout}
 
             let wg = wait_group {}
-            let _ = add {wg = wg, delta = 5}
+            add {wg = wg, delta = 5}
             wait_timeout {wg = wg, ms = 10}
         """)
         assertEquals(false, result)
@@ -134,8 +134,8 @@ class WaitGroupModuleTest {
             use std::effects::async::waitgroup::{wait_group, add, done, wait_timeout}
 
             let wg = wait_group {}
-            let _ = add {wg = wg, delta = 1}
-            let _ = done {wg = wg}
+            add {wg = wg, delta = 1}
+            done {wg = wg}
             wait_timeout {wg = wg, ms = 10}
         """)
         assertEquals(true, result)
@@ -149,7 +149,7 @@ class WaitGroupModuleTest {
             use std::effects::async::waitgroup::{wait_group, add, get_count_wg}
 
             let wg = wait_group {}
-            let _ = add {wg = wg, delta = 10}
+            add {wg = wg, delta = 10}
             get_count_wg {wg = wg}
         """)
         assertEquals(10L, result)
@@ -162,8 +162,8 @@ class WaitGroupModuleTest {
 
             let wg1 = wait_group {}
             let wg2 = wait_group {}
-            let _ = add {wg = wg1, delta = 3}
-            let _ = add {wg = wg2, delta = 5}
+            add {wg = wg1, delta = 3}
+            add {wg = wg2, delta = 5}
             get_count_wg {wg = wg1} + get_count_wg {wg = wg2}
         """)
         assertEquals(8L, result)
@@ -175,10 +175,10 @@ class WaitGroupModuleTest {
             use std::effects::async::waitgroup::{wait_group, add, done, wait, get_count_wg}
 
             let wg = wait_group {}
-            let _ = add {wg = wg, delta = 1}
-            let _ = done {wg = wg}
-            let _ = wait {wg = wg}
-            let _ = add {wg = wg, delta = 2}
+            add {wg = wg, delta = 1}
+            done {wg = wg}
+            wait {wg = wg}
+            add {wg = wg, delta = 2}
             get_count_wg {wg = wg}
         """)
         assertEquals(2L, result)

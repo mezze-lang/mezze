@@ -80,7 +80,7 @@ let time_seq_filter = {ys} -> perform SystemTime in do
 
 let run_k = {label, thunk, k, warmup} -> perform Console in perform SystemTime in do
     # Warmup
-    let _w = warmup_go {thunk = thunk, k = warmup, acc = []}
+    warmup_go {thunk = thunk, k = warmup, acc = []}
     let times = warmup_go {thunk = thunk, k = k, acc = []}
     let sorted = seq::sort {xs = times}
     let n_times = seq::size {xs = sorted}

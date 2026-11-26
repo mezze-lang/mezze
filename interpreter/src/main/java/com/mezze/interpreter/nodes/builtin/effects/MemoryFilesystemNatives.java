@@ -686,7 +686,7 @@ public final class MemoryFilesystemNatives {
      * A `WriteSync` handle needs the opposite: it is still sequential and
      * still accumulating, so the buffer has to survive. Nulling it here made
      * the second `write_chunk` fail with "Handle not opened for writing",
-     * which a caller writing `let _ = write_chunk {...}` never sees — the file
+     * which a caller writing `write_chunk {...}` as a bare statement never sees — the file
      * just quietly held the first record only.
      *
      * Idempotent: the buffer holds everything written so far and the Entry

@@ -141,32 +141,32 @@ let us_per: { reps: Int, t0: Duration, t1: Duration } -> Int =
 let run_size: { n: Int } -> {} <Log, Time> = { n } -> do
   let f = jvm_list { elems = build_foreigns { i = 1, n = n, acc = [] } }
 
-  let _w1 = loop_each { f = f, n = n, reps = 200, acc = 0 }
+  loop_each { f = f, n = n, reps = 200, acc = 0 }
   let a0 = monotonic {}
-  let _a = loop_each { f = f, n = n, reps = reps, acc = 0 }
+  loop_each { f = f, n = n, reps = reps, acc = 0 }
   let a1 = monotonic {}
 
-  let _w2 = loop_whole { f = f, reps = 200, acc = 0 }
+  loop_whole { f = f, reps = 200, acc = 0 }
   let b0 = monotonic {}
-  let _b = loop_whole { f = f, reps = reps, acc = 0 }
+  loop_whole { f = f, reps = reps, acc = 0 }
   let b1 = monotonic {}
 
   # NUMERIC drain: per-element at+int vs bulk to_ints (#11)
-  let _w3 = loop_each_int { f = f, n = n, reps = 200, acc = 0 }
+  loop_each_int { f = f, n = n, reps = 200, acc = 0 }
   let c0 = monotonic {}
-  let _c = loop_each_int { f = f, n = n, reps = reps, acc = 0 }
+  loop_each_int { f = f, n = n, reps = reps, acc = 0 }
   let c1 = monotonic {}
 
-  let _w4 = loop_whole_ints { f = f, reps = 200, acc = 0 }
+  loop_whole_ints { f = f, reps = 200, acc = 0 }
   let d0 = monotonic {}
-  let _d = loop_whole_ints { f = f, reps = reps, acc = 0 }
+  loop_whole_ints { f = f, reps = reps, acc = 0 }
   let d1 = monotonic {}
 
-  let _ = println { msg = "  n=$(int::to_str { n = n })\tFOREIGN  per-element $(int::to_str { n = us_per { reps = reps, t0 = a0, t1 = a1 } }) us\twhole-array $(int::to_str { n = us_per { reps = reps, t0 = b0, t1 = b1 } }) us" }
+  println { msg = "  n=$(int::to_str { n = n })\tFOREIGN  per-element $(int::to_str { n = us_per { reps = reps, t0 = a0, t1 = a1 } }) us\twhole-array $(int::to_str { n = us_per { reps = reps, t0 = b0, t1 = b1 } }) us" }
   println { msg = "  n=$(int::to_str { n = n })\tNUMERIC  at+int/elem $(int::to_str { n = us_per { reps = reps, t0 = c0, t1 = c1 } }) us\tto_ints(bulk) $(int::to_str { n = us_per { reps = reps, t0 = d0, t1 = d1 } }) us" }
 
 let main = {} -> perform Console in perform SystemTime in do
   println { msg = "guest array -> Mezze seq, $(int::to_str { n = reps }) reps each" }
-  let _ = run_size { n = 10 }
-  let _ = run_size { n = 100 }
+  run_size { n = 10 }
+  run_size { n = 100 }
   run_size { n = 1000 }

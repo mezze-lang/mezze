@@ -270,7 +270,7 @@ class NewtypeInUseRuntimeTest {
             Object r = MezzeTestHelper.run("""
                 newtype Money = Int
                 let m = Money.(42)
-                let _ = m.to_dbg {}
+                m.to_dbg {}
                 match m is Money.(v) -> v
                 """);
             assertEquals(42L, r);

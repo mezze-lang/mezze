@@ -104,7 +104,7 @@ class AsyncExceptionCompositionTest {
             use std::effects::parallel::{ Parallel, LoomParallel, both, for_each, map }
 
             perform ExceptionToResult in perform LoomParallel in do
-              let _ = both {
+              both {
                 l = {} -> Exception.throw { error = "left-fail" },
                 r = {} -> 42,
               }
@@ -130,7 +130,7 @@ class AsyncExceptionCompositionTest {
             perform ExceptionToResult in perform LoomAsync in do
               let good = Async.spawn { f = {} -> 100 }
               let bad = Async.spawn { f = {} -> Exception.throw { error = "bad" } }
-              let _ = await { p = good }
+              await { p = good }
               let v = match await { p = bad } is
                 Ok { val } -> val
                 Err { error = _ } -> -1
@@ -181,7 +181,7 @@ class AsyncExceptionCompositionTest {
             use std::effects::parallel::{ Parallel, LoomParallel, both, for_each, map }
 
             perform ExceptionToResult in perform LoomParallel in do
-              let _ = for_each { xs = [1, 2, 3], f = { x } ->
+              for_each { xs = [1, 2, 3], f = { x } ->
                 if x == 2 then Exception.throw { error = "two-fail" } else {}
               }
               Ok { val = 0 }

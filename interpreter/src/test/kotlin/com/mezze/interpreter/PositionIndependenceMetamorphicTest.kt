@@ -55,7 +55,7 @@ class PositionIndependenceMetamorphicTest {
             val doBlock = run(
                 """
                 let main = {} -> do
-                  let _ignored = 0
+                  0
                   $expr
                 main {}
                 """.trimIndent()

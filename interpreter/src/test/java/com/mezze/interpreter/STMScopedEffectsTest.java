@@ -763,7 +763,7 @@ public class STMScopedEffectsTest {
                 let var = tvar {init = 42}
 
                 # Minimal transaction that just reads (but doesn't use the result)
-                let _ = perform OptimisticSTM in STM.read {var = var}
+                perform OptimisticSTM in STM.read {var = var}
 
                 deref {var = var}
 

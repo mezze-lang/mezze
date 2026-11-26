@@ -130,7 +130,7 @@ class EffectChurnRecoveryTest {
               if i <= 0 then acc
               else stable { i = i - 1, acc = acc + Pick.pick {} }
             do
-              let _warm = churn { i = 2000, acc = 0 }
+              churn { i = 2000, acc = 0 }
               perform Ten in stable { i = 100000, acc = 0 }
         """.trimIndent())
         assertEquals(1000000L, answer, "the answers must stay right across recovery")
@@ -158,7 +158,7 @@ class EffectChurnRecoveryTest {
               if i <= 0 then acc
               else stable { i = i - 1, acc = acc + Pick.pick {} }
             do
-              let _warm = churn { i = 2000, acc = 0 }
+              churn { i = 2000, acc = 0 }
               perform Ten in stable { i = 100, acc = 0 }
         """.trimIndent())
         assertEquals(1000L, answer)
@@ -214,7 +214,7 @@ class EffectChurnRecoveryTest {
               if i <= 0 then acc
               else after { i = i - 1, acc = acc + (perform Twenty in Pick.pick {}) }
             do
-              let _w = churn { i = 2000, acc = 0 }
+              churn { i = 2000, acc = 0 }
               let a = perform Ten in stable { i = 100000, acc = 0 }
               let b = after { i = 2000, acc = 0 }
               a + b

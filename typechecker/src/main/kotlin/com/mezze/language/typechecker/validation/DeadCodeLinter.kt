@@ -76,8 +76,8 @@ object DeadCodeLinter {
                 for (stmt in expr.statements) {
                     if (stmt is ParsedStatement.Expr && isPureValue(stmt.expr)) {
                         findings.add(Finding(
-                            message = "This expression's result is computed and then discarded. " +
-                                "Bind it with `let`, or remove it if it has no effect.",
+                            message = "This value is computed and dropped, so the statement has no " +
+                                "effect. Use it, or remove it.",
                             loc = stmt.loc,
                             code = WarningCode.W0301_DISCARDED_VALUE,
                         ))

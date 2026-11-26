@@ -410,7 +410,7 @@ class MutationRuntimeTest {
             let main = {} ->
                 perform LocalMut in do
                     let seq = seq_to_mut { seq = [10, 20, 30] }
-                    let _ = set { seq = seq, i = 1, v = 99 }
+                    set { seq = seq, i = 1, v = 99 }
                     let val = get { seq = seq, i = 1 }
                     match val is
                         Some { val } -> val
@@ -463,7 +463,7 @@ class MutationRuntimeTest {
             let main = {} ->
                 perform LocalMut in do
                     let seq = seq_to_mut { seq = [1, 3, 4] }
-                    let _ = insert { seq = seq, i = 1, v = 2 }
+                    insert { seq = seq, i = 1, v = 2 }
                     let length = size { seq = seq }
                     let val = get { seq = seq, i = 1 }
                     match val is
@@ -504,7 +504,7 @@ class MutationRuntimeTest {
             let main = {} ->
                 perform LocalMut in do
                     let seq = seq_to_mut { seq = [1, 2, 3] }
-                    let _ = swap { seq = seq, i = 0, j = 2 }
+                    swap { seq = seq, i = 0, j = 2 }
                     let first = get { seq = seq, i = 0 }
                     let last = get { seq = seq, i = 2 }
                     match first is
@@ -933,7 +933,7 @@ class MutationRuntimeTest {
             let main = {} ->
                 perform LocalMut in do
                     let b = bytes_to_mut { bytes = bytes::from_seq { arr = [1, 2, 3] } }
-                    let _ = bytes_set { bytes = b, i = 1, v = 99 }
+                    bytes_set { bytes = b, i = 1, v = 99 }
                     let v = bytes_get { bytes = b, i = 1 }
                     match v is
                         Some { val } -> val
@@ -975,7 +975,7 @@ class MutationRuntimeTest {
             let main = {} ->
                 perform LocalMut in do
                     let b = bytes_to_mut { bytes = bytes::from_seq { arr = [1, 2, 3] } }
-                    let _ = bytes_swap { bytes = b, i = 0, j = 2 }
+                    bytes_swap { bytes = b, i = 0, j = 2 }
                     let first = bytes_get { bytes = b, i = 0 }
                     let last = bytes_get { bytes = b, i = 2 }
                     match first is
