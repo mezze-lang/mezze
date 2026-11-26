@@ -38,6 +38,11 @@ class UnusedVariableLintTest {
             it.code == WarningCode.W0101_UNUSED_VARIABLE && it.message.contains("'$name'")
         }
 
+    private fun hasUnusedParamWarningFor(name: String, code: String): Boolean =
+        warningsFor(code).any {
+            it.code == WarningCode.W0103_UNUSED_PARAMETER && it.message.contains("'$name'")
+        }
+
     @Test
     fun `unused do-block let binding warns`() {
         val code = """
@@ -88,8 +93,22 @@ class UnusedVariableLintTest {
         val code = """
             let test = {x: Int} -> 42
         """.trimIndent()
-        assertTrue(hasUnusedWarningFor("x", code),
-            "Should warn about unused lambda parameter 'x'. Warnings: ${warningsFor(code)}")
+        assertTrue(hasUnusedParamWarningFor("x", code),
+            "Should warn (W0103) about unused lambda parameter 'x'. Warnings: ${warningsFor(code)}")
+        // A parameter's name is the field callers pass: `_x` would rename the field,
+        // so the message must never suggest it (that advice produced T0211 in CI).
+        assertTrue(warningsFor(code).none { it.message.contains("Prefix with '_'") },
+            "a parameter warning must not suggest `_`. Warnings: ${warningsFor(code)}")
+    }
+
+    @Test
+    fun `a callback parameter is not flagged - its shape is given by the callee`() {
+        val code = """
+            let apply2: { f: { a: Int, b: Int } -> Int } -> Int = { f } -> f { a = 1, b = 2 }
+            pub let t = {} -> apply2 { f = { a, b } -> a }
+        """.trimIndent()
+        assertTrue(!hasUnusedParamWarningFor("b", code) && !hasUnusedWarningFor("b", code),
+            "`b` is fixed by apply2's callback type and cannot be dropped or renamed. Warnings: ${warningsFor(code)}")
     }
 
     @Test

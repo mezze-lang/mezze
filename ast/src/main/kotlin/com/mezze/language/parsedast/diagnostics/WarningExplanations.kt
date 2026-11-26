@@ -3,8 +3,16 @@ package com.mezze.language.parsedast.diagnostics
 /** Human-readable explanation for each [WarningCode], surfaced by `mez explain`. */
 fun WarningCode.explain(): String = when (this) {
     WarningCode.W0101_UNUSED_VARIABLE ->
-        "A bound name (a `let`, a lambda parameter, or a match binding) is never " +
-        "used. Remove it, or prefix it with `_` (e.g. `_x`) to say it's intentionally unused."
+        "A bound name (a `let` or a match binding) is never used. Remove it, or " +
+        "prefix it with `_` (e.g. `_x`) to say it's intentionally unused."
+
+    WarningCode.W0103_UNUSED_PARAMETER ->
+        "A lambda's parameter is never used. A parameter is not a free name: a " +
+        "lambda's parameters destructure the record its caller passes, so `x` IS " +
+        "the field `x`, and renaming it `_x` makes callers pass `_x` instead. " +
+        "Remove the parameter if no caller needs to pass it. A lambda whose shape " +
+        "is given — a callback, an impl operation, an annotated binding — is never " +
+        "warned about, since its parameters are fixed by that shape."
 
     WarningCode.W0102_UNUSED_IMPORT ->
         "An imported name is never referenced in this module. Remove it from the " +

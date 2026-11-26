@@ -102,8 +102,8 @@ ability FromFoo 'a for 'in where {
   from_foo_with: { it: 'in, config: FooC } -> Result 'a DecodeError,
 }
 impl FromFoo 'a for FooIn where {
-  from_foo      = { it }         with Decode FooC 'a -> it.decode { config = foo_default },
-  from_foo_with = { it, config } with Decode FooC 'a -> it.decode { config = config },
+  from_foo      = { it }         with Decode FooC 'a FooIn -> it.decode { config = foo_default },
+  from_foo_with = { it, config } with Decode FooC 'a FooIn -> it.decode { config = config },
 }
 ```
 

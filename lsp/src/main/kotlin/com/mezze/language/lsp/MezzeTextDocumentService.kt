@@ -612,7 +612,8 @@ class MezzeTextDocumentService(
                         // editors do for dead code; everything else is a Warning.
                         val code = warning.code
                         val isUnused = code == WarningCode.W0101_UNUSED_VARIABLE ||
-                            code == WarningCode.W0102_UNUSED_IMPORT
+                            code == WarningCode.W0102_UNUSED_IMPORT ||
+                            code == WarningCode.W0103_UNUSED_PARAMETER
                         val diag = createDiagnostic(
                             message = warning.message,
                             severity = if (isUnused) DiagnosticSeverity.Hint else DiagnosticSeverity.Warning,

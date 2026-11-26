@@ -20,8 +20,9 @@ package com.mezze.language.parsedast.diagnostics
  */
 enum class WarningCode {
     // ─── Unused / dead bindings (W01xx) ──────────────────────────────────
-    W0101_UNUSED_VARIABLE,   // a bound name (let / lambda param / match binding) is never used
+    W0101_UNUSED_VARIABLE,   // a bound name (let / match binding) is never used
     W0102_UNUSED_IMPORT,     // an imported name is never referenced
+    W0103_UNUSED_PARAMETER,  // a free-standing lambda's parameter is never used (its name is the field callers pass)
 
     // ─── Redundant / dead code (W03xx) ───────────────────────────────────
     W0301_DISCARDED_VALUE,   // a non-unit expression's result is computed then thrown away

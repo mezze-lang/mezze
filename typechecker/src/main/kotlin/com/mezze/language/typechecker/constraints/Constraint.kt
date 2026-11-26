@@ -672,7 +672,9 @@ data class ConstraintResult(
 
     data class UnusedVariable(
         val name: String,
-        val loc: Loc?
+        val loc: Loc?,
+        /** A lambda parameter: its name is the field callers pass, so `_`-prefixing is no fix (W0103). */
+        val isParameter: Boolean = false,
     )
 
     /**

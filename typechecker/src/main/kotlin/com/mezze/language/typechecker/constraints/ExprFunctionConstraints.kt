@@ -659,12 +659,16 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
     )
 
     // #84 linter: a lambda parameter that the body never references is unused.
-    // `_`-prefixed names are intentionally ignored (the convention already used
-    // for match bindings), and are never flagged.
-    val unusedParams = paramNames.filter { name ->
+    // Only for a FREE-STANDING lambda. Parameters destructure the caller's record,
+    // so when the lambda's shape is given (a callback, an impl op, an annotated
+    // binding) its names are fixed: there is nothing to remove, and the old hint
+    // ("prefix with `_`") renamed the field and produced T0211 instead — which is
+    // how a provider's conformance app broke CI. `_`-prefixed names stay exempt.
+    val shapeIsGiven = expectedFunctionType != null
+    val unusedParams = if (shapeIsGiven) emptyList() else paramNames.filter { name ->
         !name.startsWith("_") && name !in bodyResult.usedVariables
     }.map { name ->
-        ConstraintResult.UnusedVariable(name = name, loc = expr.loc)
+        ConstraintResult.UnusedVariable(name = name, loc = expr.loc, isParameter = true)
     }
 
     // #377: when the lambda's expected type declares an effect row, the body is

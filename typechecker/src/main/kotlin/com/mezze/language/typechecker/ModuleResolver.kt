@@ -1035,7 +1035,20 @@ class ModuleResolver(
         val sources = members.associateWith { raws.getValue(it).source.hash }
 
         members.forEachIndexed { i, path ->
-            val module = stamped[i]
+            val stampedModule = stamped[i]
+            // An impl of an IMPORTED ability parses as a performer: the parser can only
+            // recognise abilities declared in the same file. The checker reclassifies it
+            // once imports are known (ContextBuilder), and `updateModuleExports` then
+            // rebuilds this record's index — but only for a module that is CHECKED. A
+            // module whose typed result comes from the store (StoreHydrator) is never
+            // re-checked, so its index kept the raw parse: `mezze_js::codec`'s 15
+            // `impl EncodeScalar for JsC`-style impls were invisible and `.to_js {}`
+            // failed with "format lacks EncodeScalar" on every warm `mez dev`. Reclassify
+            // here, by the same rule, from the names this module's own `use`s bring in.
+            // Content hashes are kept, so identity is unchanged.
+            val module = reclassifyByImports(stampedModule) { dep ->
+                memberIndex[dep]?.let { raws.getValue(dep).parsed } ?: getFromCache(world, dep)?.parsedModule
+            }
             if (ModulePathConventions.isStdlib(path)) com.mezze.language.typechecker.StdlibIdentities.register(module)
             val built = PhaseTiming.phase(path, "module-record") { Module(
                 path = ModulePath.parse(path),
@@ -1045,8 +1058,11 @@ class ModuleResolver(
                 sourceHash = raws.getValue(path).source.hash,
                 index = ProgramIndex.build(module),
                 parsedModule = module,
-                source = module,
-                identity = ModuleIdentity.fingerprint(module),
+                // `source` feeds the identities importers compute against this
+                // module: it stays the stamped module, so the reclassification
+                // above changes what is INDEXED, never what anything hashes to.
+                source = stampedModule,
+                identity = ModuleIdentity.fingerprint(stampedModule),
                 stampedAgainst = against.toMap(),
                 groupSources = sources - path,
             ) }
@@ -1054,6 +1070,36 @@ class ModuleResolver(
             stampedNow.add(path)
             memo[path] = true
         }
+    }
+
+    /**
+     * [parsed] with every performer that names an ability in scope read as the
+     * ability impl it is — ContextBuilder's rule (`allAbilityNames`/`allEffectNames`),
+     * an effect name always winning. In scope: the module's own declarations, every
+     * ability/effect of a module it imports whole (`use m`, reached as `m::X`), and
+     * the selected items (and their aliases) of a selective `use m::{ … }`.
+     * [moduleOf] answers a dependency's parsed module, or null when it is unknown —
+     * an unknown module contributes no names, so nothing is reclassified wrongly.
+     */
+    private fun reclassifyByImports(parsed: ParsedModule, moduleOf: (String) -> ParsedModule?): ParsedModule {
+        if (parsed.decls.none { it is ParsedPerformerDecl }) return parsed
+        val abilities = HashSet<String>(); val effects = HashSet<String>()
+        fun addDecls(m: ParsedModule) {
+            m.decls.forEach { d -> if (d is ParsedAbilityDecl) abilities += d.name else if (d is ParsedEffectDecl) effects += d.name }
+        }
+        addDecls(parsed)
+        for (use in parsed.decls.filterIsInstance<ParsedUseDecl>()) when (val p = use.path) {
+            is ParsedUsePath.Module -> moduleOf(p.path.toString())?.let(::addDecls)
+            is ParsedUsePath.Selective -> moduleOf(p.modulePath.toString())?.let { m ->
+                val ab = m.decls.filterIsInstance<ParsedAbilityDecl>().mapTo(HashSet()) { it.name }
+                val ef = m.decls.filterIsInstance<ParsedEffectDecl>().mapTo(HashSet()) { it.name }
+                for (item in p.items) {
+                    if (item.name in ab) { abilities += item.name; item.alias?.let { abilities += it } }
+                    if (item.name in ef) { effects += item.name; item.alias?.let { effects += it } }
+                }
+            }
+        }
+        return ImplClassifier.reclassifyImportedAbilityImpls(parsed, abilities, effects)
     }
 
     /**

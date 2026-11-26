@@ -1249,7 +1249,12 @@ class TypeChecker(
         constraintResults: Map<String, ConstraintResult>,
     ): List<TypeCheckWarning> {
         val unusedVarWarnings = constraintResults.values.flatMap { it.unusedVariables }.map { unused ->
-            TypeCheckWarning(
+            if (unused.isParameter) TypeCheckWarning(
+                message = "Unused parameter '${unused.name}'. A parameter's name is the field its caller " +
+                    "passes, so renaming it would change what callers pass; remove it if no caller needs it.",
+                loc = unused.loc,
+                code = com.mezze.language.parsedast.diagnostics.WarningCode.W0103_UNUSED_PARAMETER
+            ) else TypeCheckWarning(
                 message = "Unused variable '${unused.name}'. Prefix with '_' to suppress this warning.",
                 loc = unused.loc,
                 code = com.mezze.language.parsedast.diagnostics.WarningCode.W0101_UNUSED_VARIABLE
