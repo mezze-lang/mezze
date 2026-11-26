@@ -49,9 +49,13 @@ class DeadCodeLintTest {
     }
 
     @Test
-    fun `a call that performs nothing, its result dropped, is flagged`() {
-        // `g`'s arrow has a closed empty row: the statement has no effect at all.
-        assertTrue(has(WarningCode.W0301_DISCARDED_VALUE, """
+    fun `a call statement is NOT flagged, even one whose row is empty`() {
+        // An empty row is not proof of no effect: a polyglot verb like
+        // `obj.set_property {…}` mutates the guest object with an empty row (guest
+        // effects are charged at the entry point, `Js.eval`). Flagging calls by row
+        // would tell people to delete working mutations, so only syntactically
+        // pure statements (a literal, a name, arithmetic) are flagged.
+        assertFalse(has(WarningCode.W0301_DISCARDED_VALUE, """
             let g = {} -> 0
             let f = {} -> do
               g {}

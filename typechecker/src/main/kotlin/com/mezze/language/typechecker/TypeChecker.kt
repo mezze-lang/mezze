@@ -1064,14 +1064,9 @@ class TypeChecker(
                         },
                     ).map { TypeCheckWarning(message = it.message, loc = it.loc, code = it.code) }
                 }.orEmpty()
-                // A statement that is a call performing nothing: needs solved effect rows.
-                val pureStatementWarnings = emitResult.typedModule?.let { typed ->
-                    com.mezze.language.typechecker.validation.PureStatementLinter.lint(typed, substitution)
-                        .map { TypeCheckWarning(message = it.message, loc = it.loc, code = it.code) }
-                }.orEmpty()
                 return TypeCheckResult.Success(
                     substitution = substitution, importContext = importContext,
-                    warnings = warnings + validationWarnings + deprecationWarnings + pureStatementWarnings,
+                    warnings = warnings + validationWarnings + deprecationWarnings,
                     loadedModules = loadedModules,
                     abilityImpls = context.getAllAbilityImpls(),
                     typedModule = emitResult.typedModule,
