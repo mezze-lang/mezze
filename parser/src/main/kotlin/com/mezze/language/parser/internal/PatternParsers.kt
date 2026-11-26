@@ -8,7 +8,7 @@ import com.mezze.language.parser.internal.lib.*
 internal val MezzeParser.letBindingPattern: Parser<ParsedPattern>
     get() = parser@{ stream ->
         // `let _ = expr` binds nothing. `_` is a PATTERN wildcard (`Err { error = _ }`,
-        // `_ -> …`, `let { a, b = _ } = r`); a whole `let` of it is either an
+        // `_ -> …`; `let { a, ... } = r` ignores the rest of a record); a whole `let` of it is either an
         // expression statement wearing a binding (in a `do`, write the expression on
         // its own: its effects run and its value is dropped) or, at the top level,
         // nothing at all (the top level is for definitions and performs no effects).
