@@ -253,7 +253,7 @@ export const features = [
   {
     title: 'Keep the ~mint~libraries~ you already have',
     body:
-      'Call your ~~mint:existing code~~ written in Java, JavaScript or Python on GraalVM, ' +
+      'Call your ~~mint:existing code~~ written in Java, JavaScript, Python or WebAssembly on GraalVM, ' +
       'while keeping the type safety of Mezze.',
   },
   {
