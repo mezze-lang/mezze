@@ -241,8 +241,8 @@ export const features = [
   {
     title: 'Control flow is ~olive~userland code~',
     body:
-      'Async, exceptions and early return are ~~olive:ordinary handlers~~, not syntax. ' +
-      'Yours work the same way, and even the scheduler is a library you can swap.',
+      'Async, exceptions and early return are ~~olive:ordinary handlers~~, not syntax the language had to grow. ' +
+      'Swap their implementation as needed, and yours work the same way.',
   },
   {
     title: 'A few small pieces, ~onion~reused everywhere~',
