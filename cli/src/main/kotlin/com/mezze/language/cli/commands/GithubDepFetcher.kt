@@ -53,18 +53,41 @@ class GithubDepFetcher(
      */
     fun fetch(owner: String, repo: String, ref: String): Fetched {
         val cloneDir = File(cacheDir, "$owner-$repo-${sanitize(ref)}")
+        val url = "$baseUrl$owner/$repo.git"
         // Best-effort cache: only reuse if it looks like a healthy clone.
         // A partial/aborted clone should be re-tried, not silently used.
         val cached = File(cloneDir, ".git").isDirectory && File(cloneDir, ".git/HEAD").isFile
-        if (!cached) {
-            cloneDir.deleteRecursively()
-            cloneDir.parentFile?.mkdirs()
-            val url = "$baseUrl$owner/$repo.git"
-            runGit(
-                cloneDir.parentFile ?: cacheDir,
-                listOf("git", "clone", "--depth", "1", "--branch", ref, url, cloneDir.name),
-                failureContext = "clone $url@$ref",
-            )
+        val isCommit = ref.matches(Regex("[0-9a-f]{40}"))
+        when {
+            // A commit never moves: its cached checkout is the answer.
+            cached && isCommit -> {}
+            // A branch or tag CAN move, so a cached clone is refreshed — reusing it as-is
+            // pinned `@main` to whatever main was on the first sync, forever. Offline, the
+            // cache is still better than failing: say so and use it.
+            cached -> try {
+                runGit(cloneDir, listOf("git", "fetch", "--depth", "1", "origin", ref), failureContext = "refresh $url@$ref")
+                runGit(cloneDir, listOf("git", "checkout", "-q", "--detach", "FETCH_HEAD"), failureContext = "check out $url@$ref")
+            } catch (e: GithubFetchException) {
+                System.err.println("  ⚠ could not refresh $owner/$repo@$ref (${e.message?.lineSequence()?.firstOrNull()}); using the cached copy")
+            }
+            else -> {
+                cloneDir.deleteRecursively()
+                cloneDir.parentFile?.mkdirs()
+                if (isCommit) {
+                    // `git clone --branch` takes no commit: fetch exactly that commit.
+                    cloneDir.mkdirs()
+                    runGit(cloneDir, listOf("git", "init", "-q"), failureContext = "init $cloneDir")
+                    runGit(cloneDir, listOf("git", "remote", "add", "origin", url), failureContext = "add remote $url")
+                    runGit(cloneDir, listOf("git", "fetch", "--depth", "1", "origin", ref), failureContext = "fetch $url@$ref")
+                    runGit(cloneDir, listOf("git", "checkout", "-q", "--detach", "FETCH_HEAD"), failureContext = "check out $url@$ref")
+                } else {
+                    runGit(
+                        cloneDir.parentFile ?: cacheDir,
+                        listOf("git", "clone", "--depth", "1", "--branch", ref, url, cloneDir.name),
+                        failureContext = "clone $url@$ref",
+                    )
+                }
+            }
         }
         val commit = runGitCapture(
             cloneDir,

@@ -150,6 +150,51 @@ class SyncGithubDepsTest {
         assertEquals("sha256:${storeEntry.name}", node.checksum)
     }
 
+    /** Push one more commit to `main` of the mirror [seedRepo] made; returns its sha. */
+    private fun pushCommit(root: File, owner: String, repo: String, body: String): String {
+        val work = File(root, "work-$owner-$repo")
+        File(work, "src/lib.mz").writeText(body)
+        git(work, "git", "commit", "-qam", "next")
+        git(work, "git", "push", "-q", "origin", "main")
+        return ProcessBuilder("git", "rev-parse", "HEAD").directory(work).start().inputStream.bufferedReader().readText().trim()
+    }
+
+    private fun sync(app: File, store: File, cache: File, baseDir: File) = SyncCommand().execute(
+        emptyList(), currentDir = app, storeRootOverride = store,
+        githubCacheOverride = cache, githubBaseUrlOverride = baseDir.absolutePath,
+    )
+
+    @Test
+    fun `a branch dep follows the branch - a cached clone is refreshed on the next sync`(@TempDir tmp: Path) {
+        val root = tmp.toFile()
+        val baseDir = seedRepo(root, owner = "mezze-lang", repo = "mezze-js", pkgName = "mezze_js")
+        val store = File(root, "store"); val cache = File(root, "gitcache")
+        val app = File(root, "app").also { writeApp(it, "mezze_js", "github:mezze-lang/mezze-js@main") }
+
+        assertEquals(0, sync(app, store, cache, baseDir))
+        val first = readLockFile(File(app, "Mezze.lock"))!!.packages.first { it.name == "mezze_js" }.commit
+
+        // `main` moves. Reusing the cached clone as-is kept resolving the OLD commit.
+        val moved = pushCommit(root, "mezze-lang", "mezze-js", "pub let mezze_js_val = {} -> \"moved\"\n")
+        assertEquals(0, sync(app, store, cache, baseDir))
+        val second = readLockFile(File(app, "Mezze.lock"))!!.packages.first { it.name == "mezze_js" }.commit
+        assertTrue(first != second, "the second sync must see main's new commit")
+        assertEquals(moved, second)
+    }
+
+    @Test
+    fun `a commit dep resolves to exactly that commit`(@TempDir tmp: Path) {
+        val root = tmp.toFile()
+        val baseDir = seedRepo(root, owner = "mezze-lang", repo = "mezze-wasm", pkgName = "mezze_wasm")
+        val pinned = pushCommit(root, "mezze-lang", "mezze-wasm", "pub let mezze_wasm_val = {} -> \"pinned\"\n")
+        pushCommit(root, "mezze-lang", "mezze-wasm", "pub let mezze_wasm_val = {} -> \"later\"\n")
+        val store = File(root, "store"); val cache = File(root, "gitcache")
+        val app = File(root, "app").also { writeApp(it, "mezze_wasm", "github:mezze-lang/mezze-wasm@$pinned") }
+
+        assertEquals(0, sync(app, store, cache, baseDir), "`git clone --branch` cannot take a sha; it is fetched directly")
+        assertEquals(pinned, readLockFile(File(app, "Mezze.lock"))!!.packages.first { it.name == "mezze_wasm" }.commit)
+    }
+
     @Test
     fun `malformed github spec (missing @ref) is a hard failure that increments the failure count`(@TempDir tmp: Path) {
         val root = tmp.toFile()
