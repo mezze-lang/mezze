@@ -6,7 +6,7 @@ Test files located in: `interpreter/src/test/kotlin/com/mezze/language/interpret
 
 ```
 std/effects/
-├── async.mz             # Async effect (LoomAsync, CoopAsync, OSThreadAsync)
+├── async.mz             # Async effect and its schedulers (LoomAsync, OSThreadAsync, CoopAsync)
 ├── async/               # Async utilities
 │   ├── channel.mz       # Async channels
 │   ├── ratelimit.mz     # Rate limiting
@@ -61,40 +61,41 @@ std/effects/
 ---
 
 ## async.mz - Async Effect
-Test files: `AsyncModuleTest.kt`, `CoopTest.kt`, `OSThreadTest.kt`, `LoomConcurrencyTest.kt`
+Test files: `AsyncModuleTest.kt`, `CoopAsyncSchedulerTest.kt`, `OSThreadTest.kt`, `LoomConcurrencyTest.kt`
 
 ### Effect Operations
 
-| Operation | Tested | Notes |
-|-----------|--------|-------|
-| `Async.spawn` | :white_check_mark: | Spawn async task |
-| `Async.await` | :white_check_mark: | Wait for promise |
-| `Async.is_done` | :white_check_mark: | Check if promise completed |
-| `Async.all` | :white_check_mark: | Wait for all promises |
-| `Async.race` | :white_check_mark: | Wait for first promise |
-| `Async.join` | :white_check_mark: | Run two tasks in parallel |
-| `Async.join3` | :white_check_mark: | Run three tasks in parallel |
-| `Async.map` | :white_check_mark: | Parallel map |
-| `Async.for_each` | :white_check_mark: | Parallel for_each |
-| `Async.filter` | :white_check_mark: | Parallel filter |
-| `Async.settle` | :white_check_mark: | Wait for all, return Results |
-| `Async.timeout` | :white_check_mark: | Wait with timeout |
+The effect has five operations; a scheduler implements them.
 
-### Handlers
+| Operation | Notes |
+|-----------|-------|
+| `Async.spawn` | start a task, return its promise |
+| `Async.await` | wait for a task, return how it ended |
+| `Async.cancel` | ask a task to stop |
+| `Async.park` | wait until a predicate holds |
+| `Async.park_until` | wait until a predicate holds or a deadline passes |
 
-| Handler | Tested | Notes |
-|---------|--------|-------|
-| `LoomAsync` | :white_check_mark: | Virtual threads (default) |
-| `CoopAsync` | :white_check_mark: | Cooperative scheduling (deterministic) |
-| `OSThreadAsync` | :white_check_mark: | Platform threads |
+### Schedulers (performers)
 
-### Helper Functions
+| Performer | Notes |
+|-----------|-------|
+| `LoomAsync`, `LoomAsyncWith { max_concurrent }` | a virtual thread per task (the usual choice) |
+| `OSThreadAsync`, `OSThreadAsyncWith { pool_size }` | a platform thread per task, for CPU-bound parallel work |
+| `CoopAsync`, `CoopAsyncWith { on_stall }` | every task on one thread in a repeatable order; needs a `Time` performer |
 
-| Function | Tested | Notes |
-|----------|--------|-------|
-| `run` | :white_check_mark: | spawn + await |
-| `go` | :white_check_mark: | Fire and forget |
-| `run_coop` | :white_check_mark: | Run with CoopAsync |
+Any `impl Async for …` is a scheduler too.
+
+### Functions built on the operations
+
+| Function | Notes |
+|----------|-------|
+| `await`, `try_await`, `run`, `go` | wait for one task; spawn and wait; spawn and forget |
+| `race`, `all`, `settle`, `join`, `join3`, `select`, `park_any` | wait for several tasks |
+| `par_map`, `par_for_each`, `par_filter`, `map_concurrent`, `for_each_concurrent`, `fold_concurrent_ordered` | concurrent collection operations |
+| `with_timeout`, `sleep`, `yield_now`, `wait_on` | time and waiting |
+| `scoped`, `scope_spawn`, `scope_cancel_all`, `join_on_success`, `join_on_failure`, `join_on_first` | structured concurrency |
+| `cancel_token`, `on_cancel`, `with_cancellation`, `check_cancelled` | cancellation |
+| `try_all`, `try_join`, `try_par_map`, `try_any`, … | the same, stopping at the first error |
 
 ---
 

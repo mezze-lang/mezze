@@ -1139,13 +1139,6 @@ public final class AsyncNatives {
 
 
     /**
-     * Park the current task until {@code predicate} returns True.
-     * Spin-park with exponential backoff up to a small cap; LockSupport
-     * .parkNanos lets the scheduler hibernate the virtual thread. An
-     * explicit waker would be cheaper for predicates that change
-     * rarely; can land later if profile demands.
-     */
-    /**
      * Park until the predicate holds, or until a deadline passes. True means the
      * predicate won; False means the deadline did.
      *
@@ -1162,6 +1155,35 @@ public final class AsyncNatives {
      * `Time` performer installed got exactly that: `with_timeout { ms = 1000 }`
      * on a task returning 42 immediately, answering `None` once in a while.
      */
+    /**
+     * Thread-per-task wait on a predicate that NAMES its wait queue (`wait_on { on, test }`:
+     * the STM, channels, mutexes, semaphores, latches, wait groups). Event-driven, like the
+     * cooperative machine: register, re-test, block until the primitive signals. Before this,
+     * LoomAsync/OSThreadAsync polled these with a 1µs–1ms backoff — a wake up to 1ms late and
+     * CPU spent waiting. Returns true when the predicate held, false when [deadlineNanos]
+     * (System.nanoTime based; Long.MAX_VALUE = none) passed first.
+     */
+    private static boolean parkOnQueue(com.mezze.interpreter.nodes.continuation.WaitQueue queue,
+                                       MezzeFunction predicate, IndirectCallNode callNode, long deadlineNanos) {
+        while (true) {
+            Object token = queue.registerThread(Thread.currentThread());   // before the test: no lost wake-up
+            Object result = callThunkFunction(predicate, callNode);
+            if (result instanceof Boolean b && b) { queue.deregister(token); return true; }
+            if (deadlineNanos == Long.MAX_VALUE) {
+                java.util.concurrent.locks.LockSupport.park(queue);
+            } else {
+                long remaining = deadlineNanos - System.nanoTime();
+                if (remaining <= 0L) { queue.deregister(token); return false; }
+                java.util.concurrent.locks.LockSupport.parkNanos(queue, remaining);
+            }
+            if (Thread.interrupted()) {
+                queue.deregister(token);
+                Thread.currentThread().interrupt();
+                throw new CancellationException("Park cancelled");
+            }
+        }
+    }
+
     @TruffleBoundary
     public static boolean parkUntilDeadline(MezzeRecord args, IndirectCallNode callNode) {
         MezzeFunction predicate = getFunction(args, "predicate");
@@ -1169,6 +1191,9 @@ public final class AsyncNatives {
         long ms = getLong(args, "ms");
         // A non-positive deadline is a poll: check once, do not wait.
         long deadline = System.nanoTime() + Math.max(0L, ms) * 1_000_000L;
+        var queue = com.mezze.interpreter.nodes.continuation.ContBinding.queueOf(predicate);
+        if (queue != null) return parkOnQueue(queue, predicate, callNode, deadline);
+        // An opaque predicate: nothing can signal it, so it is polled (the general escape hatch).
         long backoffNanos = 1_000L; // 1µs to start
         final long maxBackoffNanos = 1_000_000L; // 1ms cap
         while (true) {
@@ -1191,6 +1216,9 @@ public final class AsyncNatives {
     public static MezzeRecord parkUntil(MezzeRecord args, IndirectCallNode callNode) {
         MezzeFunction predicate = getFunction(args, "predicate");
         if (predicate == com.mezze.interpreter.nodes.continuation.ContBinding.readyPredicate()) { Thread.yield(); return MezzeRecord.empty(); }
+        var queue = com.mezze.interpreter.nodes.continuation.ContBinding.queueOf(predicate);
+        if (queue != null) { parkOnQueue(queue, predicate, callNode, Long.MAX_VALUE); return MezzeRecord.empty(); }
+        // An opaque predicate: nothing can signal it, so it is polled (the general escape hatch).
         long backoffNanos = 1_000L; // 1µs to start
         final long maxBackoffNanos = 1_000_000L; // 1ms cap
         while (true) {

@@ -106,12 +106,10 @@ pub let sleep: { ms: Int } -> {} <Time> = { ms } ->
 ## The predicate is the runtime's own `{} -> True`, which the task machine recognises by
 ## identity (no predicate call, the task goes straight behind the others) and a
 ## thread-per-task performer answers with a thread yield.
-## A predicate that names the primitive it waits on. `park { predicate = wait_on { on, test } }`
-## is what the stdlib's channel, mutex, semaphore, latch, wait group and STM do: a cooperative
-## scheduler registers the task with the primitive's wake-up list and runs `test` only when the
-## primitive changes state — from ANY thread — so a wait is woken, never polled; a thread-per-task
-## performer simply calls it. Use it for your own primitives: `on` is the native object whose
-## state `test` reads.
+## A predicate that names the primitive it waits on, so a wait is woken when that primitive
+## changes, never polled: `park { predicate = wait_on { on, test } }`. The stdlib's channels,
+## locks, semaphores, latches, wait groups and STM all wait this way, under every scheduler.
+## For your own primitive, `on` is the native object whose state `test` reads.
 pub let wait_on: { on: 'o, test: {} -> Bool <...> } -> ({} -> Bool <...>) = { on, test } ->
   __native_wait_on { on = on, test = test }
 
@@ -237,7 +235,7 @@ pub type CancelOutcome = |
 pub type ParkOn = |
   OnPromises { ids: [PromiseId] },
   OnPredicates { fs: [{} -> Bool <...>] },
-  Immediately,   ## ready on the machine's next turn — no predicate, no allocation (a performer's own yield)
+  Immediately,   ## ready on the scheduler's next turn: a performer's own yield
 |
 
 ## Which wait set a park joins. Named sets give a scheduler per-primitive
@@ -254,11 +252,8 @@ pub type ParkOutcome = |
 |
 
 pub newtype PromiseId = __NativePromiseRef
-## A `PromiseId` is compared by IDENTITY — two ids are equal when they name the same
-## promise. `Hash` is written beside it, as the rule requires (a hand-written `Eq` and
-## an automatic `Hash` could disagree): the structural hash of a native ref is its
-## identity hash, so the two agree. No `Ord`: ids have no meaningful order. `Inspect`
-## derives and shows the promise's state (`promise(pending)`, `promise(completed)`, …).
+## Two ids are equal when they name the same promise. They have no order. Inspecting
+## one shows the promise's state, such as `promise(pending)`.
 impl Hash for PromiseId where {
   hash: { it: PromiseId } -> Int = { it } -> structural_hash { it = it }
 }
@@ -270,9 +265,8 @@ impl Eq for PromiseId where {
 pub newtype TaskId = Int
 pub newtype WaitSetId = Int
 
-## The task machine's handles. `RunQueue` is what a performer's `drive` selector
-## receives — an opaque O(1) view of the ready set, never a materialised list —
-## and `Task` is what it returns. Both are runtime-owned; Mezze only names them.
+## For writing a scheduler: `drive` receives the tasks ready to run as a `RunQueue`
+## and returns the `Task` to run next. Both are owned by the runtime.
 pub newtype RunQueue = __NativeRunQueue
 pub newtype Task = __NativeTask
 
@@ -296,11 +290,9 @@ impl Task where {
 ## A promise's identity as the machine knows it, for `OnPromises`.
 pub let promise_id: { p: Promise 'a } -> PromiseId = { p } -> __native_promise_id { p = p }
 
-## L1 mechanism: register `f {}` as a task of the machine. Its promise settles when
-## the task finishes. A userland scheduler's `spawn` is this plus its own policy.
-## The result row is open on purpose: the task runs under the handlers in force
-## where it was spawned, so `f`'s effects are the caller's (a closed `-> Promise 'a`
-## would make `f` pure — nothing could carry its tail).
+## For writing a scheduler: start `f` as a task and return its promise, which settles
+## when the task ends. A scheduler's `spawn` is this plus its own policy. The task runs
+## under the handlers in force where it was spawned, so `f`'s effects are the caller's.
 pub let spawn_task: { f: {} -> 'a <...> } -> Promise 'a <...> = { f } -> __native_task_spawn { f = f }
 
 ## The settled half of `await`: read a promise that is known to have settled.
@@ -309,14 +301,10 @@ pub let settled_result: { p: Promise 'a } -> Result 'a AsyncError = { p } -> mat
   PromiseFailed { err } -> Err { error = err }
   PromisePending -> Err { error = AsyncFailed { msg = "woken for a promise that is still pending" } }
 
-## A single-threaded cooperative scheduler, written against the machine with no
-## native of its own but `spawn_task`: tasks run on the calling thread, a task
-## gives the loop a turn only at `await`, `yield_now`, `park` and `park_until`,
-## and the order is FIFO (no `drive`). `park_until` parks on TWO predicates, the
-## caller's and "the deadline has passed" — so the performer performs `Time`, and
-## an entry that installs `CoopAsync` installs a `Time` performer beside it
-## (`SystemTime`, or `MockTime` for a deterministic run). The runtime never reads
-## a clock on its own: that is what keeps a test scheduler deterministic.
+## Every task on one thread, taking turns at `await`, `yield_now`, `park` and
+## `park_until`, in a repeatable order: a concurrent test runs the same way every time.
+## Its deadlines read the clock through `Time`, so install a `Time` performer beside
+## it (`SystemTime`, or `MockTime` for a fully deterministic run).
 impl Async for CoopAsync where {
   initialize_scope = {} -> {},
   finalize_scope = {} -> {},
@@ -338,22 +326,13 @@ impl Async for CoopAsync where {
       ParkCancelled { reason } -> False,
 }
 
-## `CoopAsync` with a STALL REPORT. The machine never prints anything of its own — a
-## runtime writing to stderr would be an effect nobody declared. A program that wants
-## to know when the scheduler has made no progress for a while says so here, and the
-## report is a Mezze function run under THIS perform site's handlers, so whatever it
-## does — `Log`, `Console`, a metric, a `fail`, completing the promise everyone waits
-## on — is an effect the site declared:
+## `CoopAsync` that reports a stall: when no task has run for `after`, it calls `f`
+## with every waiting task and what it waits on. `f` runs under this perform site's
+## handlers, so it may log, count, or fail. It fires once per stall. `None` is plain
+## `CoopAsync`. A deadlock, where nothing could ever wake, is always an error.
 ##
 ##   perform CoopAsyncWith { on_stall = Some { val = { after = duration_seconds { n = 10 },
-##     f = { waiting } -> Log.warn { msg = "stalled: $(seq::size { xs = waiting }) parked" } } } } in …
-##
-## `waiting` lists every parked task with what it waits on. The report fires ONCE per
-## stall and re-arms when any task runs again. `after` is pacing against the machine's
-## own monotonic clock, like the poll backoff — not the `Time` effect — so a MockTime
-## does not move it; it decides WHEN the report fires, never WHETHER a program is
-## correct. `None` is exactly `CoopAsync`: silent. Only an EMPTY wait set is ever an
-## error (a provable deadlock); every other wait is waited for, Go- and Eio-style.
+##     f = { waiting } -> Log.warn { msg = "stalled: $(seq::size { xs = waiting }) waiting" } } } } in …
 impl Async for CoopAsyncWith { on_stall: Option { after: Duration, f: { waiting: [{ id: Int, on: Str }] } -> {} <...> } } where {
   initialize_scope = {} -> __native_coop_on_stall { on_stall = on_stall },
   finalize_scope = {} -> {},
@@ -390,55 +369,37 @@ pub type JoinOutcome 'a = |
   OnFirstOutcome { result: Result 'a AsyncError, settled_at: Int, cancelled: Int },
 |
 
-## Unified async effect for spawning, awaiting, and structured concurrency.
+## Start tasks, wait for them, cancel them, and let them wait for each other.
 ##
-## The effect carries only the primitives that a handler must implement.
-## The Async effect declares a single primitive: `spawn`. Every other
-## async operation (`await`, `cancel`, `sleep`, `yield_now`, `park`,
-## `scoped`) lives as a stdlib free function above, either delegating
-## to a native or riding on another effect (Time). Derived operations
-## (race, all, any, settle, join, join3, par_map, par_for_each,
-## par_filter, with_timeout, try_*) live as free functions below —
-## each expressible in terms of `spawn` + the primitives.
+## The scheduler is the caller's choice: any `impl Async for …` runs these
+## operations. The stdlib provides
 ##
-## This keeps the ability surface minimal: implementers pick a
-## scheduler (Loom vs OS threads), everything else composes on top.
+##   LoomAsync      a virtual thread per task: millions of cheap tasks
+##   OSThreadAsync  a platform thread per task: CPU-bound work in parallel
+##   CoopAsync      every task on one thread, in a repeatable order (for tests)
 ##
-## Cancellation observation is Promise-side (`p.is_cancelled {}`);
-## delivery inside a task rides on the JDK's blocking-primitive
-## interrupt (sleep, await, park, mutex/channel/latch waits are all
-## cancellation points). Pure CPU-bound tasks are not interruptible
-## by design — sprinkle a natural yield point (await, sleep, or the
-## like) if you need cooperative cancel.
-#{ unhandled: "Wrap it in `perform LoomAsync in …` (virtual threads), `OSThreadAsync` for a thread pool, or `CoopAsync` for a single-threaded, deterministic scheduler (install a `Time` performer beside it)." }
+## each with a `…With` variant that takes options.
+##
+## Cancelling is asked for with `cancel` and seen on the promise
+## (`p.is_cancelled {}`). A task notices at its next wait: `await`, `sleep`,
+## `park`, or a channel or lock. A task that only computes runs to the end.
+#{ unhandled: "Wrap it in a scheduler: `perform LoomAsync in …` (virtual threads), `OSThreadAsync` (platform threads), `CoopAsync` (one thread, repeatable order; install a `Time` performer beside it), or your own `impl Async`." }
 effect Async where {
-  ## Spawn a computation, returning a Promise immediately.
-  ##
-  ## The callback's own effects reach the spawn site through the `<...>` on its
-  ## arrow — `{} -> 'a <...>` — so a caller is still answerable for them:
-  ## `spawn { f = {} -> sleep { ms } }` inside a function annotated `<Async>`
-  ## alone is a T0210, naming `<Time>`. Writing `<Async, ...>` on the result
-  ## instead was tried and changes nothing observable; the row already travels.
-  ##
-  ## Where it does NOT travel is a bare top-level expression, which has neither
-  ## an annotation nor the entry check to answer to. A spawned task's unhandled
-  ## effect is then dropped at runtime unless somebody awaits — see
-  ## `planned_features/runtime/concurrency-and-context-bugs.md` C1, and the
-  ## report `AsyncNatives.SuspendedOps` prints when a context closes holding one.
+  ## Start `f` as a task and return its promise at once. `f`'s own effects
+  ## are the caller's to handle.
   spawn: { f: {} -> 'a <...> } -> Promise 'a <Async>,
-  ## Wait for a Promise. A performer decides HOW to wait — block a thread
-  ## (LoomAsync) or park the task (a scheduler) — which is why this is an op
-  ## and not a function: until it was, `spawn` was the only thing a performer
-  ## could differ in, and `await` always blocked.
+  ## Wait for the task behind `p` and return how it ended.
   await: { p: Promise 'a } -> Result 'a AsyncError <Async>,
+  ## Ask the task behind `p` to stop.
   cancel: { p: Promise 'a, reason: CancelReason } -> CancelOutcome <Async>,
+  ## Wait until `predicate` holds.
   park: { predicate: {} -> Bool <...> } -> {} <Async>,
+  ## Wait until `predicate` holds, or `ms` milliseconds pass. False means time ran out.
   park_until: { predicate: {} -> Bool <...>, ms: Int } -> Bool <Async>
 }
 
-# initialize_scope / finalize_scope: impl-only runtime plumbing the effect driver calls
-# to bracket the structured-concurrency scope.
-## Default handler using Project Loom virtual threads.
+# initialize_scope / finalize_scope bracket the perform block: they track its tasks.
+## A virtual thread per task: millions of cheap tasks. The usual choice.
 impl Async for LoomAsync where {
   initialize_scope = {} -> __native_async_init_scope {},
   finalize_scope = {} -> __native_async_finalize_scope { tracker = scope },
@@ -449,7 +410,7 @@ impl Async for LoomAsync where {
   park_until = { predicate, ms } -> __native_async_park_until_deadline { predicate = predicate, ms = ms },
 }
 
-## LoomAsync with configurable concurrency limit (0 = unbounded).
+## `LoomAsync` running at most `max_concurrent` tasks at once (0 means no limit).
 impl Async for LoomAsyncWith { max_concurrent: Int } where {
   initialize_scope = {} -> __native_async_init_scope {},
   finalize_scope = {} -> __native_async_finalize_scope { tracker = scope },
@@ -465,7 +426,7 @@ impl Async for LoomAsyncWith { max_concurrent: Int } where {
   park_until = { predicate, ms } -> __native_async_park_until_deadline { predicate = predicate, ms = ms },
 }
 
-## OS platform thread implementation for true parallelism on CPU-bound work.
+## A platform thread per task: CPU-bound work running in parallel.
 impl Async for OSThreadAsync where {
   initialize_scope = {} -> __native_async_init_scope_os {},
   finalize_scope = {} -> __native_async_finalize_scope_os { tracker = scope },
@@ -476,7 +437,7 @@ impl Async for OSThreadAsync where {
   park_until = { predicate, ms } -> __native_async_park_until_deadline { predicate = predicate, ms = ms },
 }
 
-## OSThreadAsync with configurable thread pool size (0 = unbounded).
+## `OSThreadAsync` on a pool of `pool_size` threads (0 means no limit).
 impl Async for OSThreadAsyncWith { pool_size: Int } where {
   initialize_scope = {} -> __native_async_init_scope_os {},
   finalize_scope = {} -> __native_async_finalize_scope_os { tracker = scope },
@@ -499,20 +460,14 @@ pub let go: { f: {} -> 'a <...> } -> {} <Async, ...> = { f } -> do
   Async.spawn { f = f }
   {}
 
-## Park-based helpers — derived from spawn + park + await primitives.
-## These are equivalent to the Async.* ops of the same name and exist
-## as plain functions so the Async effect can eventually shrink to
-## just the primitives. For now both paths coexist.
 ## Wait for any of a list of promises to settle, returning the first
 ## non-cancelled outcome as `Result 'a AsyncError`. Losing siblings are
 ## auto-cancelled when the winner commits.
 ##
 ## Built on `park` (suspend until predicate True) + `inspect` (pure
 ## non-blocking state read) + `cancel`.
-## Mezze loops for callbacks that may PARK — `await`, `cancel` under a cooperative
-## scheduler. A native such as `seq::map` cannot be suspended through (V0513 says
-## so for user code; BUG 65 was these very sites), so the helpers below are plain
-## recursion. Inputs are a handful of promises; the recursion is the right tool.
+# Plain recursion, not `seq::map`: the callbacks may wait (`await`, `cancel` under a
+# cooperative scheduler), and these lists are a handful of promises.
 let each_parking = { xs, f } -> match xs is
   [] -> {}
   [x, ...rest] -> do
