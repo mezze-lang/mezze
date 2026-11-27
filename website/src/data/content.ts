@@ -239,10 +239,12 @@ export const features = [
       'Optimised data structures, loop fusion, and safe mutation effect. AOT ~~aubergine:native binaries~~ when you want them.',
   },
   {
-    title: 'First-class ~olive~continuations~',
+    title: 'Control flow is ~olive~userland code~',
     body:
-      'Async, exceptions, and early return are ~~olive:ordinary functions~~ here, not syntax language ' +
-      'had to grow. Write your own control flow and it looks like everyone else\'s.',
+      'Async, exceptions and early return are ~~olive:ordinary handlers~~, not syntax the language ' +
+      'had to grow. Write your own and it looks like everyone else\'s. A handler can answer, stop the ' +
+      'block, or wait. The runtime holds the rest of the program, so nothing leaks, and even the ' +
+      'scheduler is a library you can swap.',
   },
   {
     title: 'A few small pieces, ~onion~reused everywhere~',
