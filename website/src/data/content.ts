@@ -253,7 +253,7 @@ export const features = [
   {
     title: 'Keep the ~lemon~libraries and code~ you already have',
     body:
-      'Call ~~lemon:Java, Kotlin, JavaScript, Python and WebAssembly~~ directly on GraalVM. ' +
+      'Call your Java, Kotlin, JavaScript, Python and WebAssembly ~~lemon:existing code~~ directly on GraalVM. ' +
       'Their errors come back as values, not crashes.',
   },
   {
