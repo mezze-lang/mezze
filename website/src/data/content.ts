@@ -253,10 +253,10 @@ export const features = [
       'fields. Effects are records of functions and so are Abilities. Learn record, variant, effect, ability, and you have the language covered.',
   },
   {
-    title: 'Keep the libraries you already have^TBD^',
+    title: 'Keep the libraries you already have',
     body:
-      'Mezze runs on GraalVM, so calling the Java, Kotlin, Python, and Javascript code you already have ' +
-      'is the plan. Designed, not yet shipped.',
+      'Mezze runs on GraalVM, so it calls the Java, Kotlin, JavaScript, Python and WebAssembly code ' +
+      'you already have. Guest errors come back as values, not crashes.',
   },
   {
     title: 'Distributed computing^TBD^',
