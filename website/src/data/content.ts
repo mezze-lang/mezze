@@ -236,7 +236,7 @@ export const features = [
   {
     title: 'Competitively fast on ~auber~GraalVM~',
     body:
-      'Optimised data structures, loop fusion, and safe mutation effect. AOT ~~aubergine:native binaries~~ when you want them.',
+      'Optimised data structures, loop fusion, and opt in mutation. AOT ~~aubergine:native binaries~~ when you want them.',
   },
   {
     title: 'Control flow is ~olive~userland code~',
@@ -247,13 +247,13 @@ export const features = [
   {
     title: 'A few small pieces, ~onion~reused everywhere~',
     body:
-      'Arguments are ~~onion:records~~, so every call names its fields. Effects and abilities ' +
-      'are records of functions. Learn records, variants, effects and abilities, and that is the language.',
+      'Arguments are ~~onion:records~~, so are effects and abilities. ' +
+      'Learn records, variants, effects and abilities, and that covers the whole language.',
   },
   {
     title: 'Keep the ~mint~libraries~ you already have',
     body:
-      'Call your ~~mint:existing code~~ written in Java, JavaScript, Python or WebAssembly on GraalVM, ' +
+      'Call your ~~mint:existing code~~ written in Java, JavaScript, Python and WebAssembly ' +
       'while keeping the type safety of Mezze.',
   },
   {
