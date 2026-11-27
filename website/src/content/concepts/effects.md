@@ -234,48 +234,9 @@ handler. The handler decides what happens to it, through one name, `cont`:
 | `cont.abort { val }` | **stop.** The rest never runs: the whole `perform` block ends, and `val` is its value. |
 | `cont.park { on, set }` | **wait.** The task sleeps until something holds, other tasks run meanwhile, and it carries on afterwards. |
 
-<!--mezze-editor
-use std::effects::log::{ Console, println }
-
-effect Stock where {
-  take: { item: Str, qty: Int } -> Int <Stock>
-}
-
-# Answer with the quantity, or stop the whole order.
-impl Stock for Shelf where {
-  take = { item, qty } -> if qty > 3 then cont.abort { val = "out of $(item)" } else qty
-}
-
-let order = {} -> do
-  let a = Stock.take { item = "tahini", qty = 2 }
-  let b = Stock.take { item = "olive-oil", qty = 5 }
-  let n = a + b
-  "took $(n.to_str {})"
-
-let main = {} -> perform Console in do
-  println { msg = perform Shelf in order {} }
--->
-
-The first `take` is answered with `2` and `order` carries on. The second is
-too large, so the handler stops it: `order` never reaches its last line, and the
-`perform` block's value is `"out of olive-oil"`. That one line is all an
-exception is.
-
-The runtime keeps the waiting computation; a handler only says what to do with
-it. That is what makes handlers dependable:
-
-- **A handler cannot forget it.** Every handler answers, stops, or waits, so
-  nothing is left hanging.
-- **It continues at most once.** No computation runs twice by accident.
-- **Answering is as cheap as a function call.** Nothing is captured to do it.
-- **Waiting is ordinary code too.** `cont.park` is how `Async` is written:
-  the scheduler is a library, and you choose which one runs.
-
-`cont.resume` and `cont.abort` are the last thing a handler does, because there
-is nothing left for it to do after them. Work that has to happen around a
-whole block, like opening and closing a resource, goes in a performer's
-`initialize_scope` and `finalize_scope`. The [Handlers](/concepts#handlers)
-page covers all of it in depth.
+The runtime holds the waiting computation and the handler only chooses one of
+these, so none is ever left hanging and none continues twice. `Async`,
+exceptions and early return are all handlers written this way.
 
 ## The row can be a variable
 

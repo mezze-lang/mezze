@@ -263,7 +263,7 @@ its parameter `it` too. A `let it` or a pattern binding `it` is an error.
 | `cont` | the rest of the program, inside a handler: `cont.resume`, `cont.abort`, `cont.park` | |
 | `scope` | what `initialize_scope` returned, inside a handler | |
 
-The [Handlers](/concepts#handlers) page covers `cont` and `scope`.
+[Effects](/concepts#effects) says what a handler does with `cont`.
 
 ### `_`
 
