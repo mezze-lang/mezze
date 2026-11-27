@@ -95,7 +95,7 @@ class MatchDestructureHoverTest {
         use std::codec::json::{ FromJson }
         let name_of = { body } -> match body.from_json {} is
           Ok { val = { product = { product_name } } } -> product_name
-          Err { error = _ } -> "?"
+          Err { ... } -> "?"
     """.trimIndent()
 
     private fun hover(needle: String): String? {

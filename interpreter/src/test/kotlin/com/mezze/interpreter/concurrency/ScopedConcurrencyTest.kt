@@ -45,7 +45,7 @@ class ScopedConcurrencyTest {
                     let p = scope_spawn {sc = sc, f = {} -> 42}
                     let r = match await {p = p} is
                         Ok {val} -> val
-                        Err {error = _} -> -1
+                        Err { ... } -> -1
                     r
                 }
         """
@@ -67,13 +67,13 @@ class ScopedConcurrencyTest {
 
                     let r1 = match await {p = p1} is
                         Ok {val} -> val
-                        Err {error = _} -> -1
+                        Err { ... } -> -1
                     let r2 = match await {p = p2} is
                         Ok {val} -> val
-                        Err {error = _} -> -1
+                        Err { ... } -> -1
                     let r3 = match await {p = p3} is
                         Ok {val} -> val
-                        Err {error = _} -> -1
+                        Err { ... } -> -1
 
                     r1 + r2 + r3
                 }
@@ -93,7 +93,7 @@ class ScopedConcurrencyTest {
                     let p = scope_spawn {sc = sc, f = {} -> 100}
                     match await {p = p} is
                         Ok {val} -> val
-                        Err {error = _} -> -1
+                        Err { ... } -> -1
                     "done"
                 }
         """
@@ -128,13 +128,13 @@ class ScopedConcurrencyTest {
                         let p2 = scope_spawn {sc = sc, f = {} -> 20}
                         let r2 = match await {p = p2} is
                             Ok {val} -> val
-                            Err {error = _} -> -1
+                            Err { ... } -> -1
                         r2
                     }
 
                     let r1 = match await {p = p1} is
                         Ok {val} -> val
-                        Err {error = _} -> -1
+                        Err { ... } -> -1
                     r1 + inner_result
                 }
         """
@@ -162,10 +162,10 @@ class ScopedConcurrencyTest {
 
                     let r1 = match await {p = p1} is
                         Ok {val} -> val
-                        Err {error = _} -> -1
+                        Err { ... } -> -1
                     let r2 = match await {p = p2} is
                         Ok {val} -> val
-                        Err {error = _} -> -1
+                        Err { ... } -> -1
 
                     r1 + r2 + result::get_or { result = joined.l, def = 0 } + result::get_or { result = joined.r, def = 0 }
                 }
@@ -185,7 +185,7 @@ class ScopedConcurrencyTest {
                     let p = scope_spawn {sc = sc, f = {} -> 10}
                     let r = match await {p = p} is
                         Ok {val} -> val
-                        Err {error = _} -> -1
+                        Err { ... } -> -1
                     r
                 }
 
@@ -193,7 +193,7 @@ class ScopedConcurrencyTest {
                     let p = scope_spawn {sc = sc, f = {} -> 20}
                     let r = match await {p = p} is
                         Ok {val} -> val
-                        Err {error = _} -> -1
+                        Err { ... } -> -1
                     r
                 }
 
@@ -201,7 +201,7 @@ class ScopedConcurrencyTest {
                     let p = scope_spawn {sc = sc, f = {} -> 30}
                     let r = match await {p = p} is
                         Ok {val} -> val
-                        Err {error = _} -> -1
+                        Err { ... } -> -1
                     r
                 }
 
@@ -232,7 +232,7 @@ class ScopedConcurrencyTest {
 
                     let r = match await {p = p} is
                         Ok {val} -> val
-                        Err {error = _} -> -1
+                        Err { ... } -> -1
                     r
                 }
         """
@@ -253,10 +253,10 @@ class ScopedConcurrencyTest {
 
                     let r1 = match await {p = p1} is
                         Ok {val} -> val
-                        Err {error = _} -> {a = 0, b = 0}
+                        Err { ... } -> {a = 0, b = 0}
                     let r2 = match await {p = p2} is
                         Ok {val} -> val
-                        Err {error = _} -> {a = 0, b = 0}
+                        Err { ... } -> {a = 0, b = 0}
 
                     r1.a + r1.b + r2.a + r2.b
                 }
@@ -277,7 +277,7 @@ class ScopedConcurrencyTest {
                     let p = scope_spawn {sc = sc, f = {} -> 5 * multiplier}
                     let r = match await {p = p} is
                         Ok {val} -> val
-                        Err {error = _} -> -1
+                        Err { ... } -> -1
                     r
                 }
         """
@@ -300,13 +300,13 @@ class ScopedConcurrencyTest {
                             let p3 = scope_spawn {sc = sc, f = {} -> 3}
                             let r3 = match await {p = p3} is
                                 Ok {val} -> val
-                                Err {error = _} -> -1
+                                Err { ... } -> -1
                             let r2 = match await {p = p2} is
                                 Ok {val} -> val
-                                Err {error = _} -> -1
+                                Err { ... } -> -1
                             let r1 = match await {p = p1} is
                                 Ok {val} -> val
-                                Err {error = _} -> -1
+                                Err { ... } -> -1
                             r1 + r2 + r3
                         }
                     }

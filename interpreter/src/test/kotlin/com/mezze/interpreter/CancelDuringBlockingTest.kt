@@ -40,10 +40,10 @@ class CancelDuringBlockingTest {
               sleep { ms = 50 }
               cancel { p = child, reason = CancelUserRequested { msg = "cancel test" } }
               match await { p = child } is
-                Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
+                Err { error = AsyncCancelled { ... } } -> "cancelled"
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"
                 Err { error = AsyncTimedOut { ms } } -> "wrong-timedout"
-                Ok  { val = _ }                      -> "wrong-ok"
+                Ok  { ... }                      -> "wrong-ok"
         """
         return eval(source) as String
     }
@@ -91,10 +91,10 @@ class CancelDuringBlockingTest {
               cancel { p = holder, reason = CancelUserRequested { msg = "cancel test" } }
               await { p = holder }
               match waiter_result is
-                Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
+                Err { error = AsyncCancelled { ... } } -> "cancelled"
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"
                 Err { error = AsyncTimedOut { ms } } -> "wrong-timedout"
-                Ok  { val = _ }                      -> "wrong-ok"
+                Ok  { ... }                      -> "wrong-ok"
         """
         assertEquals("cancelled", eval(source))
     }
@@ -118,10 +118,10 @@ class CancelDuringBlockingTest {
               sleep { ms = 50 }
               cancel { p = waiter, reason = CancelUserRequested { msg = "cancel test" } }
               match await { p = waiter } is
-                Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
+                Err { error = AsyncCancelled { ... } } -> "cancelled"
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"
                 Err { error = AsyncTimedOut { ms } } -> "wrong-timedout"
-                Ok  { val = _ }                      -> "wrong-ok"
+                Ok  { ... }                      -> "wrong-ok"
         """
         assertEquals("cancelled", eval(source))
     }
@@ -142,10 +142,10 @@ class CancelDuringBlockingTest {
               sleep { ms = 50 }
               cancel { p = waiter, reason = CancelUserRequested { msg = "cancel test" } }
               match await { p = waiter } is
-                Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
+                Err { error = AsyncCancelled { ... } } -> "cancelled"
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"
                 Err { error = AsyncTimedOut { ms } } -> "wrong-timedout"
-                Ok  { val = _ }                      -> "wrong-ok"
+                Ok  { ... }                      -> "wrong-ok"
         """
         assertEquals("cancelled", eval(source))
     }
@@ -167,10 +167,10 @@ class CancelDuringBlockingTest {
               sleep { ms = 50 }
               cancel { p = waiter, reason = CancelUserRequested { msg = "cancel test" } }
               match await { p = waiter } is
-                Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
+                Err { error = AsyncCancelled { ... } } -> "cancelled"
                 Err { error = AsyncFailed { msg } }  -> "wrong-failed"
                 Err { error = AsyncTimedOut { ms } } -> "wrong-timedout"
-                Ok  { val = _ }                      -> "wrong-ok"
+                Ok  { ... }                      -> "wrong-ok"
         """
         assertEquals("cancelled", eval(source))
     }

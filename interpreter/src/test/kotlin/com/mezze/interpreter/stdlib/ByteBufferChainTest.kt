@@ -42,7 +42,7 @@ class ByteBufferChainTest {
               .to_bytes {}
               .to_str {} is
               Ok { val } -> val
-              Err { error = _ } -> "decode failed"
+              Err { ... } -> "decode failed"
             """
         ).toString())
     }
@@ -56,7 +56,7 @@ class ByteBufferChainTest {
             use std::collections::bytes
             match buffer::empty {}.write_str { s = "a" }.write_str { s = "b" }.to_bytes {}.to_str {} is
               Ok { val } -> val
-              Err { error = _ } -> "decode failed"
+              Err { ... } -> "decode failed"
             """
         ).toString())
     }
@@ -87,7 +87,7 @@ class ByteBufferChainTest {
               .to_bytes {}
               .to_str {} is
               Ok { val } -> val
-              Err { error = _ } -> "decode failed"
+              Err { ... } -> "decode failed"
             """
         ).toString())
     }

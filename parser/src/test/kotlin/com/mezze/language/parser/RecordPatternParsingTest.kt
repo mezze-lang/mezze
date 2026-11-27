@@ -164,10 +164,10 @@ class RecordPatternParsingTest {
     // ========== Nested Patterns in Record Patterns ==========
 
     @Test
-    fun `parse record pattern with wildcard in field`() {
+    fun `a record pattern ignores the other fields with dots`() {
         val code = """
             match data is
-              { name = _, age } -> age
+              { age, ... } -> age
               _ -> 0
         """.trimIndent()
 
@@ -177,7 +177,9 @@ class RecordPatternParsingTest {
         val matchExpr = (module.decls.first() as ParsedTopLevelExpr).expression as ParsedMatch
         val recordPattern = matchExpr.cases[0].patterns.first() as ParsedRecordPattern
 
-        assertTrue(recordPattern.entries[0].pattern is ParsedWildcardPattern)
+        // `{ field = _ }` is not a thing: leave the field out, end with `...`.
+        assertTrue(recordPattern.isOpen)
+        assertTrue(recordPattern.entries.map { it.name } == listOf("age"))
     }
 
     @Test

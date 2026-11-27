@@ -84,7 +84,7 @@ class JvmCodecContainerTest {
             let f = [7, 8, 9].to_jvm {}
             match f.from_jvm {} is
               Ok { val = back } -> Ok { val = seq::sum { xs = back } }
-              Err { error = _ } -> Ok { val = 0 - 1 }
+              Err { ... } -> Ok { val = 0 - 1 }
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -132,7 +132,7 @@ class JvmCodecContainerTest {
             let back: Result Point DecodeError = f.from_jvm {}
             match back is
               Ok { val = p } -> Ok { val = p.x * 10 + p.y }
-              Err { error = _ } -> Ok { val = 0 - 1 }
+              Err { ... } -> Ok { val = 0 - 1 }
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -192,7 +192,7 @@ class JvmCodecContainerTest {
             let back: Result (Map Str Int) DecodeError = j.from_json {}
             match back is
               Ok { val = m2 } -> Ok { val = map::size { m = m2 } }
-              Err { error = _ } -> Ok { val = 0 - 1 }
+              Err { ... } -> Ok { val = 0 - 1 }
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -214,7 +214,7 @@ class JvmCodecContainerTest {
               Ok { val = m2 } -> match map::get { m = m2, k = "b" } is
                 Some { val = n } -> Ok { val = n }
                 None -> Ok { val = 0 - 1 }
-              Err { error = _ } -> Ok { val = 0 - 2 }
+              Err { ... } -> Ok { val = 0 - 2 }
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -233,7 +233,7 @@ class JvmCodecContainerTest {
             let back: Result (Map Str Int) DecodeError = f.from_jvm {}
             match back is
               Ok { val = m2 } -> Ok { val = map::size { m = m2 } }
-              Err { error = _ } -> Ok { val = 0 - 1 }
+              Err { ... } -> Ok { val = 0 - 1 }
             """.trimIndent()
         )
         val v = assertOk(result)
@@ -317,7 +317,7 @@ class JvmCodecContainerTest {
               let back: Result [Option Int] DecodeError = f.from_jvm {}
               match back is
                 Ok { val = xs } -> Ok { val = seq::size { xs = xs } }
-                Err { error = _ } -> Ok { val = 0 - 1 }
+                Err { ... } -> Ok { val = 0 - 1 }
             main {}
             """.trimIndent()
         )
@@ -342,7 +342,7 @@ class JvmCodecContainerTest {
             let back: Result [Option Int] DecodeError = f.from_jvm {}
             match back is
               Ok { val = xs } -> Ok { val = seq::size { xs = xs } }
-              Err { error = _ } -> Ok { val = 0 - 1 }
+              Err { ... } -> Ok { val = 0 - 1 }
             """.trimIndent()
         )
         val v = assertOk(result)

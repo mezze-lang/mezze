@@ -36,7 +36,7 @@ class HttpDecodeMethodTest {
               let r: Result { name: Str } HttpError = request { url = "u" }.send {}.from_json {}
               match r is
                 Ok { val = { name } } -> name
-                Err { error = _ } -> "e"
+                Err { ... } -> "e"
         """)
         assertEquals("Ada", out)
     }

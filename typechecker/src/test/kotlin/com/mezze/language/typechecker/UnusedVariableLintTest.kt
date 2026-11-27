@@ -35,12 +35,12 @@ class UnusedVariableLintTest {
 
     private fun hasUnusedWarningFor(name: String, code: String): Boolean =
         warningsFor(code).any {
-            it.code == WarningCode.W0101_UNUSED_VARIABLE && it.message.contains("'$name'")
+            it.code == WarningCode.W0101_UNUSED_VARIABLE && it.message.contains("`$name`")
         }
 
     private fun hasUnusedParamWarningFor(name: String, code: String): Boolean =
         warningsFor(code).any {
-            it.code == WarningCode.W0103_UNUSED_PARAMETER && it.message.contains("'$name'")
+            it.code == WarningCode.W0103_UNUSED_PARAMETER && it.message.contains("`$name`")
         }
 
     @Test
@@ -140,7 +140,7 @@ class UnusedVariableLintTest {
                         None -> 0
                 r
         """.trimIndent()
-        assertTrue(warningsFor(code).any { it.code == WarningCode.W0104_UNUSED_PATTERN_BINDING && it.message.contains("'val'") },
+        assertTrue(warningsFor(code).any { it.code == WarningCode.W0104_UNUSED_PATTERN_BINDING && it.message.contains("`val`") },
             "Should warn (W0104) about unused nested match binding 'val'. Warnings: ${warningsFor(code)}")
     }
 
@@ -151,7 +151,7 @@ class UnusedVariableLintTest {
                 let x = 5
                 42
         """.trimIndent()
-        val w = warningsFor(code).firstOrNull { it.message.contains("'x'") }
+        val w = warningsFor(code).firstOrNull { it.message.contains("`x`") }
         assertNotNull(w, "Expected an unused-variable warning for 'x'. Warnings: ${warningsFor(code)}")
         assertTrue(w.code == WarningCode.W0101_UNUSED_VARIABLE,
             "Warning should carry W0101 code, got ${w.code}")

@@ -149,7 +149,7 @@ class InherentMethodDispatchRegressionTest {
      *
      *     match r is
      *       Ok { val } -> val.decode {}.get_or { def = "?" }   // decode : … -> Result Str Str
-     *       Err { error = _ } -> "e"
+     *       Err { ... } -> "e"
      *
      * `val`'s payload TyVar isn't solved at generation time, so the
      * syntactic `getReceiverConcreteType` walk reported the whole
@@ -173,7 +173,7 @@ class InherentMethodDispatchRegressionTest {
               |}
               |let f = { r: Result Wrap Str } -> match r is
               |  Ok { val } -> val.decode {}.get_or { def = "?" }
-              |  Err { error = _ } -> "e"""".trimMargin()
+              |  Err { ... } -> "e"""".trimMargin()
         )
         // A resolved `f : … -> Str` proves the chain dispatched by identity
         // instead of collapsing to a structural field access (T0205).
@@ -198,7 +198,7 @@ class InherentMethodDispatchRegressionTest {
               |  Ok { val } -> do
               |    let d = val.decode {}
               |    d.get_or { def = "?" }
-              |  Err { error = _ } -> "e"""".trimMargin()
+              |  Err { ... } -> "e"""".trimMargin()
         )
         assertEquals(MezzeType.StringType, (r.getVariableType("f") as? MezzeType.FunctionType)?.returnType)
     }

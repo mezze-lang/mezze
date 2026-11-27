@@ -25,7 +25,7 @@ let lookup = { code } ->
 # `from_json` builds its decoder from the fields it pulls apart.
 let name_of = { body } -> match body.from_json {} is
   Ok { val = { product = { product_name } } } -> product_name
-  Err { error = _ } -> "the reply was not what we expected"
+  Err { ... } -> "the reply was not what we expected"
 
 let main = {} -> perform Console in do
   let code = "5050179405767"

@@ -25,10 +25,10 @@ class TryJoinHelpersTest {
                 r = {} -> 20,
               } is
                 Ok  { val = { l, r } }   -> l + r
-                Err { error = _ }        -> -1
+                Err { ... }        -> -1
             } is
               Ok { val } -> val
-              Err { error = _ } -> -1
+              Err { ... } -> -1
         """.trimIndent()
         assertEquals(30L, eval(code))
     }
@@ -45,10 +45,10 @@ class TryJoinHelpersTest {
                 c = {} -> 3,
               } is
                 Ok  { val = { a, b, c } } -> a + b + c
-                Err { error = _ }         -> -1
+                Err { ... }         -> -1
             } is
               Ok { val } -> val
-              Err { error = _ } -> -1
+              Err { ... } -> -1
         """.trimIndent()
         assertEquals(6L, eval(code))
     }
@@ -66,10 +66,10 @@ class TryJoinHelpersTest {
                 let p3 = Async.spawn { f = {} -> 3 }
                 match try_all { ps = [p1, p2, p3] } is
                   Ok  { val = vs }    -> seq::fold { xs = vs, init = 0, f = { acc, x } -> acc + x }
-                  Err { error = _ }   -> -1
+                  Err { ... }   -> -1
             } is
               Ok { val } -> val
-              Err { error = _ } -> -1
+              Err { ... } -> -1
         """.trimIndent()
         assertEquals(6L, eval(code))
     }

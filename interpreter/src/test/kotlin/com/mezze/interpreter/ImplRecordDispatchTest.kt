@@ -226,7 +226,7 @@ class ImplRecordDispatchTest {
               let p = Async.spawn { f = {} -> 42 }
               match p.await {} is
                 Ok { val } -> val
-                Err { error = _ } -> -1
+                Err { ... } -> -1
         """)
         assertEquals(42L, result)
     }

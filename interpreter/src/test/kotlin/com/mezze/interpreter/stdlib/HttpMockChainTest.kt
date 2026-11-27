@@ -45,7 +45,7 @@ class HttpMockChainTest {
 
         let text_of: { resp: Response } -> Str = { resp } -> match body_str { resp = resp } is
           Ok { val } -> val
-          Err { error = _ } -> "could not decode"
+          Err { ... } -> "could not decode"
     """.trimIndent()
 
     private fun run(src: String) = MezzeTestHelper.run("$head\n$src")
@@ -61,7 +61,7 @@ class HttpMockChainTest {
                 perform MockHttpClient { rules = mock_http_rules {}.any { url = "**" } } in
                   match request { url = "http://x/y" }.send {} is
                     Ok { val } -> val.status
-                    Err { error = _ } -> 0 - 1
+                    Err { ... } -> 0 - 1
                 """.trimIndent(),
             ),
         )
@@ -90,7 +90,7 @@ class HttpMockChainTest {
                 perform MockHttpClient { rules = mock_http_rules {}.get { url = "**" }.text { body = "pong" } } in
                   match request { url = "http://x/ping" }.with_method { val = Post }.send {} is
                     Ok { val } -> text_of { resp = val }
-                    Err { error = _ } -> "unmatched"
+                    Err { ... } -> "unmatched"
                 """.trimIndent(),
             ),
         )
@@ -112,7 +112,7 @@ class HttpMockChainTest {
                   .get { url = "**" }.methods { methods = [Post] }.text { body = "posted" } } in
                   match request { url = "http://x/y" }.send {} is
                     Ok { val } -> text_of { resp = val }
-                    Err { error = _ } -> "unmatched"
+                    Err { ... } -> "unmatched"
                 """.trimIndent(),
             ),
         )
@@ -127,7 +127,7 @@ class HttpMockChainTest {
                 perform MockHttpClient { rules = mock_http_rules {}.any { url = "**" }.methods { methods = [Get, Put] }.text { body = "either" } } in
                   match request { url = "http://x/y" }.with_method { val = Put }.send {} is
                     Ok { val } -> text_of { resp = val }
-                    Err { error = _ } -> "unmatched"
+                    Err { ... } -> "unmatched"
                 """.trimIndent(),
             ),
         )
@@ -150,7 +150,7 @@ class HttpMockChainTest {
                 perform MockHttpClient { rules = mock_http_rules {}.any { url = "**" }.status { code = 201 }.text { body = "created" } } in
                   match request { url = "http://x/y" }.send {} is
                     Ok { val } -> "$(int::to_str { n = val.status })|$(text_of { resp = val })"
-                    Err { error = _ } -> "unmatched"
+                    Err { ... } -> "unmatched"
                 """.trimIndent(),
             ),
         )
@@ -165,7 +165,7 @@ class HttpMockChainTest {
                 perform MockHttpClient { rules = mock_http_rules {}.any { url = "**" }.text { body = "accepted" }.status { code = 202 } } in
                   match request { url = "http://x/y" }.send {} is
                     Ok { val } -> "$(int::to_str { n = val.status })|$(text_of { resp = val })"
-                    Err { error = _ } -> "unmatched"
+                    Err { ... } -> "unmatched"
                 """.trimIndent(),
             ),
         )
@@ -185,7 +185,7 @@ class HttpMockChainTest {
                     Ok { val } -> match val.header { name = "content-type" } is
                       Some { val = v } -> v
                       None -> "absent"
-                    Err { error = _ } -> "unmatched"
+                    Err { ... } -> "unmatched"
                 """.trimIndent(),
             ),
         )
@@ -204,9 +204,9 @@ class HttpMockChainTest {
                 """
                 perform MockHttpClient { rules = mock_http_rules {}.any { url = "**" }.times_out { ms = 30 } } in
                   match request { url = "http://x/y" }.send {} is
-                    Ok { val = _ } -> "unexpectedly-ok"
-                    Err { error = HttpTimeout { url = _, ms } } -> "timeout-$(int::to_str { n = ms })"
-                    Err { error = _ } -> "other-error"
+                    Ok { ... } -> "unexpectedly-ok"
+                    Err { error = HttpTimeout { ms, ... } } -> "timeout-$(int::to_str { n = ms })"
+                    Err { ... } -> "other-error"
                 """.trimIndent(),
             ),
         )
@@ -220,9 +220,9 @@ class HttpMockChainTest {
                 """
                 perform MockHttpClient { rules = mock_http_rules {}.any { url = "**" }.unreachable { reason = "reset by peer" } } in
                   match request { url = "http://x/y" }.send {} is
-                    Ok { val = _ } -> "unexpectedly-ok"
-                    Err { error = HttpConnectionFailed { url = _, reason } } -> reason
-                    Err { error = _ } -> "other-error"
+                    Ok { ... } -> "unexpectedly-ok"
+                    Err { error = HttpConnectionFailed { reason, ... } } -> reason
+                    Err { ... } -> "other-error"
                 """.trimIndent(),
             ),
         )
@@ -238,9 +238,9 @@ class HttpMockChainTest {
                     error = HttpRequestFailed { url = "http://x/y", status = 500, body = "boom" },
                   } } in
                   match request { url = "http://x/y" }.send {} is
-                    Ok { val = _ } -> "unexpectedly-ok"
-                    Err { error = HttpRequestFailed { url = _, status, body = _ } } -> int::to_str { n = status }
-                    Err { error = _ } -> "other-error"
+                    Ok { ... } -> "unexpectedly-ok"
+                    Err { error = HttpRequestFailed { status, ... } } -> int::to_str { n = status }
+                    Err { ... } -> "other-error"
                 """.trimIndent(),
             ),
         )
@@ -258,7 +258,7 @@ class HttpMockChainTest {
                     Ok { val } -> match val.header { name = "content-type" } is
                       Some { val = v } -> v
                       None -> "absent"
-                    Err { error = _ } -> "unmatched"
+                    Err { ... } -> "unmatched"
                 """.trimIndent(),
             ),
         )
@@ -288,7 +288,7 @@ class HttpMockChainTest {
                 perform MockHttpClient { rules = mock_get { url = "**", body = "pong" } } in
                   match request { url = "http://x/y" }.send {} is
                     Ok { val } -> "$(int::to_str { n = val.status })|$(text_of { resp = val })"
-                    Err { error = _ } -> "unmatched"
+                    Err { ... } -> "unmatched"
                 """.trimIndent(),
             ),
         )
@@ -304,7 +304,7 @@ class HttpMockChainTest {
                 perform MockHttpClient { rules = mock_post { url = "**", body = "made" } } in
                   match request { url = "http://x/y" }.with_method { val = Post }.send {} is
                     Ok { val } -> "$(int::to_str { n = val.status })|$(text_of { resp = val })"
-                    Err { error = _ } -> "unmatched"
+                    Err { ... } -> "unmatched"
                 """.trimIndent(),
             ),
         )
@@ -321,7 +321,7 @@ class HttpMockChainTest {
                     Ok { val } -> match val.header { name = "content-type" } is
                       Some { val = v } -> v
                       None -> "absent"
-                    Err { error = _ } -> "unmatched"
+                    Err { ... } -> "unmatched"
                 """.trimIndent(),
             ),
         )
@@ -336,7 +336,7 @@ class HttpMockChainTest {
                 perform MockHttpClient { rules = mock_status { url = "**", methods = [Delete], code = 404, body = "gone" } } in
                   match request { url = "http://x/y" }.with_method { val = Delete }.send {} is
                     Ok { val } -> "$(int::to_str { n = val.status })|$(text_of { resp = val })"
-                    Err { error = _ } -> "unmatched"
+                    Err { ... } -> "unmatched"
                 """.trimIndent(),
             ),
         )
@@ -359,7 +359,7 @@ class HttpMockChainTest {
                   let a = request { url = "http://x/users" }.send {}.text_or { def = "?" }
                   let b = match request { url = "http://x/users" }.with_method { val = Post }.send {} is
                     Ok { val } -> int::to_str { n = val.status }
-                    Err { error = _ } -> "unmatched"
+                    Err { ... } -> "unmatched"
                   let c = request { url = "http://x/other" }.send {}.text_or { def = "?" }
                   "$(a)|$(b)|$(c)"
                 """.trimIndent(),
@@ -399,7 +399,7 @@ class HttpMockChainTest {
                 perform MockHttpClient { rules = rules } in do
                   let show = { url } -> match request { url = url }.send {} is
                     Ok { val } -> "$(int::to_str { n = val.status }):$(text_of { resp = val })"
-                    Err { error = _ } -> "unmatched"
+                    Err { ... } -> "unmatched"
                   "$(show { url = "http://x/a" })|$(show { url = "http://x/b" })"
                 """.trimIndent(),
             ),
@@ -417,7 +417,7 @@ class HttpMockChainTest {
                 perform MockHttpClient { rules = rules } in
                   match request { url = "http://x/zzz" }.send {} is
                     Ok { val } -> "$(int::to_str { n = val.status }):$(text_of { resp = val })"
-                    Err { error = _ } -> "unmatched"
+                    Err { ... } -> "unmatched"
                 """.trimIndent(),
             ),
         )
@@ -468,7 +468,7 @@ class HttpMockChainTest {
                   let a = request { url = "http://x/users" }.send {}.text_or { def = "?" }
                   let b = match request { url = "http://x/zzz" }.send {} is
                     Ok { val } -> "$(int::to_str { n = val.status }):$(text_of { resp = val })"
-                    Err { error = _ } -> "unmatched"
+                    Err { ... } -> "unmatched"
                   "$(a)|$(b)"
                 """.trimIndent(),
             ),
@@ -486,8 +486,8 @@ class HttpMockChainTest {
                 perform MockHttpClient { rules = rules } in do
                   let a = request { url = "http://x/a" }.send {}.text_or { def = "?" }
                   let b = match request { url = "http://x/zzz" }.send {} is
-                    Ok { val = _ } -> "answered"
-                    Err { error = _ } -> "unmatched"
+                    Ok { ... } -> "answered"
+                    Err { ... } -> "unmatched"
                   "$(a)|$(b)"
                 """.trimIndent(),
             ),

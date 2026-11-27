@@ -116,9 +116,9 @@ class PromiseMethodsTest {
               # spawn a task that crashes — handler turns it into AsyncFailed
               let p = Async.spawn { f = {} -> crash { msg = "boom" } }
               let q = p.recover { f = { err } -> match err is
-                  AsyncFailed { msg = _ }    -> 999
-                  AsyncCancelled { reason = _ } -> 0
-                  AsyncTimedOut { ms = _ }   -> 0
+                  AsyncFailed { ... }    -> 999
+                  AsyncCancelled { ... } -> 0
+                  AsyncTimedOut { ... }   -> 0
               }
               let r = await { p = q }
               result::get_or { result = r, def = -1 }

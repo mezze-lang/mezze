@@ -25,7 +25,7 @@ class HttpRouterChainTest {
         }
         let body_of: { resp: Response } -> Str = { resp } -> match bytes::to_str { b = resp.body } is
           Ok { val } -> val
-          Err { error = _ } -> "err"
+          Err { ... } -> "err"
 
         let app =
           route { method = Get, path = "/users/:id", handler = { m } ->
@@ -80,7 +80,7 @@ class HttpRouterChainTest {
             let go: {} -> Int <*> = {} -> perform MockHttpServer in do
               let h = match HttpServer.serve { handler = app } is
                 Ok { val = hh } -> hh
-                Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
               h.port
             go {}
         """.trimIndent())

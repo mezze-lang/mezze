@@ -376,6 +376,7 @@ class SyntaxEncoder(private val facts: (Loc) -> HostValue) {
         is ParsedSeqPattern -> Variant("SeqPat", record(
             "elements" to Seq(p.elements.map(::pattern)),
             "rest" to HostValue.str(p.restPattern),
+            "suffix" to HostValue.IntV(p.suffixCount.toLong()),
             "span" to span(p.loc),
         ))
         is ParsedStringInterpPattern -> Variant("StrPat", record(

@@ -96,7 +96,7 @@ class CancellationTokenTest {
 
             let ct = token {}
             match get_reason {token = ct} is
-                Some {val = _} -> False
+                Some { ... } -> False
                 None -> True
         """
         val result = eval(code)
@@ -214,7 +214,7 @@ class CancellationTokenTest {
             cancel_token {token = ct, reason = "Already cancelled"}
             let result = with_cancellation {token = ct, f = {} -> 42}
             match result is
-                Some {val = _} -> False
+                Some { ... } -> False
                 None -> True
         """
         val result = eval(code)

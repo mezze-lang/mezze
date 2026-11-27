@@ -505,7 +505,7 @@ class HttpMockTest {
             perform MockHttpClient { rules = rules } in
                 match request { url = "http://example.com/x" }.send {} is
                     Ok { val } -> get_or { result = body_str { resp = val }, def = "?" }
-                    Err { error = _ } -> "err"
+                    Err { ... } -> "err"
         """)
         assertEquals("hello body", result)
     }

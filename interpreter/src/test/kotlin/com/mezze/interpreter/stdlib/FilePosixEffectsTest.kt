@@ -44,7 +44,7 @@ class FilePosixEffectsTest {
               FileSymlinks.create_symlink { link = "/d/link", target = "/d/real" }
               match FileSymlinks.read_symlink { path = "/d/link" } is
                 Ok { val = t } -> t
-                Err { error = _ } -> "read-failed"
+                Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("/d/real", eval(code))
     }
@@ -57,10 +57,10 @@ class FilePosixEffectsTest {
             perform MemoryFileSystem in perform MemoryFileSymlinks in do
               FileSystem.create_directory { path = "/d" }
               match FileSymlinks.create_symlink { link = "/d/next", target = "/d/not-yet" } is
-                Ok { val = _ } -> match FileSymlinks.is_symlink { path = "/d/next" } is
+                Ok { ... } -> match FileSymlinks.is_symlink { path = "/d/next" } is
                   Ok { val = b } -> if b then "dangling-ok" else "not-a-link"
-                  Err { error = _ } -> "is-symlink-failed"
-                Err { error = _ } -> "create-failed"
+                  Err { ... } -> "is-symlink-failed"
+                Err { ... } -> "create-failed"
         """.trimIndent()
         assertEquals("dangling-ok", eval(code))
     }
@@ -76,9 +76,9 @@ class FilePosixEffectsTest {
                 path = "/d/plain", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate
               }
               match FileSymlinks.read_symlink { path = "/d/plain" } is
-                Ok { val = _ } -> "unexpectedly-ok"
-                Err { error = FsIOError { path = _, message = _ } } -> "not-a-link"
-                Err { error = _ } -> "other-error"
+                Ok { ... } -> "unexpectedly-ok"
+                Err { error = FsIOError { ... } } -> "not-a-link"
+                Err { ... } -> "other-error"
         """.trimIndent()
         assertEquals("not-a-link", eval(code))
     }
@@ -98,8 +98,8 @@ class FilePosixEffectsTest {
               match FileSystem.read_bytes { path = "/d/b" } is
                 Ok { val = b } -> match bytes::to_str { b = b } is
                   Ok { val } -> val
-                  Err { error = _ } -> "utf8-fail"
-                Err { error = _ } -> "read-failed"
+                  Err { ... } -> "utf8-fail"
+                Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("shared", eval(code))
     }
@@ -111,9 +111,9 @@ class FilePosixEffectsTest {
             perform MemoryFileSystem in perform MemoryFileSymlinks in do
               FileSystem.create_directory { path = "/d" }
               match FileSymlinks.create_hardlink { link = "/d/b", target = "/d/nope" } is
-                Ok { val = _ } -> "unexpectedly-ok"
-                Err { error = FsNotFound { path = _ } } -> "not-found"
-                Err { error = _ } -> "other-error"
+                Ok { ... } -> "unexpectedly-ok"
+                Err { error = FsNotFound { ... } } -> "not-found"
+                Err { ... } -> "other-error"
         """.trimIndent()
         assertEquals("not-found", eval(code))
     }
@@ -128,8 +128,8 @@ class FilePosixEffectsTest {
               FileSymlinks.create_symlink { link = "/d/a", target = "/d/b" }
               FileSymlinks.create_symlink { link = "/d/b", target = "/d/a" }
               match FilePermissions.real_path { path = "/d/a", follow_symlinks = True } is
-                Ok { val = _ } -> "unexpectedly-resolved"
-                Err { error = _ } -> "cycle-refused"
+                Ok { ... } -> "unexpectedly-resolved"
+                Err { ... } -> "cycle-refused"
         """.trimIndent()
         assertEquals("cycle-refused", eval(code))
     }
@@ -150,7 +150,7 @@ class FilePosixEffectsTest {
               FilePermissions.set_mode { path = "/d/secret", mode = { owner_read = True, owner_write = True, owner_exec = False, group_read = False, group_write = False, group_exec = False, other_read = False, other_write = False, other_exec = False } }
               match FilePermissions.get_mode { path = "/d/secret" } is
                 Ok { val = m } -> "$(m.owner_read)$(m.owner_write)$(m.group_read)$(m.other_read)"
-                Err { error = _ } -> "get-failed"
+                Err { ... } -> "get-failed"
         """.trimIndent()
         assertEquals("truetruefalsefalse", eval(code))
     }
@@ -170,7 +170,7 @@ class FilePosixEffectsTest {
               }
               match FilePermissions.get_owner { path = "/d/f" } is
                 Ok { val = o } -> "$(o.user):$(o.group)"
-                Err { error = _ } -> "get-failed"
+                Err { ... } -> "get-failed"
         """.trimIndent()
         assertEquals("deploy:web", eval(code))
     }
@@ -188,7 +188,7 @@ class FilePosixEffectsTest {
               FilePermissions.set_modified { path = "/d/f", millis = 1234567 }
               match FileSystem.stat { path = "/d/f", follow_symlinks = True } is
                 Ok { val = s } -> s.modified
-                Err { error = _ } -> 0
+                Err { ... } -> 0
         """.trimIndent()
         assertEquals(1234567L, eval(code))
     }
@@ -199,9 +199,9 @@ class FilePosixEffectsTest {
             use std::effects::filesystem::{ FilePermissions, MemoryFileSystem, MemoryFilePermissions, WriteMode }
             perform MemoryFileSystem in perform MemoryFilePermissions in
               match FilePermissions.get_mode { path = "/nope" } is
-                Ok { val = _ } -> "unexpectedly-ok"
-                Err { error = FsNotFound { path = _ } } -> "not-found"
-                Err { error = _ } -> "other-error"
+                Ok { ... } -> "unexpectedly-ok"
+                Err { error = FsNotFound { ... } } -> "not-found"
+                Err { ... } -> "other-error"
         """.trimIndent()
         assertEquals("not-found", eval(code))
     }
@@ -223,8 +223,8 @@ class FilePosixEffectsTest {
               match FileSymlinks.read_symlink { path = "$link" } is
                 Ok { val = t } -> match FileSymlinks.is_symlink { path = "$link" } is
                   Ok { val = b } -> if b then t else "not-a-link"
-                  Err { error = _ } -> "is-symlink-failed"
-                Err { error = _ } -> "read-failed"
+                  Err { ... } -> "is-symlink-failed"
+                Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals(real, eval(code))
     }
@@ -236,9 +236,9 @@ class FilePosixEffectsTest {
             use std::effects::filesystem::{ FileSymlinks, LocalFileSymlinks, WriteMode }
             perform LocalFileSymlinks in
               match FileSymlinks.is_symlink { path = "$path" } is
-                Ok { val = _ } -> "unexpectedly-ok"
-                Err { error = FsNotFound { path = _ } } -> "not-found"
-                Err { error = _ } -> "other-error"
+                Ok { ... } -> "unexpectedly-ok"
+                Err { error = FsNotFound { ... } } -> "not-found"
+                Err { ... } -> "other-error"
         """.trimIndent()
         assertEquals("not-found", eval(code))
     }
@@ -256,7 +256,7 @@ class FilePosixEffectsTest {
               FilePermissions.set_mode { path = "$path", mode = { owner_read = True, owner_write = True, owner_exec = False, group_read = False, group_write = False, group_exec = False, other_read = False, other_write = False, other_exec = False } }
               match FilePermissions.get_mode { path = "$path" } is
                 Ok { val = m } -> "$(m.owner_read)$(m.owner_write)$(m.group_read)$(m.other_read)"
-                Err { error = _ } -> "get-failed"
+                Err { ... } -> "get-failed"
         """.trimIndent()
         assertEquals("truetruefalsefalse", eval(code))
     }
@@ -275,7 +275,7 @@ class FilePosixEffectsTest {
               FileSymlinks.create_symlink { link = "$link", target = "$real" }
               match FilePermissions.real_path { path = "$link", follow_symlinks = True } is
                 Ok { val = p } -> if p == "$real" then "resolved" else "unexpected: $(p)"
-                Err { error = _ } -> "real-path-failed"
+                Err { ... } -> "real-path-failed"
         """.trimIndent()
         assertEquals("resolved", eval(code))
     }
@@ -293,7 +293,7 @@ class FilePosixEffectsTest {
               FilePermissions.set_modified { path = "$path", millis = 1700000000000 }
               match FileSystem.stat { path = "$path", follow_symlinks = True } is
                 Ok { val = s } -> s.modified
-                Err { error = _ } -> 0
+                Err { ... } -> 0
         """.trimIndent()
         assertEquals(1700000000000L, eval(code))
     }

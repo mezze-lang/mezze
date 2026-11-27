@@ -9,9 +9,10 @@ fun WarningCode.explain(): String = when (this) {
         "`_` is only a pattern wildcard.)"
 
     WarningCode.W0104_UNUSED_PATTERN_BINDING ->
-        "A pattern binds a name that is never used. Write `_` in its place — the wildcard " +
-        "binds nothing. A field written in short form `{ val }` becomes `{ val = _ }`. " +
-        "A `_`-prefixed name like `_x` is an ordinary name and is not exempt."
+        "A pattern binds a name that is never used. For a record field, leave the field out " +
+        "and end the pattern with `...` (`Ok { ... }`, `{ a, ... }`). For one positional value " +
+        "(a list element, a `$(…)` string hole) write `_`. For a list's tail `...rest`, write " +
+        "`...` without a name. A name starting with `_` is an ordinary name and is not exempt."
 
     WarningCode.W0103_UNUSED_PARAMETER ->
         "A lambda's parameter is never used. A parameter is not a free name: a " +

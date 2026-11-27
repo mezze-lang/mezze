@@ -7,7 +7,7 @@ import com.mezze.language.parser.internal.lib.*
 // Let binding pattern parser (for irrefutable patterns in let bindings)
 internal val MezzeParser.letBindingPattern: Parser<ParsedPattern>
     get() = parser@{ stream ->
-        // `let _ = expr` binds nothing. `_` is a PATTERN wildcard (`Err { error = _ }`,
+        // `let _ = expr` binds nothing. `_` is a PATTERN wildcard for one positional value (`[_, b]`,
         // `_ -> …`; `let { a, ... } = r` ignores the rest of a record); a whole `let` of it is either an
         // expression statement wearing a binding (in a `do`, write the expression on
         // its own: its effects run and its value is dropped) or, at the top level,
@@ -16,7 +16,7 @@ internal val MezzeParser.letBindingPattern: Parser<ParsedPattern>
             return@parser ParseResult.Failure(
                 "`let _ = …` binds nothing. Inside a `do`, write the expression on its own line: " +
                     "it still runs, and its value is dropped. At the top level there is nothing to " +
-                    "run, so remove it. `_` is for patterns: `Err { error = _ }`, `_ -> …`.",
+                    "run, so remove it. `_` is for patterns: `[_, b]`, `_ -> …`.",
                 stream.getSourcePosition(),
                 stream.getSourceLine(),
                 stream.getSourceColumn(),
@@ -101,142 +101,73 @@ internal val MezzeParser.variablePatternForLet: Parser<ParsedPattern>
         }
     }
 
-// Array pattern parser
+// Array pattern parser.
+//
+//   []                 empty            [a, b]           exactly 2
+//   [first, ...]       1 or more        [first, ...rest] 1 or more, `rest` = the tail
+//   [first, ..., last] 2 or more        [..., last]      1 or more
+//
+// `_` is one positional element; `...` is "the rest": at most once, anywhere, and
+// unnamed unless it is last (only a tail is a list worth binding).
 internal val MezzeParser.seqPattern: Parser<ParsedPattern>
-    get() = { stream ->
+    get() = parser@{ stream ->
         val lbracket = tok(TokenType.LBRACKET)(stream)
-        when (lbracket) {
-            is ParseResult.Success -> {
-                val stream1 = skipNewlines(lbracket.remaining)
-                val file = currentFile ?: "<unknown>"
+        if (lbracket !is ParseResult.Success) return@parser lbracket as ParseResult.Failure
+        val file = currentFile ?: "<unknown>"
+        fun fatal(at: TokenStream, msg: String): ParseResult.Failure =
+            ParseResult.Failure(msg, at.getSourcePosition(), at.getSourceLine(), at.getSourceColumn(), isFatal = true)
 
-                if (stream1.current()?.type == TokenType.RBRACKET) {
-                    val loc = spanLoc(lbracket.value, stream1.current()!!, file)
-                    ParseResult.Success(
-                        ParsedSeqPattern(emptyList(), null, loc),
-                        stream1.advance()
-                    )
-                } else {
-                    // Use recursive parsing approach to avoid labeled returns in loops
-                    fun parseSeqElements(
-                        s: TokenStream,
-                        accum: List<ParsedPattern>
-                    ): ParseResult<Pair<List<ParsedPattern>, Pair<String?, TokenStream>>> {
-                        return if (s.current()?.type == TokenType.ELLIPSIS) {
-                            val ellipsisStream = s.advance()
-                            val afterEllipsis = skipNewlines(ellipsisStream)
-
-                            val restName = identifierParser(ellipsisStream)
-                            when (restName) {
-                                is ParseResult.Success -> {
-                                    // Named rest pattern: [x, ...tail] or [x, ...tail,]
-                                    val name = restName.value.text
-                                    val remaining = skipNewlines(restName.remaining)
-                                    // Allow optional trailing comma after rest pattern
-                                    val afterRest = if (remaining.current()?.type == TokenType.COMMA) {
-                                        skipNewlines(remaining.advance())
-                                    } else {
-                                        remaining
-                                    }
-                                    // Rest pattern must be last - check that ] follows
-                                    if (afterRest.current()?.type != TokenType.RBRACKET) {
-                                        afterRest.failure(
-                                            "Rest pattern (...$name) must be the last element in a seq pattern. " +
-                                            "Use [elem1, elem2, ...rest] to match elements at the start and capture the rest."
-                                        )
-                                    } else {
-                                        ParseResult.Success(Pair(accum, Pair(name, afterRest)), afterRest)
-                                    }
-                                }
-                                is ParseResult.Failure -> {
-                                    // `..._` is the tail-ignoring rest: it matches the remaining
-                                    // elements (so the pattern covers length >= elements.size) but
-                                    // binds nothing. It parses as PLACEHOLDER, not an identifier, so
-                                    // it lands here. We record it as the sentinel rest name "_" so the
-                                    // AST can distinguish a fixed-length pattern (restPattern == null)
-                                    // from an open one — exhaustiveness checking depends on this.
-                                    if (afterEllipsis.current()?.type == TokenType.PLACEHOLDER) {
-                                        val afterUnderscore = skipNewlines(afterEllipsis.advance())
-                                        val afterRest = if (afterUnderscore.current()?.type == TokenType.COMMA) {
-                                            skipNewlines(afterUnderscore.advance())
-                                        } else {
-                                            afterUnderscore
-                                        }
-                                        if (afterRest.current()?.type != TokenType.RBRACKET) {
-                                            afterRest.failure(
-                                                "Rest pattern (..._) must be the last element in a seq pattern. " +
-                                                "Use [elem1, elem2, ..._] to match the start and ignore the rest."
-                                            )
-                                        } else {
-                                            ParseResult.Success(Pair(accum, Pair("_", afterRest)), afterRest)
-                                        }
-                                    } else {
-                                        // A bare anonymous `...` is not allowed: it makes a
-                                        // fixed-length pattern indistinguishable from an open one.
-                                        // Require a name (`...rest`) to capture the tail, or `..._`
-                                        // to match-and-ignore it.
-                                        ellipsisStream.failure(
-                                            "A rest pattern needs a name: use [first, ...rest] to capture the " +
-                                            "remaining elements, or [first, ..._] to match and ignore them. " +
-                                            "A bare `...` is not allowed because it would hide the seq's length."
-                                        )
-                                    }
-                                }
-                            }
-                        } else if (s.current()?.type == TokenType.RBRACKET) {
-                            ParseResult.Success(Pair(accum, Pair(null, s)), s)
-                        } else {
-                            val pattern = patternParser(s)
-                            when (pattern) {
-                                is ParseResult.Success -> {
-                                    val newAccum = accum + pattern.value
-                                    val afterPattern = skipNewlines(pattern.remaining)
-
-                                    when (afterPattern.current()?.type) {
-                                        TokenType.COMMA -> {
-                                            val afterComma = skipNewlines(afterPattern.advance())
-                                            if (afterComma.current()?.type == TokenType.RBRACKET) {
-                                                ParseResult.Success(Pair(newAccum, Pair(null, afterComma)), afterComma)
-                                            } else {
-                                                parseSeqElements(afterComma, newAccum)
-                                            }
-                                        }
-                                        TokenType.RBRACKET -> {
-                                            ParseResult.Success(Pair(newAccum, Pair(null, afterPattern)), afterPattern)
-                                        }
-                                        else -> afterPattern.failure(
-                                            "Expected ',' to continue seq pattern or ']' to end it, but got ${tokenGotDescription(afterPattern.current())}"
-                                        )
-                                    }
-                                }
-                                is ParseResult.Failure -> pattern
-                            }
-                        }
+        val elements = mutableListOf<ParsedPattern>()
+        var restName: String? = null
+        var restIndex = -1
+        var s = skipNewlines(lbracket.remaining)
+        while (s.current()?.type != TokenType.RBRACKET) {
+            if (s.current()?.type == TokenType.ELLIPSIS) {
+                if (restName != null) return@parser fatal(s,
+                    "A list pattern can have only one `...`: with two, which elements each one takes would be ambiguous.")
+                val afterDots = s.advance()
+                when (afterDots.current()?.type) {
+                    TokenType.PLACEHOLDER -> return@parser fatal(afterDots,
+                        "Write `...` on its own to ignore the rest: `..._` is not a thing (`_` is one element, `...` is the rest).")
+                    TokenType.IDENTIFIER -> {
+                        val ident = identifierParser(afterDots) as? ParseResult.Success
+                            ?: return@parser fatal(afterDots, "Expected a name after `...`")
+                        val name = ident.value.text
+                        checkReservedName(name)?.let { return@parser fatal(afterDots, it) }
+                        var next = skipNewlines(ident.remaining)
+                        if (next.current()?.type == TokenType.COMMA) next = skipNewlines(next.advance())
+                        if (next.current()?.type != TokenType.RBRACKET) return@parser fatal(next,
+                            "A named rest (`...$name`) must be the last element: it binds the tail of the list. " +
+                                "To skip elements in the middle, write `...` without a name: `[first, ..., last]`.")
+                        restName = name; restIndex = elements.size
+                        s = next
+                        continue
                     }
-
-                    val elementsResult = parseSeqElements(stream1, emptyList())
-                    when (elementsResult) {
-                        is ParseResult.Success -> {
-                            val (elements, restAndStream) = elementsResult.value
-                            val (restPat, currentStream) = restAndStream
-                            val rbracket = tok(TokenType.RBRACKET)(currentStream)
-                            when (rbracket) {
-                                is ParseResult.Success -> {
-                                    val loc = spanLoc(lbracket.value, rbracket.value, file)
-                                    ParseResult.Success(
-                                        ParsedSeqPattern(elements, restPat, loc),
-                                        rbracket.remaining
-                                    )
-                                }
-                                is ParseResult.Failure -> rbracket
-                            }
-                        }
-                        is ParseResult.Failure -> elementsResult
+                    else -> {
+                        restName = ParsedSeqPattern.IGNORED_REST; restIndex = elements.size
+                        s = skipNewlines(afterDots)
                     }
                 }
+            } else {
+                val pattern = patternParser(s)
+                if (pattern !is ParseResult.Success) return@parser pattern as ParseResult.Failure
+                elements += pattern.value
+                s = skipNewlines(pattern.remaining)
             }
-            is ParseResult.Failure -> lbracket
+            when (s.current()?.type) {
+                TokenType.COMMA -> s = skipNewlines(s.advance())
+                TokenType.RBRACKET -> {}
+                else -> return@parser s.failure(
+                    "Expected ',' to continue the list pattern or ']' to end it, but got ${tokenGotDescription(s.current())}"
+                )
+            }
         }
+        val rbracket = s.current()!!
+        val suffix = if (restName == null) 0 else elements.size - restIndex
+        ParseResult.Success(
+            ParsedSeqPattern(elements.toList(), restName, spanLoc(lbracket.value, rbracket, file), suffixCount = suffix),
+            s.advance(),
+        )
     }
 
 // Pattern parser (main entry point)
@@ -319,7 +250,8 @@ internal val MezzeParser.standaloneRecordPattern: Parser<ParsedPattern>
                             afterComma
                         }
 
-                        val nestedOr = nestedOrPatternError(stream3)
+                        val nestedOr = (if (isOpen) recordRestMisuse(stream3) else null)
+                            ?: nestedOrPatternError(stream3)
                         val rbrace = nestedOr ?: tok(TokenType.RBRACE)(stream3)
 
                         when (rbrace) {
@@ -339,6 +271,25 @@ internal val MezzeParser.standaloneRecordPattern: Parser<ParsedPattern>
             is ParseResult.Failure -> lbrace
         }
     }
+
+
+/**
+ * What may follow a record pattern's `...`: only `}`. A record pattern names the fields
+ * it needs and ends with `...` to ignore the rest — records are not sliced, so there is
+ * no `...rest`, and `...` is always last (fields have no order, one spelling).
+ */
+internal fun recordRestMisuse(afterDots: TokenStream): ParseResult.Failure? {
+    fun fatal(msg: String) = ParseResult.Failure(
+        msg, afterDots.getSourcePosition(), afterDots.getSourceLine(), afterDots.getSourceColumn(), isFatal = true)
+    return when (afterDots.current()?.type) {
+        TokenType.IDENTIFIER -> fatal(
+            "A record pattern cannot bind its remaining fields: `...${afterDots.current()!!.text}` is not a thing. " +
+                "Name the fields you need and end with `...`: `{ a, ... }`.")
+        TokenType.PLACEHOLDER -> fatal("Write `...` on its own to ignore the remaining fields: `..._` is not a thing.")
+        TokenType.COMMA -> fatal("`...` always comes last in a record pattern: write `{ a, b, ... }`.")
+        else -> null
+    }
+}
 
 // Wildcard pattern parser
 internal val MezzeParser.wildcardPattern: Parser<ParsedPattern>
@@ -524,41 +475,16 @@ internal val MezzeParser.constructorPattern: Parser<ParsedPattern>
                             }
                         }
                         next?.type == TokenType.IDENTIFIER -> {
-                            // Shorthand pattern: Some x (means Some {value = x})
-                            val varPat = identifierParser(stream1)
-                            when (varPat) {
-                                is ParseResult.Success -> {
-                                    val name = varPat.value.text
-                                    val reservedError = checkReservedName(name)
-                                    if (reservedError != null) {
-                                        ParseResult.Failure(
-                                            reservedError,
-                                            varPat.remaining.getSourcePosition(),
-                                            varPat.value.line,
-                                            varPat.value.column
-                                        )
-                                    } else {
-                                        val varLoc = tokenLoc(varPat.value, file)
-                                        val innerPattern = ParsedRecordPattern(
-                                            listOf(
-                                                ParsedRecordPatternEntry("value", ParsedVariablePattern(name, varLoc), varLoc)
-                                            ),
-                                            false,
-                                            varLoc
-                                        )
-                                        val ctorLoc = spanLoc(ident.value, varPat.value, file)
-                                        ParseResult.Success(
-                                            ParsedConstructorPattern(
-                                                ident.value.text,
-                                                innerPattern,
-                                                ctorLoc
-                                            ),
-                                            varPat.remaining
-                                        )
-                                    }
-                                }
-                                is ParseResult.Failure -> varPat
-                            }
+                            // `Some x` is not a pattern: a variant's payload is always a tagged
+                            // record, so it is matched as one.
+                            val name = ident.value.text
+                            val v = stream1.current()!!.text
+                            ParseResult.Failure(
+                                "`$name $v` is not a pattern: a variant's payload is a record, matched as one — " +
+                                    "`$name { field = $v }`, `$name { field }` when the names match, or `$name { ... }` to ignore it.",
+                                stream1.getSourcePosition(), stream1.getSourceLine(), stream1.getSourceColumn(),
+                                isFatal = true,
+                            )
                         }
                         else -> {
                             ParseResult.Success(
@@ -640,7 +566,8 @@ internal val MezzeParser.recordPatternParser: Parser<ParsedRecordPattern>
                             afterComma
                         }
 
-                        val nestedOr = nestedOrPatternError(stream3)
+                        val nestedOr = (if (isOpen) recordRestMisuse(stream3) else null)
+                            ?: nestedOrPatternError(stream3)
                         val rbrace = nestedOr ?: tok(TokenType.RBRACE)(stream3)
 
                         when (rbrace) {
@@ -688,10 +615,21 @@ internal val MezzeParser.recordPatternEntryParser: Parser<ParsedRecordPatternEnt
                             // field = pattern
                             val pattern = patternParser(assign.remaining)
                             when (pattern) {
-                                is ParseResult.Success -> ParseResult.Success(
-                                    ParsedRecordPatternEntry(fieldName, pattern.value, fieldLoc),
-                                    pattern.remaining
-                                )
+                                is ParseResult.Success ->
+                                    // A record field is named, so it is ignored by leaving it out
+                                    // and ending with `...` — `_` is one POSITIONAL value.
+                                    if (pattern.value is ParsedWildcardPattern) ParseResult.Failure(
+                                        "`$fieldName = _` is not a thing: to ignore a field, leave it out and end the " +
+                                            "pattern with `...` (e.g. `Err { ... }`, `{ a, ... }`).",
+                                        assign.remaining.getSourcePosition(),
+                                        assign.remaining.getSourceLine(),
+                                        assign.remaining.getSourceColumn(),
+                                        isFatal = true,
+                                    )
+                                    else ParseResult.Success(
+                                        ParsedRecordPatternEntry(fieldName, pattern.value, fieldLoc),
+                                        pattern.remaining
+                                    )
                                 is ParseResult.Failure -> pattern
                             }
                         }

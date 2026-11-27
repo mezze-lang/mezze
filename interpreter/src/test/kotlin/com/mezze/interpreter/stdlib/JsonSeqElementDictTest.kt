@@ -50,7 +50,7 @@ class JsonSeqElementDictTest {
         $head
         let go: {} -> Str = {} -> match bytes::to_str { b = to_bytes { json = $expr } } is
           Ok { val } -> val
-          Err { error = _ } -> "undecodable"
+          Err { ... } -> "undecodable"
         go {}
         """.trimIndent(),
     )
@@ -84,7 +84,7 @@ class JsonSeqElementDictTest {
               let rows = seq::map { xs = seq::range { start = 1, end = 4 }, f = { x } -> x * 2 }
               match bytes::to_str { b = to_bytes { json = rows.to_json {} } } is
                 Ok { val } -> val
-                Err { error = _ } -> "undecodable"
+                Err { ... } -> "undecodable"
             go {}
             """.trimIndent(),
         )

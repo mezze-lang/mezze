@@ -266,6 +266,7 @@ internal fun ExpressionConstraintGenerator.generateMatch(expr: ParsedMatch, cont
                         name = varName,
                         loc = patternLocation,
                         kind = ConstraintResult.BindingKind.PATTERN,
+                        slot = patternSlotOf(matchCase.patterns, varName) ?: PatternSlot.POSITION,
                     )
                 )
             }
@@ -415,6 +416,8 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
     // processed (a name may be referenced by a *later* statement, so the check
     // can only run once the whole block has been generated).
     val letBindings = mutableListOf<Pair<String, Loc?>>()
+    // A `let` that destructures (`let { a, b } = r`): its names are pattern bindings.
+    val letPatternSlots = HashMap<String, PatternSlot>()
 
     // #86 case-A shadowing: names bound by THIS do-block's own `let`s. Kept
     // local (not in the context) so a NESTED do-block starts fresh — reusing an
@@ -806,6 +809,7 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
                 // once the whole block is generated. No name is exempt: an unused
                 // value is not bound at all (write the expression as a statement).
                 for (varName in variableNames) {
+                    if (stmt.pattern !is ParsedVariablePattern) patternSlotOf(listOf(stmt.pattern), varName)?.let { letPatternSlots[varName] = it }
                     letBindings.add(varName to (patternResult.bindingLocations[varName] ?: stmt.loc))
                 }
             }
@@ -835,7 +839,12 @@ internal fun ExpressionConstraintGenerator.generateDo(expr: ParsedDo, context: C
     // has accumulated every referenced name across the whole block by now.
     for ((varName, loc) in letBindings) {
         if (varName !in collector.usedVars) {
-            collector.unusedVars.add(ConstraintResult.UnusedVariable(name = varName, loc = loc))
+            val slot = letPatternSlots[varName]
+            collector.unusedVars.add(ConstraintResult.UnusedVariable(
+                name = varName, loc = loc,
+                kind = if (slot != null) ConstraintResult.BindingKind.PATTERN else ConstraintResult.BindingKind.LET,
+                slot = slot,
+            ))
         }
     }
 

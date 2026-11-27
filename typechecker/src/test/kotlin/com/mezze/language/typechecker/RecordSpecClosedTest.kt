@@ -156,7 +156,7 @@ class RecordSpecClosedTest : VariantSpecBase() {
             use std::int
             pub let f = { r: { x: Int, y: Int } } -> match r is
               { x = 1 } -> 10
-              { x = _, y = _ } -> 20
+              { ... } -> 20
             $MAIN
             """,
             "V0602",
@@ -174,7 +174,7 @@ class RecordSpecClosedTest : VariantSpecBase() {
             use std::int
             pub let f = { r: { x: Int, y: Int } } -> match r is
               { x = 1, ... } -> 10
-              { x = _, ... } -> 20
+              { ... } -> 20
             $MAIN
             """,
             "Same two arms, with the ignoring made explicit. Pairs with the rejection " +

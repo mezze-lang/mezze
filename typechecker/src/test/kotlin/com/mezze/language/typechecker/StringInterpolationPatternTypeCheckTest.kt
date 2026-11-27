@@ -477,7 +477,7 @@ class StringInterpolationPatternTypeCheckTest {
             let parse_opt = {opt} ->
                 match opt is
                     Some {val = "$(name)@$(domain)"} -> { name = name, domain = domain }
-                    Some {val = _} -> { name = "", domain = "" }
+                    Some { ... } -> { name = "", domain = "" }
                     None -> { name = "", domain = "" }
             let result = parse_opt {opt = Some {val = "user@example.com"}}
         """.trimIndent()
@@ -491,7 +491,7 @@ class StringInterpolationPatternTypeCheckTest {
         val code = """
             let parse_first = {strs: [Str]} ->
                 match strs is
-                    ["$(first)-$(second)", ..._] -> { a = first, b = second }
+                    ["$(first)-$(second)", ...] -> { a = first, b = second }
                     _ -> { a = "", b = "" }
             let result = parse_first {strs = ["hello-world", "foo-bar"]}
         """.trimIndent()

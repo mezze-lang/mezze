@@ -61,7 +61,7 @@ let mathAndCompare = { mode, x, y } -> match mode is
 
 
 let withWildcard = { opt, x, y } -> match opt is
-  Some { val = _ } -> x + y
+  Some { ... } -> x + y
   _ -> x - y
 
 

@@ -53,7 +53,7 @@ class SqliteDbTest {
                    .bind { v = DbFloat { val = 9.5 } }
                    .bind { v = DbInt { val = 1 } } } is
               Ok { val = o } -> o.changed
-              Err { error = _ } -> -1
+              Err { ... } -> -1
             """.trimIndent(),
         )
         assertEquals(1L, r, "one insert changed one row")
@@ -71,7 +71,7 @@ class SqliteDbTest {
               Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                 Some { val = DbStr { val = s } } -> s
                 _ -> "wrong type"
-              Err { error = _ } -> "failed"
+              Err { ... } -> "failed"
             """.trimIndent(),
         )
         assertEquals("ada", r)
@@ -90,7 +90,7 @@ class SqliteDbTest {
               Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                 Some { val = DbStr { val = s } } -> if s == nasty then 1 else 2
                 _ -> 3
-              Err { error = _ } -> 4
+              Err { ... } -> 4
             """.trimIndent(),
         )
         assertEquals(1L, r, "the table survived and the text was stored verbatim")
@@ -103,7 +103,7 @@ class SqliteDbTest {
             Db.apply { q = sql { text = "insert into users (name) values ('ada')" } }
             match Db.run { q = sql { text = "select id, name, score from users" } } is
               Ok { val = rows } -> str::join { strings = rows.cols, separator = "," }
-              Err { error = _ } -> "failed"
+              Err { ... } -> "failed"
             """.trimIndent(),
         )
         assertEquals("id,name,score", r)
@@ -115,7 +115,7 @@ class SqliteDbTest {
             """
             match Db.run { q = sql { text = "select * from users where id = ?" }.bind { v = DbInt { val = 999 } } } is
               Ok { val = rows } -> if is_empty { rows = rows } then 0 else row_count { rows = rows }
-              Err { error = _ } -> -1
+              Err { ... } -> -1
             """.trimIndent(),
         )
         assertEquals(0L, r, "not found is an answer, not a failure")
@@ -131,7 +131,7 @@ class SqliteDbTest {
                 match seq::get { xs = x, i = 0 } is
                   Some { val = DbInt { val = n } } -> (acc * 10) + n
                   _ -> acc }
-              Err { error = _ } -> -1
+              Err { ... } -> -1
             """.trimIndent(),
         )
         assertEquals(123L, r)
@@ -150,7 +150,7 @@ class SqliteDbTest {
                   Some { val = DbFloat { val = f } } -> if f == 2.5 then n else -2
                   _ -> -3
                 _ -> -4
-              Err { error = _ } -> -1
+              Err { ... } -> -1
             """.trimIndent(),
         )
         assertEquals(7L, r)
@@ -164,9 +164,9 @@ class SqliteDbTest {
             match Db.run { q = sql { text = "select name from users" } } is
               Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                 Some { val = DbNull } -> 1
-                Some { val = _ } -> 2
+                Some { ... } -> 2
                 None -> 3
-              Err { error = _ } -> 4
+              Err { ... } -> 4
             """.trimIndent(),
         )
         assertEquals(1L, r, "the cell is present and holds null — which is not the same as absent")
@@ -182,7 +182,7 @@ class SqliteDbTest {
               Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                 Some { val = DbInt { val = n } } -> n
                 _ -> -2
-              Err { error = _ } -> -1
+              Err { ... } -> -1
             """.trimIndent(),
         )
         assertEquals(1L, r)
@@ -202,7 +202,7 @@ class SqliteDbTest {
                 Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                   Some { val = DbBytes { val = b } } -> bytes::size { b = b }
                   _ -> -2
-                Err { error = _ } -> -1
+                Err { ... } -> -1
             main {}
             """.trimIndent(),
         )
@@ -216,9 +216,9 @@ class SqliteDbTest {
         val r = onMemory(
             """
             match Db.run { q = sql { text = "select * from no_such_table" } } is
-              Ok { val = _ } -> "unexpectedly succeeded"
-              Err { error = DbRejected { sql = s, msg = _ } } -> s
-              Err { error = _ } -> "wrong error kind"
+              Ok { ... } -> "unexpectedly succeeded"
+              Err { error = DbRejected { sql = s, ... } } -> s
+              Err { ... } -> "wrong error kind"
             """.trimIndent(),
         )
         assertEquals(
@@ -236,7 +236,7 @@ class SqliteDbTest {
             Db.run { q = sql { text = "select * from no_such_table" } }
             match Db.run { q = sql { text = "select 1" } } is
               Ok { val = rows } -> row_count { rows = rows }
-              Err { error = _ } -> -1
+              Err { ... } -> -1
             """.trimIndent(),
         )
         assertEquals(1L, r)
@@ -249,9 +249,9 @@ class SqliteDbTest {
             $head
             let main = {} -> perform SqliteDb { path = "/nonexistent-directory-xyz/db.sqlite" } in
               match Db.run { q = sql { text = "select 1" } } is
-                Ok { val = _ } -> "unexpectedly succeeded"
-                Err { error = DbUnavailable { msg = _ } } -> "unavailable"
-                Err { error = _ } -> "wrong error kind"
+                Ok { ... } -> "unexpectedly succeeded"
+                Err { error = DbUnavailable { ... } } -> "unavailable"
+                Err { ... } -> "wrong error kind"
             main {}
             """.trimIndent(),
         )
@@ -275,7 +275,7 @@ class SqliteDbTest {
               Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                 Some { val = DbInt { val = n } } -> n
                 _ -> -2
-              Err { error = _ } -> -1
+              Err { ... } -> -1
             """.trimIndent(),
         )
         assertEquals(2L, r)
@@ -294,7 +294,7 @@ class SqliteDbTest {
               Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                 Some { val = DbInt { val = n } } -> n
                 _ -> -2
-              Err { error = _ } -> -1
+              Err { ... } -> -1
             """.trimIndent(),
         )
         assertEquals(0L, r, "the insert inside the abandoned transaction is gone")
@@ -305,9 +305,9 @@ class SqliteDbTest {
         val r = onMemory(
             """
             match Db.tx { body = {} -> Err { error = DbConflict { msg = "mine" } } } is
-              Ok { val = _ } -> "unexpectedly succeeded"
+              Ok { ... } -> "unexpectedly succeeded"
               Err { error = DbConflict { msg = m } } -> m
-              Err { error = _ } -> "the rollback replaced the body's error"
+              Err { ... } -> "the rollback replaced the body's error"
             """.trimIndent(),
         )
         assertEquals("mine", r)
@@ -319,7 +319,7 @@ class SqliteDbTest {
             """
             match Db.tx { body = {} -> Ok { val = 42 } } is
               Ok { val = v } -> v
-              Err { error = _ } -> -1
+              Err { ... } -> -1
             """.trimIndent(),
         )
         assertEquals(42L, r)
@@ -339,7 +339,7 @@ class SqliteDbTest {
               Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                 Some { val = DbInt { val = n } } -> n
                 _ -> -2
-              Err { error = _ } -> -1
+              Err { ... } -> -1
             """.trimIndent(),
         )
         assertEquals(0L, r, "the inner write did not survive the outer rollback")
@@ -357,7 +357,7 @@ class SqliteDbTest {
               Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                 Some { val = DbInt { val = n } } -> n
                 _ -> -2
-              Err { error = _ } -> -1
+              Err { ... } -> -1
             """.trimIndent(),
         )
         assertEquals(2L, r)
@@ -378,7 +378,7 @@ class SqliteDbTest {
                 Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                   Some { val = DbInt { val = n } } -> n
                   _ -> -2
-                Err { error = _ } -> -1
+                Err { ... } -> -1
 
             let main = {} -> do
               perform SqliteDb { path = ":memory:" } in
@@ -400,7 +400,7 @@ class SqliteDbTest {
                 Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                   Some { val = DbInt { val = n } } -> n
                   _ -> -2
-                Err { error = _ } -> -1
+                Err { ... } -> -1
 
             let main = {} -> perform SqliteDb { path = ":memory:" } in do
               Db.apply { q = sql { text = "create table outer_t (a int)" } }
@@ -432,7 +432,7 @@ class SqliteDbTest {
                   Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                     Some { val = DbInt { val = n } } -> n
                     _ -> -2
-                  Err { error = _ } -> -1
+                  Err { ... } -> -1
             main {}
             """.trimIndent(),
         )
@@ -460,7 +460,7 @@ class SqliteDbTest {
           match request { url = "http://127.0.0.1:$(int::to_str { n = port })$(path)" }.send {} is
             Ok { val = resp } -> match body_str { resp = resp } is
               Ok { val = s } -> s
-              Err { error = _ } -> "undecodable"
+              Err { ... } -> "undecodable"
             Err { error = e } -> format_error { err = e }
     """.trimIndent()
 
@@ -475,7 +475,7 @@ class SqliteDbTest {
                       Some { val = DbInt { val = n } } -> reply { code = 200, text = int::to_str { n = n }, url = req.url }
                       _ -> reply { code = 200, text = "wrong cell", url = req.url }
                     Err { error = DbUnavailable { msg = m } } -> reply { code = 200, text = "unavailable", url = req.url }
-                    Err { error = _ } -> reply { code = 200, text = "db error", url = req.url }
+                    Err { ... } -> reply { code = 200, text = "db error", url = req.url }
 
                 let go: {} -> Str <*> = {} ->
                   perform SqliteDb { path = ":memory:" } in
@@ -485,7 +485,7 @@ class SqliteDbTest {
                         Db.apply { q = sql { text = "insert into t values (1), (2)" } }
                         let h = match HttpServer.serve { handler = handler } is
                           Ok { val = hh } -> hh
-                          Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                          Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                         let out = get { port = h.port, path = "/" }
                         h.stop {}
                         out
@@ -509,7 +509,7 @@ class SqliteDbTest {
                     Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                       Some { val = DbInt { val = n } } -> reply { code = 200, text = int::to_str { n = n }, url = req.url }
                       _ -> reply { code = 200, text = "wrong cell", url = req.url }
-                    Err { error = _ } -> reply { code = 200, text = "db error", url = req.url }
+                    Err { ... } -> reply { code = 200, text = "db error", url = req.url }
 
                 let go: {} -> Str <*> = {} ->
                   perform SqliteDb { path = ":memory:" } in
@@ -518,7 +518,7 @@ class SqliteDbTest {
                         Db.apply { q = sql { text = "create table t (a int)" } }
                         let h = match HttpServer.serve { handler = handler } is
                           Ok { val = hh } -> hh
-                          Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                          Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                         let first = get { port = h.port, path = "/" }
                         let second = get { port = h.port, path = "/" }
                         let third = get { port = h.port, path = "/" }
@@ -545,7 +545,7 @@ class SqliteDbTest {
                     Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                       Some { val = DbInt { val = n } } -> reply { code = 200, text = int::to_str { n = n }, url = req.url }
                       _ -> reply { code = 200, text = "wrong cell", url = req.url }
-                    Err { error = _ } -> reply { code = 200, text = "db error", url = req.url }
+                    Err { ... } -> reply { code = 200, text = "db error", url = req.url }
 
                 let go: {} -> Str <*> = {} ->
                   perform SqliteDb { path = ":memory:" } in
@@ -554,7 +554,7 @@ class SqliteDbTest {
                         Db.apply { q = sql { text = "create table t (a int)" } }
                         let h = match HttpServer.serve { handler = handler } is
                           Ok { val = hh } -> hh
-                          Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                          Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                         let first = get { port = h.port, path = "/" }
                         let second = get { port = h.port, path = "/" }
                         h.stop {}
@@ -588,7 +588,7 @@ class SqliteDbTest {
                     Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                       Some { val = DbInt { val = n } } -> reply { code = 200, text = int::to_str { n = n }, url = req.url }
                       _ -> reply { code = 200, text = "wrong cell", url = req.url }
-                    Err { error = _ } -> reply { code = 200, text = "db error", url = req.url }
+                    Err { ... } -> reply { code = 200, text = "db error", url = req.url }
 
                 let go: {} -> Str <*> = {} ->
                   perform SqliteDb { path = ":memory:" } in
@@ -598,7 +598,7 @@ class SqliteDbTest {
                           Db.apply { q = sql { text = "create table t (a int)" } }
                           let h = match HttpServer.serve { handler = handler } is
                             Ok { val = hh } -> hh
-                            Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                            Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                           let both = Parallel.join {
                             l = {} -> Parallel.join {
                               l = {} -> get { port = h.port, path = "/" },
@@ -630,9 +630,9 @@ class SqliteDbTest {
                 """
                 let handler: { req: Request } -> Response <Db> = { req } ->
                   match Db.run { q = sql { text = "select count(*) from t" } } is
-                    Ok { val = _ } -> reply { code = 200, text = "answered anyway", url = req.url }
-                    Err { error = DbUnavailable { msg = _ } } -> reply { code = 200, text = "ambiguous", url = req.url }
-                    Err { error = _ } -> reply { code = 200, text = "wrong error kind", url = req.url }
+                    Ok { ... } -> reply { code = 200, text = "answered anyway", url = req.url }
+                    Err { error = DbUnavailable { ... } } -> reply { code = 200, text = "ambiguous", url = req.url }
+                    Err { ... } -> reply { code = 200, text = "wrong error kind", url = req.url }
 
                 let go: {} -> Str <*> = {} ->
                   perform SqliteDb { path = ":memory:" } in do
@@ -644,7 +644,7 @@ class SqliteDbTest {
                         perform SimpleHttpClient in do
                           let h = match HttpServer.serve { handler = handler } is
                             Ok { val = hh } -> hh
-                            Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                            Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                           let out = get { port = h.port, path = "/" }
                           h.stop {}
                           out
@@ -675,8 +675,8 @@ class SqliteDbTest {
                   let decoded: Result [{ id: Int, name: Str }] DecodeError = rows.decode { config = row_c }
                   match decoded is
                     Ok { val = us } -> str::join { strings = seq::map { xs = us, f = { x } -> x.name }, separator = "," }
-                    Err { error = _ } -> "did not decode"
-                Err { error = _ } -> "query failed"
+                    Err { ... } -> "did not decode"
+                Err { ... } -> "query failed"
             main {}
             """.trimIndent(),
         )

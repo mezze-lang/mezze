@@ -34,14 +34,14 @@ let raw: Str = do
 
 let tree: Json = match parse_str { s = raw } is
   Ok { val } -> val
-  Err { error = _ } -> JArray { items = [] }
+  Err { ... } -> JArray { items = [] }
 
 ## ── The derived walk ────────────────────────────────────────────────────────
 let derived_decode: { t: Json } -> Int = { t } -> do
   let r: Result [Row] DecodeError = t.decode { config = json_default }
   match r is
     Ok { val = rows } -> seq::fold { xs = rows, init = 0, f = { acc, x } -> acc + x.id }
-    Err { error = _ } -> -1
+    Err { ... } -> -1
 
 ## ── The hand-written walk ───────────────────────────────────────────────────
 ##

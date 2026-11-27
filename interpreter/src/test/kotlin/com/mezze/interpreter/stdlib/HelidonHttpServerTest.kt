@@ -33,11 +33,11 @@ class HelidonHttpServerTest {
           reply { code = 404, text = "nope", url = req.url }
         let text_of: { resp: Response } -> Str = { resp } -> match body_str { resp = resp } is
           Ok { val } -> val
-          Err { error = _ } -> "could not decode"
+          Err { ... } -> "could not decode"
         let body_text: { req: Request } -> Str = { req } -> match req.body is
           Some { val } -> match bytes::to_str { b = val } is
             Ok { val = s } -> s
-            Err { error = _ } -> "could not decode"
+            Err { ... } -> "could not decode"
           None -> "<empty>"
         let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_print_log = Off }
         # serve expecting success (these tests bind port 0, which never clashes):
@@ -45,7 +45,7 @@ class HelidonHttpServerTest {
         # fails the test loudly rather than silently.
         let serve_ok = { app } -> match HttpServer.serve { handler = app } is
           Ok { val = h } -> h
-          Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+          Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
     """.trimIndent()
 
     /** `GET` a url and give back the body text, or the error, as a Str. */

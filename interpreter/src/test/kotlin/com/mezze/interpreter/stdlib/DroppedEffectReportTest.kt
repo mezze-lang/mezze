@@ -87,7 +87,7 @@ class DroppedEffectReportTest {
                   let p = Async.spawn { f = {} -> sleep { ms = 1 } }
                   match await { p = p } is
                     Ok { val } -> 1
-                    Err { error = _ } -> 0
+                    Err { ... } -> 0
                 """.trimIndent(),
             )
         }

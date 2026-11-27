@@ -116,7 +116,7 @@ class VariantPayloadCheckedAtCallSiteTest {
             err("""
                 let describe = { r } -> match r is
                   Ok { val } -> val.to_upper {}
-                  Err { error = _ } -> "bad"
+                  Err { ... } -> "bad"
                 describe { r = Ok { val = 5 } }
             """),
             "the receiver is method-grown, so the payload is not comparable",
@@ -131,7 +131,7 @@ class VariantPayloadCheckedAtCallSiteTest {
                 let want = { s: Search } -> s.q
                 let describe = { r } -> match r is
                   Ok { val } -> want { s = val }
-                  Err { error = _ } -> "bad"
+                  Err { ... } -> "bad"
                 describe { r = Ok { val = 5 } }
             """),
             "the arm needs Search; the call passes Int",
@@ -146,7 +146,7 @@ class VariantPayloadCheckedAtCallSiteTest {
                 let want = { s: Search } -> s.q
                 let describe = { r: Result 'a Str } -> match r is
                   Ok { val } -> want { s = val }
-                  Err { error = _ } -> "bad"
+                  Err { ... } -> "bad"
                 describe { r = Ok { val = 5 } }
             """),
             "declared `'a`, Int payload",
@@ -177,7 +177,7 @@ class VariantPayloadCheckedAtCallSiteTest {
                 let want = { s: Search } -> s.q
                 let describe = { r: Result Int Str } -> match r is
                   Ok { val } -> want { s = val }
-                  Err { error = _ } -> "bad"
+                  Err { ... } -> "bad"
                 describe { r = Ok { val = 5 } }
             """),
             "Int payload into a Search-taking call",

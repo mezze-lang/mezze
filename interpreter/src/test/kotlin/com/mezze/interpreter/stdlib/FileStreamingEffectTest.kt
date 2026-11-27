@@ -38,12 +38,12 @@ class FileStreamingEffectTest {
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "/f", mode = Read } is
-                Err { error = _ } -> "open-failed"
+                Err { ... } -> "open-failed"
                 Ok { val = h } -> match FileStreaming.read_at { handle = h, offset = 3, max_bytes = 4 } is
                   Ok { val = b } -> match bytes::to_str { b = b } is
                     Ok { val } -> val
-                    Err { error = _ } -> "utf8-fail"
-                  Err { error = _ } -> "read-failed"
+                    Err { ... } -> "utf8-fail"
+                  Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("3456", eval(code))
     }
@@ -61,15 +61,15 @@ class FileStreamingEffectTest {
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "/f", mode = Read } is
-                Err { error = _ } -> "open-failed"
+                Err { ... } -> "open-failed"
                 Ok { val = h } -> do
                   FileStreaming.read_chunk { handle = h, max_bytes = 2 }
                   FileStreaming.read_at { handle = h, offset = 8, max_bytes = 2 }
                   match FileStreaming.read_chunk { handle = h, max_bytes = 2 } is
                     Ok { val = b } -> match bytes::to_str { b = b } is
                       Ok { val } -> val
-                      Err { error = _ } -> "utf8-fail"
-                    Err { error = _ } -> "read-failed"
+                      Err { ... } -> "utf8-fail"
+                    Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("23", eval(code))
     }
@@ -82,10 +82,10 @@ class FileStreamingEffectTest {
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "abc" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "/f", mode = Read } is
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
                 Ok { val = h } -> match FileStreaming.read_at { handle = h, offset = 99, max_bytes = 4 } is
                   Ok { val = b } -> bytes::size { b = b }
-                  Err { error = _ } -> 0 - 1
+                  Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(0L, eval(code))
     }
@@ -98,15 +98,15 @@ class FileStreamingEffectTest {
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "aaaa" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "/f", mode = Write } is
-                Err { error = _ } -> "open-failed"
+                Err { ... } -> "open-failed"
                 Ok { val = h } -> do
                   FileStreaming.write_at { handle = h, offset = 1, bytes = bytes::from_str { s = "bb" } }
                   FileStreaming.close { handle = h }
                   match FileSystem.read_bytes { path = "/f" } is
                     Ok { val = b } -> match bytes::to_str { b = b } is
                       Ok { val } -> val
-                      Err { error = _ } -> "utf8-fail"
-                    Err { error = _ } -> "read-failed"
+                      Err { ... } -> "utf8-fail"
+                    Err { ... } -> "read-failed"
         """.trimIndent()
         // `Write` truncates on open — in BOTH backends — so the patch lands
         // in an empty file: offset 1 extends with a zero byte, then "bb".
@@ -124,13 +124,13 @@ class FileStreamingEffectTest {
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "ab" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "/f", mode = Write } is
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
                 Ok { val = h } -> do
                   FileStreaming.write_at { handle = h, offset = 5, bytes = bytes::from_str { s = "z" } }
                   FileStreaming.close { handle = h }
                   match FileSystem.stat { path = "/f", follow_symlinks = True } is
                     Ok { val = s } -> s.size
-                    Err { error = _ } -> 0 - 1
+                    Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(6L, eval(code))
     }
@@ -143,13 +143,13 @@ class FileStreamingEffectTest {
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "/f", mode = Append } is
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
                 Ok { val = h } -> do
                   FileStreaming.truncate { handle = h, size = 4 }
                   FileStreaming.close { handle = h }
                   match FileSystem.stat { path = "/f", follow_symlinks = True } is
                     Ok { val = s } -> s.size
-                    Err { error = _ } -> 0 - 1
+                    Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(4L, eval(code))
     }
@@ -163,13 +163,13 @@ class FileStreamingEffectTest {
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "abc" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "/f", mode = Append } is
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
                 Ok { val = h } -> do
                   FileStreaming.truncate { handle = h, size = 100 }
                   FileStreaming.close { handle = h }
                   match FileSystem.stat { path = "/f", follow_symlinks = True } is
                     Ok { val = s } -> s.size
-                    Err { error = _ } -> 0 - 1
+                    Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(3L, eval(code))
     }
@@ -182,14 +182,14 @@ class FileStreamingEffectTest {
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "/f", mode = Read } is
-                Err { error = _ } -> "open-failed"
+                Err { ... } -> "open-failed"
                 Ok { val = h } -> do
                   FileStreaming.seek { handle = h, offset = 7 }
                   match FileStreaming.read_chunk { handle = h, max_bytes = 3 } is
                     Ok { val = b } -> match bytes::to_str { b = b } is
                       Ok { val } -> val
-                      Err { error = _ } -> "utf8-fail"
-                    Err { error = _ } -> "read-failed"
+                      Err { ... } -> "utf8-fail"
+                    Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("789", eval(code))
     }
@@ -202,11 +202,11 @@ class FileStreamingEffectTest {
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "abc" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "/f", mode = Read } is
-                Err { error = _ } -> "open-failed"
+                Err { ... } -> "open-failed"
                 Ok { val = h } -> match FileStreaming.read_at { handle = h, offset = 0 - 1, max_bytes = 2 } is
-                  Ok { val = _ } -> "unexpectedly-ok"
-                  Err { error = FsIOError { path = _, message = _ } } -> "rejected"
-                  Err { error = _ } -> "other-error"
+                  Ok { ... } -> "unexpectedly-ok"
+                  Err { error = FsIOError { ... } } -> "rejected"
+                  Err { ... } -> "other-error"
         """.trimIndent()
         assertEquals("rejected", eval(code))
     }
@@ -219,10 +219,10 @@ class FileStreamingEffectTest {
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "abc" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "/f", mode = Write } is
-                Err { error = _ } -> "open-failed"
+                Err { ... } -> "open-failed"
                 Ok { val = h } -> match FileStreaming.read_at { handle = h, offset = 0, max_bytes = 2 } is
-                  Ok { val = _ } -> "unexpectedly-ok"
-                  Err { error = _ } -> "refused"
+                  Ok { ... } -> "unexpectedly-ok"
+                  Err { ... } -> "refused"
         """.trimIndent()
         assertEquals("refused", eval(code))
     }
@@ -238,12 +238,12 @@ class FileStreamingEffectTest {
             perform LocalFileSystem in perform LocalFileStreaming in do
               FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "$path", mode = Read } is
-                Err { error = _ } -> "open-failed"
+                Err { ... } -> "open-failed"
                 Ok { val = h } -> match FileStreaming.read_at { handle = h, offset = 3, max_bytes = 4 } is
                   Ok { val = b } -> match bytes::to_str { b = b } is
                     Ok { val } -> val
-                    Err { error = _ } -> "utf8-fail"
-                  Err { error = _ } -> "read-failed"
+                    Err { ... } -> "utf8-fail"
+                  Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("3456", eval(code))
     }
@@ -257,15 +257,15 @@ class FileStreamingEffectTest {
             perform LocalFileSystem in perform LocalFileStreaming in do
               FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "$path", mode = Read } is
-                Err { error = _ } -> "open-failed"
+                Err { ... } -> "open-failed"
                 Ok { val = h } -> do
                   FileStreaming.read_chunk { handle = h, max_bytes = 2 }
                   FileStreaming.read_at { handle = h, offset = 8, max_bytes = 2 }
                   match FileStreaming.read_chunk { handle = h, max_bytes = 2 } is
                     Ok { val = b } -> match bytes::to_str { b = b } is
                       Ok { val } -> val
-                      Err { error = _ } -> "utf8-fail"
-                    Err { error = _ } -> "read-failed"
+                      Err { ... } -> "utf8-fail"
+                    Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("23", eval(code))
     }
@@ -279,15 +279,15 @@ class FileStreamingEffectTest {
             perform LocalFileSystem in perform LocalFileStreaming in do
               FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "aaaa" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "$path", mode = Write } is
-                Err { error = _ } -> "open-failed"
+                Err { ... } -> "open-failed"
                 Ok { val = h } -> do
                   FileStreaming.write_at { handle = h, offset = 1, bytes = bytes::from_str { s = "bb" } }
                   FileStreaming.close { handle = h }
                   match FileSystem.read_bytes { path = "$path" } is
                     Ok { val = b } -> match bytes::to_str { b = b } is
                       Ok { val } -> val
-                      Err { error = _ } -> "utf8-fail"
-                    Err { error = _ } -> "read-failed"
+                      Err { ... } -> "utf8-fail"
+                    Err { ... } -> "read-failed"
         """.trimIndent()
         // Write mode truncates on open, so the patch lands in an empty file:
         // offset 1 extends with a zero byte, then "bb". The point is that the
@@ -304,13 +304,13 @@ class FileStreamingEffectTest {
             perform LocalFileSystem in perform LocalFileStreaming in do
               FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "$path", mode = Append } is
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
                 Ok { val = h } -> do
                   FileStreaming.truncate { handle = h, size = 4 }
                   FileStreaming.close { handle = h }
                   match FileSystem.stat { path = "$path", follow_symlinks = True } is
                     Ok { val = s } -> s.size
-                    Err { error = _ } -> 0 - 1
+                    Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(4L, eval(code))
     }
@@ -324,14 +324,14 @@ class FileStreamingEffectTest {
             perform LocalFileSystem in perform LocalFileStreaming in do
               FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "0123456789" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "$path", mode = Read } is
-                Err { error = _ } -> "open-failed"
+                Err { ... } -> "open-failed"
                 Ok { val = h } -> do
                   FileStreaming.seek { handle = h, offset = 7 }
                   match FileStreaming.read_chunk { handle = h, max_bytes = 3 } is
                     Ok { val = b } -> match bytes::to_str { b = b } is
                       Ok { val } -> val
-                      Err { error = _ } -> "utf8-fail"
-                    Err { error = _ } -> "read-failed"
+                      Err { ... } -> "utf8-fail"
+                    Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("789", eval(code))
     }
@@ -345,13 +345,13 @@ class FileStreamingEffectTest {
             perform LocalFileSystem in perform LocalFileStreaming in do
               FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "abc" }, mode = CreateOrTruncate }
               match FileStreaming.open { path = "$path", mode = Read } is
-                Err { error = _ } -> "open-failed"
+                Err { ... } -> "open-failed"
                 Ok { val = h } -> do
                   FileStreaming.close { handle = h }
                   match FileStreaming.read_at { handle = h, offset = 0, max_bytes = 1 } is
-                    Ok { val = _ } -> "unexpectedly-ok"
-                    Err { error = FsClosedHandle { path = _ } } -> "closed"
-                    Err { error = _ } -> "other-error"
+                    Ok { ... } -> "unexpectedly-ok"
+                    Err { error = FsClosedHandle { ... } } -> "closed"
+                    Err { ... } -> "other-error"
         """.trimIndent()
         assertEquals("closed", eval(code))
     }
@@ -378,12 +378,12 @@ class FileStreamingEffectTest {
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in
               match FileStreaming.open { path = "/wal", mode = WriteSync } is
-                Err { error = _ } -> "open-failed"
+                Err { ... } -> "open-failed"
                 Ok { val = h } -> do
                 FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "record-1" } }
                 match read_text { path = "/wal" } is
                   Ok { val = t } -> t
-                  Err { error = _ } -> "read-failed"
+                  Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("record-1", eval(code))
     }
@@ -396,12 +396,12 @@ class FileStreamingEffectTest {
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileStreaming in
               match FileStreaming.open { path = "$f", mode = WriteSync } is
-                Err { error = _ } -> "open-failed"
+                Err { ... } -> "open-failed"
                 Ok { val = h } -> do
                 FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "record-1" } }
                 match read_text { path = "$f" } is
                   Ok { val = t } -> t
-                  Err { error = _ } -> "read-failed"
+                  Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("record-1", eval(code))
     }
@@ -420,12 +420,12 @@ class FileStreamingEffectTest {
             use std::str
             perform MemoryFileSystem in perform MemoryFileStreaming in
               match FileStreaming.open { path = "/buffered", mode = Write } is
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
                 Ok { val = h } -> do
                 FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "record-1" } }
                 match read_text { path = "/buffered" } is
                   Ok { val = t } -> str::size { s = t }
-                  Err { error = _ } -> 0 - 1
+                  Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(0L, eval(code))
     }
@@ -438,7 +438,7 @@ class FileStreamingEffectTest {
             use std::collections::bytes
             perform MemoryFileSystem in perform MemoryFileStreaming in
               match FileStreaming.open { path = "/wal", mode = WriteSync } is
-                Err { error = _ } -> "open-failed"
+                Err { ... } -> "open-failed"
                 Ok { val = h } -> do
                 FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "a" } }
                 FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "b" } }
@@ -446,7 +446,7 @@ class FileStreamingEffectTest {
                 FileStreaming.close { handle = h }
                 match read_text { path = "/wal" } is
                   Ok { val = t } -> t
-                  Err { error = _ } -> "read-failed"
+                  Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("abc", eval(code))
     }
@@ -459,7 +459,7 @@ class FileStreamingEffectTest {
             use std::collections::bytes
             perform LocalFileSystem in perform LocalFileStreaming in
               match FileStreaming.open { path = "$f", mode = WriteSync } is
-                Err { error = _ } -> "open-failed"
+                Err { ... } -> "open-failed"
                 Ok { val = h } -> do
                 FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "a" } }
                 FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "b" } }
@@ -467,7 +467,7 @@ class FileStreamingEffectTest {
                 FileStreaming.close { handle = h }
                 match read_text { path = "$f" } is
                   Ok { val = t } -> t
-                  Err { error = _ } -> "read-failed"
+                  Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("abc", eval(code))
     }
@@ -481,13 +481,13 @@ class FileStreamingEffectTest {
             perform MemoryFileSystem in perform MemoryFileStreaming in do
               write_text { path = "/f", text = "old-and-long" }
               match FileStreaming.open { path = "/f", mode = WriteSync } is
-                Err { error = _ } -> "open-failed"
+                Err { ... } -> "open-failed"
                 Ok { val = h } -> do
                 FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "new" } }
                 FileStreaming.close { handle = h }
                 match read_text { path = "/f" } is
                   Ok { val = t } -> t
-                  Err { error = _ } -> "read-failed"
+                  Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("new", eval(code))
     }
@@ -501,13 +501,13 @@ class FileStreamingEffectTest {
             perform LocalFileSystem in perform LocalFileStreaming in do
               write_text { path = "$f", text = "old-and-long" }
               match FileStreaming.open { path = "$f", mode = WriteSync } is
-                Err { error = _ } -> "open-failed"
+                Err { ... } -> "open-failed"
                 Ok { val = h } -> do
                 FileStreaming.write_chunk { handle = h, bytes = bytes::from_str { s = "new" } }
                 FileStreaming.close { handle = h }
                 match read_text { path = "$f" } is
                   Ok { val = t } -> t
-                  Err { error = _ } -> "read-failed"
+                  Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("new", eval(code))
     }
@@ -519,10 +519,10 @@ class FileStreamingEffectTest {
             use std::effects::filesystem::{ FileStreaming, MemoryFileSystem, MemoryFileStreaming, OpenMode }
             perform MemoryFileSystem in perform MemoryFileStreaming in
               match FileStreaming.open { path = "/f", mode = WriteSync } is
-                Err { error = _ } -> "open-failed"
+                Err { ... } -> "open-failed"
                 Ok { val = h } -> match FileStreaming.read_chunk { handle = h, max_bytes = 4 } is
-                  Ok { val = _ } -> "unexpectedly-read"
-                  Err { error = _ } -> "refused"
+                  Ok { ... } -> "unexpectedly-read"
+                  Err { ... } -> "refused"
         """.trimIndent()
         assertEquals("refused", eval(code))
     }

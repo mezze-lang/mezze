@@ -46,7 +46,9 @@ data class TypedSeqPattern(
     val elements: List<TypedPattern>,
     val rest: String?,
     override val type: MezzeType,
-    override val loc: Loc
+    override val loc: Loc,
+    /** Elements after an unnamed middle `...`, read from the end (see ParsedSeqPattern). */
+    val suffixCount: Int = 0,
 ) : TypedPattern
 
 @Serializable

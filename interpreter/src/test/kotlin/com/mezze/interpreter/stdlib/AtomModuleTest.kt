@@ -228,7 +228,7 @@ class AtomModuleTest {
 
             match atom_validated {val = 5, validator = {val} -> val >= 0} is
               Ok { val = positive } -> deref_validated {atom = positive}
-              Err { error = _ } -> 0-1
+              Err { ... } -> 0-1
         """)
         assertEquals(5L, result)
     }
@@ -242,7 +242,7 @@ class AtomModuleTest {
               Ok { val = counter } -> do
                 swap_validated {atom = counter, f = {current} -> current + 5}
                 deref_validated {atom = counter}
-              Err { error = _ } -> 0-1
+              Err { ... } -> 0-1
         """)
         assertEquals(15L, result)
     }

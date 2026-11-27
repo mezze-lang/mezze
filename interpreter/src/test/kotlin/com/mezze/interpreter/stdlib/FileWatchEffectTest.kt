@@ -43,15 +43,15 @@ class FileWatchEffectTest {
             perform MemoryFileSystem in perform MemoryFileWatch in do
               FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
-                Err { error = _ } -> "watch-failed"
+                Err { ... } -> "watch-failed"
                 Ok { val = h } -> do
                 FileSystem.write_bytes { path = "/d/new", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> match seq::first { xs = evs } is
                     Some { val = Created { path = p } } -> p
-                    Some { val = _ } -> "wrong-kind"
+                    Some { ... } -> "wrong-kind"
                     None -> "no-events"
-                  Err { error = _ } -> "poll-failed"
+                  Err { ... } -> "poll-failed"
         """.trimIndent()
         assertEquals("/d/new", eval(code))
     }
@@ -65,16 +65,16 @@ class FileWatchEffectTest {
               FileSystem.create_directory { path = "/d" }
               FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "a" }, mode = CreateOrTruncate }
               match FileWatch.watch { path = "/d", recursive = False } is
-                Err { error = _ } -> "watch-failed"
+                Err { ... } -> "watch-failed"
                 Ok { val = h } -> do
                 FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "b" }, mode = CreateOrTruncate }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> match seq::first { xs = evs } is
-                    Some { val = Modified { path = _ } } -> "modified"
-                    Some { val = Created { path = _ } } -> "said-created"
-                    Some { val = _ } -> "wrong-kind"
+                    Some { val = Modified { ... } } -> "modified"
+                    Some { val = Created { ... } } -> "said-created"
+                    Some { ... } -> "wrong-kind"
                     None -> "no-events"
-                  Err { error = _ } -> "poll-failed"
+                  Err { ... } -> "poll-failed"
         """.trimIndent()
         assertEquals("modified", eval(code))
     }
@@ -88,15 +88,15 @@ class FileWatchEffectTest {
               FileSystem.create_directory { path = "/d" }
               FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "a" }, mode = CreateOrTruncate }
               match FileWatch.watch { path = "/d", recursive = False } is
-                Err { error = _ } -> "watch-failed"
+                Err { ... } -> "watch-failed"
                 Ok { val = h } -> do
                 FileSystem.delete { path = "/d/f" }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> match seq::first { xs = evs } is
                     Some { val = Deleted { path = p } } -> p
-                    Some { val = _ } -> "wrong-kind"
+                    Some { ... } -> "wrong-kind"
                     None -> "no-events"
-                  Err { error = _ } -> "poll-failed"
+                  Err { ... } -> "poll-failed"
         """.trimIndent()
         assertEquals("/d/f", eval(code))
     }
@@ -110,13 +110,13 @@ class FileWatchEffectTest {
             perform MemoryFileSystem in perform MemoryFileWatch in do
               FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
                 Ok { val = h } -> do
                 FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
                 FileWatch.poll { handle = h, timeout_ms = 0 }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> seq::size { xs = evs }
-                  Err { error = _ } -> 0 - 1
+                  Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(0L, eval(code))
     }
@@ -131,12 +131,12 @@ class FileWatchEffectTest {
               FileSystem.create_directory { path = "/d" }
               FileSystem.create_directory { path = "/d/sub" }
               match FileWatch.watch { path = "/d", recursive = False } is
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
                 Ok { val = h } -> do
                 FileSystem.write_bytes { path = "/d/sub/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> seq::size { xs = evs }
-                  Err { error = _ } -> 0 - 1
+                  Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(0L, eval(code))
     }
@@ -150,12 +150,12 @@ class FileWatchEffectTest {
               FileSystem.create_directory { path = "/d" }
               FileSystem.create_directory { path = "/d/sub" }
               match FileWatch.watch { path = "/d", recursive = True } is
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
                 Ok { val = h } -> do
                 FileSystem.write_bytes { path = "/d/sub/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> seq::size { xs = evs }
-                  Err { error = _ } -> 0 - 1
+                  Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(1L, eval(code))
     }
@@ -166,9 +166,9 @@ class FileWatchEffectTest {
             use std::effects::filesystem::{ FileWatch, MemoryFileSystem, MemoryFileWatch, WriteMode }
             perform MemoryFileSystem in perform MemoryFileWatch in
               match FileWatch.watch { path = "/nope", recursive = False } is
-                Ok { val = _ } -> "unexpectedly-ok"
-                Err { error = FsNotFound { path = _ } } -> "not-found"
-                Err { error = _ } -> "other-error"
+                Ok { ... } -> "unexpectedly-ok"
+                Err { error = FsNotFound { ... } } -> "not-found"
+                Err { ... } -> "other-error"
         """.trimIndent()
         assertEquals("not-found", eval(code))
     }
@@ -180,12 +180,12 @@ class FileWatchEffectTest {
             perform MemoryFileSystem in perform MemoryFileWatch in do
               FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
-                Err { error = _ } -> "watch-failed"
+                Err { ... } -> "watch-failed"
                 Ok { val = h } -> do
                 FileWatch.unwatch { handle = h }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
-                  Ok { val = _ } -> "still-polling"
-                  Err { error = _ } -> "unregistered"
+                  Ok { ... } -> "still-polling"
+                  Err { ... } -> "unregistered"
         """.trimIndent()
         assertEquals("unregistered", eval(code))
     }
@@ -205,12 +205,12 @@ class FileWatchEffectTest {
             use std::effects::filesystem::{ FileWatch, LocalFileWatch, WriteMode }
             perform LocalFileWatch in do
               match FileWatch.watch { path = "${tmp.toString()}", recursive = False } is
-                Err { error = _ } -> "watch-failed"
+                Err { ... } -> "watch-failed"
                 Ok { val = h } -> do
                 FileWatch.poll { handle = h, timeout_ms = 0 }
                 match FileWatch.unwatch { handle = h } is
-                  Ok { val = _ } -> "ok"
-                  Err { error = _ } -> "unwatch-failed"
+                  Ok { ... } -> "ok"
+                  Err { ... } -> "unwatch-failed"
         """.trimIndent()
         assertEquals("ok", eval(code))
     }
@@ -224,9 +224,9 @@ class FileWatchEffectTest {
             perform LocalFileSystem in perform LocalFileWatch in do
               FileSystem.write_bytes { path = "$path", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate }
               match FileWatch.watch { path = "$path", recursive = False } is
-                Ok { val = _ } -> "unexpectedly-ok"
-                Err { error = FsNotADirectory { path = _ } } -> "not-a-directory"
-                Err { error = _ } -> "other-error"
+                Ok { ... } -> "unexpectedly-ok"
+                Err { error = FsNotADirectory { ... } } -> "not-a-directory"
+                Err { ... } -> "other-error"
         """.trimIndent()
         assertEquals("not-a-directory", eval(code))
     }
@@ -237,13 +237,13 @@ class FileWatchEffectTest {
             use std::effects::filesystem::{ FileWatch, LocalFileWatch, WriteMode }
             perform LocalFileWatch in do
               match FileWatch.watch { path = "${tmp.toString()}", recursive = False } is
-                Err { error = _ } -> "watch-failed"
+                Err { ... } -> "watch-failed"
                 Ok { val = h } -> do
                 FileWatch.unwatch { handle = h }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
-                  Ok { val = _ } -> "still-polling"
-                  Err { error = FsClosedHandle { path = _ } } -> "closed"
-                  Err { error = _ } -> "other-error"
+                  Ok { ... } -> "still-polling"
+                  Err { error = FsClosedHandle { ... } } -> "closed"
+                  Err { ... } -> "other-error"
         """.trimIndent()
         assertEquals("closed", eval(code))
     }
@@ -273,8 +273,8 @@ class FileWatchEffectTest {
             use std::effects::filesystem::{ FileWatch, LocalFileWatch, WriteMode }
             perform LocalFileWatch in
               match FileWatch.watch { path = "${tmp.toString()}", recursive = False } is
-                Ok { val = _ } -> "watching"
-                Err { error = _ } -> "watch-failed"
+                Ok { ... } -> "watching"
+                Err { ... } -> "watch-failed"
         """.trimIndent()
         // Deliberately no unwatch.
         assertEquals("watching", eval(code), "precondition: the watch must register")
@@ -320,15 +320,15 @@ class FileWatchEffectTest {
             perform MemoryFileSystem in perform MemoryFileWatch in do
               FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
-                Err { error = _ } -> "watch-failed"
+                Err { ... } -> "watch-failed"
                 Ok { val = h } -> do
                 seq::for_each { xs = seq::range { start = 0, end = 1100 }, f = { x } -> FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate } }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> match seq::first { xs = evs } is
                     Some { val = Overflow } -> "overflow"
-                    Some { val = _ } -> "wrong-kind"
+                    Some { ... } -> "wrong-kind"
                     None -> "no-events"
-                  Err { error = _ } -> "poll-failed"
+                  Err { ... } -> "poll-failed"
         """.trimIndent()
         assertEquals("overflow", eval(code))
     }
@@ -347,12 +347,12 @@ class FileWatchEffectTest {
             perform MemoryFileSystem in perform MemoryFileWatch in do
               FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
                 Ok { val = h } -> do
                 seq::for_each { xs = seq::range { start = 0, end = 1100 }, f = { x } -> FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate } }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> seq::size { xs = evs }
-                  Err { error = _ } -> 0 - 1
+                  Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(1L, eval(code))
     }
@@ -369,7 +369,7 @@ class FileWatchEffectTest {
             perform MemoryFileSystem in perform MemoryFileWatch in do
               FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
-                Err { error = _ } -> "watch-failed"
+                Err { ... } -> "watch-failed"
                 Ok { val = h } -> do
                 seq::for_each { xs = seq::range { start = 0, end = 1100 }, f = { x } -> FileSystem.write_bytes { path = "/d/f", bytes = bytes::from_str { s = "x" }, mode = CreateOrTruncate } }
                 FileWatch.poll { handle = h, timeout_ms = 0 }
@@ -378,9 +378,9 @@ class FileWatchEffectTest {
                   Ok { val = evs } -> match seq::first { xs = evs } is
                     Some { val = Created { path = p } } -> p
                     Some { val = Overflow } -> "still-overflowing"
-                    Some { val = _ } -> "wrong-kind"
+                    Some { ... } -> "wrong-kind"
                     None -> "no-events"
-                  Err { error = _ } -> "poll-failed"
+                  Err { ... } -> "poll-failed"
         """.trimIndent()
         assertEquals("/d/after", eval(code))
     }

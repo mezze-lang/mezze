@@ -62,7 +62,7 @@ let main = {} -> perform Console in
         perform NativeWebSocket in perform HelidonSocketClient in do
             let h = match HttpServer.serve_routes { routes = table, fallback = not_found } is
               Ok { val = hh } -> hh
-              Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+              Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
             let base = "http://127.0.0.1:$(int::to_str { n = h.port })"
             let hit = fetch {
                 url = request { url = "$(base)/hello/world" }
@@ -79,12 +79,12 @@ let main = {} -> perform Console in
                 Ok { val } -> val
                 Err { error = e } -> format_error { err = e }
             let echoed = match SocketClient.connect { url = "ws://127.0.0.1:$(int::to_str { n = h.port })/echo", config = default_http_config } is
-                Err { error = _ } -> "connect-failed"
+                Err { ... } -> "connect-failed"
                 Ok { val = s } -> do
                     WebSocket.send { socket = s, msg = Text { text = "ws-ok" } }
                     let got = match WebSocket.receive { socket = s } is
                         Some { val = Text { text } } -> text
-                        Some { val = Binary { bytes = _ } } -> "binary"
+                        Some { val = Binary { ... } } -> "binary"
                         None -> "closed"
                     WebSocket.close { socket = s }
                     got

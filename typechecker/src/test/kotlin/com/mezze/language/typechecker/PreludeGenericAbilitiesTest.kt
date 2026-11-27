@@ -250,7 +250,7 @@ class PreludeGenericAbilitiesTest {
             """
             let takes_str_err : { r: Result Int Str } -> Int = { r } -> match r is
                 Ok { val } -> val
-                Err { error = _ } -> 0
+                Err { ... } -> 0
 
             let a = takes_str_err { r = 42.ok {} }
             """

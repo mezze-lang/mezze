@@ -30,13 +30,13 @@ class MinimalTypeVarTest {
                 let p3 = Async.spawn {f = {} -> 3 * 2}
                 let r1 = match await {p = p1} is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
                 let r2 = match await {p = p2} is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
                 let r3 = match await {p = p3} is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
                 [r1, r2, r3]
         """
         val result = eval(code)
@@ -59,7 +59,7 @@ class MinimalTypeVarTest {
 
             let unwrap_async = {r} -> match r is
                 Ok { val } -> val
-                Err { error = _ } -> crash { msg = "await failed" }
+                Err { ... } -> crash { msg = "await failed" }
 
             let spawn = {f} -> Async.spawn {f = f}
             let await = {p} -> unwrap_async {r = await_result {p = p}}
@@ -95,13 +95,13 @@ class MinimalTypeVarTest {
                 let p3 = Async.spawn {f = {} -> 3 * 2}
                 let r1 = match await {p = p1} is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
                 let r2 = match await {p = p2} is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
                 let r3 = match await {p = p3} is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
                 [r1, r2, r3]
         """
         val result = eval(code)

@@ -13,8 +13,8 @@ import java.nio.file.Paths
  *  - Nested-variant payloads: `Wrap { inner = X }` covers X but not Y
  *    (`nestedVariantExhaustivenessErrors`, commit 6003125b6).
  *  - Seq/list length: a match must cover every length. Exhaustive iff a catch-all
- *    (`_`/var/`[...all]`/`[..._]`) OR (`[]` plus a one-leading-element open-cons
- *    `[x, ...rest]`/`[x, ..._]`). Fixed-length patterns (`[a]`, `[a, b]`) cover
+ *    (`_`/var/`[...all]`/`[...]`) OR (`[]` plus a one-leading-element open-cons
+ *    `[x, ...rest]`/`[x, ...]`). Fixed-length patterns (`[a]`, `[a, b]`) cover
  *    only that one length (`seqExhaustivenessErrors`).
  *
  * Each `is rejected` test pins a real non-exhaustive program that used to
@@ -123,7 +123,7 @@ class PatternExhaustivenessHolesTest {
             type Outer = | Wrap { inner: Inner } |
             let f = { o: Outer } ->
               match o is
-                Wrap { inner = _ } -> 1
+                Wrap { ... } -> 1
         """))
     }
 
@@ -158,11 +158,11 @@ class PatternExhaustivenessHolesTest {
     }
 
     @Test fun `seq match with a whole-seq underscore-rest is accepted`() {
-        // `[..._]` binds nothing and matches any length — a catch-all.
+        // `[...]` binds nothing and matches any length — a catch-all.
         assertNull(err("""
             let f = { xs: [Int] } ->
               match xs is
-                [..._] -> 0
+                [...] -> 0
         """))
     }
 
@@ -179,7 +179,7 @@ class PatternExhaustivenessHolesTest {
             let f = { xs: [Int] } ->
               match xs is
                 [] -> 0
-                [x, ..._] -> x
+                [x, ...] -> x
         """))
     }
 

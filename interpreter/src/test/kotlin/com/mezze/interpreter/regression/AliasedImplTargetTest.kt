@@ -49,7 +49,7 @@ class AliasedImplTargetTest {
             impl Describe for MyErr where { describe = { it } -> "described" }
 
             match body_json { resp = response_ok_text { body = "not json" } } is
-              Ok { val = _ } -> "unexpectedly ok"
+              Ok { ... } -> "unexpectedly ok"
               Err { error = e } -> e.describe {}
         """.trimIndent()
         assertEquals("described", eval(src))
@@ -67,7 +67,7 @@ class AliasedImplTargetTest {
             impl Describe for DecodeError where { describe = { it } -> "described" }
 
             match body_json { resp = response_ok_text { body = "not json" } } is
-              Ok { val = _ } -> "unexpectedly ok"
+              Ok { ... } -> "unexpectedly ok"
               Err { error = e } -> e.describe {}
         """.trimIndent()
         assertEquals("described", eval(src))
@@ -89,7 +89,7 @@ class AliasedImplTargetTest {
             impl Describe for MyErr where { describe = { it } -> it.message }
 
             match body_json { resp = response_ok_text { body = "not json" } } is
-              Ok { val = _ } -> "unexpectedly ok"
+              Ok { ... } -> "unexpectedly ok"
               Err { error = e } -> do
                 let named: MyErr = e
                 named.describe {}

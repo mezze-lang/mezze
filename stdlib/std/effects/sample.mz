@@ -185,7 +185,7 @@ pub let frequency: { choices: [{ weight: Int, gen: {} -> 'a <Sample> }], def: 'a
       xs = choices,
       init = { left = target, chosen = None },
       f = { acc, x } -> match acc.chosen is
-        Some { val = _ } -> acc
+        Some { ... } -> acc
         None -> do
           let w = int::max { l = x.weight, r = 0 }
           if acc.left < w

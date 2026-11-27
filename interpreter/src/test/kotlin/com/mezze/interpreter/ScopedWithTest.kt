@@ -77,9 +77,9 @@ class ScopedWithTest {
                 body = { sc } -> [scope_spawn { sc = sc, f = {} -> 99 }]
               }
               match outcome is
-                OnFirstOutcome { result, settled_at = _, cancelled = _ } -> match result is
+                OnFirstOutcome { result, ... } -> match result is
                   Ok { val }        -> val
-                  Err { error = _ } -> 0
+                  Err { ... } -> 0
                 _ -> 0
 
             perform LoomAsync in main {}
@@ -98,7 +98,7 @@ class ScopedWithTest {
                 body = { sc } -> [scope_spawn { sc = sc, f = {} -> 42 }]
               }
               match outcome is
-                OnSuccessOutcome { winner, losers_cancelled = _ } -> winner
+                OnSuccessOutcome { winner, ... } -> winner
                 _ -> 0
 
             perform LoomAsync in main {}

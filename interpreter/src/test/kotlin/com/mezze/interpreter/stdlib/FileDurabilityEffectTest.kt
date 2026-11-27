@@ -49,9 +49,9 @@ class FileDurabilityEffectTest {
                     handle = h, bytes = bytes::from_str { s = "entry" }
                   }
                   match FileDurability.fsync { handle = h } is
-                    Ok { val = _ } -> "synced"
-                    Err { error = _ } -> "fsync-failed"
-                Err { error = _ } -> "open-failed"
+                    Ok { ... } -> "synced"
+                    Err { ... } -> "fsync-failed"
+                Err { ... } -> "open-failed"
         """.trimIndent()
         assertEquals("synced", eval(code))
     }
@@ -79,9 +79,9 @@ class FileDurabilityEffectTest {
                   match FileSystem.read_bytes { path = "/d/wal" } is
                     Ok { val = b } -> match bytes::to_str { b = b } is
                       Ok { val } -> val
-                      Err { error = _ } -> "utf8-fail"
-                    Err { error = _ } -> "not-visible"
-                Err { error = _ } -> "open-failed"
+                      Err { ... } -> "utf8-fail"
+                    Err { ... } -> "not-visible"
+                Err { ... } -> "open-failed"
         """.trimIndent()
         assertEquals("committed", eval(code))
     }
@@ -93,11 +93,11 @@ class FileDurabilityEffectTest {
             perform MemoryFileSystem in perform MemoryFileDurability in do
               FileSystem.create_directory { path = "/d" }
               let here = match FileDurability.fsync_dir { path = "/d" } is
-                Ok { val = _ } -> "ok"
-                Err { error = _ } -> "err"
+                Ok { ... } -> "ok"
+                Err { ... } -> "err"
               let gone = match FileDurability.fsync_dir { path = "/nope" } is
-                Ok { val = _ } -> "ok"
-                Err { error = _ } -> "err"
+                Ok { ... } -> "ok"
+                Err { ... } -> "err"
               "$(here)-$(gone)"
         """.trimIndent()
         assertEquals("ok-err", eval(code))
@@ -118,11 +118,11 @@ class FileDurabilityEffectTest {
                     handle = h, bytes = bytes::from_str { s = "durable" }
                   }
                   let synced = match FileDurability.fsync { handle = h } is
-                    Ok { val = _ } -> "synced"
-                    Err { error = _ } -> "fsync-failed"
+                    Ok { ... } -> "synced"
+                    Err { ... } -> "fsync-failed"
                   FileStreaming.close { handle = h }
                   synced
-                Err { error = _ } -> "open-failed"
+                Err { ... } -> "open-failed"
         """.trimIndent()
         assertEquals("synced", eval(code))
     }
@@ -137,10 +137,10 @@ class FileDurabilityEffectTest {
                 Ok { val = h } -> do
                   FileStreaming.close { handle = h }
                   match FileDurability.fsync { handle = h } is
-                    Ok { val = _ } -> "unexpectedly-ok"
-                    Err { error = FsClosedHandle { path = _ } } -> "closed"
-                    Err { error = _ } -> "other-error"
-                Err { error = _ } -> "open-failed"
+                    Ok { ... } -> "unexpectedly-ok"
+                    Err { error = FsClosedHandle { ... } } -> "closed"
+                    Err { ... } -> "other-error"
+                Err { ... } -> "open-failed"
         """.trimIndent()
         assertEquals("closed", eval(code))
     }
@@ -151,8 +151,8 @@ class FileDurabilityEffectTest {
             use std::effects::filesystem::{ FileDurability, LocalFileDurability }
             perform LocalFileDurability in
               match FileDurability.fsync_dir { path = "${tmp.toString()}" } is
-                Ok { val = _ } -> "ok"
-                Err { error = _ } -> "err"
+                Ok { ... } -> "ok"
+                Err { ... } -> "err"
         """.trimIndent()
         assertEquals("ok", eval(code))
     }
@@ -164,9 +164,9 @@ class FileDurabilityEffectTest {
             use std::effects::filesystem::{ FileDurability, LocalFileDurability }
             perform LocalFileDurability in
               match FileDurability.fsync_dir { path = "$path" } is
-                Ok { val = _ } -> "unexpectedly-ok"
-                Err { error = FsNotFound { path = _ } } -> "not-found"
-                Err { error = _ } -> "other-error"
+                Ok { ... } -> "unexpectedly-ok"
+                Err { error = FsNotFound { ... } } -> "not-found"
+                Err { ... } -> "other-error"
         """.trimIndent()
         assertEquals("not-found", eval(code))
     }

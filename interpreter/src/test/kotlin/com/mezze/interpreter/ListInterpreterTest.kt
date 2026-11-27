@@ -72,7 +72,7 @@ class ListInterpreterTest {
                     Cons { head, tail } ->
                         match tail is
                             Nil -> 1
-                            Cons { head = _, tail = rest } -> 2 + count { xs = rest }
+                            Cons { tail = rest, ... } -> 2 + count { xs = rest }
 
             let xs = list::range { start = 1, end = 5 }  # [1,2,3,4]
             count { xs = xs }

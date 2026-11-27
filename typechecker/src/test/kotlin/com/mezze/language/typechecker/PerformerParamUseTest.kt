@@ -52,7 +52,7 @@ class PerformerParamUseTest {
         val (result, warnings) = warningsFor(source)
         assertNotNull(result)
         assertFalse(
-            warnings.any { it.contains("Unused variable") && it.contains("clock") },
+            warnings.any { it.contains("`clock` is never used") },
             "`clock` is passed to `perform MockTime { clock = clock }`, so it is used. " +
                 "Warnings: $warnings",
         )
@@ -78,11 +78,11 @@ class PerformerParamUseTest {
         val (result, warnings) = warningsFor(source)
         assertNotNull(result)
         assertTrue(
-            warnings.any { it.contains("Unused variable") && it.contains("spare") },
+            warnings.any { it.contains("`spare` is never used") },
             "`spare` is referenced nowhere and must still warn. Warnings: $warnings",
         )
         assertFalse(
-            warnings.any { it.contains("Unused variable") && it.contains("clock") },
+            warnings.any { it.contains("`clock` is never used") },
             "`clock` is used in the performer parameter. Warnings: $warnings",
         )
     }

@@ -220,7 +220,7 @@ pub let put_tmvar: { var: TMVar 'a, val: 'a } -> {} <STM> = { var, val } -> do
   let inner = unwrap_tmvar { var = var }
   let contents = STM.read { var = inner }
   match contents is
-    Some { val = _ } -> STM.retry {}
+    Some { ... } -> STM.retry {}
     None -> STM.write { var = inner, val = Some { val = val } }
 
 
@@ -250,7 +250,7 @@ pub let try_put_tmvar: { var: TMVar 'a, val: 'a } -> Bool <STM> = { var, val } -
     let inner = unwrap_tmvar { var = var }
     let contents = STM.read { var = inner }
     match contents is
-      Some { val = _ } -> False
+      Some { ... } -> False
       None -> do
         STM.write { var = inner, val = Some { val = val } }
         True
@@ -267,7 +267,7 @@ pub let is_empty_tmvar: { var: TMVar 'a } -> Bool <STM> = { var } -> do
   let inner = unwrap_tmvar { var = var }
   let contents = STM.read { var = inner }
   match contents is
-    Some { val = _ } -> False
+    Some { ... } -> False
     None -> True
 
 

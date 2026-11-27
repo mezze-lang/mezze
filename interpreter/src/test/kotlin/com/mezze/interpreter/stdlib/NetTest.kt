@@ -43,7 +43,7 @@ class NetTest {
 
         ## Describe a send.
         let sent: { r: Result {} NetError } -> Str = { r } -> match r is
-          Ok { val = _ } -> "sent"
+          Ok { ... } -> "sent"
           Err { error } -> show_err { e = error }
 
         ## A line-echo handler for `serve_on`: every line comes back prefixed.
@@ -62,9 +62,9 @@ class NetTest {
             lines { conn = conn, init = "", f = { acc, x } -> "$(acc)[$(x)]" } }
           TcpServer.close { listener = l }
           let served = match await { p = server } is
-            Ok { val = Ok { val = _ } } -> "served"
+            Ok { val = Ok { ... } } -> "served"
             Ok { val = Err { error } } -> show_err { e = error }
-            Err { error = _ } -> "server task failed"
+            Err { ... } -> "server task failed"
           match out is
             Ok { val = Ok { val = s } } -> "$(s)|$(served)"
             Ok { val = Err { error } } -> show_err { e = error }
@@ -83,7 +83,7 @@ class NetTest {
             let net = mock_network {}
             perform MockTcp { net = net } in
               match Tcp.connect { addr = local { port = 9 }, config = default_tcp_config } is
-                Ok { val = _ } -> "connected?"
+                Ok { ... } -> "connected?"
                 Err { error } -> show_err { e = error }
             """,
         ))
@@ -211,9 +211,9 @@ class NetTest {
             let net = mock_network {}
             let pair: { l: TcpListener, port: Int } -> Option { c: TcpConn, a: TcpConn } <Tcp, TcpServer> = { l, port } ->
               match Tcp.connect { addr = local { port = port }, config = default_tcp_config } is
-                Err { error = _ } -> None
+                Err { ... } -> None
                 Ok { val = c } -> match TcpServer.accept { listener = l } is
-                  Err { error = _ } -> None
+                  Err { ... } -> None
                   Ok { val = a } -> Some { val = { c = c, a = a.conn } }
             perform MockTcp { net = net } in perform MockTcpServer { net = net } in
               match TcpServer.bind { addr = local { port = 4 }, config = default_tcp_config } is
@@ -256,12 +256,12 @@ class NetTest {
                 Err { error } -> show_err { e = error }
                 Ok { val = l } -> do
                   let waiter = Async.spawn { f = {} -> match TcpServer.accept { listener = l } is
-                    Ok { val = _ } -> "accepted?"
+                    Ok { ... } -> "accepted?"
                     Err { error } -> show_err { e = error } }
                   TcpServer.close { listener = l }
                   match await { p = waiter } is
                     Ok { val = s } -> s
-                    Err { error = _ } -> "task failed"
+                    Err { ... } -> "task failed"
             """,
         ))
         assertEquals("closed", r)
@@ -306,8 +306,8 @@ class NetTest {
                 Err { error } -> show_err { e = error }
                 Ok { val = l } -> do
                   let again = match TcpServer.bind { addr = local { port = 6 }, config = default_tcp_config } is
-                    Ok { val = _ } -> "bound twice?"
-                    Err { error = NetBindFailed { addr, reason = _ } } -> "bind failed on $(addr_to_str { addr = addr })"
+                    Ok { ... } -> "bound twice?"
+                    Err { error = NetBindFailed { addr, ... } } -> "bind failed on $(addr_to_str { addr = addr })"
                     Err { error } -> show_err { e = error }
                   TcpServer.close { listener = l }
                   let after = match TcpServer.bind { addr = local { port = 6 }, config = default_tcp_config } is
@@ -350,7 +350,7 @@ class NetTest {
                   let port = listener_port { listener = l }
                   TcpServer.close { listener = l }
                   match Tcp.connect { addr = local { port = port }, config = default_tcp_config } is
-                    Ok { val = _ } -> "connected?"
+                    Ok { ... } -> "connected?"
                     Err { error } -> show_err { e = error }
             """,
         )) as String
@@ -367,12 +367,12 @@ class NetTest {
                 Err { error } -> show_err { e = error }
                 Ok { val = l } -> do
                   let waiter = Async.spawn { f = {} -> match TcpServer.accept { listener = l } is
-                    Ok { val = _ } -> "accepted?"
+                    Ok { ... } -> "accepted?"
                     Err { error } -> show_err { e = error } }
                   TcpServer.close { listener = l }
                   match await { p = waiter } is
                     Ok { val = s } -> s
-                    Err { error = _ } -> "task failed"
+                    Err { ... } -> "task failed"
             """,
         ))
         assertEquals("closed", r)

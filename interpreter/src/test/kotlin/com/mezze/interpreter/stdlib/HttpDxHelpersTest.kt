@@ -64,7 +64,7 @@ class HttpDxHelpersTest {
             let resp = response_ok_text { body = "hi" }
             match body_str { resp = resp } is
               Ok { val } -> val
-              Err { error = _ } -> "err"
+              Err { ... } -> "err"
         """.trimIndent())
         assertEquals("hi", result)
     }

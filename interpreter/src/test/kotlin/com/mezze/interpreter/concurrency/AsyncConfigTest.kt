@@ -34,7 +34,7 @@ class AsyncConfigTest {
                 let p = Async.spawn {f = {} -> 42}
                 match await {p = p} is
                     Ok {val} -> val
-                    Err {error = _} -> -1
+                    Err { ... } -> -1
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -52,13 +52,13 @@ class AsyncConfigTest {
 
                 let r1 = match await {p = p1} is
                     Ok {val} -> val
-                    Err {error = _} -> -1
+                    Err { ... } -> -1
                 let r2 = match await {p = p2} is
                     Ok {val} -> val
-                    Err {error = _} -> -1
+                    Err { ... } -> -1
                 let r3 = match await {p = p3} is
                     Ok {val} -> val
-                    Err {error = _} -> -1
+                    Err { ... } -> -1
 
                 r1 + r2 + r3
         """
@@ -79,13 +79,13 @@ class AsyncConfigTest {
 
                 let r1 = match await {p = p1} is
                     Ok {val} -> val
-                    Err {error = _} -> -1
+                    Err { ... } -> -1
                 let r2 = match await {p = p2} is
                     Ok {val} -> val
-                    Err {error = _} -> -1
+                    Err { ... } -> -1
                 let r3 = match await {p = p3} is
                     Ok {val} -> val
-                    Err {error = _} -> -1
+                    Err { ... } -> -1
                 r1 + r2 + r3
         """
         val result = eval(code)
@@ -106,7 +106,7 @@ class AsyncConfigTest {
                 let p = Async.spawn {f = {} -> 42}
                 match await {p = p} is
                     Ok {val} -> val
-                    Err {error = _} -> -1
+                    Err { ... } -> -1
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -124,13 +124,13 @@ class AsyncConfigTest {
 
                 let r1 = match await {p = p1} is
                     Ok {val} -> val
-                    Err {error = _} -> -1
+                    Err { ... } -> -1
                 let r2 = match await {p = p2} is
                     Ok {val} -> val
-                    Err {error = _} -> -1
+                    Err { ... } -> -1
                 let r3 = match await {p = p3} is
                     Ok {val} -> val
-                    Err {error = _} -> -1
+                    Err { ... } -> -1
 
                 r1 + r2 + r3
         """
@@ -150,10 +150,10 @@ class AsyncConfigTest {
 
                 let r1 = match await {p = p1} is
                     Ok {val} -> val
-                    Err {error = _} -> -1
+                    Err { ... } -> -1
                 let r2 = match await {p = p2} is
                     Ok {val} -> val
-                    Err {error = _} -> -1
+                    Err { ... } -> -1
                 r1 + r2
         """
         val result = eval(code)
@@ -173,7 +173,7 @@ class AsyncConfigTest {
                 let p = Async.spawn {f = {} -> 42}
                 match await {p = p} is
                     Ok {val} -> val
-                    Err {error = _} -> -1
+                    Err { ... } -> -1
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -188,7 +188,7 @@ class AsyncConfigTest {
                 let p = Async.spawn {f = {} -> 42}
                 match await {p = p} is
                     Ok {val} -> val
-                    Err {error = _} -> -1
+                    Err { ... } -> -1
         """
         val result = eval(code)
         assertEquals(42L, result)

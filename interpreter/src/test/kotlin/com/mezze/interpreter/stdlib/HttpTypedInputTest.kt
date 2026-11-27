@@ -40,7 +40,7 @@ class HttpTypedInputTest {
 
         let text_of: { resp: Response } -> Str = { resp } -> match body_str { resp = resp } is
           Ok { val } -> val
-          Err { error = _ } -> "could not decode"
+          Err { ... } -> "could not decode"
     """.trimIndent()
 
     private fun run(body: String): Any = MezzeTestHelper.run("$head\n$body")
@@ -121,7 +121,7 @@ class HttpTypedInputTest {
             let api = router { path = "" }
               .get { path = "/users/:id", handler = { m } -> match m.param_as { name = "id" } is
                 Ok { val } -> show { id = val }
-                Err { error = _ } -> "not a number" }
+                Err { ... } -> "not a number" }
               .handler {}
         """.trimIndent()
         val r = run(

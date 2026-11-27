@@ -84,8 +84,10 @@ internal fun <T> MezzeParser.parseCommaSeparatedOps(
                 }
             }
         }
-        is ParseResult.Failure -> {
-        }
+        // No first op: an empty block (the caller then expects `}`). But a FATAL failure is a
+        // committed, targeted error in that op (e.g. `val = _` in a pattern) — discarding it
+        // surfaced as a baffling "Expected '}' but got 'op'" instead.
+        is ParseResult.Failure -> if (firstOp.isFatal) return firstOp
     }
     return ParseResult.Success(Pair(operations, currentStream), currentStream)
 }

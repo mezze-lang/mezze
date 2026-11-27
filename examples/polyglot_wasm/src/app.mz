@@ -36,7 +36,7 @@ use std::int
 let show_int: { label: Str, r: WasmForeign } -> {} <Log>
   = { label, r } -> match r.int{} is
     Ok { val = n } -> println { msg = "  $(label) = $(int::to_str { n = n })" }
-    Err { error = _ } -> println { msg = "  $(label): coerce failed / guest error" }
+    Err { ... } -> println { msg = "  $(label): coerce failed / guest error" }
 
 ## Hand-assembled wasm module. 85 bytes; see the doc comment above for
 ## the export table. The byte layout is:
@@ -63,8 +63,8 @@ let module_bytes: {} -> Bytes = {} -> match bytes::from_hex { s = "$(module_hex)
 ## a bare error message on failure.
 let show_write: { label: Str, r: Result {} InteropError } -> {} <Log>
   = { label, r } -> match r is
-    Ok { val = _ } -> println { msg = "  $(label): ok" }
-    Err { error = _ } -> println { msg = "  $(label): failed" }
+    Ok { ... } -> println { msg = "  $(label): ok" }
+    Err { ... } -> println { msg = "  $(label): failed" }
 
 ## Report the outcome of a memory_read — print the byte count.
 let show_read: { label: Str, r: Result Bytes InteropError } -> {} <Log>
@@ -72,7 +72,7 @@ let show_read: { label: Str, r: Result Bytes InteropError } -> {} <Log>
     Ok { val = b } -> println {
       msg = "  $(label): $(int::to_str { n = bytes::size { b = b } }) bytes read: $(bytes::to_hex { b = b })",
     }
-    Err { error = _ } -> println { msg = "  $(label): failed" }
+    Err { ... } -> println { msg = "  $(label): failed" }
 
 ## Body of the demo, factored out so `main`'s outer `do` block ends
 ## with a clean expression. Takes the loaded module and drives every
@@ -124,7 +124,7 @@ let run_memory_demo: { mem: WasmForeign } -> {} <Log, *>
   = { mem } -> do
     match mem.memory_size{} is
       Ok  { val = n }   -> println { msg = "  memory_size = $(int::to_str { n = n })" }
-      Err { error = _ } -> println { msg = "  memory_size: failed" }
+      Err { ... } -> println { msg = "  memory_size: failed" }
     let payload = bytes::from_seq { arr = [72, 105, 44, 32, 87, 65, 83, 77, 33] }
     show_write {
       label = "write \"Hi, WASM!\" at offset 0",
@@ -146,7 +146,7 @@ let main = {} -> perform Console in perform GraalWasm in do
   println { msg = "" }
 
   match Wasm.load_module { bytes = wasm_bytes, name = "arith" } is
-    Err { error = _ } -> println { msg = "load_module failed" }
+    Err { ... } -> println { msg = "load_module failed" }
     Ok { val = mod } -> run_demo { mod = mod }
 
   println { msg = "" }

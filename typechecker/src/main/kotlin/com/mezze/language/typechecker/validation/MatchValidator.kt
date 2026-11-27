@@ -149,8 +149,8 @@ class MatchValidator(
         if (expandedType !is MezzeType.VariantType) {
             // #203: a seq/list match is exhaustive only if it covers every length.
             // The sound, conservative rule: a catch-all arm (`_`/variable/`[...all]`/
-            // `[..._]`), OR an empty-arm (`[]`) together with an open-cons arm
-            // (`[x, ...rest]`/`[x, ..._]`) that covers all lengths >= 1. A
+            // `[...]`), OR an empty-arm (`[]`) together with an open-cons arm
+            // (`[x, ...rest]`/`[x, ...]`) that covers all lengths >= 1. A
             // fixed-length pattern (`[a]`, `[a, b]`) covers only that one length.
             if (isSeqApp(expandedType) || isListApp(expandedType)) {
                 return seqExhaustivenessErrors(
@@ -299,7 +299,7 @@ class MatchValidator(
      *                   OR ( an empty arm `[]`  AND  an open-cons arm `[x, ...rest]` )
      *
      * where a **catch-all** is `_`, a bare variable, or a whole-seq rest with no
-     * fixed elements (`[...all]` / `[..._]`); an **open-cons** is ONE leading
+     * fixed elements (`[...all]` / `[...]`); an **open-cons** is ONE leading
      * element plus a rest (`[x, ...rest]`, `[Some x, ...tail]`), which covers every
      * length ≥ 1. A wider open-cons like `[a, b, ...rest]` covers only length ≥ 2
      * (leaving length 1 uncovered), and fixed-length patterns (`[a]`, `[a, b]`)
@@ -344,7 +344,7 @@ class MatchValidator(
                     is ParsedSeqPattern -> {
                         val width = pattern.elements.size
                         if (pattern.restPattern != null) {
-                            // `[..._]` (width 0) is a catch-all; `[e1..em, ...rest]`
+                            // `[...]` (width 0) is a catch-all; `[e1..em, ...rest]`
                             // covers all lengths >= m.
                             if (width == 0) hasCatchAll = true
                             else minOpenConsWidth = minOf(minOpenConsWidth, width)
@@ -382,7 +382,7 @@ class MatchValidator(
             !coversEmpty && !coversAllNonEmpty ->
                 "the empty seq `[]` and a non-empty seq `[x, ...rest]`"
             !coversEmpty -> "the empty seq `[]`"
-            else -> "a non-empty seq `[x, ...rest]` (add `[x, ...rest]`, `[x, ..._]`, or `_`)"
+            else -> "a non-empty seq `[x, ...rest]` (add `[x, ...rest]`, `[x, ...]`, or `_`)"
         }
         return ValidationResult.Failure(listOf(ValidationError.NonExhaustiveMatch(
             coveredConstructors = emptyList(),
@@ -431,7 +431,9 @@ class MatchValidator(
             for (pattern in case.patterns) {
                 if (pattern !is ParsedSeqPattern) continue
                 if (pattern.restPattern == null) continue        // fixed length — cannot match a long seq
-                heads.add(pattern.elements.firstOrNull() ?: return emptyList())  // `[...all]` — a catch-all
+                // No element before the rest (`[...]`, `[..., last]`): any head — a catch-all here.
+                if (pattern.elements.size == pattern.suffixCount) return emptyList()
+                heads.add(pattern.elements.first())
             }
         }
         if (heads.isEmpty()) return emptyList()
@@ -696,7 +698,7 @@ class MatchValidator(
                         errors.add(ValidationError.NonExhaustiveMatch(
                             coveredConstructors = emptyList(),
                             missingConstructors = listOf(
-                                "$ctorName { $fieldName = _ } (a ${prettyPrintType(fieldType)} field cannot be exhausted by listing values — add a wildcard/variable)"
+                                "$ctorName { ... } (a ${prettyPrintType(fieldType)} field cannot be exhausted by listing values — add an arm that takes any `$fieldName`)"
                             ),
                             loc = matchExpr.loc
                         ))
@@ -892,6 +894,9 @@ class MatchValidator(
         // a duplicate/unreachable arm (almost always a typo), reported as an error
         // just like the "after a catch-all" case below.
         val coveredKeys = HashSet<String>()
+        // Every alternative an earlier arm takes unconditionally, with that arm: a later
+        // arm all of whose alternatives one of these already matches can never run.
+        val covering = mutableListOf<Pair<ParsedPattern, ParsedMatchCase>>()
 
         for (case in matchExpr.cases) {
             if (isExhausted) {
@@ -902,6 +907,24 @@ class MatchValidator(
                     removableArmLoc = case.loc
                 ))
                 continue
+            }
+            // Structural coverage (V0603 extended): constructors with payloads, records,
+            // lists (incl. `[first, ..., last]`), newtypes and string holes. Checked for a
+            // guarded arm too — an earlier unconditional arm gets there first whatever the
+            // guard says. A duplicable-key repeat is reported below instead (no double report).
+            val coveredBy = if (case.patterns.isEmpty()) null else case.patterns.map { alt ->
+                covering.firstOrNull { (earlier, _) -> PatternCoverage.covers(earlier, alt) }?.second
+            }
+            val keyedDuplicate = case.guard == null && case.ifLetBindings.isEmpty() &&
+                case.patterns.mapNotNull { duplicableKey(it) }.let { k -> k.size == case.patterns.size && k.all { it in coveredKeys } }
+            if (coveredBy != null && coveredBy.all { it != null } && !keyedDuplicate) {
+                val earlierLine = coveredBy.first()!!.loc.startLine
+                errors.add(ValidationError.UnreachablePattern(
+                    pattern = case.patterns.first(),
+                    reason = "This arm can never run: the arm on line $earlierLine already matches everything it does.",
+                    loc = case.loc,
+                    removableArmLoc = case.loc
+                ))
             }
             // A guard/if-let arm may not fire even when its shape repeats, so it
             // neither closes off future arms nor counts as covering a key.
@@ -938,6 +961,7 @@ class MatchValidator(
                 // the earlier arm gets there first whatever the guard says.
                 for ((altIndex, pattern) in case.patterns.withIndex()) {
                     if (!case.altCovers(altIndex)) continue
+                    covering += pattern to case
                     duplicableKey(pattern)?.let { coveredKeys.add(it) }
                     if (pattern is ParsedWildcardPattern || pattern is ParsedVariablePattern) {
                         isExhausted = true

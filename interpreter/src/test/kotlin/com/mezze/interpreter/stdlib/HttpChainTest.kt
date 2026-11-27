@@ -480,7 +480,7 @@ class HttpChainTest {
               let result_text = HttpClient.request { req = req, config = default_http_config }.text {}
               match result_text is
                 Ok  { val = s } -> s
-                Err { error = _ } -> "ERR"
+                Err { ... } -> "ERR"
         """)
         assertEquals("the-body", result)
     }

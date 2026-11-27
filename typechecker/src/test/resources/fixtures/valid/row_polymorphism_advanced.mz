@@ -19,7 +19,7 @@ let nestedAccess = { v } -> match v is
 
 let processList = { items } -> match items is
   Cons { head, tail } -> match head is
-    Some { val = _ } -> 1
+    Some { ... } -> 1
     _ -> 0
   _ -> 0
 

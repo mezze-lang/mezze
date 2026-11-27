@@ -35,7 +35,7 @@ class HttpSseTest {
         }
         let text_of: { resp: Response } -> Str = { resp } -> match body_str { resp = resp } is
           Ok { val } -> val
-          Err { error = _ } -> "could not decode"
+          Err { ... } -> "could not decode"
         let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_print_log = Off }
     """.trimIndent()
 
@@ -98,7 +98,7 @@ class HttpSseTest {
                 perform SimpleHttpClient in do
                   let h = match HttpServer.serve { handler = app } is
                     Ok { val = hh } -> hh
-                    Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                    Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                   let out = match request { url = ${url("/events")} }.send {} is
                     Ok { val } -> "$(match map::get { m = val.headers, k = "content-type" } is
                       Some { val = t } -> t
@@ -136,14 +136,14 @@ class HttpSseTest {
               perform EarlyReturn in
                 chunks { reader = reader, chunk_bytes = 65536, init = "nothing", f = { acc, x } -> match bytes::to_str { b = x } is
                   Ok { val = t } -> return { val = t }
-                  Err { error = _ } -> return { val = "undecodable" } }
+                  Err { ... } -> return { val = "undecodable" } }
             let go: {} -> Str <*> = {} ->
               perform SystemTime in
                 perform HelidonHttpServerWith { config = listen_on_any_port } in
                   perform SimpleHttpClient in perform SimpleHttpDownload in do
                     let h = match HttpServer.serve { handler = app } is
                       Ok { val = hh } -> hh
-                      Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                      Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                     let out = match with_download {
                       req = request { url = ${url("/slow")} }, config = default_http_config,
                       f = { resp, reader } -> first_chunk { reader = reader },

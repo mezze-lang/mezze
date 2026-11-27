@@ -18,4 +18,4 @@ let main = {} -> perform Console in perform GraalJs in do
   # yields a `Result`, so any guest error surfaces as `Err` instead of crashing.
   match Js.eval { source = "6 * 7" }.int {} is
     Ok  { val = n }   -> println { msg = "JavaScript says 6 * 7 = $(int::to_str { n = n })" }
-    Err { error = _ } -> println { msg = "JavaScript evaluation failed" }
+    Err { ... } -> println { msg = "JavaScript evaluation failed" }

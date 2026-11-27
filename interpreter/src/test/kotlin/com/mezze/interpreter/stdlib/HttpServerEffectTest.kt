@@ -44,7 +44,7 @@ class HttpServerEffectTest {
             let go: {} -> Int <*> = {} -> perform MockHttpServer in do
               let h = match HttpServer.serve { handler = handler } is
                 Ok { val = hh } -> hh
-                Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
               h.port
             go {}
         """.trimIndent())
@@ -62,7 +62,7 @@ class HttpServerEffectTest {
             let resp = handler { req = incoming { method = Get, url = "/users/7" } }
             match bytes::to_str { b = resp.body } is
               Ok { val } -> val
-              Err { error = _ } -> "err"
+              Err { ... } -> "err"
         """.trimIndent())
         assertEquals("/users/7", r)
     }

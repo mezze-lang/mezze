@@ -268,7 +268,7 @@ The [Handlers](/concepts#handlers) page covers `cont` and `scope`.
 ### `_`
 
 `_` is the pattern wildcard. It matches anything and binds nothing:
-`Err { error = _ }`, or a catch-all arm `_ -> …`. To take some fields of a record
+`Err { ... }`, or a catch-all arm `_ -> …`. To take some fields of a record
 and ignore the rest, write `...`: `let { a, ... } = r`. `_` is not a name, so
 `let _ = …` is an error. To run something only for its effect,
 write it as a statement on its own line in a `do` block; its value is dropped.

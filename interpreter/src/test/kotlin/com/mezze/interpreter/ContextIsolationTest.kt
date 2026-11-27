@@ -39,7 +39,7 @@ class ContextIsolationTest {
             perform MemoryFileSystem in
               match write_text { path = "/leaked.txt", text = "from the first program" } is
                 Ok { val } -> "wrote"
-                Err { error = _ } -> "write failed"
+                Err { ... } -> "write failed"
             """.trimIndent(),
         )
         assertEquals("wrote", wrote, "precondition: the first program must manage to write")
@@ -50,7 +50,7 @@ class ContextIsolationTest {
             perform MemoryFileSystem in
               match exists { path = "/leaked.txt" } is
                 Ok { val } -> bool::to_str { b = val }
-                Err { error = _ } -> "stat failed"
+                Err { ... } -> "stat failed"
             """.trimIndent(),
         )
         assertEquals(
@@ -100,7 +100,7 @@ class ContextIsolationTest {
                 perform MemoryFileSystem in
                   match write_text { path = "/retained.txt", text = "bytes that must not outlive me" } is
                     Ok { val } -> "wrote"
-                    Err { error = _ } -> "write failed"
+                    Err { ... } -> "write failed"
                 """.trimIndent(),
             )
 

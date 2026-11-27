@@ -38,13 +38,13 @@ class IterSourcesTest {
         let count_lines: { path: Str, chunk_bytes: Int } -> Int <FileStreaming> = { path, chunk_bytes } ->
           match with_lines { path = path, chunk_bytes = chunk_bytes, init = 0, f = { acc, x } -> acc + 1 } is
             Ok { val = n } -> n
-            Err { error = _ } -> 0 - 1
+            Err { ... } -> 0 - 1
 
         ## Every line bracketed, in order; "failed" if `with_lines` fails.
         let join_lines: { path: Str, chunk_bytes: Int } -> Str <FileStreaming> = { path, chunk_bytes } ->
           match with_lines { path = path, chunk_bytes = chunk_bytes, init = "", f = { acc, x } -> "$(acc)[$(x)]" } is
             Ok { val = s } -> s
-            Err { error = _ } -> "failed"
+            Err { ... } -> "failed"
     """.trimIndent()
 
     private val scopes = "perform MemoryFileSystem in perform MemoryFileStreaming in do"
@@ -144,7 +144,7 @@ class IterSourcesTest {
             let body = seq::fold { xs = seq::range { start = 0, end = 200 }, init = "", f = { acc, x } -> "$(acc)line\n" }
             write_text { path = "/f", text = body }
             match FileStreaming.open { path = "/f", mode = Read } is
-              Err { error = _ } -> "open-failed"
+              Err { ... } -> "open-failed"
               Ok { val = h } -> do
                 let n = perform EarlyReturn in
                   lines { handle = h, chunk_bytes = 16, init = 0, f = { acc, x } -> if acc + 1 == 2 then return { val = 2 } else acc + 1 }
@@ -153,7 +153,7 @@ class IterSourcesTest {
                   Ok { val = h2 } -> do
                     FileStreaming.close { handle = h2 }
                     "$(int::to_str { n = n }) lines, reopened-fine"
-                  Err { error = _ } -> "reopen-failed"
+                  Err { ... } -> "reopen-failed"
             """,
             extra = "use std::effects::early_return::{ EarlyReturn, return }",
         )
@@ -167,12 +167,12 @@ class IterSourcesTest {
             """
             write_text { path = "/f", text = "a\nb\nc\nd\n" }
             match with_lines { path = "/f", chunk_bytes = 64, init = {}, f = { acc, x } -> {} } is
-              Ok { val = _ } -> match FileStreaming.open { path = "/f", mode = Read } is
+              Ok { ... } -> match FileStreaming.open { path = "/f", mode = Read } is
                 Ok { val = h2 } -> do
                   FileStreaming.close { handle = h2 }
                   "reopened-fine"
-                Err { error = _ } -> "reopen-failed"
-              Err { error = _ } -> "with_lines-failed"
+                Err { ... } -> "reopen-failed"
+              Err { ... } -> "with_lines-failed"
             """,
         )
         assertEquals("reopened-fine", eval(code))
@@ -187,7 +187,7 @@ class IterSourcesTest {
               write_text { path = "$f", text = "alpha\nbeta\ngamma\n" }
               match with_lines { path = "$f", chunk_bytes = 4, init = "", f = { acc, x } -> "$(acc)[$(x)]" } is
                 Ok { val = s } -> s
-                Err { error = _ } -> "failed"
+                Err { ... } -> "failed"
         """.trimIndent()
         assertEquals("[alpha][beta][gamma]", eval(code))
     }
@@ -207,7 +207,7 @@ class IterSourcesTest {
             perform MemoryFileSystem in perform MemoryFileWatch in do
               FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
                 Ok { val = h } -> do
                   write_text { path = "/d/a", text = "1" }
                   write_text { path = "/d/b", text = "2" }
@@ -225,7 +225,7 @@ class IterSourcesTest {
             perform MemoryFileSystem in perform MemoryFileWatch in do
               FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
                 Ok { val = h } -> watch { handle = h, timeout_ms = 0, init = 0, f = { acc, x } -> acc + 1 }
         """.trimIndent()
         assertEquals(0L, eval(code))
@@ -239,13 +239,13 @@ class IterSourcesTest {
             perform MemoryFileSystem in perform MemoryFileWatch in do
               FileSystem.create_directory { path = "/d" }
               match FileWatch.watch { path = "/d", recursive = False } is
-                Err { error = _ } -> "watch-failed"
+                Err { ... } -> "watch-failed"
                 Ok { val = h } -> do
                   write_text { path = "/d/only", text = "1" }
                   watch { handle = h, timeout_ms = 0, init = "", f = { acc, x } -> match x is
                     Created { path = p } -> "$(acc)created:$(p)"
-                    Modified { path = _ } -> "$(acc)modified"
-                    Deleted { path = _ } -> "$(acc)deleted"
+                    Modified { ... } -> "$(acc)modified"
+                    Deleted { ... } -> "$(acc)deleted"
                     Overflow -> "$(acc)overflow"
                   }
         """.trimIndent()

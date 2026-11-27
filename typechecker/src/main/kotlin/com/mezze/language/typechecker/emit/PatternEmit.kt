@@ -331,7 +331,7 @@ internal fun TypedAstBuilder.patternBindingTypes(pattern: ParsedPattern, type: M
                 else -> null
             }
             val elements = pattern.elements.fold(emptyMap<String, MezzeType>()) { acc, e -> acc + patternBindingTypes(e, elementType) }
-            val rest = pattern.restPattern
+            val rest = pattern.restPattern?.takeIf { it != com.mezze.language.parsedast.ParsedSeqPattern.IGNORED_REST }
             if (rest != null && shape != null && elementType != null) elements + (rest to shape) else elements
         }
     }
@@ -376,7 +376,8 @@ internal fun TypedAstBuilder.buildPattern(pattern: ParsedPattern, file: String):
             elements = pattern.elements.map { buildPattern(it, file) },
             rest = pattern.restPattern,
             type = unknownType,
-            loc = loc
+            loc = loc,
+            suffixCount = pattern.suffixCount,
         )
         is ParsedStringInterpPattern ->
             TypedStringInterpPattern(

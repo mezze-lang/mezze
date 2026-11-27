@@ -180,7 +180,7 @@ class CrossModuleImplFieldItMismatchTest {
                 let resp = c.get { path = "/x" }.send {}
                 match resp is
                   Ok { val } -> val.status
-                  Err { error = _ } -> -1
+                  Err { ... } -> -1
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(userSource, "test.mz")
@@ -224,7 +224,7 @@ class CrossModuleImplFieldItMismatchTest {
             let r = make_resp {}
             let out = match r is
               Ok { val } -> if val.is_ok {} then 1 else 0
-              Err { error = _ } -> -1
+              Err { ... } -> -1
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(userSource, "test.mz")
@@ -280,7 +280,7 @@ class CrossModuleImplFieldItMismatchTest {
             let resp = req.send {}
             let status = match resp is
               Ok { val } -> val.status
-              Err { error = _ } -> -1
+              Err { ... } -> -1
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(userSource, "test.mz")
@@ -335,7 +335,7 @@ class CrossModuleImplFieldItMismatchTest {
                 let resp = api.get { path = "/users/42" }.send {}
                 match resp is
                   Ok { val } -> val.status
-                  Err { error = _ } -> -1
+                  Err { ... } -> -1
         """.trimIndent()
 
         val parsedModule = parser.parseParsedModule(userSource, "test.mz")

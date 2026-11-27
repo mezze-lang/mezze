@@ -24,7 +24,7 @@ type Stock = |
 let can_cook = { s } -> match s is
   InStock { grams } -> grams > 100
   Low { grams } -> grams > 100
-  OutUntil { day = _ } -> False
+  OutUntil { ... } -> False
   Discontinued -> False
 
 let note = { s } -> match s is

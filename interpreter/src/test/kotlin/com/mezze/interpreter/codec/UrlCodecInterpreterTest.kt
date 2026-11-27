@@ -198,7 +198,7 @@ class UrlCodecInterpreterTest {
             use std::codec::url
             match url::parse { s = "http://example.com/some/path" } is
               Ok { val = u } -> url::render { url = u }
-              Err { error = _ } -> "ERR"
+              Err { ... } -> "ERR"
         """.trimIndent()) as String
         assertEquals("http://example.com/some/path", rendered)
     }
@@ -209,7 +209,7 @@ class UrlCodecInterpreterTest {
             use std::codec::url
             match url::parse { s = "http://example.com:8080/x" } is
               Ok { val = u } -> url::render { url = u }
-              Err { error = _ } -> "ERR"
+              Err { ... } -> "ERR"
         """.trimIndent()) as String
         assertEquals("http://example.com:8080/x", rendered)
     }
@@ -220,7 +220,7 @@ class UrlCodecInterpreterTest {
             use std::codec::url
             match url::parse { s = "http://example.com/x?a=1&b=2" } is
               Ok { val = u } -> url::render { url = u }
-              Err { error = _ } -> "ERR"
+              Err { ... } -> "ERR"
         """.trimIndent()) as String
         assertEquals("http://example.com/x?a=1&b=2", rendered)
     }
@@ -231,7 +231,7 @@ class UrlCodecInterpreterTest {
             use std::codec::url
             match url::parse { s = "http://example.com/x#top" } is
               Ok { val = u } -> url::render { url = u }
-              Err { error = _ } -> "ERR"
+              Err { ... } -> "ERR"
         """.trimIndent()) as String
         assertEquals("http://example.com/x#top", rendered)
     }
@@ -242,7 +242,7 @@ class UrlCodecInterpreterTest {
             use std::codec::url
             match url::parse { s = "https://user:pw@example.com/p" } is
               Ok { val = u } -> url::render { url = u }
-              Err { error = _ } -> "ERR"
+              Err { ... } -> "ERR"
         """.trimIndent()) as String
         assertEquals("https://user:pw@example.com/p", rendered)
     }
@@ -280,7 +280,7 @@ class UrlCodecInterpreterTest {
             use std::codec::url
             match url::parse { s = "https://example.com/caf%C3%A9" } is
               Ok { val = u } -> url::render { url = u }
-              Err { error = _ } -> "ERR"
+              Err { ... } -> "ERR"
         """.trimIndent()) as String
         assertEquals("https://example.com/caf%C3%A9", rendered)
     }

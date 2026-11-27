@@ -108,7 +108,7 @@ let loop_whole: { f: JvmForeign, reps: Int, acc: Int } -> Int =
     if reps <= 0 then acc
     else match f.to_seq {} is
       Ok { val = es } -> loop_whole { f = f, reps = reps - 1, acc = acc + seq::size { xs = es } }
-      Err { error = _ } -> acc
+      Err { ... } -> acc
 
 ## ---- NUMERIC drain, per-element: `at{}` THEN `int{}` — two crossings per element
 ## (read the handle, then coerce it). This is what a codec's per-element decode does. ----
@@ -117,7 +117,7 @@ let read_each_int: { f: JvmForeign, i: Int, n: Int, acc: Int } -> Int =
     if i >= n then acc
     else match f.at { index = i }.int {} is
       Ok { val = v } -> read_each_int { f = f, i = i + 1, n = n, acc = acc + v }
-      Err { error = _ } -> acc
+      Err { ... } -> acc
 
 let loop_each_int: { f: JvmForeign, n: Int, reps: Int, acc: Int } -> Int =
   { f, n, reps, acc } ->
@@ -131,7 +131,7 @@ let loop_whole_ints: { f: JvmForeign, reps: Int, acc: Int } -> Int =
     if reps <= 0 then acc
     else match f.to_ints {} is
       Ok { val = xs } -> loop_whole_ints { f = f, reps = reps - 1, acc = acc + seq::size { xs = xs } }
-      Err { error = _ } -> acc
+      Err { ... } -> acc
 
 let us_per: { reps: Int, t0: Duration, t1: Duration } -> Int =
   { reps, t0, t1 } ->

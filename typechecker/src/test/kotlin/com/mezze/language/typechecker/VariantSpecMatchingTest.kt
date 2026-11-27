@@ -164,7 +164,7 @@ class VariantSpecMatchingTest : VariantSpecBase() {
     @Test fun `a guarded arm plus an unguarded one for the same tag`() {
         accepts(
             "pub let f = { c: | Red { n: Int }, Pink | } -> match c is\n" +
-                "  Red { n = v } if v > 0 -> 1\n  Red { n = _ } -> 2\n  Pink -> 3\n$MAIN",
+                "  Red { n = v } if v > 0 -> 1\n  Red { ... } -> 2\n  Pink -> 3\n$MAIN",
             "CONTROL, and it is load-bearing: the sound form is expressible, so the " +
                 "guard rule never makes a program unwritable — only more explicit",
         )
@@ -229,7 +229,7 @@ class VariantSpecMatchingTest : VariantSpecBase() {
     @Test fun `a payload pattern`() {
         accepts(
             "pub let f = { c: | Red { n: Int }, Pink | } -> match c is\n" +
-                "  Red { n = _ } -> 1\n  Pink -> 2\n$MAIN",
+                "  Red { ... } -> 1\n  Pink -> 2\n$MAIN",
             "binding or ignoring a payload does not change coverage",
         )
     }

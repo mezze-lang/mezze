@@ -316,11 +316,11 @@ pub let ensure_ok
   : { resp: Result Response HttpError }
   -> Result Response HttpError
   = { resp } -> match resp is
-    Err { error = _ } -> resp
+    Err { ... } -> resp
     Ok { val } -> if is_success { resp = val } then resp else do
       let body_text = match body_str { resp = val } is
         Ok { val = s } -> s
-        Err { error = _ } -> ""
+        Err { ... } -> ""
 
       Err {
         error = HttpRequestFailed { url = val.url, status = val.status, body = body_text },
@@ -447,21 +447,21 @@ impl IntoErrorResponse for Str where {
 ## 502, not the upstream's own status — an upstream 404 is not this service's.
 impl IntoErrorResponse for HttpError where {
   into_error_response = { it } -> match it is
-    HttpConnectionFailed { url = _, reason = _ } ->
+    HttpConnectionFailed { ... } ->
       response_status { code = 502, body = "upstream connection failed" }
-    HttpTimeout { url = _, ms = _ } ->
+    HttpTimeout { ... } ->
       response_status { code = 504, body = "upstream timed out" }
-    HttpTlsError { url = _, reason = _ } ->
+    HttpTlsError { ... } ->
       response_status { code = 502, body = "upstream TLS failure" }
-    HttpRequestFailed { url = _, status = _, body = _ } ->
+    HttpRequestFailed { ... } ->
       response_status { code = 502, body = "upstream returned an error" }
-    HttpDecodeError { url = _, message = _ } ->
+    HttpDecodeError { ... } ->
       response_status { code = 502, body = "could not decode the upstream reply" }
     # The remaining three are THIS service's own mistakes, not the upstream's:
     # a url we built wrong, a body we failed to encode, a request we gave up on.
-    HttpInvalidUrl { url = _, reason = _ } ->
+    HttpInvalidUrl { ... } ->
       response_status { code = 500, body = "internal error" }
-    HttpEncodeError { url = _, message = _ } ->
+    HttpEncodeError { ... } ->
       response_status { code = 500, body = "internal error" }
     HttpCancelled -> response_status { code = 503, body = "request cancelled" },
 }
@@ -783,7 +783,7 @@ let sse_fold_blocks
     Some { val = i } -> do
       let block = match bytes::to_str { b = bytes::slice { b = buf, start = 0, end = i } } is
         Ok { val = t } -> t
-        Err { error = _ } -> ""
+        Err { ... } -> ""
       sse_fold_blocks { buf = bytes::drop { b = buf, n = i + 2 }, acc = f { acc = acc, ev = sse_parse { block = block } }, f = f }
 
 ## Fold `f` over the events of a `text/event-stream` response as they arrive; stop early with
@@ -804,7 +804,7 @@ pub let events
       # a last event the server never terminated with a blank line still counts
       let tail = match bytes::to_str { b = final.buf } is
         Ok { val = t } -> str::trim { s = t }
-        Err { error = _ } -> ""
+        Err { ... } -> ""
       if tail == "" then final.acc else f { acc = final.acc, ev = sse_parse { block = tail } }
   }
 
@@ -869,8 +869,8 @@ pub let text_or: { resp: Result Response HttpError, def: Str } -> Str = { resp, 
   match resp is
     Ok { val } -> match body_str { resp = val } is
       Ok { val = s } -> s
-      Err { error = _ } -> def
-    Err { error = _ } -> def
+      Err { ... } -> def
+    Err { ... } -> def
 
 ## Decode the Ok Response body as JSON; return `def` on any Err OR a
 ## decode failure.
@@ -878,8 +878,8 @@ pub let json_or: { resp: Result Response HttpError, def: Json } -> Json = { resp
   match resp is
     Ok { val } -> match body_json { resp = val } is
       Ok { val = j } -> j
-      Err { error = _ } -> def
-    Err { error = _ } -> def
+      Err { ... } -> def
+    Err { ... } -> def
 
 ## Run `f` on the Ok Response (for its effects); a no-op on Err.
 pub let on_ok
@@ -887,7 +887,7 @@ pub let on_ok
   -> {} <...>
   = { resp, f } -> match resp is
     Ok { val } -> f { resp = val }
-    Err { error = _ } -> {}
+    Err { ... } -> {}
 
 ## Run `f` on the Err (for its effects); a no-op on Ok.
 pub let on_err
@@ -1140,7 +1140,7 @@ pub let chunks
   : { reader: Download, chunk_bytes: Int, init: 'acc, f: { acc: 'acc, x: Bytes } -> 'acc <...> }
   -> 'acc <HttpDownload, ...>
   = { reader, chunk_bytes, init, f } -> match HttpDownload.read_chunk { reader = reader, max_bytes = chunk_bytes } is
-    Err { error = _ } -> init
+    Err { ... } -> init
     Ok { val = b } -> if bytes::size { b = b } == 0 then init
       else chunks { reader = reader, chunk_bytes = chunk_bytes, init = f { acc = init, x = b }, f = f }
 
@@ -1163,7 +1163,7 @@ pub let with_download
       # close surfaces a part-way read failure `chunks` cannot carry (a dead connection ends the walk).
       match HttpDownload.close { reader = d.reader } is
         Err { error } -> Err { error = error }
-        Ok { val = _ } -> Ok { val = out }
+        Ok { ... } -> Ok { val = out }
 
 ## A reusable client: a base URL, default headers and timeout, from which
 ## each call derives a request, e.g. `api.get { path = "/users/42" }.send {}`.
@@ -1386,7 +1386,7 @@ let mock_http_rule: { url: Str } -> MockRule = { url } ->
 let mock_response_of: { rule: MockRule } -> Response = { rule } ->
   match rule.response is
     Ok { val } -> val
-    Err { error = _ } -> response_status { code = 200, body = "" }
+    Err { ... } -> response_status { code = 200, body = "" }
 
 let mock_with_response: { rule: MockRule, resp: Response } -> MockRule = { rule, resp } ->
   { methods = rule.methods, url = rule.url, response = Ok { val = resp } }

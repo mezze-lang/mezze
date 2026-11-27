@@ -33,7 +33,7 @@ class HttpIntoResponseTest {
         let fallback: { req: Request } -> Response = { req } -> not_found { body = "nope" }
         let body_of: { resp: Response } -> Str = { resp } -> match bytes::to_str { b = resp.body } is
           Ok { val } -> val
-          Err { error = _ } -> "err"
+          Err { ... } -> "err"
         let header_of: { resp: Response, name: Str } -> Str = { resp, name } ->
           match resp.header { name = name } is
             Some { val } -> val
@@ -642,7 +642,7 @@ class HttpIntoResponseTest {
                 let v = or_throw { result = Err { error = "plain" } }
                 Ok { val = v }
               match outcome is
-                Ok { val = _ } -> 0
+                Ok { ... } -> 0
                 Err { error = resp } -> resp.status
             run_it {}
             """.trimIndent()
@@ -1223,7 +1223,7 @@ class HttpIntoResponseTest {
               chunks = iter::from_seq { xs = [bytes::from_str { s = "stream" }] },
             }
             match streamed.with_text { val = "plain" }.chunks is
-              Some { val = _ } -> "still-streaming"
+              Some { ... } -> "still-streaming"
               None -> body_of { resp = streamed.with_text { val = "plain" } }
             """.trimIndent()
         )

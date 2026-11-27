@@ -157,7 +157,7 @@ class FracModuleTest {
         val source = """
             use std::frac
             match frac::from_float { f = 0.0 / 0.0 } is
-              Some { val = _ } -> "some"
+              Some { ... } -> "some"
               None -> "none"
         """.trimIndent()
 

@@ -94,7 +94,7 @@ class AsyncHelpersTest {
               }
               match race { ps = [fast, slow] } is
                 Ok { val } -> val
-                Err { error = _ } -> -1
+                Err { ... } -> -1
         """.trimIndent()
         // The fast one resolves immediately; race should observe it first.
         assertEquals(42L, eval(source))
@@ -198,7 +198,7 @@ class AsyncHelpersTest {
               let p = Async.spawn { f = {} -> 42 }
               match with_timeout { ms = 1000, p = p } is
                 Ok { val } -> val
-                Err { error = _ } -> 0
+                Err { ... } -> 0
         """.trimIndent()
         assertEquals(42L, eval(source))
     }

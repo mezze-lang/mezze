@@ -78,7 +78,7 @@ let read_chain: { obj: JsForeign, n: Int, acc: Int } -> Int <Js> =
     else do
       let got = match obj.property { name = "v" }.int {} is
         Ok { val = i } -> i
-        Err { error = _ } -> 0
+        Err { ... } -> 0
       read_chain { obj = obj, n = n - 1, acc = acc + got }
 
 ## ---- member read, MATCHED spelling ----
@@ -90,7 +90,7 @@ let read_matched: { obj: JsForeign, n: Int, acc: Int } -> Int <Js> =
       let f = obj.property { name = "v" }
       let got = match f.int {} is
         Ok { val = i } -> i
-        Err { error = _ } -> 0
+        Err { ... } -> 0
       read_matched { obj = obj, n = n - 1, acc = acc + got }
 
 ## ---- method invoke ----
@@ -101,7 +101,7 @@ let invoke_loop: { obj: JsForeign, n: Int, acc: Int } -> Int <Js> =
     else do
       let got = match obj.method { name = "get", args = [] }.int {} is
         Ok { val = i } -> i
-        Err { error = _ } -> 0
+        Err { ... } -> 0
       invoke_loop { obj = obj, n = n - 1, acc = acc + got }
 
 ## ---- indexed element read ----
@@ -116,7 +116,7 @@ let index_loop: { arr: JsForeign, i: Int, n: Int, acc: Int } -> Int <Js> =
     else do
       let got = match arr.index { i = i % 1000 }.int {} is
         Ok { val = v } -> v
-        Err { error = _ } -> 0
+        Err { ... } -> 0
       index_loop { arr = arr, i = i + 1, n = n, acc = acc + got }
 
 ## ns per iteration, measured INSIDE the process so ~4s of startup and the
@@ -143,7 +143,7 @@ let control_loop: { s: Str, n: Int, acc: Int } -> Int =
     else do
       let got = match str::index_of { s = s, sub = "l" } is
         Some { val = i } -> match str::char_at { s = s, i = i } is
-          Some { val = _ } -> 1
+          Some { ... } -> 1
           None -> 0
         None -> 0
       control_loop { s = s, n = n - 1, acc = acc + got }
@@ -239,7 +239,7 @@ let main = {} -> perform Console in perform SystemTime in perform GraalJs in do
       let c  = invoke_loop { obj = obj, n = iters, acc = 0 }
       let i1 = monotonic {}
       report { label = "invoke         ", got = c, n = iters, t0 = i0, t1 = i1 }
-    Err { error = _ } -> println { msg = "  eval of the test object FAILED" }
+    Err { ... } -> println { msg = "  eval of the test object FAILED" }
 
   # (the control row is reported above, inside the best-of-5 block, so that it
   # is measured under the same conditions as the two rows it is subtracted from)
@@ -250,4 +250,4 @@ let main = {} -> perform Console in perform SystemTime in perform GraalJs in do
       let d  = index_loop { arr = arr, i = 0, n = iters, acc = 0 }
       let x1 = monotonic {}
       report { label = "index          ", got = d, n = iters, t0 = x0, t1 = x1 }
-    Err { error = _ } -> println { msg = "  eval of the test array FAILED" }
+    Err { ... } -> println { msg = "  eval of the test array FAILED" }

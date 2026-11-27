@@ -111,7 +111,7 @@ class FusedMapGetMatchTest {
             let m = map::insert { m = map::empty {}, k = 1, v = None }
             let present = match map::get { m = m, k = 1 } is
               Some { val } -> match val is
-                Some { val = _ } -> 0 - 1
+                Some { ... } -> 0 - 1
                 None -> 1
               None -> 0
             present
@@ -150,11 +150,11 @@ class FusedMapGetMatchTest {
             let m = map::insert { m = map::empty {}, k = 1, v = 10 }
             let big = match map::get { m = m, k = 1 } is
               Some { val } if val > 5 -> 1
-              Some { val = _ } -> 0
+              Some { ... } -> 0
               None -> 0
             let small = match map::get { m = m, k = 1 } is
               Some { val } if val > 50 -> 0
-              Some { val = _ } -> 1
+              Some { ... } -> 1
               None -> 0
             if big == 1 && small == 1 then 1 else 0
             """

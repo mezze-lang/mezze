@@ -3461,7 +3461,8 @@ class MezzeTextDocumentService(
      * spans the offending token, so edits are computed from it — no message
      * parsing, no AST re-walk.
      *   - W0101 unused `let` → "Remove the binding" (delete `let x =`, keep the expression).
-     *   - W0104 unused pattern binding → "Replace with `_`" (`{ val }` → `{ val = _ }`).
+     *   - W0104 unused pattern binding → by slot: `_` for a position, `...` for a list
+     *     tail, or leave the record field out and end the pattern with `...`.
      *   - W0103 unused parameter → no quick fix: removing it changes every caller.
      *   - W0102 unused import   → "Remove import" (delete the `use` line).
      */
@@ -3500,20 +3501,34 @@ class MezzeTextDocumentService(
                 }
             }
             WarningCode.W0104_UNUSED_PATTERN_BINDING.display() -> {
-                // `_` binds nothing. A punned record field `{ val }` keeps its label: `{ val = _ }`.
+                // One fix per slot, matching the message: a positional value -> `_`; a list
+                // tail `...rest` -> `...`; a record field -> leave it out, end with `...`.
                 val lineNo = diagnostic.range.start.line
                 val line = state.content.lines().getOrNull(lineNo)
                 val col = diagnostic.range.start.character
                 val name = line?.let { Regex("""[A-Za-z_][A-Za-z0-9_]*""").find(it, col)?.takeIf { m -> m.range.first == col } }
                 if (line != null && name != null) {
-                    val after = line.substring(name.range.last + 1).trimStart()
-                    val before = line.substring(0, col).trimEnd()
-                    val punned = (before.endsWith("{") || before.endsWith(",")) &&
-                        (after.startsWith(",") || after.startsWith("}")) &&
-                        line.lastIndexOf('[', col) <= line.lastIndexOf('{', col)
-                    val range = Range(Position(lineNo, name.range.first), Position(lineNo, name.range.last + 1))
-                    val text = if (punned) "${name.value} = _" else "_"
-                    out.add(Either.forRight(quickFix("Replace with `_`", listOf(TextEdit(range, text)))))
+                    val nameRange = Range(Position(lineNo, name.range.first), Position(lineNo, name.range.last + 1))
+                    val message = diagnostic.message
+                    when {
+                        message.contains("without a name") ->
+                            out.add(Either.forRight(quickFix("Write `...`", listOf(TextEdit(nameRange, "")))))
+                        message.contains("Leave the field out") -> {
+                            // Only for a one-line pattern with no nested braces: the entry list
+                            // can then be rewritten exactly.
+                            val open = line.lastIndexOf('{', col)
+                            val close = line.indexOf('}', col)
+                            val inner = if (open >= 0 && close > open) line.substring(open + 1, close) else null
+                            if (inner != null && '{' !in inner && '[' !in inner) {
+                                val entries = inner.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+                                val kept = entries.filterNot { e -> e == name.value || e.endsWith("= ${name.value}") || e.startsWith("${name.value} ") } 
+                                    .filter { it != "..." } + "..."
+                                val range = Range(Position(lineNo, open), Position(lineNo, close + 1))
+                                out.add(Either.forRight(quickFix("Leave the field out", listOf(TextEdit(range, "{ ${kept.joinToString(", ")} }")))))
+                            }
+                        }
+                        else -> out.add(Either.forRight(quickFix("Replace with `_`", listOf(TextEdit(nameRange, "_")))))
+                    }
                 }
             }
             WarningCode.W0102_UNUSED_IMPORT.display() -> {

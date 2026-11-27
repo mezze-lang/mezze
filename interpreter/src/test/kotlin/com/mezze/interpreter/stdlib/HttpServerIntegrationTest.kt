@@ -27,7 +27,7 @@ class HttpServerIntegrationTest {
         let not_found: { req: Request } -> Response = { req } -> reply { code = 404, text = "nope", url = req.url }
         let body_of: { resp: Response } -> Str = { resp } -> match bytes::to_str { b = resp.body } is
           Ok { val } -> val
-          Err { error = _ } -> "err"
+          Err { ... } -> "err"
 
         let app = otherwise {
           routes = or_else {
@@ -49,7 +49,7 @@ class HttpServerIntegrationTest {
             let go: {} -> Int <*> = {} -> perform MockHttpServer in do
               let h = match HttpServer.serve { handler = app } is
                 Ok { val = hh } -> hh
-                Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
               h.port
             go {}
         """.trimIndent())
@@ -80,7 +80,7 @@ class HttpServerIntegrationTest {
             let go: {} -> Int <*> = {} -> perform LoomAsync in perform MockHttpServer in do
               let h = match HttpServer.serve { handler = app } is
                 Ok { val = hh } -> hh
-                Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
               h.port
             go {}
         """.trimIndent())

@@ -43,7 +43,7 @@ use std::effects::time::{ SystemTime }
 
 let unwrap_async = {r} -> match r is
     Ok { val } -> val
-    Err { error = _ } -> crash { msg = "await failed" }
+    Err { ... } -> crash { msg = "await failed" }
 
 let spawn = {f} -> Async.spawn {f = f}
 let await = {p} -> unwrap_async {r = await_result {p = p}}

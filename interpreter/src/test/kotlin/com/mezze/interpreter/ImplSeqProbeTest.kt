@@ -26,7 +26,7 @@ class ImplSeqProbeTest {
               let ps = [p1, p2]
               match ps.race {} is
                 Ok  { val }       -> val
-                Err { error = _ } -> 0
+                Err { ... } -> 0
 
             main {}
         """
@@ -75,7 +75,7 @@ class ImplSeqProbeTest {
                 Ok  { val }       -> match val is
                   [a, b] -> a + b
                   _      -> 0
-                Err { error = _ } -> 0
+                Err { ... } -> 0
 
             main {}
         """

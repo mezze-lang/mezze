@@ -223,7 +223,7 @@ class OrPatternBindingTest {
                     A { inner = x } | B { inner = x } ->
                         match r is
                             Ok { val = y } -> x + y
-                            Err { error = _ } -> x
+                            Err { ... } -> x
         """.trimIndent()
 
         val program = parseAndTypeCheck(code)

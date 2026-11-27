@@ -49,7 +49,7 @@ class GenericPayloadNestedExhaustivenessTest {
             """
             type Box 'a = | Full { v: 'a }, Empty |
             let f = { o } -> match o is
-              Full { v = _ } -> 1
+              Full { ... } -> 1
               Empty -> -1
             let main = f { o = Full { v = Empty } }
             """

@@ -84,7 +84,7 @@ class InlineContainerProbeTest {
             type Tree = | Leaf { v: Int }, Node { l: Tree, r: Tree } |
 
             let count: { t: Tree } -> Int = { t } -> match t is
-              Leaf { v = _ } -> 1
+              Leaf { ... } -> 1
               Node { l, r } -> count { t = l } + count { t = r }
 
             let gen_tree: {} -> Tree <Sample> = {} ->

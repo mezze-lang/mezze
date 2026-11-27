@@ -202,7 +202,7 @@ class BlockBodiedTailLoopTest {
                       n = c,
                       delta = match await { p = Async.spawn { f = {} -> 10 } } is
                         Ok { val } -> val
-                        Err { error = _ } -> 0,
+                        Err { ... } -> 0,
                     }
                     go { i = i - 1, c = c }
 

@@ -789,6 +789,7 @@ private class Walker(
                 b.appendInt(pattern.elements.size)
                 pattern.elements.forEach { pattern(it) }
                 optional(pattern.restPattern) { b.append(it) }
+                b.appendInt(pattern.suffixCount)
             }
             is ParsedStringInterpPattern -> {
                 b.append(byteArrayOf(HashTags.STRING_INTERPOLATION_PATTERN))

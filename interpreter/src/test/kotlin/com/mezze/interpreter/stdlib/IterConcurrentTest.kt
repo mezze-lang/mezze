@@ -68,7 +68,7 @@ class IterConcurrentTest {
               }
               match FileSystem.list { path = "/d" } is
                 Ok { val = names } -> seq::size { xs = names }
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(20L, eval(code))
     }
@@ -118,7 +118,7 @@ class IterConcurrentTest {
                   write_text { path = me, text = "1" }
                   let n = match FileSystem.list { path = "/live" } is
                     Ok { val = names } -> seq::size { xs = names }
-                    Err { error = _ } -> 0 - 1
+                    Err { ... } -> 0 - 1
                   write_text { path = "/peak/$(int::to_str { n = n })", text = "1" }
                   sleep { ms = 5 }
                   FileSystem.delete { path = me }
@@ -138,7 +138,7 @@ class IterConcurrentTest {
                     Some { val = n } -> int::max { l = acc, r = n }
                     None -> acc,
                 }
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
         """.trimIndent()
         val peak = MezzeTestHelper.asLong(eval(code))
         // Bounded at 4, and at least 2 so the test is not passing against a
@@ -169,7 +169,7 @@ class IterConcurrentTest {
               }
               match FileSystem.list { path = "/d" } is
                 Ok { val = names } -> seq::size { xs = names }
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(9L, eval(code))
     }
@@ -191,7 +191,7 @@ class IterConcurrentTest {
               }
               match FileSystem.list { path = "/d" } is
                 Ok { val = names } -> seq::size { xs = names }
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(2L, eval(code))
     }
@@ -213,7 +213,7 @@ class IterConcurrentTest {
               }
               match FileSystem.list { path = "/d" } is
                 Ok { val = names } -> seq::size { xs = names }
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(0L, eval(code))
     }
@@ -252,7 +252,7 @@ class IterConcurrentTest {
                 init = 0,
                 f = { acc, x } -> match x is
                   Ok { val = v } -> acc + v
-                  Err { error = _ } -> acc,
+                  Err { ... } -> acc,
               }
         """.trimIndent()
         // 1+4+9+16+25
@@ -282,7 +282,7 @@ class IterConcurrentTest {
                 init = "",
                 f = { acc, x } -> match x is
                   Ok { val = v } -> "$(acc)$(int::to_str { n = v })"
-                  Err { error = _ } -> "$(acc)?",
+                  Err { ... } -> "$(acc)?",
               }
         """.trimIndent()
         assertEquals("01234", eval(code))
@@ -307,7 +307,7 @@ class IterConcurrentTest {
                 init = 0,
                 f = { acc, x } -> match x is
                   Ok { val = v } -> acc + v
-                  Err { error = _ } -> acc,
+                  Err { ... } -> acc,
               }
         """.trimIndent()
         // (1+2+3+4) * 10
@@ -363,14 +363,14 @@ class IterConcurrentTest {
                   it = iter::range { start = 0, end = 6 },
                   f = { x } -> match read_text { path = "/in/$(int::to_str { n = x })" } is
                     Ok { val = t } -> str::size { s = t }
-                    Err { error = _ } -> 0
+                    Err { ... } -> 0
                   ,
                   max_in_flight = 3,
                 },
                 init = 0,
                 f = { acc, x } -> match x is
                   Ok { val = v } -> acc + v
-                  Err { error = _ } -> acc,
+                  Err { ... } -> acc,
               }
         """.trimIndent()
         // six files of two characters

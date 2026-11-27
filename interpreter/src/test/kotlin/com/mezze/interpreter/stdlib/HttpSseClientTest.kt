@@ -82,7 +82,7 @@ class HttpSseClientTest {
                 perform SimpleHttpClient in perform SimpleHttpDownload in do
                   let h = match HttpServer.serve { handler = app } is
                     Ok { val = hh } -> hh
-                    Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                    Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                   let out = match events {
                     req = request { url = ${url("/events")} }, config = default_http_config,
                     init = "", f = { acc, ev } -> "$(acc)$(show { ev = ev })",
@@ -121,7 +121,7 @@ class HttpSseClientTest {
                   perform SimpleHttpClient in perform SimpleHttpDownload in do
                     let h = match HttpServer.serve { handler = app } is
                       Ok { val = hh } -> hh
-                      Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                      Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                     let out = match perform EarlyReturn in events {
                       req = request { url = ${url("/slow")} }, config = default_http_config,
                       init = "", f = { acc, ev } -> return { val = Ok { val = show { ev = ev } } },

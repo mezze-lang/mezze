@@ -440,6 +440,39 @@ internal fun ExpressionConstraintGenerator.generateLambda(expr: ParsedLambda, co
         }
     }
 
+    // An OPEN callback type written `{ a: Int, ... } -> R` means the CALLEE chooses what it
+    // passes: at least `a`, maybe more. So the callback may rely on `a` only, and — since a
+    // closed record pattern claims the exact shape everywhere — must say "maybe more" with
+    // `...`. Before this, the lambda took over the expected open tail, so `{ a, b } -> a + b`
+    // was accepted, `b` was never passed, and the call returned a partial application where
+    // the type said `Int`. Only a tail the user WROTE (`...`) is held to this: a row the
+    // checker generated while inferring an unannotated function is not a promise.
+    if (expectedParamType != null && expectedParamType.rowVar?.isUserSpecified() == true) {
+        val guaranteed = expectedParamType.fields.keys
+        val shown = guaranteed.sorted().joinToString(", ")
+        val extra = paramNames.filter { it !in guaranteed }
+        if (extra.isNotEmpty()) throw TypeCheckError(
+            message = "This callback needs ${extra.joinToString(", ") { "`$it`" }}, but its type only guarantees " +
+                "${guaranteed.sorted().joinToString(", ") { "`$it`" }.ifEmpty { "no fields" }}: the caller may pass just those. " +
+                "Use only the guaranteed fields and end with `...`: `{ ${if (shown.isEmpty()) "" else "$shown, "}... }`.",
+            loc = expr.loc,
+            errorType = ErrorType.TYPE_MISMATCH,
+            code = ErrorCode.T0211_CALLBACK_PARAM_NAMES_MISMATCH,
+        )
+        // "Say maybe-more with `...`" is for a lambda handed to a call, whose callback
+        // type someone else declared. A lambda that IS an annotated definition
+        // (`let f: { x: Int, ... } -> Int = { x } -> …`) needs no repeat: its annotation
+        // is its signature and already says open (decided 2026-11-27).
+        if (expr.params is ParsedLambdaParams.Untyped && !isOpenPattern && expr.loc in context.callArgumentLambdaLocs) throw TypeCheckError(
+            message = "This callback may receive more fields than it names — its type is open " +
+                "(`{ ${if (shown.isEmpty()) "" else "$shown, "}... }`). Say so with `...`: " +
+                "`{ ${paramNames.joinToString(", ").let { if (it.isEmpty()) "" else "$it, " }}... }`.",
+            loc = expr.loc,
+            errorType = ErrorType.TYPE_MISMATCH,
+            code = ErrorCode.T0211_CALLBACK_PARAM_NAMES_MISMATCH,
+        )
+    }
+
     val rowVar = when {
         expectedParamType?.rowVar != null -> expectedParamType.rowVar
         // #403: an EXPLICIT open lambda pattern (`{ x, ... } -> ...`) is the user's

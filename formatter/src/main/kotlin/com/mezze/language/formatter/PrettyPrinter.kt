@@ -1094,16 +1094,14 @@ class PrettyPrinter(private val config: FormatterWidths = FormatterConfig) {
     }
 
     private fun printSeqPattern(pattern: ParsedSeqPattern) {
+        // The rest sits before the last `suffixCount` elements; unnamed prints as `...`.
+        val parts = pattern.elements.map { e -> { printPattern(e) } }.toMutableList<() -> Unit>()
+        pattern.restPattern?.let { rest ->
+            val name = if (rest == ParsedSeqPattern.IGNORED_REST) "" else rest
+            parts.add(pattern.elements.size - pattern.suffixCount) { append("..."); append(name) }
+        }
         append("[")
-        pattern.elements.forEachIndexed { i, elem ->
-            if (i > 0) append(", ")
-            printPattern(elem)
-        }
-        pattern.restPattern?.let {
-            if (pattern.elements.isNotEmpty()) append(", ")
-            append("...")
-            append(it)
-        }
+        parts.forEachIndexed { i, p -> if (i > 0) append(", "); p() }
         append("]")
     }
 

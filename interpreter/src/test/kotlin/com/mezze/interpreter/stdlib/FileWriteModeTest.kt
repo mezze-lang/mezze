@@ -64,7 +64,7 @@ class FileWriteModeTest {
               FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "bb" }, mode = CreateOrTruncate }
               match read_text { path = "/f" } is
                 Ok { val } -> val
-                Err { error = _ } -> "read-failed"
+                Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("bb", eval(code))
     }
@@ -79,7 +79,7 @@ class FileWriteModeTest {
               FileSystem.write_bytes { path = "$f", bytes = bytes::from_str { s = "bb" }, mode = CreateOrTruncate }
               match read_text { path = "$f" } is
                 Ok { val } -> val
-                Err { error = _ } -> "read-failed"
+                Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("bb", eval(code))
     }
@@ -94,7 +94,7 @@ class FileWriteModeTest {
               FileSystem.write_bytes { path = "/new", bytes = bytes::from_str { s = "hi" }, mode = CreateNew }
               match read_text { path = "/new" } is
                 Ok { val } -> val
-                Err { error = _ } -> "read-failed"
+                Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("hi", eval(code))
     }
@@ -107,9 +107,9 @@ class FileWriteModeTest {
             perform MemoryFileSystem in do
               write_text { path = "/f", text = "first" }
               match FileSystem.write_bytes { path = "/f", bytes = bytes::from_str { s = "second" }, mode = CreateNew } is
-                Ok { val = _ } -> "overwrote"
-                Err { error = FsAlreadyExists { path = _ } } -> "refused"
-                Err { error = _ } -> "other-error"
+                Ok { ... } -> "overwrote"
+                Err { error = FsAlreadyExists { ... } } -> "refused"
+                Err { ... } -> "other-error"
         """.trimIndent()
         assertEquals("refused", eval(code))
     }
@@ -122,9 +122,9 @@ class FileWriteModeTest {
             perform LocalFileSystem in do
               write_text { path = "$f", text = "first" }
               match FileSystem.write_bytes { path = "$f", bytes = bytes::from_str { s = "second" }, mode = CreateNew } is
-                Ok { val = _ } -> "overwrote"
-                Err { error = FsAlreadyExists { path = _ } } -> "refused"
-                Err { error = _ } -> "other-error"
+                Ok { ... } -> "overwrote"
+                Err { error = FsAlreadyExists { ... } } -> "refused"
+                Err { ... } -> "other-error"
         """.trimIndent()
         assertEquals("refused", eval(code))
     }
@@ -140,7 +140,7 @@ class FileWriteModeTest {
               FileSystem.write_bytes { path = "$f", bytes = bytes::from_str { s = "clobbered" }, mode = CreateNew }
               match read_text { path = "$f" } is
                 Ok { val } -> val
-                Err { error = _ } -> "read-failed"
+                Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("original", eval(code))
     }
@@ -161,8 +161,8 @@ class FileWriteModeTest {
               match first is
                 Ok { val = a } -> match second is
                   Ok { val = b } -> "$(bool::to_str { b = a })-$(bool::to_str { b = b })"
-                  Err { error = _ } -> "second-errored"
-                Err { error = _ } -> "first-errored"
+                  Err { ... } -> "second-errored"
+                Err { ... } -> "first-errored"
         """.trimIndent()
         assertEquals("True-False", eval(code))
     }
@@ -179,8 +179,8 @@ class FileWriteModeTest {
               match first is
                 Ok { val = a } -> match second is
                   Ok { val = b } -> "$(bool::to_str { b = a })-$(bool::to_str { b = b })"
-                  Err { error = _ } -> "second-errored"
-                Err { error = _ } -> "first-errored"
+                  Err { ... } -> "second-errored"
+                Err { ... } -> "first-errored"
         """.trimIndent()
         assertEquals("True-False", eval(code))
     }
@@ -197,7 +197,7 @@ class FileWriteModeTest {
               FileSystem.write_bytes { path = "/log", bytes = bytes::from_str { s = "three\n" }, mode = CreateOrAppend }
               match read_text { path = "/log" } is
                 Ok { val } -> val
-                Err { error = _ } -> "read-failed"
+                Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("one\ntwo\nthree\n", eval(code))
     }
@@ -213,7 +213,7 @@ class FileWriteModeTest {
               FileSystem.write_bytes { path = "$f", bytes = bytes::from_str { s = "three\n" }, mode = CreateOrAppend }
               match read_text { path = "$f" } is
                 Ok { val } -> val
-                Err { error = _ } -> "read-failed"
+                Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("one\ntwo\nthree\n", eval(code))
     }
@@ -227,7 +227,7 @@ class FileWriteModeTest {
               FileSystem.write_bytes { path = "/fresh", bytes = bytes::from_str { s = "x" }, mode = CreateOrAppend }
               match read_text { path = "/fresh" } is
                 Ok { val } -> val
-                Err { error = _ } -> "read-failed"
+                Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("x", eval(code))
     }
@@ -241,7 +241,7 @@ class FileWriteModeTest {
               FileSystem.write_bytes { path = "$f", bytes = bytes::from_str { s = "x" }, mode = CreateOrAppend }
               match read_text { path = "$f" } is
                 Ok { val } -> val
-                Err { error = _ } -> "read-failed"
+                Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("x", eval(code))
     }
@@ -265,7 +265,7 @@ class FileWriteModeTest {
               append_text { path = "/log", text = "c" }
               match read_text { path = "/log" } is
                 Ok { val } -> val
-                Err { error = _ } -> "read-failed"
+                Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("abc", eval(code))
     }
@@ -280,9 +280,9 @@ class FileWriteModeTest {
               write_text { path = "/a", text = "from-a" }
               write_text { path = "/b", text = "from-b" }
               match FileSystem.copy_file { src = "/a", dest = "/b", replace_existing = False, preserve_attrs = False, follow_symlinks = True } is
-                Ok { val = _ } -> "replaced"
-                Err { error = FsAlreadyExists { path = _ } } -> "refused"
-                Err { error = _ } -> "other-error"
+                Ok { ... } -> "replaced"
+                Err { error = FsAlreadyExists { ... } } -> "refused"
+                Err { ... } -> "other-error"
         """.trimIndent()
         assertEquals("refused", eval(code))
     }
@@ -297,7 +297,7 @@ class FileWriteModeTest {
               FileSystem.copy_file { src = "/a", dest = "/b", replace_existing = True, preserve_attrs = False, follow_symlinks = True }
               match read_text { path = "/b" } is
                 Ok { val } -> val
-                Err { error = _ } -> "read-failed"
+                Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("from-a", eval(code))
     }
@@ -314,7 +314,7 @@ class FileWriteModeTest {
               FileSystem.copy_file { src = "$a", dest = "$b", replace_existing = True, preserve_attrs = False, follow_symlinks = True }
               match read_text { path = "$b" } is
                 Ok { val } -> val
-                Err { error = _ } -> "read-failed"
+                Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("from-a", eval(code))
     }
@@ -329,9 +329,9 @@ class FileWriteModeTest {
               write_text { path = "$a", text = "from-a" }
               write_text { path = "$b", text = "from-b" }
               match FileSystem.copy_file { src = "$a", dest = "$b", replace_existing = False, preserve_attrs = False, follow_symlinks = True } is
-                Ok { val = _ } -> "replaced"
-                Err { error = FsAlreadyExists { path = _ } } -> "refused"
-                Err { error = _ } -> "other-error"
+                Ok { ... } -> "replaced"
+                Err { error = FsAlreadyExists { ... } } -> "refused"
+                Err { ... } -> "other-error"
         """.trimIndent()
         assertEquals("refused", eval(code))
     }
@@ -351,7 +351,7 @@ class FileWriteModeTest {
               FileSystem.copy_file { src = "/a", dest = "/b", replace_existing = False, preserve_attrs = True, follow_symlinks = True }
               match FilePermissions.get_mode { path = "/b" } is
                 Ok { val = m } -> "$(bool::to_str { b = m.owner_exec })-$(bool::to_str { b = m.group_read })"
-                Err { error = _ } -> "get-mode-failed"
+                Err { ... } -> "get-mode-failed"
         """.trimIndent()
         assertEquals("True-False", eval(code))
     }
@@ -366,9 +366,9 @@ class FileWriteModeTest {
               write_text { path = "/a", text = "from-a" }
               write_text { path = "/b", text = "from-b" }
               match FileSystem.move_file { src = "/a", dest = "/b", replace_existing = False, require_atomic = False } is
-                Ok { val = _ } -> "replaced"
-                Err { error = FsAlreadyExists { path = _ } } -> "refused"
-                Err { error = _ } -> "other-error"
+                Ok { ... } -> "replaced"
+                Err { error = FsAlreadyExists { ... } } -> "refused"
+                Err { ... } -> "other-error"
         """.trimIndent()
         assertEquals("refused", eval(code))
     }
@@ -386,8 +386,8 @@ class FileWriteModeTest {
               match read_text { path = "/b" } is
                 Ok { val = t } -> match exists { path = "/a" } is
                   Ok { val = still } -> "$(t)-$(bool::to_str { b = still })"
-                  Err { error = _ } -> "exists-failed"
-                Err { error = _ } -> "read-failed"
+                  Err { ... } -> "exists-failed"
+                Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("from-a-False", eval(code))
     }
@@ -404,7 +404,7 @@ class FileWriteModeTest {
               FileSystem.move_file { src = "$a", dest = "$b", replace_existing = True, require_atomic = False }
               match read_text { path = "$b" } is
                 Ok { val } -> val
-                Err { error = _ } -> "read-failed"
+                Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("from-a", eval(code))
     }
@@ -425,10 +425,10 @@ class FileWriteModeTest {
             perform LocalFileSystem in do
               write_text { path = "$a", text = "payload" }
               match FileSystem.move_file { src = "$a", dest = "$b", replace_existing = False, require_atomic = True } is
-                Ok { val = _ } -> match read_text { path = "$b" } is
+                Ok { ... } -> match read_text { path = "$b" } is
                   Ok { val } -> val
-                  Err { error = _ } -> "read-failed"
-                Err { error = _ } -> "move-failed"
+                  Err { ... } -> "read-failed"
+                Err { ... } -> "move-failed"
         """.trimIndent()
         assertEquals("payload", eval(code))
     }
@@ -456,8 +456,8 @@ class FileWriteModeTest {
                       FileMissing -> "other-then-notfound"
                       _ -> "followed-wrong"
                     _ -> "unfollowed-wrong"
-                  Err { error = _ } -> "followed-errored"
-                Err { error = _ } -> "unfollowed-errored"
+                  Err { ... } -> "followed-errored"
+                Err { ... } -> "unfollowed-errored"
         """.trimIndent()
         assertEquals("other-then-notfound", eval(code))
     }
@@ -475,8 +475,8 @@ class FileWriteModeTest {
                       FileMissing -> "other-then-notfound"
                       _ -> "followed-wrong"
                     _ -> "unfollowed-wrong"
-                  Err { error = _ } -> "followed-errored"
-                Err { error = _ } -> "unfollowed-errored"
+                  Err { ... } -> "followed-errored"
+                Err { ... } -> "unfollowed-errored"
         """.trimIndent()
         assertEquals("other-then-notfound", eval(code))
     }
@@ -493,7 +493,7 @@ class FileWriteModeTest {
               FileSymlinks.create_symlink { link = "$link", target = "$target" }
               match FileSystem.stat { path = "$link", follow_symlinks = True } is
                 Ok { val = s } -> s.size
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(5L, eval(code))
     }
@@ -511,8 +511,8 @@ class FileWriteModeTest {
               match exists { path = "/live" } is
                 Ok { val = a } -> match exists { path = "/dead" } is
                   Ok { val = b } -> "$(bool::to_str { b = a })-$(bool::to_str { b = b })"
-                  Err { error = _ } -> "dead-errored"
-                Err { error = _ } -> "live-errored"
+                  Err { ... } -> "dead-errored"
+                Err { ... } -> "live-errored"
         """.trimIndent()
         assertEquals("True-False", eval(code))
     }
@@ -557,7 +557,7 @@ class FileWriteModeTest {
               }
               match read_text { path = "/log" } is
                 Ok { val = t } -> str::size { s = t }
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(6400L, eval(code))
     }
@@ -579,9 +579,9 @@ class FileWriteModeTest {
             perform MemoryFileSystem in do
               write_text { path = "/a", text = "payload" }
               match FileSystem.move_file { src = "/a", dest = "/b", replace_existing = False, require_atomic = True } is
-                Ok { val = _ } -> "claimed-atomic"
-                Err { error = FsNotSupported { path = _, operation = _ } } -> "declined"
-                Err { error = _ } -> "other-error"
+                Ok { ... } -> "claimed-atomic"
+                Err { error = FsNotSupported { ... } } -> "declined"
+                Err { ... } -> "other-error"
         """.trimIndent()
         assertEquals("declined", eval(code))
     }
@@ -596,7 +596,7 @@ class FileWriteModeTest {
               FileSystem.move_file { src = "/a", dest = "/b", replace_existing = False, require_atomic = False }
               match read_text { path = "/b" } is
                 Ok { val } -> val
-                Err { error = _ } -> "read-failed"
+                Err { ... } -> "read-failed"
         """.trimIndent()
         assertEquals("payload", eval(code))
     }
@@ -618,7 +618,7 @@ class FileWriteModeTest {
               FileSymlinks.create_symlink { link = "/three", target = "/two" }
               match FileSystem.stat { path = "/three", follow_symlinks = True } is
                 Ok { val = s } -> s.size
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(5L, eval(code))
     }
@@ -638,7 +638,7 @@ class FileWriteModeTest {
               FileSymlinks.create_symlink { link = "$three", target = "$two" }
               match FileSystem.stat { path = "$three", follow_symlinks = True } is
                 Ok { val = s } -> s.size
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(5L, eval(code))
     }
@@ -656,9 +656,9 @@ class FileWriteModeTest {
               FileSymlinks.create_symlink { link = "/a", target = "/b" }
               FileSymlinks.create_symlink { link = "/b", target = "/a" }
               match FileSystem.stat { path = "/a", follow_symlinks = True } is
-                Ok { val = _ } -> "unexpectedly-ok"
-                Err { error = FsIOError { path = _, message = _ } } -> "loop-reported"
-                Err { error = _ } -> "other-error"
+                Ok { ... } -> "unexpectedly-ok"
+                Err { error = FsIOError { ... } } -> "loop-reported"
+                Err { ... } -> "other-error"
         """.trimIndent()
         assertEquals("loop-reported", eval(code))
     }
@@ -687,9 +687,9 @@ class FileWriteModeTest {
             perform LocalFileSystem in do
               write_text { path = "$src", text = "payload" }
               match FileSystem.move_file { src = "$src", dest = "$dest", replace_existing = False, require_atomic = True } is
-                Ok { val = _ } -> "claimed-atomic"
-                Err { error = FsNotSupported { path = _, operation = _ } } -> "declined"
-                Err { error = _ } -> "other-error"
+                Ok { ... } -> "claimed-atomic"
+                Err { error = FsNotSupported { ... } } -> "declined"
+                Err { ... } -> "other-error"
         """.trimIndent()
         try {
             assertEquals("declined", eval(code))
@@ -709,10 +709,10 @@ class FileWriteModeTest {
             perform LocalFileSystem in do
               write_text { path = "$src", text = "payload" }
               match FileSystem.move_file { src = "$src", dest = "$dest", replace_existing = False, require_atomic = False } is
-                Ok { val = _ } -> match read_text { path = "$dest" } is
+                Ok { ... } -> match read_text { path = "$dest" } is
                   Ok { val } -> val
-                  Err { error = _ } -> "read-failed"
-                Err { error = _ } -> "move-failed"
+                  Err { ... } -> "read-failed"
+                Err { ... } -> "move-failed"
         """.trimIndent()
         try {
             assertEquals("payload", eval(code))
@@ -756,7 +756,7 @@ class FileWriteModeTest {
               FileSystem.copy_file { src = "$a", dest = "$b", replace_existing = False, preserve_attrs = True, follow_symlinks = True }
               match FilePermissions.get_mode { path = "$b" } is
                 Ok { val = m } -> "$(bool::to_str { b = m.owner_exec })-$(bool::to_str { b = m.group_read })"
-                Err { error = _ } -> "get-mode-failed"
+                Err { ... } -> "get-mode-failed"
         """.trimIndent()
         assertEquals("True-False", eval(code))
     }
@@ -783,7 +783,7 @@ class FileWriteModeTest {
               FileSystem.copy_file { src = "$a", dest = "$b", replace_existing = False, preserve_attrs = False, follow_symlinks = True }
               match FilePermissions.get_mode { path = "$b" } is
                 Ok { val = m } -> bool::to_str { b = m.owner_exec }
-                Err { error = _ } -> "get-mode-failed"
+                Err { ... } -> "get-mode-failed"
         """.trimIndent()
         assertEquals("True", eval(code))
     }
@@ -800,7 +800,7 @@ class FileWriteModeTest {
               FileSystem.copy_file { src = "/a", dest = "/b", replace_existing = False, preserve_attrs = False, follow_symlinks = True }
               match FilePermissions.get_mode { path = "/b" } is
                 Ok { val = m } -> bool::to_str { b = m.owner_exec }
-                Err { error = _ } -> "get-mode-failed"
+                Err { ... } -> "get-mode-failed"
         """.trimIndent()
         assertEquals("True", eval(code))
     }
@@ -823,19 +823,19 @@ class FileWriteModeTest {
               FileSystem.create_directory { path = "/d" }
               write_text { path = "/d/existing", text = "a" }
               match FileWatch.watch { path = "/d", recursive = False } is
-                Err { error = _ } -> "watch-failed"
+                Err { ... } -> "watch-failed"
                 Ok { val = h } -> do
                 FileSystem.write_bytes { path = "/d/existing", bytes = bytes::from_str { s = "b" }, mode = CreateOrAppend }
                 FileSystem.write_bytes { path = "/d/brand-new", bytes = bytes::from_str { s = "c" }, mode = CreateNew }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> match seq::first { xs = evs } is
-                    Some { val = Modified { path = _ } } -> match seq::last { xs = evs } is
+                    Some { val = Modified { ... } } -> match seq::last { xs = evs } is
                       Some { val = Created { path = p } } -> p
-                      Some { val = _ } -> "second-wrong-kind"
+                      Some { ... } -> "second-wrong-kind"
                       None -> "only-one-event"
-                    Some { val = _ } -> "first-wrong-kind"
+                    Some { ... } -> "first-wrong-kind"
                     None -> "no-events"
-                  Err { error = _ } -> "poll-failed"
+                  Err { ... } -> "poll-failed"
         """.trimIndent()
         assertEquals("/d/brand-new", eval(code))
     }
@@ -850,12 +850,12 @@ class FileWriteModeTest {
               FileSystem.create_directory { path = "/d" }
               write_text { path = "/d/taken", text = "a" }
               match FileWatch.watch { path = "/d", recursive = False } is
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
                 Ok { val = h } -> do
                 FileSystem.write_bytes { path = "/d/taken", bytes = bytes::from_str { s = "b" }, mode = CreateNew }
                 match FileWatch.poll { handle = h, timeout_ms = 0 } is
                   Ok { val = evs } -> seq::size { xs = evs }
-                  Err { error = _ } -> 0 - 1
+                  Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(0L, eval(code))
     }

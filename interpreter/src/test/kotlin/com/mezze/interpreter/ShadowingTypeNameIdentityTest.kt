@@ -75,7 +75,7 @@ class ShadowingTypeNameIdentityTest {
             """
             let f = { l: List Int } -> match l is
               Nil -> 0
-              Cons { head = h, tail = _ } -> h
+              Cons { head = h, ... } -> h
             f { l = Nil }
             """.trimIndent(),
         )

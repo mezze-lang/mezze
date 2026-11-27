@@ -301,7 +301,7 @@ class SeqPatternTypeCheckTest {
         val code = """
             let get_top_left = {matrix: [[Int]]} ->
                 match matrix is
-                  [[x, ..._], ..._] -> x
+                  [[x, ...], ...] -> x
                   _ -> 0
             let result = get_top_left {matrix = [[1, 2], [3, 4]]}
         """.trimIndent()
@@ -427,7 +427,7 @@ class SeqPatternTypeCheckTest {
         val code = """
             let unwrap_first_some = {xs} ->
                 match xs is
-                  [Some {val = x}, ..._] -> x
+                  [Some {val = x}, ...] -> x
                   _ -> 0
             let result = unwrap_first_some {xs = [Some {val = 42}, None, Some {val = 10}]}
         """.trimIndent()
@@ -495,7 +495,7 @@ class SeqPatternTypeCheckTest {
         val code = """
             let starts_with_positive = {xs: [Int]} ->
                 match xs is
-                  [x, ..._] if x > 0 -> True
+                  [x, ...] if x > 0 -> True
                   _ -> False
             let result = starts_with_positive {xs = [5, -1, -2]}
         """.trimIndent()
@@ -575,7 +575,7 @@ class SeqPatternTypeCheckTest {
                 match names is
                   [] -> "Hello, nobody!"
                   [name] -> "Hello, $(name)!"
-                  [first, ..._] -> "Hello, $(first) and others!"
+                  [first, ...] -> "Hello, $(first) and others!"
             let result = get_greeting {names = ["Alice", "Bob"]}
         """.trimIndent()
 

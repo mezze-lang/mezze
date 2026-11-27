@@ -42,7 +42,7 @@ class OSThreadConcurrencyTest {
                 let p = Async.spawn {f = {} -> 5 + 10}
                 let result = match await {p = p} is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
                 result
         """
         val result = eval(code)
@@ -58,7 +58,7 @@ class OSThreadConcurrencyTest {
                 let p = Async.spawn {f = {} -> 42}
                 let result = match await {p = p} is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
                 result
         """
         val result = eval(code)
@@ -77,13 +77,13 @@ class OSThreadConcurrencyTest {
 
                 let r1 = match await {p = p1} is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
                 let r2 = match await {p = p2} is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
                 let r3 = match await {p = p3} is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
 
                 r1 + r2 + r3
         """
@@ -106,7 +106,7 @@ class OSThreadConcurrencyTest {
                     let p = Async.spawn {f = {} -> double {x = 100}}
                     let result = match await {p = p} is
                         Ok { val } -> val
-                        Err { error = _ } -> -1
+                        Err { ... } -> -1
                     result
 
             test {}
@@ -129,7 +129,7 @@ class OSThreadConcurrencyTest {
                 }
                 let result = match await {p = p} is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
                 result
         """
         val result = eval(code)
@@ -147,12 +147,12 @@ class OSThreadConcurrencyTest {
                         let inner = Async.spawn {f = {} -> 42}
                         let inner_result = match await {p = inner} is
                             Ok { val } -> val
-                            Err { error = _ } -> -1
+                            Err { ... } -> -1
                         inner_result
                 }
                 let outer_result = match await {p = outer} is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
                 outer_result
         """
         val result = eval(code)
@@ -171,13 +171,13 @@ class OSThreadConcurrencyTest {
 
                 let r1 = match await {p = p1} is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
                 let r2 = match await {p = p2} is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
                 let r3 = match await {p = p3} is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
 
                 r1 + r2 + r3
         """
@@ -198,17 +198,17 @@ class OSThreadConcurrencyTest {
                 let stage1 = Async.spawn {f = {} -> 10}
                 let result1 = match await {p = stage1} is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
 
                 let stage2 = Async.spawn {f = {} -> result1 * 2}
                 let result2 = match await {p = stage2} is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
 
                 let stage3 = Async.spawn {f = {} -> result2 + 5}
                 let result3 = match await {p = stage3} is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
                 result3
         """
         val result = eval(code)
@@ -227,7 +227,7 @@ class OSThreadConcurrencyTest {
                     let p = Async.spawn {f = {} -> remaining * 2}
                     let result = match await {p = p} is
                         Ok { val } -> val
-                        Err { error = _ } -> -1
+                        Err { ... } -> -1
                     spawn_workers {remaining = remaining - 1, acc = acc + result}
 
             spawn_workers {remaining = 5, acc = 0}
@@ -252,7 +252,7 @@ class OSThreadConcurrencyTest {
                     let p = Async.spawn {f = {} -> recursive_spawn {n = n - 1}}
                     let result = match await {p = p} is
                         Ok { val } -> val
-                        Err { error = _ } -> -1
+                        Err { ... } -> -1
                     n + result
 
             recursive_spawn {n = 5}
@@ -273,7 +273,7 @@ class OSThreadConcurrencyTest {
                     let p = Async.spawn {f = {} -> n}
                     let result = match await {p = p} is
                         Ok { val } -> val
-                        Err { error = _ } -> -1
+                        Err { ... } -> -1
                     parallel_sum {n = n - 1, acc = acc + result}
 
             parallel_sum {n = 10, acc = 0}
@@ -301,10 +301,10 @@ class OSThreadConcurrencyTest {
 
                     let r1 = match await {p = p1} is
                         Ok { val } -> val
-                        Err { error = _ } -> -1
+                        Err { ... } -> -1
                     let r2 = match await {p = p2} is
                         Ok { val } -> val
-                        Err { error = _ } -> -1
+                        Err { ... } -> -1
 
                     r1 + r2
 
@@ -330,10 +330,10 @@ class OSThreadConcurrencyTest {
 
                     let r1 = match await {p = p1} is
                         Ok { val } -> val
-                        Err { error = _ } -> -1
+                        Err { ... } -> -1
                     let r2 = match await {p = p2} is
                         Ok { val } -> val
-                        Err { error = _ } -> -1
+                        Err { ... } -> -1
 
                     r1 + r2
 
@@ -354,7 +354,7 @@ class OSThreadConcurrencyTest {
                     let p = Async.spawn {f = {} -> 100}
                     let result = match await {p = p} is
                         Ok { val } -> val
-                        Err { error = _ } -> -1
+                        Err { ... } -> -1
                     result
                 else 50
 
@@ -379,7 +379,7 @@ class OSThreadConcurrencyTest {
                 let p3 = Async.spawn {f = {} -> 3}
                 let result = match race {ps = [p1, p2, p3]} is
                   Ok { val } -> val
-                  Err { error = _ } -> -1
+                  Err { ... } -> -1
                 result >= 1
         """
         val result = eval(code)
@@ -429,7 +429,7 @@ class OSThreadConcurrencyTest {
                 let p = Async.spawn {f = {} -> 42}
                 match await {p = p} is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
                 is_done {p = p}
         """
         val result = eval(code)
@@ -446,7 +446,7 @@ class OSThreadConcurrencyTest {
                 let result = with_timeout {ms = 5000, p = p}
                 match result is
                     Ok {val} -> val
-                    Err {error = _} -> 0
+                    Err { ... } -> 0
         """
         val result = eval(code)
         assertEquals(42L, result)

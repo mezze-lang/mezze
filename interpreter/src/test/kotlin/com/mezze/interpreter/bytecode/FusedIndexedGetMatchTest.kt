@@ -91,7 +91,7 @@ class FusedIndexedGetMatchTest {
             let xs = [None, Some { val = 5 }]
             let zeroth = match seq::get { xs = xs, i = 0 } is
               Some { val } -> match val is
-                Some { val = _ } -> 0
+                Some { ... } -> 0
                 None -> 1
               None -> 0 - 1
             zeroth
@@ -125,7 +125,7 @@ class FusedIndexedGetMatchTest {
             """
             use std::collections::list
             match list::get { xs = list::empty {}, index = 0 } is
-              Some { val = _ } -> 0
+              Some { ... } -> 0
               None -> 1
             """
         ))

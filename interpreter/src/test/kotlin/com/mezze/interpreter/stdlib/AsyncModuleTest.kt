@@ -119,7 +119,7 @@ class AsyncModuleTest {
             let p2 = Async.spawn {f = {} -> 2}
             match race {ps = [p1, p2]} is
               Ok { val } -> val
-              Err { error = _ } -> -1
+              Err { ... } -> -1
         """))
         // The racers run on virtual threads, so which one finishes first is
         // the scheduler's call. `race` promises Ok with SOME racer's value,
@@ -224,7 +224,7 @@ class AsyncModuleTest {
             let p = Async.spawn {f = {} -> 42}
             match with_timeout {ms = 1000, p = p} is
                 Ok {val} -> val
-                Err {error = _} -> 0
+                Err { ... } -> 0
         """))
         assertEquals(42L, result)
     }
@@ -240,7 +240,7 @@ class AsyncModuleTest {
                 let p = Async.spawn {f = {} -> 42}
                 match with_timeout {ms = 1000, p = p} is
                     Ok {val} -> val
-                    Err {error = _} -> 0
+                    Err { ... } -> 0
             """))
             assertEquals(42L, result, "attempt $attempt answered a timeout that had not elapsed")
         }
@@ -255,11 +255,11 @@ class AsyncModuleTest {
         val result = eval(withLoomAsync("""
             let p = promise_from {setup = {complete, fail, on_cancel} -> {}}
             match with_timeout {ms = 30, p = p} is
-                Ok {val = _} -> "settled"
+                Ok { ... } -> "settled"
                 Err {error} -> match error is
                     AsyncTimedOut {ms} -> "timed out after $(int::to_str {n = ms})ms"
-                    AsyncFailed {msg = _} -> "failed"
-                    AsyncCancelled {reason = _} -> "cancelled"
+                    AsyncFailed { ... } -> "failed"
+                    AsyncCancelled { ... } -> "cancelled"
         """))
         assertEquals(
             "timed out after 30ms", result,
@@ -274,11 +274,11 @@ class AsyncModuleTest {
         val result = eval(withLoomAsync("""
             let p = promise_failed {err = AsyncFailed {msg = "boom"}}
             match with_timeout {ms = 1000, p = p} is
-                Ok {val = _} -> "settled"
+                Ok { ... } -> "settled"
                 Err {error} -> match error is
                     AsyncFailed {msg} -> msg
-                    AsyncTimedOut {ms = _} -> "timed out"
-                    AsyncCancelled {reason = _} -> "cancelled"
+                    AsyncTimedOut { ... } -> "timed out"
+                    AsyncCancelled { ... } -> "cancelled"
         """))
         assertEquals("boom", result)
     }
@@ -290,7 +290,7 @@ class AsyncModuleTest {
         val settled = eval(withLoomAsync("""
             match with_timeout {ms = 0, p = promise_of {val = 9}} is
                 Ok {val} -> val
-                Err {error = _} -> 0
+                Err { ... } -> 0
         """))
         assertEquals(9L, settled)
 
@@ -298,7 +298,7 @@ class AsyncModuleTest {
             let p = promise_from {setup = {complete, fail, on_cancel} -> {}}
             match with_timeout {ms = 0, p = p} is
                 Ok {val} -> val
-                Err {error = _} -> 0 - 7
+                Err { ... } -> 0 - 7
         """))
         assertEquals(-7L, pending)
     }
@@ -355,7 +355,7 @@ class AsyncModuleTest {
 
             let err: AsyncError = AsyncCancelled { reason = CancelUserRequested { msg = "test" } }
             match err is
-                AsyncCancelled { reason = _ } -> True
+                AsyncCancelled { ... } -> True
                 _ -> False
         """)
         assertEquals(true, result)

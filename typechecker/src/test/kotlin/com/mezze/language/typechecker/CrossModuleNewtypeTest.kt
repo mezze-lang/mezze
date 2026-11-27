@@ -499,7 +499,7 @@ class CrossModuleNewtypeTest {
         val main = """
             newtype Money = { currency: Str, amount: Int }
             let m : Money = Money.({ currency = "USD", amount = 500 })
-            let amount : Int = match m is Money.({ amount = a, currency = _ }) -> a
+            let amount : Int = match m is Money.({ amount = a, ... }) -> a
         """
         val r = checkMain(main)
         assertTrue(r.isSuccess) {

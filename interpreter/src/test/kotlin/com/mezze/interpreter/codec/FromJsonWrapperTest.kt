@@ -48,7 +48,7 @@ class FromJsonWrapperTest {
             let r: Result { name: Str } DecodeError = dec { s = "{\"name\":\"Ada\"}" }
             match r is
               Ok { val = { name } } -> name
-              Err { error = _ } -> "err"
+              Err { ... } -> "err"
         """.trimIndent()
         assertEquals("Ada", run(src))
     }
@@ -63,7 +63,7 @@ class FromJsonWrapperTest {
             let r: Result { name: Str } Str = dec { s = "{\"name\":\"Ada\"}" }
             match r is
               Ok { val = { name } } -> name
-              Err { error = _ } -> "err"
+              Err { ... } -> "err"
         """.trimIndent()
         assertEquals("Ada", run(src))
     }
@@ -88,7 +88,7 @@ class FromJsonWrapperTest {
             let r: Result { name: Str } Fail = dec { s = "{\"name\":\"Ada\"}" }
             match r is
               Ok { val = { name } } -> name
-              Err { error = _ } -> "err"
+              Err { ... } -> "err"
         """.trimIndent()
         assertEquals("Ada", run(src))
     }

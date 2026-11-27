@@ -80,7 +80,7 @@ class HttpStreamedDownloadTest {
             perform SimpleHttpClient in perform SimpleHttpDownload in do
               let h = match HttpServer.serve { handler = app } is
                 Ok { val = hh } -> hh
-                Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
               let out = $expr
               h.stop {}
               out

@@ -3418,6 +3418,20 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
     }
 
     /**
+     * Read the seq element {@code fromEnd} positions from the end (1 = the last).
+     * The list matcher's read for elements after a middle `...` in `[first, ..., last]`;
+     * the size check that guards the match guarantees the index is in range.
+     */
+    @Operation
+    @ConstantOperand(type = int.class)
+    public static final class SeqGetFromEnd {
+        @Specialization
+        public static Object doSeq(int fromEnd, MezzeSeq<?> seq) {
+            return seq.get(seq.size() - fromEnd);
+        }
+    }
+
+    /**
      * Sum a `Bytes` into a primitive long — no guest callback, no boxing, no
      * per-element record.
      *
@@ -5152,6 +5166,15 @@ public abstract class MezzeBytecodeRootNode extends RootNode implements Bytecode
                 if (idx >= 0) return record.getField(idx);
             }
             return payload;
+        }
+
+        // #384 for the fused read: a native MezzeList is pattern-matched AS the `Cons`
+        // variant `{ head, tail }`. A pattern naming ONE field (`Cons { tail = rest, ... }`)
+        // lowers to this fused read, so it must know the list too — before, only the
+        // two-field spelling `{ head = _, tail = rest }` reached the list-aware path.
+        @Specialization
+        public static Object doList(String fieldName, com.mezze.datastructures.list.MezzeList<?> list) {
+            return "head".equals(fieldName) ? list.get(0) : list.tail();
         }
 
         static boolean isLongPayload(MezzeVariant v) {

@@ -108,14 +108,14 @@ class RecordScrutineeExhaustivenessTest {
     }
 
     @Test fun `two variant fields covered via a wildcard on one axis is accepted`() {
-        // `{a=Red, b=_}` + `{a=Green, b=_}` covers every b for each a ⇒ total.
+        // `{ a=Red, ... }` + `{ a=Green, ... }` covers every b for each a ⇒ total.
         assertNull(
             err(
                 """
                 type Color = | Red, Green |
                 let f: { r: { a: Color, b: Color } } -> Int = { r } -> match r is
-                  { a = Red, b = _ } -> 1
-                  { a = Green, b = _ } -> 2
+                  { a = Red, ... } -> 1
+                  { a = Green, ... } -> 2
                 """
             )
         )
@@ -137,13 +137,13 @@ class RecordScrutineeExhaustivenessTest {
     }
 
     @Test fun `a wildcard on one axis combines with concrete arms on the other to be total`() {
-        // `{a=Red, b=_}` covers Red×{all b}; the two Green arms cover the rest.
+        // `{ a=Red, ... }` covers Red×{all b}; the two Green arms cover the rest.
         assertNull(
             err(
                 """
                 type Color = | Red, Green |
                 let f: { r: { a: Color, b: Color } } -> Int = { r } -> match r is
-                  { a = Red, b = _ } -> 1
+                  { a = Red, ... } -> 1
                   { a = Green, b = Red } -> 2
                   { a = Green, b = Green } -> 3
                 """
@@ -152,13 +152,13 @@ class RecordScrutineeExhaustivenessTest {
     }
 
     @Test fun `a wildcard on one axis still leaves the other axis to be covered`() {
-        // `{a=Red, b=_}` covers all of a=Red, but a=Green only covers b=Red →
+        // `{ a=Red, ... }` covers all of a=Red, but a=Green only covers b=Red →
         // { a = Green, b = Green } is still missing.
         val m = err(
             """
             type Color = | Red, Green |
             let f: { r: { a: Color, b: Color } } -> Int = { r } -> match r is
-              { a = Red, b = _ } -> 1
+              { a = Red, ... } -> 1
               { a = Green, b = Red } -> 2
             """
         )
@@ -173,9 +173,9 @@ class RecordScrutineeExhaustivenessTest {
                 """
                 type Bit = | O, I |
                 let f: { r: { a: Bit, b: Bit, c: Bit } } -> Int = { r } -> match r is
-                  { a = O, b = _, c = _ } -> 1
-                  { a = I, b = O, c = _ } -> 2
-                  { a = I, b = I, c = _ } -> 3
+                  { a = O, ... } -> 1
+                  { a = I, b = O, ... } -> 2
+                  { a = I, b = I, ... } -> 3
                 """
             )
         )
@@ -205,7 +205,7 @@ class RecordScrutineeExhaustivenessTest {
                 """
                 let f: { r: { a: Bool, b: Bool, c: Bool, d: Bool, e: Bool, g: Bool, h: Bool, i: Bool, j: Bool } } -> Int = { r } ->
                   match r is
-                    { a = True, b = _, c = _, d = _, e = _, g = _, h = _, i = _, j = _ } -> 1
+                    { a = True, ... } -> 1
                 """
             ),
             "a 512-combination product can't be enumerated; a catch-all is required",
@@ -247,7 +247,7 @@ class RecordScrutineeExhaustivenessTest {
                 type Color = | Red, Green, Blue |
                 let f: { r: { c: Color } } -> Int = { r } -> match r is
                   { c = Red } -> 1
-                  { c = _ } -> 2
+                  { ... } -> 2
                 """
             )
         )

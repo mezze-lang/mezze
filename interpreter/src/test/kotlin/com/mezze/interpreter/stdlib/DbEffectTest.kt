@@ -142,7 +142,7 @@ class DbEffectTest {
             $head
             let fixture: Rows = { cols = ["id"], rows = [[DbInt { val = 1 }]] }
             let main = {} -> match value_at { rows = fixture, row = 99, col = 0 } is
-              Some { val = _ } -> 1
+              Some { ... } -> 1
               None -> 0
             main {}
             """.trimIndent(),
@@ -160,7 +160,7 @@ class DbEffectTest {
             let main = {} -> perform MockDb in
               match Db.run { q = sql { text = "select 1" } } is
                 Ok { val = rows } -> row_count { rows = rows }
-                Err { error = _ } -> -1
+                Err { ... } -> -1
             main {}
             """.trimIndent(),
         )
@@ -178,7 +178,7 @@ class DbEffectTest {
                 Ok { val = rows } -> match value_at { rows = rows, row = 0, col = 0 } is
                   Some { val = DbInt { val = n } } -> n
                   _ -> -1
-                Err { error = _ } -> -2
+                Err { ... } -> -2
             main {}
             """.trimIndent(),
         )
@@ -194,7 +194,7 @@ class DbEffectTest {
             let main = {} -> perform MockDbWith { answers = [{ sql = "from users", rows = users }] } in
               match Db.run { q = sql { text = "select * from orders" } } is
                 Ok { val = rows } -> row_count { rows = rows }
-                Err { error = _ } -> -1
+                Err { ... } -> -1
             main {}
             """.trimIndent(),
         )
@@ -209,7 +209,7 @@ class DbEffectTest {
             let main = {} -> perform MockDb in
               match Db.apply { q = sql { text = "delete from users" } } is
                 Ok { val = out } -> out.changed
-                Err { error = _ } -> -1
+                Err { ... } -> -1
             main {}
             """.trimIndent(),
         )
@@ -224,7 +224,7 @@ class DbEffectTest {
             let main = {} -> perform MockDb in
               match Db.tx { body = {} -> Ok { val = 11 } } is
                 Ok { val = n } -> n
-                Err { error = _ } -> -1
+                Err { ... } -> -1
             main {}
             """.trimIndent(),
         )
@@ -238,9 +238,9 @@ class DbEffectTest {
             $head
             let main = {} -> perform MockDb in
               match Db.tx { body = {} -> Err { error = DbConflict { msg = "serialization" } } } is
-                Ok { val = _ } -> "committed"
+                Ok { ... } -> "committed"
                 Err { error = DbConflict { msg = m } } -> m
-                Err { error = _ } -> "other"
+                Err { ... } -> "other"
             main {}
             """.trimIndent(),
         )
@@ -254,9 +254,9 @@ class DbEffectTest {
             $head
             let main = {} -> perform FailingDb { error = DbUnavailable { msg = "no route to host" } } in
               match Db.run { q = sql { text = "select 1" } } is
-                Ok { val = _ } -> "unexpectedly fine"
+                Ok { ... } -> "unexpectedly fine"
                 Err { error = DbUnavailable { msg = m } } -> m
-                Err { error = _ } -> "other"
+                Err { ... } -> "other"
             main {}
             """.trimIndent(),
         )
@@ -286,7 +286,7 @@ class DbEffectTest {
             let main = {} -> perform MockDbWith { answers = [{ sql = "from users", rows = users }] } in
               match Db.run { q = lookup { id = 1 } } is
                 Ok { val = rows } -> name_of { rows = rows }
-                Err { error = _ } -> "query failed"
+                Err { ... } -> "query failed"
             main {}
             """.trimIndent(),
         )

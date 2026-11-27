@@ -675,6 +675,8 @@ data class ConstraintResult(
         val loc: Loc?,
         /** Which kind of binding: each has its own fix, and none of them is a `_` prefix. */
         val kind: BindingKind = BindingKind.LET,
+        /** For a pattern binding, where in the pattern: decides `...` vs `_`. */
+        val slot: PatternSlot? = null,
     )
 
     /**

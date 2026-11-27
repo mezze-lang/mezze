@@ -87,7 +87,7 @@ class CrossEffectCompositionTest {
           await { p = producer }
           match await { p = reader } is
             Ok { val } -> val
-            Err { error = _ } -> -1
+            Err { ... } -> -1
     """.trimIndent()
 
     @Test
@@ -246,7 +246,7 @@ class CrossEffectCompositionTest {
           await { p = producer }
           match v is
             Ok { val } -> val
-            Err { error = _ } -> -1
+            Err { ... } -> -1
     """.trimIndent()
 
     @Test
@@ -310,8 +310,8 @@ class CrossEffectCompositionTest {
           }
           recv { ch = ch }
           let r = match await { p = t } is
-            Ok { val = _ } -> "ok"
-            Err { error = _ } -> "err"
+            Ok { ... } -> "ok"
+            Err { ... } -> "err"
           Ok { val = r }
     """.trimIndent()
 

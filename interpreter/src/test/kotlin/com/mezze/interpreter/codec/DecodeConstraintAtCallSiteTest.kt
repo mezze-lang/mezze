@@ -48,10 +48,10 @@ class DecodeConstraintAtCallSiteTest {
             let b: Result { n: Int } DecodeError = "{\"n\":7}".from_json {}
             let an = match a is
               Ok { val = { name } } -> name
-              Err { error = _ } -> "err"
+              Err { ... } -> "err"
             let bn = match b is
               Ok { val = { n } } -> n
-              Err { error = _ } -> 0
+              Err { ... } -> 0
             an.concat { r = bn.to_str {} }
         """.trimIndent()
         assertEquals("Ada7", run(src))
@@ -69,10 +69,10 @@ class DecodeConstraintAtCallSiteTest {
             let b: Result { name: Str } DecodeError = "{\"name\":\"Lin\"}".from_json {}
             let an = match a is
               Ok { val = { name } } -> name
-              Err { error = _ } -> "err"
+              Err { ... } -> "err"
             let bn = match b is
               Ok { val = { name } } -> name
-              Err { error = _ } -> "err"
+              Err { ... } -> "err"
             an.concat { r = bn }
         """.trimIndent()
         assertEquals("AdaLin", run(src))
@@ -89,7 +89,7 @@ class DecodeConstraintAtCallSiteTest {
             use std::result
             match "{\"n\":7}".from_json {}.map { f = { val } -> val.n } is
               Ok { val } -> val
-              Err { error = _ } -> 0
+              Err { ... } -> 0
         """.trimIndent()
         assertEquals(7L, run(src))
     }

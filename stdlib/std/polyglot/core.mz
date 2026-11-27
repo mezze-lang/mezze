@@ -173,5 +173,5 @@ impl Polyglot for Runtime having 'f = 'g where {
 ## Call once at a typed entry point (`Js.eval`, …); a bare errored foreign cannot be matched as Ok/Err.
 pub let lift: { on: 'f } -> Result 'f InteropError <Polyglot> = { on } ->
   match Polyglot.check { on = on } is
-    Ok  { val = _ }   -> Ok { val = on }
+    Ok  { ... }   -> Ok { val = on }
     Err { error = e } -> Err { error = e }

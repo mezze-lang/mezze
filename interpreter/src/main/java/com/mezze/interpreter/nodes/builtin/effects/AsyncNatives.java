@@ -1938,7 +1938,7 @@ public final class AsyncNatives {
     /**
      * Build a `Result _ AsyncError = Err { error = AsyncCancelled { reason } }`
      * variant. Coop callers were returning the raw AsyncError variant —
-     * wrong; users pattern-match `Err { error = AsyncCancelled { reason = _ } }`
+     * wrong; users pattern-match `Err { error = AsyncCancelled { ... } }`
      * and saw a tag mismatch. Matches Loom's promiseAwaitResult.
      *
      * `reason` is a CancelReason variant (from the cancelled promise's

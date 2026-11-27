@@ -74,10 +74,10 @@ class IterCursorTest {
               let third = iter::cursor_next { c = c }
               let a = match second is
                 None -> True
-                Some { val = _ } -> False
+                Some { ... } -> False
               let b = match third is
                 None -> True
-                Some { val = _ } -> False
+                Some { ... } -> False
               "$(bool::to_str { b = a })$(bool::to_str { b = b })"
         """.trimIndent()
         assertEquals("TrueTrue", eval(code))
@@ -236,7 +236,7 @@ class IterCursorTest {
                 init = 0,
                 step = { acc, r } -> match r is
                   Ok { val = v } -> acc * 10 + v
-                  Err { error = _ } -> acc,
+                  Err { ... } -> acc,
               }
         """.trimIndent()
         assertEquals(12345L, eval(code))
@@ -263,7 +263,7 @@ class IterCursorTest {
                 step = { acc, r } -> do
                   let s = match r is
                     Ok { val = v } -> acc.sum + v
-                    Err { error = _ } -> acc.sum
+                    Err { ... } -> acc.sum
                   if acc.seen + 1 == 4 then return { val = s } else { sum = s, seen = acc.seen + 1 },
               }
               final.sum
@@ -300,7 +300,7 @@ class IterCursorTest {
                 {}
               match FileSystem.list { path = "/seen" } is
                 Ok { val = names } -> seq::size { xs = names }
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
         """.trimIndent()
         val invocations = MezzeTestHelper.asLong(eval(code))
         assert(invocations in 4..32) {
@@ -325,13 +325,13 @@ class IterCursorTest {
                 it = iter::range { start = 0, end = 5 },
                 f = { x } -> match read_text { path = "/in/$(int::to_str { n = x })" } is
                   Ok { val = t } -> str::size { s = t }
-                  Err { error = _ } -> 0
+                  Err { ... } -> 0
                 ,
                 max_in_flight = 2,
                 init = 0,
                 step = { acc, r } -> match r is
                   Ok { val = v } -> acc + v
-                  Err { error = _ } -> acc,
+                  Err { ... } -> acc,
               }
         """.trimIndent()
         // five files of two characters

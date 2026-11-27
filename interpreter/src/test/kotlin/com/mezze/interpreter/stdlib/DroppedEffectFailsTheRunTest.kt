@@ -72,7 +72,7 @@ class DroppedEffectFailsTheRunTest {
                 7 }
               match await { p = p } is
                 Ok { val } -> val
-                Err { error = _ } -> -1
+                Err { ... } -> -1
             """.trimIndent(),
         )
         assertEquals(7L, r, "an awaited spawn discharges its effect and is not a drop")

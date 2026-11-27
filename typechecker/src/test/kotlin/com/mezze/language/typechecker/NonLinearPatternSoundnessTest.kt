@@ -65,7 +65,7 @@ class NonLinearPatternSoundnessTest {
             type T = | A { x: Str, y: Int } |
             let f = { t: T } ->
               match t is
-                A { x = _, y = _ } -> 0
+                A { ... } -> 0
         """), "`_` is not a binding and may repeat")
     }
 

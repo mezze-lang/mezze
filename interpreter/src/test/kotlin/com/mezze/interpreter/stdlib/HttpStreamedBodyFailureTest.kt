@@ -13,7 +13,7 @@ import kotlin.test.assertTrue
  * `response_file`'s chunk step answered `Done` for two different things — a
  * finished file and a FAILED read:
  *
- *     Err { error = _ } -> Done                                   # the read failed
+ *     Err { ... } -> Done                                   # the read failed
  *     Ok { val = b } -> if bytes::size { b = b } == 0 then Done    # genuine EOF
  *
  * `Done` sends the terminal zero-length chunk, and for a chunked response that
@@ -98,7 +98,7 @@ class HttpStreamedBodyFailureTest {
             perform SimpleHttpClient in perform SimpleHttpDownload in do
               let h = match HttpServer.serve { handler = app } is
                 Ok { val = hh } -> hh
-                Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
               let out = match with_download {
                 req = request { url = str::concat { l = "http://127.0.0.1:", r = str::concat {
                   l = int::to_str { n = h.port }, r = "/big" } } },
@@ -168,7 +168,7 @@ class HttpStreamedBodyFailureTest {
                 perform SimpleHttpClient in perform SimpleHttpDownload in do
                   let h = match HttpServer.serve { handler = app } is
                     Ok { val = hh } -> hh
-                    Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                    Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                   let out = match with_download {
                     req = request { url = str::concat { l = "http://127.0.0.1:", r = str::concat {
                       l = int::to_str { n = h.port }, r = "/big" } } },

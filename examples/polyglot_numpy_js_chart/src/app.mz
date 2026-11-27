@@ -73,7 +73,7 @@ let main = {} -> perform Console, GraalPy, GraalJs in do
   # never needs a helper let-binding.
   let json_r = Python.eval { source = python_stats_src }.str {}
   match json_r is
-    Err { error = _ } -> println { msg = "  python side failed" }
+    Err { ... } -> println { msg = "  python side failed" }
     Ok  { val = json_blob } -> do
 
       # Pull mean + std back as scalar `Float`s. Same inline
@@ -89,10 +89,10 @@ let main = {} -> perform Console, GraalPy, GraalJs in do
       }.float {}
       match mean_r is
         Ok  { val = m } -> println { msg = "    mean = $(float::to_str { n = m })" }
-        Err { error = _ } -> println { msg = "    mean: coerce failed" }
+        Err { ... } -> println { msg = "    mean: coerce failed" }
       match std_r is
         Ok  { val = s } -> println { msg = "    std  = $(float::to_str { n = s })" }
-        Err { error = _ } -> println { msg = "    std : coerce failed" }
+        Err { ... } -> println { msg = "    std : coerce failed" }
       let n_bytes = str::size { s = json_blob }
       println { msg = "    histogram: 20 bins ($(int::to_str { n = n_bytes })-byte JSON payload)" }
       println { msg = "" }
@@ -109,8 +109,8 @@ let main = {} -> perform Console, GraalPy, GraalJs in do
         Err { error } -> match error is
           InteropNotFound { name = n } -> println { msg = "  js: not found: $(n)" }
           InteropTypeError { message = m } -> println { msg = "  js: type error: $(m)" }
-          InteropGuestError { message = m, guest_stack = _ } -> println { msg = "  js: guest error: $(m)" }
-          InteropArityMismatch { expected = _, actual = _ } -> println { msg = "  js: arity mismatch" }
+          InteropGuestError { message = m, ... } -> println { msg = "  js: guest error: $(m)" }
+          InteropArityMismatch { ... } -> println { msg = "  js: arity mismatch" }
           InteropUnsupportedMessage -> println { msg = "  js: unsupported message" }
 
       println { msg = "" }

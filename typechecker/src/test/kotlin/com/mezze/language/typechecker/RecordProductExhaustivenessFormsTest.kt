@@ -53,13 +53,13 @@ class RecordProductExhaustivenessFormsTest {
 
     @Test
     fun `a per-field wildcard covers the rest`() =
-        accepts("`{ m = _, k = _ }`", prog("  { m = Get, k = True } -> 1\n  { m = _, k = _ } -> 0"))
+        accepts("`{ ... }`", prog("  { m = Get, k = True } -> 1\n  { ... } -> 0"))
 
     @Test
     fun `pinning one field and wildcarding the other splits the product`() =
         accepts(
             "one field pinned per arm",
-            prog("  { m = Get, k = _ } -> 1\n  { m = Post, k = _ } -> 0")
+            prog("  { m = Get, ... } -> 1\n  { m = Post, ... } -> 0")
         )
 
     @Test
@@ -88,7 +88,7 @@ class RecordProductExhaustivenessFormsTest {
         accepts(
             "3 fields",
             prog(
-                "  { m = Get, k = True, n = _ } -> 1\n  _ -> 0",
+                "  { m = Get, k = True, ... } -> 1\n  _ -> 0",
                 fields = "{ m: M, k: Bool, n: Bool }",
                 call = "{ m = Get, k = True, n = False }",
             )

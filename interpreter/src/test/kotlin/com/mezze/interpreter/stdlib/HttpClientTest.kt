@@ -104,7 +104,7 @@ class HttpClientTest {
                   perform PooledHttpClientWith { overrides = impatient } in do
                     let h = match HttpServer.serve { handler = slow } is
                       Ok { val = hh } -> hh
-                      Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                      Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                     let out = match request { url = "http://127.0.0.1:$(int::to_str { n = h.port })/slow" }.send {} is
                       Ok { val } -> "the override did not reach the request"
                       Err { error = e } -> format_error { err = e }
@@ -137,7 +137,7 @@ class HttpClientTest {
 
         let text_of: { resp: Response } -> Str = { resp } -> match bytes::to_str { b = resp.body } is
           Ok { val } -> val
-          Err { error = _ } -> "could not decode"
+          Err { ... } -> "could not decode"
 
         ## The Location is absolute, built from the request's own Host header —
         ## the only way the handler can know the port the OS picked.
@@ -184,10 +184,10 @@ class HttpClientTest {
                 perform PooledHttpClientWith { overrides = { ...default_http_config, follow_redirects = False } } in do
                   let h = match HttpServer.serve { handler = app } is
                     Ok { val = hh } -> hh
-                    Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                    Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                   let out = match request { url = "http://127.0.0.1:$(int::to_str { n = h.port })/redir" }.send {} is
                     Ok { val } -> val.status
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
                   h.stop {}
                   out
             go {}
@@ -204,7 +204,7 @@ class HttpClientTest {
                 perform PooledHttpClientWith { overrides = default_http_config } in do
                   let h = match HttpServer.serve { handler = app } is
                     Ok { val = hh } -> hh
-                    Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                    Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                   let out = match request { url = "http://127.0.0.1:$(int::to_str { n = h.port })/redir" }.send {} is
                     Ok { val } -> text_of { resp = val }
                     Err { error = e } -> format_error { err = e }
@@ -306,7 +306,7 @@ class HttpClientTest {
                   perform SimpleHttpClientWith { overrides = impatient } in do
                     let h = match HttpServer.serve { handler = slow } is
                       Ok { val = hh } -> hh
-                      Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                      Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                     let out = match request { url = "http://127.0.0.1:$(int::to_str { n = h.port })/slow" }.send {} is
                       Ok { val } -> "the override did not reach the request"
                       Err { error = e } -> format_error { err = e }

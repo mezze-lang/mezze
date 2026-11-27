@@ -69,7 +69,7 @@ let k_one_variant = { n } -> do
     let s = Circle { r = i }
     let v = match s is
       Circle { r } -> r
-      Tri { b = _, h = _ } -> 0
+      Tri { ... } -> 0
     go { i = i - 1, acc = acc + v }
   go { i = n, acc = 0 }
 
@@ -77,8 +77,8 @@ let k_two_variant = { n } -> do
   let go = { i, acc } -> if i <= 0 then acc else do
     let s = Tri { b = i, h = i }
     let v = match s is
-      Tri { b, h = _ } -> b
-      Circle { r = _ } -> 0
+      Tri { b, ... } -> b
+      Circle { ... } -> 0
     go { i = i - 1, acc = acc + v }
   go { i = n, acc = 0 }
 
@@ -90,7 +90,7 @@ let k_one_inline = { n } -> do
   let go = { i, acc } -> if i <= 0 then acc else do
     let v = match Circle { r = i } is
       Circle { r } -> r
-      Tri { b = _, h = _ } -> 0
+      Tri { ... } -> 0
     go { i = i - 1, acc = acc + v }
   go { i = n, acc = 0 }
 

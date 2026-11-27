@@ -124,7 +124,7 @@ class CodebaseEffectTest {
                 match decoded is
                   Ok { val = r } -> "$(r.route) for $(r.auth.role), $(seq::size { xs = r.methods }.to_str {}) methods"
                   Err { error } -> "decode failed: $(error.message)"
-              Err { error = _ } -> "not JSON: $(raw)"
+              Err { ... } -> "not JSON: $(raw)"
 
             let answer = {} -> perform ComptimeEvalCodebase in match Codebase.resolve { module = "app", name = "tickets" } is
               Some { val } -> match Codebase.info { decl = val } is

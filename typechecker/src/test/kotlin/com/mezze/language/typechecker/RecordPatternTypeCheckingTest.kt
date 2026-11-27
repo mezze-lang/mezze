@@ -142,7 +142,7 @@ class RecordPatternTypeCheckingTest {
         val code = """
             let get_age = {person} ->
                 match person is
-                  { name = _, age } -> age
+                  { age, ... } -> age
             let result = get_age { person = { name = "Alice", age = 30 } }
         """.trimIndent()
 

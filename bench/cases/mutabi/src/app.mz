@@ -148,7 +148,7 @@ let k_char = { n } -> perform LocalMut in do
     else go {
       i = i - 1,
       acc = match string_char_at { s = s, i = 3 } is
-        Some { val = _ } -> acc + 1
+        Some { ... } -> acc + 1
         None -> acc,
     }
   go { i = n, acc = 0 }

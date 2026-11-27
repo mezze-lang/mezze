@@ -590,7 +590,8 @@ class SyntaxDecoder(
                 },
                 loc,
             )
-            "SeqPat" -> ParsedSeqPattern(p.seqOf("elements", ::pattern), p.optStr("rest"), loc)
+            "SeqPat" -> ParsedSeqPattern(p.seqOf("elements", ::pattern), p.optStr("rest"), loc,
+                suffixCount = if (p.has("suffix")) p.long("suffix").toInt() else 0)
             "StrPat" -> ParsedStringInterpPattern(p.seqOf("parts") { part, pat ->
                 variant(part, "StrPatPart", pat) { ptag, s ->
                     when (ptag) {

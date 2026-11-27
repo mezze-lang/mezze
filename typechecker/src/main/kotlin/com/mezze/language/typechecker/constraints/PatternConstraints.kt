@@ -291,7 +291,8 @@ class PatternConstraintGenerator {
         for (part in pattern.parts) {
             when (part) {
                 is ParsedStringPatternPart.Capture -> {
-                    bindings[part.variableName] = MezzeType.StringType
+                    // `$(_)` is a hole that matches any substring and binds nothing.
+                    if (part.variableName != "_") bindings[part.variableName] = MezzeType.StringType
                 }
                 is ParsedStringPatternPart.Literal -> {
                 }
@@ -503,8 +504,9 @@ class PatternConstraintGenerator {
             constraints.addAll(elementResult.constraints)
         }
 
+        // An unnamed `...` binds nothing; only a named tail is a binding.
         val restPatternName = pattern.restPattern
-        if (restPatternName != null) {
+        if (restPatternName != null && restPatternName != ParsedSeqPattern.IGNORED_REST) {
             bindings[restPatternName] = BuiltinTypes.seqApp(elementType)
         }
 

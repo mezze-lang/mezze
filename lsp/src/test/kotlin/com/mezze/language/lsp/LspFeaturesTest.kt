@@ -3121,6 +3121,41 @@ class LspFeaturesTest {
         assertEquals("  let x = ".length, edit.range.end.character, "and ends where the expression begins")
     }
 
+    @Test
+    fun `unused pattern bindings offer the fix their slot needs`() {
+        // W0104 by slot: a record field is left out (end with `...`), a positional
+        // value becomes `_`, a list tail drops its name. Never "prefix with `_`".
+        val (uri, _) = openSingleFile("""
+            let f = { o: Option Int } -> match o is
+              Some { val } -> 0
+              None -> 1
+            let g = { xs: [Int] } -> match xs is
+              [first, b] -> first
+              [first, ...rest] -> first
+              [] -> 0
+        """.trimIndent())
+        val diags = client.awaitDiagnostics(uri, 5_000)
+        assertNotNull(diags, "expected publishDiagnostics")
+        fun fixFor(name: String): Pair<String, TextEdit> {
+            val d = diags!!.diagnostics.firstOrNull { it.code?.left == "W0104" && it.message.contains("`$name`") }
+                ?: fail("no W0104 for `$name` among ${diags.diagnostics.map { it.message }}")
+            val actions = server.textDocumentService.codeAction(CodeActionParams().apply {
+                textDocument = TextDocumentIdentifier(uri); range = d.range; context = CodeActionContext(listOf(d))
+            }).get(5, TimeUnit.SECONDS) ?: emptyList()
+            val a = actions.firstOrNull { it.isRight }?.right ?: fail("no quick fix for `$name`")
+            return a.title to a.edit.changes[uri]!!.single()
+        }
+        val (fieldTitle, fieldEdit) = fixFor("val")
+        assertEquals("Leave the field out", fieldTitle)
+        assertEquals("{ ... }", fieldEdit.newText)
+        val (posTitle, posEdit) = fixFor("b")
+        assertEquals("Replace with `_`", posTitle)
+        assertEquals("_", posEdit.newText)
+        val (restTitle, restEdit) = fixFor("rest")
+        assertEquals("Write `...`", restTitle)
+        assertEquals("", restEdit.newText, "the name after `...` is deleted")
+    }
+
     // ===== Cross-module go-to-definition (in-memory fallback) =========
 
     // Disabled for the same reason as

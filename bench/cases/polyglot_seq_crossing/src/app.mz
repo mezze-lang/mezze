@@ -71,8 +71,8 @@ let repeat_source: { xs: [Int], n: Int, acc: Int } -> Int <Js> =
     else do
       let r = cross_via_source { xs = xs }
       let got = match r is
-        Ok { val = _ } -> 1
-        Err { error = _ } -> 0
+        Ok { ... } -> 1
+        Err { ... } -> 0
       repeat_source { xs = xs, n = n - 1, acc = acc + got }
 
 ## THE CODEC PATH CANNOT BE WRITTEN HERE. `__native_polyglot_make_list` is

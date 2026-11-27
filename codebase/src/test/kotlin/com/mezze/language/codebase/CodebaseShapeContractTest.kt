@@ -230,8 +230,8 @@ class CodebaseShapeContractTest {
             False -> 0
           let picked = match extra is
             Some { val } if let Meters.(f) = val -> f > 1.0
-            Some { val = _ } if count > 1 -> True
-            Some { val = _ } -> False
+            Some { ... } if count > 1 -> True
+            Some { ... } -> False
             None -> (count >= 0)
           let n = perform Scaled { factor = 2 } in Beep.beep { times = 3 }
           let lits = [1n == 1n, 2.5 > 1.0, 4 % 3 == 1]
@@ -249,7 +249,7 @@ class CodebaseShapeContractTest {
             _ -> "near"
           "$(sized) $(natted) $(floated)"
         let shape_name: { s: Shape } -> Str = { s } -> match s is
-          Circle { r = _ } -> "circle"
+          Circle { ... } -> "circle"
           Dot -> "dot"
         let local_types: { p: Point, s: std::syntax::Span, v: | On, Off | } -> Int = { p, s, v } -> p.x
         let quoted: { e: Expr } -> Expr = { e } -> `(~e + 1)

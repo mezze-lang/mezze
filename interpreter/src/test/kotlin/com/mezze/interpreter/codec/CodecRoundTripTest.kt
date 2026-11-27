@@ -912,8 +912,8 @@ class CodecRoundTripTest {
         match parse_str { s = s } is
           Ok { val = j } -> match j.from_json {} is
               Ok { val = c } -> if c == original then $sizeExpr else (0 - 3)
-              Err { error = _ } -> (0 - 1)
-          Err { error = _ } -> (0 - 2)
+              Err { ... } -> (0 - 1)
+          Err { ... } -> (0 - 2)
     """.trimIndent()
 
     @Test
@@ -972,13 +972,13 @@ class CodecRoundTripTest {
             let p: Pt = { a = 5, b = "hi" }
             let r1 = match m.to_json{}.from_json {} is
               Ok { val = c } -> if c == m then 1 else 0
-              Err { error = _ } -> 0
+              Err { ... } -> 0
             let r2 = match s.to_json{}.from_json {} is
               Ok { val = c } -> if c == s then 1 else 0
-              Err { error = _ } -> 0
+              Err { ... } -> 0
             let r3 = match p.to_json{}.from_json {} is
               Ok { val = c } -> if c == p then 1 else 0
-              Err { error = _ } -> 0
+              Err { ... } -> 0
             r1 + r2 + r3
         """.trimIndent()
         assertEquals(3L, eval(src))
@@ -996,8 +996,8 @@ class CodecRoundTripTest {
             match parse_str { s = s } is
               Ok { val = j } -> match j.from_json {} is
                   Ok { val = n } -> if n == original then nat::to_int { n = n } else (0 - 3)
-                  Err { error = _ } -> (0 - 1)
-              Err { error = _ } -> (0 - 2)
+                  Err { ... } -> (0 - 1)
+              Err { ... } -> (0 - 2)
         """.trimIndent()
         assertEquals(5L, eval(src))
     }
@@ -1013,8 +1013,8 @@ class CodecRoundTripTest {
             match parse_str { s = "-5" } is
               Ok { val = j } -> match j.from_json {} is
                   Ok { val = n } -> nat::to_int { n = n }
-                  Err { error = _ } -> (0 - 99)
-              Err { error = _ } -> (0 - 98)
+                  Err { ... } -> (0 - 99)
+              Err { ... } -> (0 - 98)
         """.trimIndent()
         assertEquals(-99L, eval(src))
     }
@@ -1032,8 +1032,8 @@ class CodecRoundTripTest {
             match parse_str { s = "5" } is
               Ok { val = j } -> match j.from_json {} is
                   Ok { val = c } -> use_id { u = c }
-                  Err { error = _ } -> (0 - 1)
-              Err { error = _ } -> (0 - 2)
+                  Err { ... } -> (0 - 1)
+              Err { ... } -> (0 - 2)
         """.trimIndent()
         assertThrows(Exception::class.java) { eval(src) }
     }

@@ -39,7 +39,7 @@ class HttpStreamedResponseTest {
         }
         let text_of: { resp: Response } -> Str = { resp } -> match body_str { resp = resp } is
           Ok { val } -> val
-          Err { error = _ } -> "could not decode"
+          Err { ... } -> "could not decode"
         let listen_on_any_port: ServerConfig = { port = 0, host = "127.0.0.1", workers = 4, stream_bodies = False, helidon_print_log = Off }
     """.trimIndent()
 
@@ -78,7 +78,7 @@ class HttpStreamedResponseTest {
                 perform SimpleHttpClient in do
                   let h = match HttpServer.serve { handler = app } is
                     Ok { val = hh } -> hh
-                    Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                    Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                   let out = fetch { url = ${url("/stream")} }
                   h.stop {}
                   out
@@ -128,7 +128,7 @@ class HttpStreamedResponseTest {
                   perform SimpleHttpClient in do
                     let h = match HttpServer.serve { handler = app } is
                       Ok { val = hh } -> hh
-                      Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                      Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                     let body = fetch { url = ${url("/stream")} }
                     h.stop {}
                     body
@@ -161,7 +161,7 @@ class HttpStreamedResponseTest {
                 perform SimpleHttpClient in do
                   let h = match HttpServer.serve { handler = app } is
                     Ok { val = hh } -> hh
-                    Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                    Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                   let out = fetch { url = ${url("/empty")} }
                   h.stop {}
                   "[$(out)]"
@@ -193,7 +193,7 @@ class HttpStreamedResponseTest {
                 perform SimpleHttpClient in do
                   let h = match HttpServer.serve { handler = app } is
                     Ok { val = hh } -> hh
-                    Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                    Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                   let out = fetch { url = ${url("/whole")} }
                   h.stop {}
                   out
@@ -222,7 +222,7 @@ class HttpStreamedResponseTest {
               routes = route { method = Get, path = "/file",
                 handler = { m } -> match response_file { path = "/big.txt", chunk_bytes = 4 } is
                   Ok { val = resp } -> resp
-                  Err { error = _ } -> not_found { req = m.req } },
+                  Err { ... } -> not_found { req = m.req } },
               fallback = not_found,
             }
             let go: {} -> Str <*> = {} ->
@@ -233,7 +233,7 @@ class HttpStreamedResponseTest {
                       write_text { path = "/big.txt", text = "abcdefghijklmno" }
                       let h = match HttpServer.serve { handler = app } is
                         Ok { val = hh } -> hh
-                        Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                        Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                       let out = fetch { url = ${url("/file")} }
                       h.stop {}
                       out

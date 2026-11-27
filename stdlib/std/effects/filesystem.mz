@@ -394,8 +394,8 @@ pub let append_text: { path: Str, text: Str } -> Result {} FsError <FileSystem> 
 ## Atomic, so of two racing processes exactly one gets `True`; FsNotSupported if the backend can't.
 pub let create_exclusive: { path: Str, bytes: Bytes } -> Result Bool FsError <FileSystem> = { path, bytes } ->
   match FileSystem.write_bytes { path = path, bytes = bytes, mode = CreateNew } is
-    Ok { val = _ } -> Ok { val = True }
-    Err { error = FsAlreadyExists { path = _ } } -> Ok { val = False }
+    Ok { ... } -> Ok { val = True }
+    Err { error = FsAlreadyExists { ... } } -> Ok { val = False }
     Err { error } -> Err { error = error }
 
 # Directory + write conveniences
@@ -482,11 +482,11 @@ let lines_loop
   -> 'acc <FileStreaming, ...>
   = { handle, chunk_bytes, buf, acc, f } ->
     match FileStreaming.read_chunk { handle = handle, max_bytes = chunk_bytes } is
-      Err { error = _ } -> acc
+      Err { ... } -> acc
       Ok { val = b } -> if bytes::size { b = b } == 0 then
           if str::size { s = buf } > 0 then f { acc = acc, x = buf } else acc
         else match bytes::to_str { b = b } is
-          Err { error = _ } -> acc
+          Err { ... } -> acc
           Ok { val = chunk } -> do
             let step = fold_lines { buf = "$(buf)$(chunk)", acc = acc, f = f }
             lines_loop { handle = handle, chunk_bytes = chunk_bytes, buf = step.buf, acc = step.acc, f = f }
@@ -522,7 +522,7 @@ pub let watch
   : { handle: WatchHandle, timeout_ms: Int, init: 'acc, f: { acc: 'acc, x: WatchEvent } -> 'acc <...> }
   -> 'acc <FileWatch, ...>
   = { handle, timeout_ms, init, f } -> match FileWatch.poll { handle = handle, timeout_ms = timeout_ms } is
-    Err { error = _ } -> init
+    Err { ... } -> init
     Ok { val = batch } -> if seq::size { xs = batch } == 0 then init
       else watch { handle = handle, timeout_ms = timeout_ms, init = seq::fold { xs = batch, init = init, f = f }, f = f }
 

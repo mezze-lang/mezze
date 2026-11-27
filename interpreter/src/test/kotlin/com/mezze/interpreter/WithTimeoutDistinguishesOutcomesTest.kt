@@ -36,8 +36,8 @@ class WithTimeoutDistinguishesOutcomesTest {
               let p = Async.spawn { f = {} -> 42 }
               match with_timeout { ms = 2000, p = p } is
                 Ok { val } -> "ok:$(int::to_str { n = val })"
-                Err { error = AsyncTimedOut { ms = _ } } -> "timed-out"
-                Err { error = _ } -> "other-error"
+                Err { error = AsyncTimedOut { ... } } -> "timed-out"
+                Err { ... } -> "other-error"
             """,
         )
         assertEquals("ok:42", r)
@@ -54,10 +54,10 @@ class WithTimeoutDistinguishesOutcomesTest {
                 sleep { ms = 10000 }
                 1 }
               match with_timeout { ms = 50, p = p } is
-                Ok { val = _ } -> "unexpectedly-ok"
+                Ok { ... } -> "unexpectedly-ok"
                 Err { error = AsyncTimedOut { ms = m } } -> "timed-out:$(int::to_str { n = m })"
-                Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
-                Err { error = AsyncFailed { msg = _ } } -> "failed"
+                Err { error = AsyncCancelled { ... } } -> "cancelled"
+                Err { error = AsyncFailed { ... } } -> "failed"
             """,
         )
         assertEquals("timed-out:50", r, "the deadline case must be AsyncTimedOut and must carry its ms")
@@ -76,11 +76,11 @@ class WithTimeoutDistinguishesOutcomesTest {
                 1 }
               cancel { p = p, reason = CancelUserRequested { msg = "mine" } }
               match with_timeout { ms = 5000, p = p } is
-                Ok { val = _ } -> "unexpectedly-ok"
-                Err { error = AsyncTimedOut { ms = _ } } -> "timed-out"
+                Ok { ... } -> "unexpectedly-ok"
+                Err { error = AsyncTimedOut { ... } } -> "timed-out"
                 Err { error = AsyncCancelled { reason = CancelUserRequested { msg = m } } } -> "cancelled:$(m)"
-                Err { error = AsyncCancelled { reason = _ } } -> "cancelled:other"
-                Err { error = AsyncFailed { msg = _ } } -> "failed"
+                Err { error = AsyncCancelled { ... } } -> "cancelled:other"
+                Err { error = AsyncFailed { ... } } -> "failed"
             """,
         )
         assertEquals(
@@ -99,9 +99,9 @@ class WithTimeoutDistinguishesOutcomesTest {
               let p = promise_from { setup = { complete, fail, on_cancel } ->
                 fail { err = AsyncFailed { msg = "boom" } } }
               match with_timeout { ms = 5000, p = p } is
-                Ok { val = _ } -> "unexpectedly-ok"
-                Err { error = AsyncTimedOut { ms = _ } } -> "timed-out"
-                Err { error = AsyncCancelled { reason = _ } } -> "cancelled"
+                Ok { ... } -> "unexpectedly-ok"
+                Err { error = AsyncTimedOut { ... } } -> "timed-out"
+                Err { error = AsyncCancelled { ... } } -> "cancelled"
                 Err { error = AsyncFailed { msg = m } } -> "failed:$(m)"
             """,
         )

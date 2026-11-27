@@ -51,10 +51,10 @@ class UserContainerInstanceTest {
           lt = { it, r } -> match it is
             Leaf -> match r is
               Leaf -> False
-              Node { l = _, v = _, r = _ } -> True
-            Node { l = _, v = a, r = _ } -> match r is
+              Node { ... } -> True
+            Node { v = a, ... } -> match r is
               Leaf -> False
-              Node { l = _, v = b, r = _ } -> a < b,
+              Node { v = b, ... } -> a < b,
           le = { it, r } -> if r < it then False else True,
           gt = { it, r } -> r < it,
           ge = { it, r } -> if it < r then False else True,
@@ -63,6 +63,6 @@ class UserContainerInstanceTest {
     private fun runO(body: String) = run("$ordHead\n$body")
     @Test fun treeLt()        { assertEquals(true,  runO("let main = {} -> leaf { x = 1, y = 0 } < leaf { x = 2, y = 0 }\nmain {}")) }
     @Test fun seqOfTreesLt()  { assertEquals(true,  runO("let main = {} -> [ leaf { x = 1, y = 0 } ] < [ leaf { x = 2, y = 0 } ]\nmain {}")) }
-    @Test fun sortTrees()     { assertEquals(1L,    runO("let main = {} -> match seq::first { xs = seq::sort { xs = [ leaf { x = 3, y = 0 }, leaf { x = 1, y = 0 }, leaf { x = 2, y = 0 } ] } } is\n  Some { val = t } -> match t is\n    Node { l = _, v = v, r = _ } -> px { p = v }\n    Leaf -> 0 - 1\n  None -> 0 - 1\nmain {}")) }
-    @Test fun minTree()       { assertEquals(1L,    runO("let main = {} -> match seq::min { xs = [ leaf { x = 3, y = 0 }, leaf { x = 1, y = 0 } ] } is\n  Some { val = t } -> match t is\n    Node { l = _, v = v, r = _ } -> px { p = v }\n    Leaf -> 0 - 1\n  None -> 0 - 1\nmain {}")) }
+    @Test fun sortTrees()     { assertEquals(1L,    runO("let main = {} -> match seq::first { xs = seq::sort { xs = [ leaf { x = 3, y = 0 }, leaf { x = 1, y = 0 }, leaf { x = 2, y = 0 } ] } } is\n  Some { val = t } -> match t is\n    Node { v = v, ... } -> px { p = v }\n    Leaf -> 0 - 1\n  None -> 0 - 1\nmain {}")) }
+    @Test fun minTree()       { assertEquals(1L,    runO("let main = {} -> match seq::min { xs = [ leaf { x = 3, y = 0 }, leaf { x = 1, y = 0 } ] } is\n  Some { val = t } -> match t is\n    Node { v = v, ... } -> px { p = v }\n    Leaf -> 0 - 1\n  None -> 0 - 1\nmain {}")) }
 }

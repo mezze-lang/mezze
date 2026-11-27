@@ -141,7 +141,7 @@ class ParallelErrorPropagationTest {
             # Count how many failed
             let err_count = seq::count {xs = results, p = {x} -> match x is
                 Ok { val } -> False
-                Err { error = _ } -> True}
+                Err { ... } -> True}
 
             # Should have at least 1 failure
             if err_count > 0 then "failed" else "success"
@@ -169,10 +169,10 @@ class ParallelErrorPropagationTest {
 
             let ok_count = seq::count {xs = results, p = {x} -> match x is
                 Ok { val } -> True
-                Err { error = _ } -> False}
+                Err { ... } -> False}
             let err_count = seq::count {xs = results, p = {x} -> match x is
                 Ok { val } -> False
-                Err { error = _ } -> True}
+                Err { ... } -> True}
 
             {ok_count = ok_count, err_count = err_count}
         """
@@ -196,10 +196,10 @@ class ParallelErrorPropagationTest {
             # Get the second result (error case)
             match seq::get { xs = results, i = 1 } is
                 Some { val } -> match val is
-                    Ok { val = _ } -> "unexpected success"
+                    Ok { ... } -> "unexpected success"
                     Err { error } -> match error is
                         AsyncFailed {msg} -> msg
-                        AsyncCancelled { reason = _ } -> "cancelled"
+                        AsyncCancelled { ... } -> "cancelled"
                         AsyncTimedOut {ms} -> "timed out"
                 None -> "missing index"
         """
@@ -280,7 +280,7 @@ class ParallelErrorPropagationTest {
 
             match result is
                 Ok { val } -> val
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
         """
         val result = eval(code)
         assertEquals(42L, result)
@@ -357,7 +357,7 @@ class ParallelErrorPropagationTest {
             # Count errors
             seq::count {xs = results, p = {x} -> match x is
                 Ok { val } -> False
-                Err { error = _ } -> True}
+                Err { ... } -> True}
         """
         val result = eval(code)
         assertEquals(1L, result)
@@ -392,7 +392,7 @@ class ParallelErrorPropagationTest {
                 init = 0,
                 f = { acc, x } -> match x is
                     Ok { val } -> acc + val
-                    Err { error = _ } -> acc
+                    Err { ... } -> acc
             }
 
             seq::fold {
@@ -400,7 +400,7 @@ class ParallelErrorPropagationTest {
                 init = 0,
                 f = { acc, x } -> match x is
                     Ok { val } -> acc + sum_arr { arr = val }
-                    Err { error = _ } -> acc
+                    Err { ... } -> acc
             }
         """
         val result = eval(code)
@@ -432,7 +432,7 @@ class ParallelErrorPropagationTest {
 
             let result = match race {ps = [p1, p2]} is
               Ok { val } -> val
-              Err { error = _ } -> "err"
+              Err { ... } -> "err"
 
             # race auto-cancels the losing promise (#122) — no
             # cleanup needed.
@@ -496,10 +496,10 @@ class ParallelErrorPropagationTest {
 
             match seq::get { xs = results, i = 0 } is
                 Some { val } -> match val is
-                    Ok { val = _ } -> "unexpected success"
+                    Ok { ... } -> "unexpected success"
                     Err { error } -> match error is
                         AsyncFailed {msg} -> msg
-                        AsyncCancelled { reason = _ } -> "cancelled"
+                        AsyncCancelled { ... } -> "cancelled"
                         AsyncTimedOut {ms} -> "timed out"
                 None -> "missing index"
         """

@@ -9332,7 +9332,7 @@ public final class BytecodeCompiler {
             // tail into restSlot if restSlot >= 0.
             int elemCount = sp.getElementSlots().size();
             // hasRest = open pattern (length >= N); bindRest = the tail is captured
-            // into a slot. `..._` is open (hasRest) but binds nothing (restSlot < 0).
+            // into a slot. `...` is open (hasRest) but binds nothing (restSlot < 0).
             boolean hasRest = sp.getHasRest();
             boolean bindRest = sp.getRestSlot() >= 0;
             b.beginConditional();
@@ -9348,14 +9348,22 @@ public final class BytecodeCompiler {
                 b.endSeqSizeEquals();
             }
             b.beginBlock();
+            // Elements after a middle `...` (`[first, ..., last]`) are read from the end.
+            int prefixCount = elemCount - sp.getSuffixCount();
             for (int i = 0; i < elemCount; i++) {
                 int slot = sp.getElementSlots().get(i);
                 if (slot < 0) continue;  // wildcard element (`_`) — no binding
                 BytecodeLocal target = localMap[slot - argCount];
                 b.beginStoreLocal(target);
-                b.beginSeqGetAt(i);
-                b.emitLoadLocal(scrutineeLocal);
-                b.endSeqGetAt();
+                if (i < prefixCount) {
+                    b.beginSeqGetAt(i);
+                    b.emitLoadLocal(scrutineeLocal);
+                    b.endSeqGetAt();
+                } else {
+                    b.beginSeqGetFromEnd(elemCount - i);
+                    b.emitLoadLocal(scrutineeLocal);
+                    b.endSeqGetFromEnd();
+                }
                 b.endStoreLocal();
             }
             if (bindRest) {

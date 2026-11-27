@@ -43,11 +43,11 @@ class HttpOneApiTest {
 
         let text_of: { resp: Response } -> Str = { resp } -> match body_str { resp = resp } is
           Ok { val } -> val
-          Err { error = _ } -> "could not decode"
+          Err { ... } -> "could not decode"
 
         let sent: { r: Result Response 'e } -> Str = { r } -> match r is
           Ok { val } -> text_of { resp = val }
-          Err { error = _ } -> "request failed"
+          Err { ... } -> "request failed"
     """.trimIndent()
 
     private fun run(body: String): Any = MezzeTestHelper.run("$head\n$body")
@@ -143,7 +143,7 @@ class HttpOneApiTest {
               perform SimpleHttpClient in do
                 let h = match HttpServer.serve { handler = api } is
                   Ok { val = hh } -> hh
-                  Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                  Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                 let c = client { base_url = "http://127.0.0.1:${'$'}(int::to_str { n = h.port })" }
                 let one = sent { r = c.get { path = "/api/users/7" }.send {} }
                 let two = sent { r = c.post { path = "/api/users" }.send {} }

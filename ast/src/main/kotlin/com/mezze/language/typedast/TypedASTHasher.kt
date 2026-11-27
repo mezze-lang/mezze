@@ -400,6 +400,7 @@ object TypedASTHasher {
                 }
                 b.appendBoolean(pattern.rest != null)
                 pattern.rest?.let { b.append(it) }
+                b.appendInt(pattern.suffixCount)
             }
             is TypedStringInterpPattern -> {
                 b.append(byteArrayOf(HashTags.STRING_INTERPOLATION_PATTERN))

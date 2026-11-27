@@ -157,7 +157,7 @@ class HttpStageDTest {
               let resp = request { url = "http://test.com/x" }.send {}
               match ensure_ok { resp = resp } is
                 Ok { val } -> val.status
-                Err { error = _ } -> -1
+                Err { ... } -> -1
         """)
         assertEquals(200L, result)
     }
@@ -184,7 +184,7 @@ class HttpStageDTest {
               let resp = request { url = "http://test.com/users/42" }.send {}
               match resp is
                 Ok { val } -> val.url
-                Err { error = _ } -> "ERR"
+                Err { ... } -> "ERR"
         """)
         assertEquals("http://test.com/users/42", result)
     }
@@ -236,7 +236,7 @@ class HttpStageDTest {
             perform MockHttpClient { rules = rules } in do
               let resp = request { url = "http://test.com/api/v2/users/42" }.send {}
               match ensure_ok { resp = resp } is
-                Ok { val = _ } -> "ok"
+                Ok { ... } -> "ok"
                 Err { error } -> match error is
                   HttpRequestFailed { url, status, body } -> url
                   _ -> "other"
@@ -282,11 +282,11 @@ class HttpStageDTest {
               let resp = request { url = "http://test.com/x" }.send {}
               match resp is
                 Ok { val } -> match val.ensure_ok {} is
-                  Ok { val = _ } -> -1
+                  Ok { ... } -> -1
                   Err { error } -> match error is
                     HttpRequestFailed { url, status, body } -> status
                     _ -> -2
-                Err { error = _ } -> -3
+                Err { ... } -> -3
         """)
         assertEquals(500L, result)
     }
@@ -318,7 +318,7 @@ class HttpStageDTest {
                 let resp = retry { req = req, max_attempts = 3, backoff_ms = 0 }
                 match resp is
                   Ok { val } -> val.status
-                  Err { error = _ } -> -1
+                  Err { ... } -> -1
         """)
         assertEquals(200L, result)
     }

@@ -118,6 +118,6 @@ let main = {} -> perform Console in
     perform HelidonHttpServerWith { config = cfg } in do
       let h = match HttpServer.serve { handler = app } is
         Ok { val = hh } -> hh
-        Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+        Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
       println { msg = "listening on $(int::to_str { n = h.port })" }
       park { n = 24 }

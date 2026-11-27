@@ -56,7 +56,7 @@ class VariantBoundThenMatchedTest {
             let s = Circle { r = 7 }
             match s is
               Circle { r } -> r
-              Tri { b = _, h = _ } -> 0 - 1
+              Tri { ... } -> 0 - 1
               Dot -> 0 - 2
             """
         ))
@@ -71,7 +71,7 @@ class VariantBoundThenMatchedTest {
             let s = Tri { b = 2, h = 3 }
             match s is
               Tri { b, h } -> b * 10 + h
-              Circle { r = _ } -> 0 - 1
+              Circle { ... } -> 0 - 1
               Dot -> 0 - 2
             """
         ))
@@ -86,8 +86,8 @@ class VariantBoundThenMatchedTest {
             let s = Dot
             match s is
               Dot -> 42
-              Circle { r = _ } -> 0 - 1
-              Tri { b = _, h = _ } -> 0 - 2
+              Circle { ... } -> 0 - 1
+              Tri { ... } -> 0 - 2
             """
         ))
     }
@@ -103,9 +103,9 @@ class VariantBoundThenMatchedTest {
             $shape
             let s = Tri { b = 5, h = 9 }
             match s is
-              Circle { r = _ } -> 0 - 1
+              Circle { ... } -> 0 - 1
               Dot -> 0 - 2
-              Tri { b, h = _ } -> b
+              Tri { b, ... } -> b
             """
         ))
     }
@@ -122,11 +122,11 @@ class VariantBoundThenMatchedTest {
             let s = Circle { r = 7 }
             let a = match s is
               Circle { r } -> r
-              Tri { b = _, h = _ } -> 0
+              Tri { ... } -> 0
               Dot -> 0
             let b = match s is
               Circle { r } -> r
-              Tri { b = _, h = _ } -> 0
+              Tri { ... } -> 0
               Dot -> 0
             a + b
             """
@@ -143,7 +143,7 @@ class VariantBoundThenMatchedTest {
               let s = Circle { r = i }
               let v = match s is
                 Circle { r } -> r
-                Tri { b = _, h = _ } -> 0
+                Tri { ... } -> 0
                 Dot -> 0
               go { i = i - 1, acc = acc + v }
             go { i = 10, acc = 0 }
@@ -160,8 +160,8 @@ class VariantBoundThenMatchedTest {
             let go = { i, acc } -> if i <= 0 then acc else do
               let s = Tri { b = i, h = i * 100 }
               let v = match s is
-                Tri { b, h = _ } -> b
-                Circle { r = _ } -> 0
+                Tri { b, ... } -> b
+                Circle { ... } -> 0
                 Dot -> 0
               go { i = i - 1, acc = acc + v }
             go { i = 10, acc = 0 }
@@ -182,8 +182,8 @@ class VariantBoundThenMatchedTest {
               let s = Circle { r = i }
               let v = match s is
                 Circle { r } if r > 5 -> r
-                Circle { r = _ } -> 0
-                Tri { b = _, h = _ } -> 0
+                Circle { ... } -> 0
+                Tri { ... } -> 0
                 Dot -> 0
               go { i = i - 1, acc = acc + v }
             go { i = 10, acc = 0 }
@@ -252,7 +252,7 @@ class VariantBoundThenMatchedTest {
             $shape
             let pick = { c } -> match (if c then Circle { r = 11 } else Circle { r = 22 }) is
               Circle { r } -> r
-              Tri { b = _, h = _ } -> 0 - 1
+              Tri { ... } -> 0 - 1
               Dot -> 0 - 2
             pick { c = %s }
         """.trimIndent()
@@ -290,7 +290,7 @@ class VariantBoundThenMatchedTest {
             let go = { i, acc } -> if i <= 0 then acc else do
               let v = match mk { i = i } is
                 Circle { r } -> r
-                Tri { b = _, h = _ } -> 0
+                Tri { ... } -> 0
                 Dot -> 0
               go { i = i - 1, acc = acc + v }
             go { i = 10, acc = 0 }
@@ -337,7 +337,7 @@ class VariantBoundThenMatchedTest {
             let s = Tri { b = i * 2, h = i * 2 + 1 }
             match s is
               Tri { b, h } -> "$(int::to_str { n = b })|$(int::to_str { n = h })"
-              Circle { r = _ } -> "no"
+              Circle { ... } -> "no"
               Dot -> "no"
             """
         ))

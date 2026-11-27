@@ -37,7 +37,7 @@ class JsonUtf8WriterTest {
         let go: {} -> Str = {} -> do
           let streamed = match bytes::to_str { b = ($expr).to_json_utf8 {} } is
             Ok { val } -> val
-            Err { error = _ } -> "<undecodable>"
+            Err { ... } -> "<undecodable>"
           let tree = ($expr).to_json_str {}
           "$(streamed)|$(tree)"
         go {}
@@ -53,7 +53,7 @@ class JsonUtf8WriterTest {
             let go: {} -> Str = {} -> do
               let streamed = match bytes::to_str { b = $name.to_json_utf8 {} } is
                 Ok { val } -> val
-                Err { error = _ } -> "<undecodable>"
+                Err { ... } -> "<undecodable>"
               let tree = $name.to_json_str {}
               "$(streamed)|$(tree)"
             go {}

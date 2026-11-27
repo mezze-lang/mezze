@@ -36,7 +36,7 @@ class AsyncExceptionCompositionTest {
               let t = Async.spawn { f = {} -> Exception.throw { error = "boom" } }
               let v = match await { p = t } is
                 Ok { val } -> val
-                Err { error = _ } -> -1
+                Err { ... } -> -1
               Ok { val = v }
         """.trimIndent()
 
@@ -62,7 +62,7 @@ class AsyncExceptionCompositionTest {
               }
               let v = match await { p = t } is
                 Ok { val } -> val
-                Err { error = _ } -> -1
+                Err { ... } -> -1
               Ok { val = v }
         """.trimIndent()
 
@@ -133,7 +133,7 @@ class AsyncExceptionCompositionTest {
               await { p = good }
               let v = match await { p = bad } is
                 Ok { val } -> val
-                Err { error = _ } -> -1
+                Err { ... } -> -1
               Ok { val = v }
         """.trimIndent()
 
@@ -159,11 +159,11 @@ class AsyncExceptionCompositionTest {
                 let inner = Async.spawn { f = {} -> Exception.throw { error = "inner-bad" } }
                 match await { p = inner } is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
               }
               let v = match await { p = outer } is
                 Ok { val } -> val
-                Err { error = _ } -> -1
+                Err { ... } -> -1
               Ok { val = v }
         """.trimIndent()
 

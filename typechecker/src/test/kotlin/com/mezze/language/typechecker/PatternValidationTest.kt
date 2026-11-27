@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.test.assertEquals
 
 /**
  * Tests for pattern validation in match expressions.
@@ -365,8 +366,8 @@ class PatternValidationTest {
         val (result, warnings) = parseAndTypeCheckWithWarnings(code)
         assertNotNull(result)
         // Check warnings contain unused variable
-        assertTrue(warnings.any { it.contains("Unused binding 'val'") && it.contains("{ val = _ }") },
-            "Should warn about unused binding 'val' and say `{ val = _ }`. Warnings: $warnings")
+        assertTrue(warnings.any { it.contains("`val` is never used") && it.contains("...") },
+            "An unused record field: leave it out and end with `...`. Warnings: $warnings")
     }
 
     @Test
@@ -383,18 +384,18 @@ class PatternValidationTest {
         val (result, warnings) = parseAndTypeCheckWithWarnings(code)
         assertNotNull(result)
         // Should not warn since 'val' is used
-        assertTrue(warnings.none { it.contains("Unused binding 'val'") },
+        assertTrue(warnings.none { it.contains("`val` is never used") },
             "Should not warn about 'val' since it's used. Warnings: $warnings")
     }
 
     @Test
-    fun `the wildcard binds nothing and is not warned about - a _-prefixed name is`() {
+    fun `ignoring a payload with dots is silent - an unused _-prefixed field binding is not`() {
         val code = """
             type Maybe = | Just { val: Int }, Nothing |
 
             let test = {opt: Maybe} ->
                 match opt is
-                    Just { val = _ } -> 42
+                    Just { ... } -> 42
                     Nothing -> 0
             let named = {opt: Maybe} ->
                 match opt is
@@ -404,9 +405,9 @@ class PatternValidationTest {
 
         val (result, warnings) = parseAndTypeCheckWithWarnings(code)
         assertNotNull(result)
-        assertTrue(warnings.any { it.contains("'_unused'") && it.contains("Write `_`") },
-            "`_unused` is an ordinary name: unused, so it must warn and say to write `_`. Warnings: $warnings")
-        assertTrue(warnings.none { it.contains("'val'") }, "the wildcard binds nothing. Warnings: $warnings")
+        assertTrue(warnings.any { it.contains("`_unused` is never used") && it.contains("...") },
+            "`_unused` is an ordinary name bound to a field: leave the field out, end with `...`. Warnings: $warnings")
+        assertEquals(1, warnings.count { it.contains("is never used") }, "`Just { ... }` binds nothing. Warnings: $warnings")
     }
 
     // ========== FLOAT LITERAL PATTERN WARNING ==========

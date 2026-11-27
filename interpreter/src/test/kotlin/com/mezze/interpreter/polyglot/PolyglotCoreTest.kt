@@ -534,7 +534,7 @@ class PolyglotCoreTest {
               set.method { name = "add", args = [from_int { val = 30 }] }
               match set.to_seq {} is
                 Ok  { val = xs }  -> seq::size { xs = xs }
-                Err { error = _ } -> -1
+                Err { ... } -> -1
             main {}
             """.trimIndent()
         )
@@ -579,8 +579,8 @@ class PolyglotCoreTest {
             use std::polyglot::core::{ Runtime, lift }
             use std::polyglot::jvm as jvm
             match perform Runtime in lift { on = jvm::class { name = "java.util.ArrayList" } } is
-              Ok  { val = _ }   -> "matched-ok"
-              Err { error = _ } -> "matched-err"
+              Ok  { ... }   -> "matched-ok"
+              Err { ... } -> "matched-err"
             """.trimIndent()
         )
         assertEquals("matched-ok", result)
@@ -596,8 +596,8 @@ class PolyglotCoreTest {
             use std::polyglot::core::{ Runtime, lift }
             use std::polyglot::jvm as jvm
             match perform Runtime in lift { on = jvm::class { name = "com.does.not.Exist_XYZ" } } is
-              Ok  { val = _ }   -> "matched-ok"
-              Err { error = _ } -> "matched-err"
+              Ok  { ... }   -> "matched-ok"
+              Err { ... } -> "matched-err"
             """.trimIndent()
         )
         assertEquals("matched-err", result)
@@ -642,8 +642,8 @@ class PolyglotCoreTest {
                 perform Runtime in lift { on = Polyglot.eval_raw { lang = "jvm", source = source } }
             }
             match perform XHost in X.run { source = "1 + 1" } is
-              Ok  { val = _ }   -> "matched-ok"
-              Err { error = _ } -> "matched-err"
+              Ok  { ... }   -> "matched-ok"
+              Err { ... } -> "matched-err"
             """.trimIndent()
         )
         assertTrue(result == "matched-ok" || result == "matched-err",
@@ -661,7 +661,7 @@ class PolyglotCoreTest {
               Ok { val = xs } -> match xs is
                 [a, b, c] -> a + b + c
                 _         -> 0
-              Err { error = _ } -> 0 - 1
+              Err { ... } -> 0 - 1
             """.trimIndent()
         )
         assertEquals(60L, MezzeTestHelper.asLong(result))
@@ -676,7 +676,7 @@ class PolyglotCoreTest {
               Ok { val = xs } -> match xs is
                 [a, b] -> a + b
                 _      -> 0.0
-              Err { error = _ } -> 0.0 - 1.0
+              Err { ... } -> 0.0 - 1.0
             """.trimIndent()
         )
         assertEquals(4.0, MezzeTestHelper.asDouble(result))
@@ -692,7 +692,7 @@ class PolyglotCoreTest {
               Ok { val = xs } -> match xs is
                 [a, b] -> "$(a)-$(b)"
                 _      -> "?"
-              Err { error = _ } -> "err"
+              Err { ... } -> "err"
             """.trimIndent()
         )
         assertEquals("x-y", result)
@@ -709,7 +709,7 @@ class PolyglotCoreTest {
               Ok { val = xs } -> match xs is
                 [a, b] -> (if a then 2 else 0) + (if b then 1 else 0)
                 _      -> 0 - 1
-              Err { error = _ } -> 0 - 2
+              Err { ... } -> 0 - 2
             """.trimIndent()
         )
         assertEquals(2L, MezzeTestHelper.asLong(result))

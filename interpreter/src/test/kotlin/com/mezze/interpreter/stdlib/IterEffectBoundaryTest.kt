@@ -64,7 +64,7 @@ class IterEffectBoundaryTest {
               }
               match FileSystem.list { path = "/d" } is
                 Ok { val = names } -> seq::size { xs = names }
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(5L, eval(code))
     }
@@ -106,7 +106,7 @@ class IterEffectBoundaryTest {
                 init = 0,
                 f = { acc, x } -> match exists { path = "/keep/$(int::to_str { n = x })" } is
                   Ok { val = yes } -> if yes then acc + 1 else acc
-                  Err { error = _ } -> acc
+                  Err { ... } -> acc
               }
         """.trimIndent()
         // 0,2,4,6,8,10 -> >2: 4,6,8,10 -> exists: 4 and 8
@@ -125,7 +125,7 @@ class IterEffectBoundaryTest {
                 it = iter::range { start = 0, end = 6 },
                 p = { x } -> match exists { path = "/keep/$(int::to_str { n = x })" } is
                   Ok { val = yes } -> yes
-                  Err { error = _ } -> False
+                  Err { ... } -> False
               }
         """.trimIndent()
         assertEquals(true, eval(code))
@@ -142,7 +142,7 @@ class IterEffectBoundaryTest {
                 it = iter::range { start = 0, end = 6 },
                 p = { x } -> match exists { path = "/keep/$(int::to_str { n = x })" } is
                   Ok { val = yes } -> yes
-                  Err { error = _ } -> False
+                  Err { ... } -> False
               }
         """.trimIndent()
         assertEquals(false, eval(code))
@@ -205,7 +205,7 @@ class IterEffectBoundaryTest {
                 Some { val = {} }
               match FileSystem.list { path = "/d" } is
                 Ok { val = names } -> seq::size { xs = names }
-                Err { error = _ } -> 0 - 1
+                Err { ... } -> 0 - 1
         """.trimIndent()
         assertEquals(4L, eval(code))
     }
@@ -225,7 +225,7 @@ class IterEffectBoundaryTest {
                 init = 0,
                 f = { acc, x } -> match await { p = Async.spawn { f = { } -> x * x } } is
                   Ok { val = n } -> acc + n
-                  Err { error = _ } -> acc
+                  Err { ... } -> acc
               }
         """.trimIndent()
         assertEquals(30L, eval(code))

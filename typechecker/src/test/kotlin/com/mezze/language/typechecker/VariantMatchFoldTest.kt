@@ -84,8 +84,8 @@ class VariantMatchFoldTest {
                 if i <= 0 then acc
                 else match A { n = i } is
                   A { n } -> go { i = i - 1, acc = acc + n }
-                  B { n = _ } -> acc
-                  C { n = _ } -> acc
+                  B { ... } -> acc
+                  C { ... } -> acc
               go { i = n, acc = 0 }
         """
         assertTrue(built(src) == 0, "a variant was still constructed: " + built(src))

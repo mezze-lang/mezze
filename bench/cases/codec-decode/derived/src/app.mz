@@ -42,14 +42,14 @@ let raw_for: { k: Int } -> Str = { k } -> do
 let load_tree: {} -> Json <FileSystem> = {} ->
   match parse_str { s = read_text_or { path = "payload.json", def = "[]" } } is
     Ok { val } -> val
-    Err { error = _ } -> JArray { items = [] }
+    Err { ... } -> JArray { items = [] }
 
 ## ── The derived walk ────────────────────────────────────────────────────────
 let derived_decode: { t: Json } -> Int = { t } -> do
   let r: Result Row DecodeError = t.decode { config = json_default }
   match r is
     Ok { val = row } -> row.id
-    Err { error = _ } -> -1
+    Err { ... } -> -1
 
 ## ── The hand-written walk ───────────────────────────────────────────────────
 ##

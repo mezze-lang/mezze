@@ -644,7 +644,7 @@ class DestructuringRenameIntegrationTest {
                 let r: Result Mid Str = Ok { val = { product = { product_name = "olives" } } }
                 let result = match r is
                   Ok { val = { product = { product_name } } } -> product_name
-                  Err { error = _ } -> "?"
+                  Err { ... } -> "?"
                 """);
             assertEquals("olives", ctx.get("result"));
         }

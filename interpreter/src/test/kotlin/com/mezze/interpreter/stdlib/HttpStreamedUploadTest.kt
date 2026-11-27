@@ -47,7 +47,7 @@ class HttpStreamedUploadTest {
           reply { code = 404, text = "nope", url = req.url }
         let text_of: { resp: Response } -> Str = { resp } -> match body_str { resp = resp } is
           Ok { val } -> val
-          Err { error = _ } -> "could not decode"
+          Err { ... } -> "could not decode"
 
         ## The chunk SIZES a handler saw, which is what says it streamed.
         let sizes_of: { req: Request } -> Str = { req } -> match req.chunks is
@@ -60,7 +60,7 @@ class HttpStreamedUploadTest {
         ## The whole body, however it arrived.
         let whole_of: { req: Request } -> Str = { req } -> match bytes::to_str { b = body_bytes { req = req } } is
           Ok { val } -> val
-          Err { error = _ } -> "could not decode"
+          Err { ... } -> "could not decode"
 
         let chunks_of: { parts: [Str] } -> Iter Bytes = { parts } ->
           iter::map { it = iter::from_seq { xs = parts }, f = { x } -> bytes::from_str { s = x } }
@@ -137,7 +137,7 @@ class HttpStreamedUploadTest {
                     perform SimpleHttpClient in do
                       let h = match HttpServer.serve { handler = app } is
                         Ok { val = hh } -> hh
-                        Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                        Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                       let out = match request { url = "http://127.0.0.1:$(int::to_str { n = h.port })/u" }
                         .with_method { val = Post }
                         .with_text { val = "hello over the wire" }
@@ -193,7 +193,7 @@ class HttpStreamedUploadTest {
                         perform SimpleHttpClient in do
                           let h = match HttpServer.serve { handler = app } is
                             Ok { val = hh } -> hh
-                            Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                            Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                           let out = match request { url = "http://127.0.0.1:$(int::to_str { n = h.port })/u" }
                             .with_method { val = Post }
                             .with_text { val = "$sent" }
@@ -228,7 +228,7 @@ class HttpStreamedUploadTest {
                     perform SimpleHttpClient in do
                       let h = match HttpServer.serve { handler = app } is
                         Ok { val = hh } -> hh
-                        Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                        Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                       let out = match request { url = "http://127.0.0.1:$(int::to_str { n = h.port })/u" }
                         .with_method { val = Post }
                         .with_text { val = "hello over the wire" }

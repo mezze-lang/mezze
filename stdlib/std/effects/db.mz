@@ -155,11 +155,11 @@ let no_cell: { ctx: CodecCtx, expected: Str } -> DecodeError = { ctx, expected }
 ## What a value IS, for an error message that names the mismatch.
 let kind_of: { v: DbValue } -> Str = { v } -> match v is
   DbNull -> "null"
-  DbInt { val = _ } -> "an integer"
-  DbStr { val = _ } -> "a string"
-  DbFloat { val = _ } -> "a float"
-  DbBool { val = _ } -> "a boolean"
-  DbBytes { val = _ } -> "bytes"
+  DbInt { ... } -> "an integer"
+  DbStr { ... } -> "a string"
+  DbFloat { ... } -> "a float"
+  DbBool { ... } -> "a boolean"
+  DbBytes { ... } -> "bytes"
 
 impl DecodeScalar for RowC having 'in = Rows where {
   decode_int = { it, val, ctx } -> match only_cell { rows = val } is
@@ -230,7 +230,7 @@ impl DecodeOption for RowC having 'in = Rows where {
   decode_option = { it, val, ctx } -> match only_cell { rows = val } is
     None -> Ok { val = None }
     Some { val = DbNull } -> Ok { val = None }
-    Some { val = _ } -> Ok { val = Some { val = val } },
+    Some { ... } -> Ok { val = Some { val = val } },
 }
 
 # ── Reading records out of a result set ────────────────────────────────────
@@ -270,5 +270,5 @@ impl Db for SqliteDb { path: Str } where {
         if began.nested then Ok { val = v }
         else match __native_db_commit {} is
           Err { error = e } -> Err { error = e }
-          Ok { val = _ } -> Ok { val = v },
+          Ok { ... } -> Ok { val = v },
 }

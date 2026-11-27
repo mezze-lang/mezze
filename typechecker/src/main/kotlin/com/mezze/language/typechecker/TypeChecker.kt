@@ -427,7 +427,7 @@ class TypeChecker(
         }
 
         val contextBuilder = ContextBuilder()
-        val buildResult = PhaseTiming.phase(currentModulePath, "context") { contextBuilder.build(
+        val buildResult = try { PhaseTiming.phase(currentModulePath, "context") { contextBuilder.build(
             module = module,
             parentContext = enhancedContext,
             importedImpls = importContext?.importedImpls ?: emptyMap(),
@@ -440,7 +440,17 @@ class TypeChecker(
             importedEffects = (importContext?.importedEffects ?: emptyMap()) +
                 (importContext?.effectsByHash?.values?.associateBy { it.name } ?: emptyMap()),
             currentModulePath = currentModulePath
-        ) }
+        ) } } catch (e: com.mezze.language.typechecker.TypeCheckError) {
+            // Same reason as below: a failed import is the cause, the thrown error its consequence.
+            if (importFailureErrors.isEmpty()) throw e
+            return TypeCheckResult.Failure(
+                errors = importFailureErrors + TypeCheckError(
+                    phase = "Context", message = e.message, loc = e.loc,
+                    code = e.code, hints = e.hints, fixHints = e.fixHints,
+                ),
+                importContext = importContext,
+            )
+        }
         val context = buildResult.context
         val parsedModule = buildResult.resolvedModule ?: module
 
@@ -530,7 +540,10 @@ class TypeChecker(
                 .validateAsWritten(parsedModule)
             if (asWritten.isNotEmpty()) {
                 return TypeCheckResult.Failure(
-                    errors = asWritten.map { error ->
+                    // A failed import first: it is usually WHY a check here fails (a type
+                    // from a module that did not parse is "not a declared type"), and
+                    // dropping it reported only the consequence.
+                    errors = importFailureErrors + asWritten.map { error ->
                         TypeCheckError(
                             phase = "Validation", message = error.message(), loc = error.location(),
                             code = error.code, hints = error.hints, fixHints = error.fixHints,
@@ -1251,19 +1264,25 @@ class TypeChecker(
         val unusedVarWarnings = constraintResults.values.flatMap { it.unusedVariables }.map { unused ->
             when (unused.kind) {
                 com.mezze.language.typechecker.constraints.ConstraintResult.BindingKind.PARAMETER -> TypeCheckWarning(
-                    message = "Unused parameter '${unused.name}'. A parameter's name is the field its caller " +
-                        "passes, so renaming it would change what callers pass; remove it if no caller needs it.",
+                    message = "`${unused.name}` is never used. Remove the parameter: its name is the field " +
+                        "callers pass, so renaming it would change what they must pass.",
                     loc = unused.loc,
                     code = com.mezze.language.parsedast.diagnostics.WarningCode.W0103_UNUSED_PARAMETER
                 )
                 com.mezze.language.typechecker.constraints.ConstraintResult.BindingKind.PATTERN -> TypeCheckWarning(
-                    message = "Unused binding '${unused.name}' in this pattern. Write `_` in its place " +
-                        "(a field written `{ ${unused.name} }` becomes `{ ${unused.name} = _ }`).",
+                    message = when (unused.slot) {
+                        com.mezze.language.typechecker.constraints.PatternSlot.FIELD ->
+                            "`${unused.name}` is never used. Leave the field out and end the pattern with `...` " +
+                                "(e.g. `Ok { ... }`, `{ a, ... }`)."
+                        com.mezze.language.typechecker.constraints.PatternSlot.REST ->
+                            "`${unused.name}` is never used. Write `...` without a name."
+                        else -> "`${unused.name}` is never used. Write `_` in its place."
+                    },
                     loc = unused.loc,
                     code = com.mezze.language.parsedast.diagnostics.WarningCode.W0104_UNUSED_PATTERN_BINDING
                 )
                 com.mezze.language.typechecker.constraints.ConstraintResult.BindingKind.LET -> TypeCheckWarning(
-                    message = "Unused variable '${unused.name}'. Remove the binding; if the expression must " +
+                    message = "`${unused.name}` is never used. Remove the binding; if the expression must " +
                         "still run for its effect, keep it on its own as a statement.",
                     loc = unused.loc,
                     code = com.mezze.language.parsedast.diagnostics.WarningCode.W0101_UNUSED_VARIABLE

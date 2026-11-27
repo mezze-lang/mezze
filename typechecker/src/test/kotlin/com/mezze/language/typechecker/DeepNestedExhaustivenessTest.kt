@@ -49,7 +49,7 @@ class DeepNestedExhaustivenessTest {
         assertNull(err("""
             $threeLevel
             let f = { o: Outer } -> match o is
-              Wrap { m = Mid { i = _ } } -> 1
+              Wrap { m = Mid { ... } } -> 1
         """))
     }
 

@@ -36,9 +36,9 @@ class FileLockEffectTest {
             perform MemoryFileLock in
               match FileLock.lock { path = "/l", kind = Exclusive, blocking = False } is
                 Ok { val = h } -> match FileLock.unlock { handle = h } is
-                  Ok { val = _ } -> "locked-unlocked"
-                  Err { error = _ } -> "unlock-failed"
-                Err { error = _ } -> "lock-failed"
+                  Ok { ... } -> "locked-unlocked"
+                  Err { ... } -> "unlock-failed"
+                Err { ... } -> "lock-failed"
         """.trimIndent()
         assertEquals("locked-unlocked", eval(code))
     }
@@ -50,12 +50,12 @@ class FileLockEffectTest {
             use std::effects::filesystem::{ FileLock, MemoryFileLock, LockKind }
             perform MemoryFileLock in
               match FileLock.lock { path = "/l", kind = Exclusive, blocking = False } is
-                Ok { val = _ } ->
+                Ok { ... } ->
                   match FileLock.lock { path = "/l", kind = Exclusive, blocking = False } is
-                    Ok { val = _ } -> "second-acquired"
-                    Err { error = FsPermissionDenied { path = _, operation = _ } } -> "excluded"
-                    Err { error = _ } -> "other-error"
-                Err { error = _ } -> "first-failed"
+                    Ok { ... } -> "second-acquired"
+                    Err { error = FsPermissionDenied { ... } } -> "excluded"
+                    Err { ... } -> "other-error"
+                Err { ... } -> "first-failed"
         """.trimIndent()
         assertEquals("excluded", eval(code))
     }
@@ -70,9 +70,9 @@ class FileLockEffectTest {
                 Ok { val = h } -> do
                   FileLock.unlock { handle = h }
                   match FileLock.lock { path = "/l", kind = Exclusive, blocking = False } is
-                    Ok { val = _ } -> "reacquired"
-                    Err { error = _ } -> "still-held"
-                Err { error = _ } -> "first-failed"
+                    Ok { ... } -> "reacquired"
+                    Err { ... } -> "still-held"
+                Err { ... } -> "first-failed"
         """.trimIndent()
         assertEquals("reacquired", eval(code))
     }
@@ -83,14 +83,14 @@ class FileLockEffectTest {
             use std::effects::filesystem::{ FileLock, MemoryFileLock, LockKind }
             perform MemoryFileLock in
               match FileLock.lock { path = "/l", kind = Shared, blocking = False } is
-                Ok { val = _ } ->
+                Ok { ... } ->
                   match FileLock.lock { path = "/l", kind = Shared, blocking = False } is
-                    Ok { val = _ } ->
+                    Ok { ... } ->
                       match FileLock.lock { path = "/l", kind = Exclusive, blocking = False } is
-                        Ok { val = _ } -> "exclusive-got-in"
-                        Err { error = _ } -> "two-shared-one-excluded"
-                    Err { error = _ } -> "second-shared-refused"
-                Err { error = _ } -> "first-shared-refused"
+                        Ok { ... } -> "exclusive-got-in"
+                        Err { ... } -> "two-shared-one-excluded"
+                    Err { ... } -> "second-shared-refused"
+                Err { ... } -> "first-shared-refused"
         """.trimIndent()
         assertEquals("two-shared-one-excluded", eval(code))
     }
@@ -104,13 +104,13 @@ class FileLockEffectTest {
               match FileLock.lock { path = "/l", kind = Shared, blocking = False } is
                 Ok { val = h1 } ->
                   match FileLock.lock { path = "/l", kind = Shared, blocking = False } is
-                    Ok { val = _ } -> do
+                    Ok { ... } -> do
                       FileLock.unlock { handle = h1 }
                       match FileLock.lock { path = "/l", kind = Exclusive, blocking = False } is
-                        Ok { val = _ } -> "released-too-much"
-                        Err { error = _ } -> "still-held-by-second"
-                    Err { error = _ } -> "second-shared-refused"
-                Err { error = _ } -> "first-shared-refused"
+                        Ok { ... } -> "released-too-much"
+                        Err { ... } -> "still-held-by-second"
+                    Err { ... } -> "second-shared-refused"
+                Err { ... } -> "first-shared-refused"
         """.trimIndent()
         assertEquals("still-held-by-second", eval(code))
     }
@@ -122,12 +122,12 @@ class FileLockEffectTest {
             use std::effects::filesystem::{ FileLock, MemoryFileLock, LockKind }
             perform MemoryFileLock in
               match FileLock.lock { path = "/l", kind = Exclusive, blocking = False } is
-                Ok { val = _ } ->
+                Ok { ... } ->
                   match FileLock.lock { path = "/l", kind = Exclusive, blocking = True } is
-                    Ok { val = _ } -> "unexpectedly-acquired"
-                    Err { error = FsIOError { path = _, message = _ } } -> "refused"
-                    Err { error = _ } -> "other-error"
-                Err { error = _ } -> "first-failed"
+                    Ok { ... } -> "unexpectedly-acquired"
+                    Err { error = FsIOError { ... } } -> "refused"
+                    Err { ... } -> "other-error"
+                Err { ... } -> "first-failed"
         """.trimIndent()
         assertEquals("refused", eval(code))
     }
@@ -141,9 +141,9 @@ class FileLockEffectTest {
                 Ok { val = h } -> do
                   FileLock.unlock { handle = h }
                   match FileLock.unlock { handle = h } is
-                    Ok { val = _ } -> "idempotent"
-                    Err { error = _ } -> "second-unlock-failed"
-                Err { error = _ } -> "lock-failed"
+                    Ok { ... } -> "idempotent"
+                    Err { ... } -> "second-unlock-failed"
+                Err { ... } -> "lock-failed"
         """.trimIndent()
         assertEquals("idempotent", eval(code))
     }
@@ -158,9 +158,9 @@ class FileLockEffectTest {
             perform LocalFileLock in
               match FileLock.lock { path = "$path", kind = Exclusive, blocking = False } is
                 Ok { val = h } -> match FileLock.unlock { handle = h } is
-                  Ok { val = _ } -> "ok"
-                  Err { error = _ } -> "unlock-failed"
-                Err { error = _ } -> "lock-failed"
+                  Ok { ... } -> "ok"
+                  Err { ... } -> "unlock-failed"
+                Err { ... } -> "lock-failed"
         """.trimIndent()
         assertEquals("ok", eval(code))
     }
@@ -177,12 +177,12 @@ class FileLockEffectTest {
             use std::effects::filesystem::{ FileLock, LocalFileLock, LockKind }
             perform LocalFileLock in
               match FileLock.lock { path = "$path", kind = Exclusive, blocking = False } is
-                Ok { val = _ } ->
+                Ok { ... } ->
                   match FileLock.lock { path = "$path", kind = Exclusive, blocking = False } is
-                    Ok { val = _ } -> "second-acquired"
-                    Err { error = FsPermissionDenied { path = _, operation = _ } } -> "excluded"
-                    Err { error = _ } -> "other-error"
-                Err { error = _ } -> "first-failed"
+                    Ok { ... } -> "second-acquired"
+                    Err { error = FsPermissionDenied { ... } } -> "excluded"
+                    Err { ... } -> "other-error"
+                Err { ... } -> "first-failed"
         """.trimIndent()
         assertEquals("excluded", eval(code))
     }

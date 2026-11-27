@@ -55,9 +55,9 @@ class HttpWebSocketTest {
               WebSocket.close { socket = p.a }
               let after = show { got = WebSocket.receive { socket = p.b } }
               let refused = match WebSocket.send { socket = p.b, msg = Text { text = "late" } } is
-                Ok { val = _ } -> "sent"
+                Ok { ... } -> "sent"
                 Err { error = SocketClosed } -> "refused"
-                Err { error = SocketConnectFailed { url = _, reason = _ } } -> "odd"
+                Err { error = SocketConnectFailed { ... } } -> "odd"
               "$(first)|$(second)|$(after)|$(refused)"
             """.trimIndent(),
         )
@@ -72,7 +72,7 @@ class HttpWebSocketTest {
             $head
             let greet: {} -> Str <SocketClient, WebSocket> = {} ->
               match SocketClient.connect { url = "ws://example.test/chat", config = default_http_config } is
-                Err { error = _ } -> "connect failed"
+                Err { ... } -> "connect failed"
                 Ok { val = s } -> do
                   WebSocket.send { socket = s, msg = Text { text = "hello" } }
                   show { got = WebSocket.receive { socket = s } }
@@ -99,7 +99,7 @@ class HttpWebSocketTest {
               WebSocket.close { socket = p.a }
               messages { socket = p.b, init = "", f = { acc, msg } -> match msg is
                 Text { text } -> "$(acc)$(text)"
-                Binary { bytes = _ } -> "$(acc)?" }
+                Binary { ... } -> "$(acc)?" }
             """.trimIndent(),
         )
         assertEquals("ab", r)
@@ -124,9 +124,9 @@ class HttpWebSocketTest {
                   perform HelidonSocketClient in do
                     let h = match HttpServer.serve_routes { routes = app.table {}, fallback = not_found } is
                       Ok { val = hh } -> hh
-                      Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                      Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                     let out = match SocketClient.connect { url = "ws://127.0.0.1:$(int::to_str { n = h.port })/echo", config = default_http_config } is
-                      Err { error = SocketConnectFailed { url = _, reason } } -> "connect failed: $(reason)"
+                      Err { error = SocketConnectFailed { reason, ... } } -> "connect failed: $(reason)"
                       Err { error = SocketClosed } -> "closed"
                       Ok { val = s } -> do
                         WebSocket.send { socket = s, msg = Text { text = "ping" } }
@@ -161,9 +161,9 @@ class HttpWebSocketTest {
                   perform HelidonSocketClient in do
                     let h = match HttpServer.serve_routes { routes = app.table {}, fallback = not_found } is
                       Ok { val = hh } -> hh
-                      Err { error = _ } -> { stop = {} -> {}, port = 0 - 1 }
+                      Err { ... } -> { stop = {} -> {}, port = 0 - 1 }
                     let out = match SocketClient.connect { url = "ws://127.0.0.1:$(int::to_str { n = h.port })/ws/who", config = default_http_config } is
-                      Err { error = _ } -> "connect failed"
+                      Err { ... } -> "connect failed"
                       Ok { val = s } -> do
                         let got = show { got = WebSocket.receive { socket = s } }
                         WebSocket.close { socket = s }

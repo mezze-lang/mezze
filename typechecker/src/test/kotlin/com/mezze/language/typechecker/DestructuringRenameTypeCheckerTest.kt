@@ -710,7 +710,7 @@ class DestructuringRenameTypeCheckerTest {
             // Some fields can be wildcards, others renamed
             val code = """
                 let data = { keep = 42, ignore = 100 }
-                let { keep = k, ignore = _ } = data
+                let { keep = k, ... } = data
                 let result = k
             """.trimIndent()
 

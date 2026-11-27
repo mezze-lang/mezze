@@ -46,7 +46,7 @@ class LetDestructuringParsingTest {
             assertTrue(err!!.message.orEmpty().contains("binds nothing"), "got: ${err.message}")
         }
         // A wildcard INSIDE a destructuring is still a wildcard.
-        assertNotNull(parser.parseParsedModule("let f = { r } -> do\n  let { a, b = _ } = r\n  a"))
+        assertNotNull(parser.parseParsedModule("let f = { r } -> do\n  let { a, ... } = r\n  a"))
     }
 
     // ========== Record Pattern in Let ==========

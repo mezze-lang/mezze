@@ -522,7 +522,7 @@ class AsyncExtendedTest {
                     let p = Async.spawn {f = {} -> x * 2}
                     match await {p = p} is
                         Ok { val } -> val
-                        Err { error = _ } -> -1
+                        Err { ... } -> -1
                 }, def = [] }
                 match results is
                     [a, b, c] -> a + b + c

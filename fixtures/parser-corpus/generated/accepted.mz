@@ -6066,7 +6066,7 @@ let sqesprea=[ ...yys, 1, 2]
 let sread  = { ...base, a = 1, b = 2 }
 
 # === 1379
-let sseqspread = [..._ys, 1, 2]
+let sseqspread = [...ys, 1, 2]
 
 # === 1380
 let ssig: { xs: ['a], f: { x: 'a}  -> 'b <...> } -> ['b] <...> = { xs, f } -> xs
@@ -7304,7 +7304,7 @@ match data is
 
 # === 1694
 match data is
-  { name = _, age } -> age
+  { age, ... } -> age
   _ -> 0
 
 # === 1695

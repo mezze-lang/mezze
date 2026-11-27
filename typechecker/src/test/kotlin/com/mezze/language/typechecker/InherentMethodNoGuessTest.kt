@@ -33,7 +33,7 @@ class InherentMethodNoGuessTest : AbilityEffectSpecBase() {
             let make_resp: {} -> Result Resp Er = {} -> Ok { val = { status = 200 } }
             let out: Int = match make_resp {} is
               Ok { val } -> if val.is_ok {} then 1 else 0
-              Err { error = _ } -> 0
+              Err { ... } -> 0
             $MAIN
             """,
             "#184's case: `val` is Resp once solved, so the pick waits and lands",

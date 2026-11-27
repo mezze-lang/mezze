@@ -81,7 +81,7 @@ impl EncodeScalar for UrlC having 'out = Str where {
 impl EncodeVariant for UrlC having 'out = Str where {
   encode_variant = { it, tag, payload, ctx } -> match payload is
     None -> tag
-    Some { val = _ } -> tag,
+    Some { ... } -> tag,
 }
 
 impl EncodeOption for UrlC having 'out = Str where {

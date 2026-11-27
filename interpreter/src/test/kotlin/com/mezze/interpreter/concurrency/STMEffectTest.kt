@@ -635,7 +635,7 @@ class STMEffectTest {
             let mvar = tmvar_empty {}
             perform OptimisticSTM in do
                 match try_take_tmvar {var = mvar} is
-                    Some {val = _} -> False
+                    Some { ... } -> False
                     None -> True
         """
         val result = eval(code)
@@ -764,7 +764,7 @@ class STMEffectTest {
             let q = tqueue {}
             perform OptimisticSTM in do
                 match try_read_tqueue {q = q} is
-                    Some {val = _} -> False
+                    Some { ... } -> False
                     None -> True
         """
         val result = eval(code)

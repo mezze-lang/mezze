@@ -137,7 +137,9 @@ pub type Pattern = |
   NewtypePat { type_name: Str, inner: Pattern, span: Span },
   RecordPat { fields: [FieldPat], is_open: Bool, span: Span },
   LiteralPat { value: PatLiteral, span: Span },
-  SeqPat { elements: [Pattern], rest: Option Str, span: Span },
+  ## `rest`: None for a fixed length, `Some "_"` for an unnamed `...`, else the tail's name.
+  ## `suffix`: how many of `elements` come after the `...` (read from the end).
+  SeqPat { elements: [Pattern], rest: Option Str, suffix: Int, span: Span },
   StrPat { parts: [StrPatPart], span: Span },
 |
 

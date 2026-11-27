@@ -67,12 +67,12 @@ pub let is_pending: { p: Promise 'a } -> Bool = { p } -> match __native_promise_
 
 
 pub let is_failed: { p: Promise 'a } -> Bool = { p } -> match __native_promise_inspect { p = p } is
-  PromiseFailed { err = _ } -> True
+  PromiseFailed { ... } -> True
   _ -> False
 
 
 pub let is_cancelled: { p: Promise 'a } -> Bool = { p } -> match __native_promise_inspect { p = p } is
-  PromiseFailed { err = AsyncCancelled { reason = _ } } -> True
+  PromiseFailed { err = AsyncCancelled { ... } } -> True
   _ -> False
 
 
@@ -169,7 +169,7 @@ pub let on_complete
 ## Block on the Promise; return None on any failure, dropping error info.
 pub let try_await: { p: Promise 'a } -> Option 'a <Async> = { p } -> match await { p = p } is
   Ok { val } -> Some { val = val }
-  Err { error = _ } -> None
+  Err { ... } -> None
 
 
 impl Promise 'a where {
@@ -674,7 +674,7 @@ pub let par_filter
     seq::map {
       xs = seq::filter { xs = tagged, p = { x } -> match x is
         Ok { val = r } -> r.keep
-        Err { error = _ } -> True
+        Err { ... } -> True
  },
       f = { x } -> match x is
         Ok { val = r } -> Ok { val = r.elem }
@@ -705,11 +705,11 @@ pub let try_all: { ps: [Promise 'a] } -> Result ['a] AsyncError <Async, ...> = {
     match seq::find { xs = results, p = { x } -> result::is_err { result = x } } is
       Some { val = first_err } -> match first_err is
         Err { error = e } -> Err { error = e }
-        Ok { val = _ } -> Err { error = AsyncFailed { msg = "try_all: impossible" } }
+        Ok { ... } -> Err { error = AsyncFailed { msg = "try_all: impossible" } }
       None -> Ok {
         val = seq::map { xs = results, f = { x } -> match x is
           Ok { val = v } -> v
-          Err { error = _ } -> crash { msg = "try_all: impossible" }
+          Err { ... } -> crash { msg = "try_all: impossible" }
  },
       }
 
@@ -769,7 +769,7 @@ pub let try_par_for_each
   : { xs: ['a], f: { x: 'a } -> 'b <...> }
   -> Result {} AsyncError <Async, ...>
   = { xs, f } -> match try_par_map { xs = xs, f = f } is
-    Ok { val = _ } -> Ok { val = {} }
+    Ok { ... } -> Ok { val = {} }
     Err { error = e } -> Err { error = e }
 
 
@@ -797,11 +797,11 @@ pub let try_any: { ps: [Promise 'a] } -> Result 'a AsyncError <Async, ...> = { p
     match seq::find { xs = results, p = { x } -> result::is_ok { result = x } } is
       Some { val = winner } -> match winner is
         Ok { val = v } -> Ok { val = v }
-        Err { error = _ } -> Err { error = AsyncFailed { msg = "try_any: impossible" } }
+        Err { ... } -> Err { error = AsyncFailed { msg = "try_any: impossible" } }
       None -> match seq::find { xs = results, p = { x } -> result::is_err { result = x } } is
         Some { val = first_err } -> match first_err is
           Err { error = e } -> Err { error = e }
-          Ok { val = _ } -> Err { error = AsyncFailed { msg = "try_any: impossible" } }
+          Ok { ... } -> Err { error = AsyncFailed { msg = "try_any: impossible" } }
         None -> Err { error = AsyncFailed { msg = "try_any: empty input" } }
 
 
@@ -885,7 +885,7 @@ pub let join_on_success
       Some { val = winner } -> do
         let winner_val = match inspect { p = winner } is
           PromiseCompleted { val = v } -> v
-          PromiseFailed { err = _ } -> crash { msg = "on_success: winner reverted to PromiseFailed" }
+          PromiseFailed { ... } -> crash { msg = "on_success: winner reverted to PromiseFailed" }
           PromisePending -> crash { msg = "on_success: winner reverted to PromisePending" }
 
         scope_cancel_all { sc = sc }
@@ -899,7 +899,7 @@ pub let join_on_success
       None -> OnSuccessAllFailed {
         errs = seq::map { xs = ps, f = { x } -> match inspect { p = x } is
           PromiseFailed { err = e } -> e
-          PromiseCompleted { val = _ } -> AsyncFailed { msg = "on_success: expected PromiseFailed, got PromiseCompleted" }
+          PromiseCompleted { ... } -> AsyncFailed { msg = "on_success: expected PromiseFailed, got PromiseCompleted" }
           PromisePending -> AsyncFailed { msg = "on_success: expected PromiseFailed, got PromisePending" }
  },
       }
@@ -912,13 +912,13 @@ pub let join_on_failure
   = { sc, ps } -> do
     let results = all { ps = ps }
     match seq::find_index { xs = results, p = { x } -> match x is
-      Err { error = _ } -> True
-      Ok { val = _ } -> False
+      Err { ... } -> True
+      Ok { ... } -> False
  } is
       None -> OnFailureOutcome {
         results = seq::map { xs = results, f = { x } -> match x is
           Ok { val = v } -> v
-          Err { error = _ } -> crash { msg = "on_failure: find_index=None but Err in seq" }
+          Err { ... } -> crash { msg = "on_failure: find_index=None but Err in seq" }
  },
       }
       Some { val = idx } -> do
@@ -926,7 +926,7 @@ pub let join_on_failure
         let nth_res = seq::nth { xs = results, i = idx }
         let err = match nth_res is
           Some { val = Err { error = e } } -> e
-          Some { val = Ok { val = _ } } -> AsyncFailed { msg = "on_failure: nth=Ok at failed idx" }
+          Some { val = Ok { ... } } -> AsyncFailed { msg = "on_failure: nth=Ok at failed idx" }
           None -> AsyncFailed { msg = "on_failure: nth=None at failed idx" }
 
         OnFailureCaught {
@@ -934,7 +934,7 @@ pub let join_on_failure
           err = err,
           partial = seq::map { xs = results, f = { x } -> match x is
             Ok { val = v } -> Some { val = v }
-            Err { error = _ } -> None
+            Err { ... } -> None
  },
         }
 

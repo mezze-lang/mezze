@@ -49,7 +49,7 @@ let forked = { xs: [Int] } -> perform LoomAsyncWith { max_concurrent = 16 } in
     init = 0,
     f = { acc, x } -> match x is
       Ok { val = v } -> acc + v
-      Err { error = _ } -> acc,
+      Err { ... } -> acc,
   }
 
 ## chunk_fold forks per CHUNK and runs a fused Iter pipeline inside each.
@@ -95,7 +95,7 @@ let io_forked = { xs: [Int] } -> perform LoomAsyncWith { max_concurrent = 16 } i
     init = 0,
     f = { acc, x } -> match x is
       Ok { val = v } -> acc + v
-      Err { error = _ } -> acc,
+      Err { ... } -> acc,
   }
 
 let io_chunked = { xs: [Int] } -> perform LoomParallel in chunk_fold {

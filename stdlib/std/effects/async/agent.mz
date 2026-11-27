@@ -65,7 +65,7 @@ pub let agent_error: { agent: Agent 'a } -> Option Str <Async> = { agent } ->
 
 ## Check if the agent is in error state.
 pub let has_error: { agent: Agent 'a } -> Bool <Async> = { agent } -> match agent_error { agent = agent } is
-  Some { val = _ } -> True
+  Some { ... } -> True
   None -> False
 
 

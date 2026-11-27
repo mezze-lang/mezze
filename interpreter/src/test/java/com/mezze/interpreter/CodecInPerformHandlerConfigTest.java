@@ -48,8 +48,8 @@ class CodecInPerformHandlerConfigTest {
                 match resp is
                   Ok { val } -> match body_str { resp = val } is
                     Ok { val = s } -> s
-                    Err { error = _ } -> "read-fail"
-                  Err { error = _ } -> "req-fail"
+                    Err { ... } -> "read-fail"
+                  Err { ... } -> "req-fail"
 
             fetch {}
             """);
@@ -73,8 +73,8 @@ class CodecInPerformHandlerConfigTest {
                 match resp is
                   Ok { val } -> match body_str { resp = val } is
                     Ok { val = s } -> s
-                    Err { error = _ } -> "read-fail"
-                  Err { error = _ } -> "req-fail"
+                    Err { ... } -> "read-fail"
+                  Err { ... } -> "req-fail"
 
             fetch {}
             """);
@@ -97,8 +97,8 @@ class CodecInPerformHandlerConfigTest {
                 match resp is
                   Ok { val } -> match body_str { resp = val } is
                     Ok { val = s } -> s
-                    Err { error = _ } -> "read-fail"
-                  Err { error = _ } -> "req-fail"
+                    Err { ... } -> "read-fail"
+                  Err { ... } -> "req-fail"
 
             fetch {}
             """);

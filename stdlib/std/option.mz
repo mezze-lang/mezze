@@ -18,7 +18,7 @@ impl Tryable for Option 'a having 'inner = 'a where {
 impl Ord for Option 'a where {
   lt: { it: Option 'a, r: Option 'a } with Ord 'a -> Bool = { it, r } -> match it is
     None -> match r is
-      Some { val = _ } -> True
+      Some { ... } -> True
       None -> False
     Some { val = l } -> match r is
       None -> False
@@ -39,7 +39,7 @@ impl Ord for Option 'a where {
       None -> True
     None -> match r is
       None -> True
-      Some { val = _ } -> False,
+      Some { ... } -> False,
 }
 
 impl Default for Option 'a where {

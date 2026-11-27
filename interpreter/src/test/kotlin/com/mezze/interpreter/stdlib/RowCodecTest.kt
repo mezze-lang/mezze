@@ -122,7 +122,7 @@ class RowCodecTest {
               Some { val = row } -> do
                 let decoded: Result { id: Int } DecodeError = row.decode { config = row_c }
                 match decoded is
-                  Ok { val = _ } -> "wrongly accepted"
+                  Ok { ... } -> "wrongly accepted"
                   Err { error = e } -> "$(e.expected)|$(match e.found is
                     Some { val = f } -> f
                     None -> "?")"
@@ -144,7 +144,7 @@ class RowCodecTest {
                 let decoded: Result { ratio: Float } DecodeError = row.decode { config = row_c }
                 match decoded is
                   Ok { val = v } -> v.ratio
-                  Err { error = _ } -> -1.0
+                  Err { ... } -> -1.0
             main {}
             """.trimIndent(),
         )
@@ -185,7 +185,7 @@ class RowCodecTest {
             }
             let main = {} -> perform MockDbWith { answers = [{ sql = "from users", rows = users }] } in
               match Db.run { q = sql { text = "select id, name, active from users" } } is
-                Err { error = _ } -> "query failed"
+                Err { ... } -> "query failed"
                 Ok { val = rows } -> do
                   let decoded: Result [{ id: Int, name: Str, active: Bool }] DecodeError = rows.decode { config = row_c }
                   match decoded is

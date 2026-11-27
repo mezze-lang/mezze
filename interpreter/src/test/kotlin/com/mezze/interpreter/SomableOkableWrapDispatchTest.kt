@@ -75,7 +75,7 @@ class SomableOkableWrapDispatchTest {
             let r: (Result Int Str) = 2.ok {}
             match r is
               Ok { val } -> val
-              Err { error = _ } -> 0
+              Err { ... } -> 0
         """
         assertEquals(2L, eval(code))
     }
@@ -86,7 +86,7 @@ class SomableOkableWrapDispatchTest {
             use std::result
             let r: (Result Int Str) = "boom".err {}
             match r is
-              Ok { val = _ } -> "ok"
+              Ok { ... } -> "ok"
               Err { error } -> error
         """
         assertEquals("boom", eval(code))

@@ -56,7 +56,7 @@ class UndeterminedCodecTargetTest {
             let want = { s: Search } -> s.q
             let f = {} -> match "q=mezze".from_query {} is
               Ok { val } -> want { s = val }
-              Err { error = _ } -> "bad"
+              Err { ... } -> "bad"
             f {}
         """))
     }

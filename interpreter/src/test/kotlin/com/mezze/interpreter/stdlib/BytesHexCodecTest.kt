@@ -128,7 +128,7 @@ class BytesHexCodecTest {
             prelude,
             listOf(
                 "let bad = { s } -> match bytes::from_hex { s = s } is",
-                "  Some { val = _ } -> 0",
+                "  Some { ... } -> 0",
                 "  None -> 1",
                 "# odd length, a non-hex character, and the SIGNS parseInt used to accept",
                 "let odd = bad { s = \"abc\" }",

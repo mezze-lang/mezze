@@ -263,12 +263,12 @@ impl EncodeVariant for JvmC having 'out = JvmForeign where {
 ## The guest type name for an error message, or "foreign" for an errored foreign.
 let type_name_or: { f: JvmForeign } -> Str = { f } -> match f.type_name {} is
   Ok  { val = n }   -> n
-  Err { error = _ } -> "foreign"
+  Err { ... } -> "foreign"
 
 impl DecodeScalar for JvmC having 'in = JvmForeign where {
   decode_int = { it, val, ctx } -> match val.int{} is
     Ok { val = n } -> Ok { val = n }
-    Err { error = _ } -> decode_error {
+    Err { ... } -> decode_error {
       path = ctx.path,
       message = "Expected Foreign coercible to Int",
       expected = "Int",
@@ -276,7 +276,7 @@ impl DecodeScalar for JvmC having 'in = JvmForeign where {
     },
   decode_float = { it, val, ctx } -> match val.float{} is
     Ok { val = n } -> Ok { val = n }
-    Err { error = _ } -> decode_error {
+    Err { ... } -> decode_error {
       path = ctx.path,
       message = "Expected Foreign coercible to Float",
       expected = "Float",
@@ -284,7 +284,7 @@ impl DecodeScalar for JvmC having 'in = JvmForeign where {
     },
   decode_str = { it, val, ctx } -> match val.str{} is
     Ok { val = s } -> Ok { val = s }
-    Err { error = _ } -> decode_error {
+    Err { ... } -> decode_error {
       path = ctx.path,
       message = "Expected Foreign coercible to Str",
       expected = "Str",
@@ -292,7 +292,7 @@ impl DecodeScalar for JvmC having 'in = JvmForeign where {
     },
   decode_bool = { it, val, ctx } -> match val.bool{} is
     Ok { val = b } -> Ok { val = b }
-    Err { error = _ } -> decode_error {
+    Err { ... } -> decode_error {
       path = ctx.path,
       message = "Expected Foreign coercible to Bool",
       expected = "Bool",
@@ -300,7 +300,7 @@ impl DecodeScalar for JvmC having 'in = JvmForeign where {
     },
   decode_frac = { it, val, ctx } -> match val.float{} is
     Ok { val = f } -> Ok { val = __native_float_to_frac { f = f } }
-    Err { error = _ } -> decode_error {
+    Err { ... } -> decode_error {
       path = ctx.path,
       message = "Expected Foreign coercible to Frac",
       expected = "Frac",
@@ -321,7 +321,7 @@ impl DecodeScalar for JvmC having 'in = JvmForeign where {
         expected = "Char",
         found = Some { val = s },
       }
-    Err { error = _ } -> decode_error {
+    Err { ... } -> decode_error {
       path = ctx.path,
       message = "Expected Foreign coercible to Char",
       expected = "Char",
@@ -336,7 +336,7 @@ impl DecodeScalar for JvmC having 'in = JvmForeign where {
         expected = "Nat",
         found = Some { val = "negative integer" },
       }
-    Err { error = _ } -> decode_error {
+    Err { ... } -> decode_error {
       path = ctx.path,
       message = "Expected Foreign coercible to Nat",
       expected = "Nat",
@@ -350,7 +350,7 @@ impl DecodeOption for JvmC having 'in = JvmForeign where {
     match val.is_null {} is
       Ok  { val = True }  -> Ok { val = None }
       Ok  { val = False } -> Ok { val = Some { val = val } }
-      Err { error = _ }   -> Ok { val = Some { val = val } },
+      Err { ... }   -> Ok { val = Some { val = val } },
 }
 
 # Tier 2: decode, container shapes — a dict is hash-shaped, not reachable via
@@ -364,7 +364,7 @@ let pair_entry_of: { p: JvmForeign } -> Option { key: JvmForeign, value: JvmFore
         Some { val = v } -> Some { val = { key = k, value = v } }
         None -> None
       None -> None
-    Err { error = _ } -> None
+    Err { ... } -> None
 
 ## Every pair, or None if any one is malformed.
 let read_pairs:
@@ -384,7 +384,7 @@ let read_pairs:
 impl DecodeSequence for JvmC having 'in = JvmForeign where {
   decode_sequence = { it, val, ctx } -> match val.to_seq {} is
     Ok { val = es } -> Ok { val = es }
-    Err { error = _ } -> decode_error {
+    Err { ... } -> decode_error {
       path = ctx.path,
       message = "Expected an array-shaped Foreign",
       expected = "List",
@@ -396,25 +396,25 @@ impl DecodeSequence for JvmC having 'in = JvmForeign where {
 impl DecodeScalarSequence for JvmC having 'in = JvmForeign where {
   decode_int_seq = { it, val, ctx } -> match val.to_ints {} is
     Ok { val = xs } -> Ok { val = xs }
-    Err { error = _ } -> decode_error {
+    Err { ... } -> decode_error {
       path = ctx.path, message = "Expected an array of Int-coercible Foreigns",
       expected = "[Int]", found = Some { val = type_name_or { f = val } },
     },
   decode_float_seq = { it, val, ctx } -> match val.to_floats {} is
     Ok { val = xs } -> Ok { val = xs }
-    Err { error = _ } -> decode_error {
+    Err { ... } -> decode_error {
       path = ctx.path, message = "Expected an array of Float-coercible Foreigns",
       expected = "[Float]", found = Some { val = type_name_or { f = val } },
     },
   decode_str_seq = { it, val, ctx } -> match val.to_strs {} is
     Ok { val = xs } -> Ok { val = xs }
-    Err { error = _ } -> decode_error {
+    Err { ... } -> decode_error {
       path = ctx.path, message = "Expected an array of Str-coercible Foreigns",
       expected = "[Str]", found = Some { val = type_name_or { f = val } },
     },
   decode_bool_seq = { it, val, ctx } -> match val.to_bools {} is
     Ok { val = xs } -> Ok { val = xs }
-    Err { error = _ } -> decode_error {
+    Err { ... } -> decode_error {
       path = ctx.path, message = "Expected an array of Bool-coercible Foreigns",
       expected = "[Bool]", found = Some { val = type_name_or { f = val } },
     },
@@ -431,7 +431,7 @@ impl DecodeMapping for JvmC having 'in = JvmForeign where {
         expected = "Map",
         found = Some { val = type_name_or { f = val } },
       }
-    Err { error = _ } -> decode_error {
+    Err { ... } -> decode_error {
       path = ctx.path,
       message = "Expected a hash-shaped Foreign",
       expected = "Map",
@@ -443,8 +443,8 @@ impl DecodeRecord for JvmC having 'in = JvmForeign where {
   # `.ok{}` probes the key so a missing field is a clean decode_error.
   decode_record_field = { it, val, key, ctx } ->
     match val.key { of = key }.ok {} is
-      Ok  { val = _ } -> Ok { val = val.key { of = key } }
-      Err { error = _ } -> decode_error {
+      Ok  { ... } -> Ok { val = val.key { of = key } }
+      Err { ... } -> decode_error {
         path = ctx.path,
         message = "Missing field: $(key)",
         expected = key,
@@ -457,9 +457,9 @@ impl DecodeVariant for JvmC having 'in = JvmForeign where {
   # The tag is crossed with `.str{}`; `value`'s presence is probed with `.ok{}`.
   decode_variant = { it, val, ctx } -> match val.key { of = "tag" }.str {} is
     Ok { val = tag } -> match val.key { of = "value" }.ok {} is
-      Ok  { val = _ } -> Ok { val = { tag = tag, payload = Some { val = val.key { of = "value" } } } }
-      Err { error = _ } -> Ok { val = { tag = tag, payload = None } }
-    Err { error = _ } -> decode_error {
+      Ok  { ... } -> Ok { val = { tag = tag, payload = Some { val = val.key { of = "value" } } } }
+      Err { ... } -> Ok { val = { tag = tag, payload = None } }
+    Err { ... } -> decode_error {
       path = ctx.path,
       message = "Expected a Foreign with a string 'tag' entry",
       expected = "Variant",

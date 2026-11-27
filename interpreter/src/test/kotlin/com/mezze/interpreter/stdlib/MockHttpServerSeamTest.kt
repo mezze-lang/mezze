@@ -35,7 +35,7 @@ class MockHttpServerSeamTest {
 
         let body_of: { resp: Response } -> Str = { resp } -> match bytes::to_str { b = resp.body } is
           Ok { val } -> val
-          Err { error = _ } -> "err"
+          Err { ... } -> "err"
 
         ## One app answering every verb, so each test only changes the request.
         let app = router { path = "" }

@@ -222,7 +222,23 @@ internal fun TypedASTCompiler.compileMatch(expr: TypedMatch, src: SourceInfo): N
                 for (nsd in nestedSeqDestructures) {
                     // Generate: let var = seq_get(tempSlot, index) for each binding in the inner pattern
                     val innerPat = nsd.innerPattern
-                    if (innerPat is TypedSeqPattern) {
+                    if (innerPat is TypedSeqPattern && innerPat.suffixCount > 0) {
+                        // `[first, ..., last]` nested: elements after the `...` are read from
+                        // the end, which fixed-index reads below cannot do — bind them through
+                        // the list matcher (it has no named rest: a named rest is always last).
+                        val slots = innerPat.elements.map { iElem ->
+                            if (iElem is TypedVarPattern) scopeStack.lastOrNull()?.get(iElem.name)
+                                ?: localsByName[iElem.name] ?: forceAllocLocal(iElem.name)
+                            else -1
+                        }
+                        val readTemp = ReadLocalIR(nsd.tempSlot, SlotKind.OBJECT, src)
+                        val bindCase = CaseIR(PatternIR.Seq(slots, -1, true, innerPat.suffixCount), emptyList(), null,
+                            ReadLocalIR(nsd.tempSlot, SlotKind.OBJECT, src), src)
+                        val fallback = CaseIR(PatternIR.Wildcard(-1), emptyList(), null, ReadLocalIR(nsd.tempSlot, SlotKind.OBJECT, src), src)
+                        val resultSlot = forceAllocLocal("__seq_suffix_result_${nsd.tempSlot}")
+                        seqStmts.add(StmtIR.Let(resultSlot, SlotKind.OBJECT, "__seq_suffix_result", Hash.ZERO,
+                            MatchIR(readTemp, listOf(bindCase, fallback), src), src))
+                    } else if (innerPat is TypedSeqPattern) {
                         // For each element in the inner seq pattern, generate a seq_get
                         for ((innerIdx, innerElem) in innerPat.elements.withIndex()) {
                             if (innerElem is TypedVarPattern) {
@@ -235,7 +251,7 @@ internal fun TypedASTCompiler.compileMatch(expr: TypedMatch, src: SourceInfo): N
                             }
                         }
                         // Handle rest binding in inner seq pattern.
-                        // "_" (`..._`) matches the tail but binds nothing — skip it.
+                        // "_" (`...`) matches the tail but binds nothing — skip it.
                         val restName = innerPat.rest
                         if (restName != null && restName != "_") {
                             val restSlot = scopeStack.lastOrNull()?.get(restName)
@@ -610,7 +626,7 @@ internal fun TypedASTCompiler.compilePattern(pattern: TypedPattern?): PatternIR 
                 },
                 run {
                     val restName = pattern.rest
-                    // "_" is the tail-ignoring rest (`..._`): match the tail but bind nothing,
+                    // "_" is the tail-ignoring rest (`...`): match the tail but bind nothing,
                     // just like a wildcard element (slot -1).
                     if (restName != null && restName != "_") {
                         scopeStack.lastOrNull()?.get(restName)
@@ -618,8 +634,9 @@ internal fun TypedASTCompiler.compilePattern(pattern: TypedPattern?): PatternIR 
                             ?: forceAllocLocal(restName)
                     } else -1
                 },
-                // hasRest: any rest (named OR `..._`) makes this an open, length>=N pattern.
-                hasRest = pattern.rest != null
+                // hasRest: any rest (named OR unnamed `...`) makes this an open, length>=N pattern.
+                hasRest = pattern.rest != null,
+                suffixCount = pattern.suffixCount,
             )
         }
         is TypedStringInterpPattern -> {
@@ -637,7 +654,8 @@ internal fun TypedASTCompiler.compilePattern(pattern: TypedPattern?): PatternIR 
                     is TypedStringPatternPart.Capture -> {
                         partTypes.add(1) // 1 = capture
                         literals.add(null)
-                        val slot = scopeStack.lastOrNull()?.get(part.variableName)
+                        // `$(_)`: a hole that binds nothing (slot -1 is skipped by the matcher).
+                        val slot = if (part.variableName == "_") -1 else scopeStack.lastOrNull()?.get(part.variableName)
                             ?: localsByName[part.variableName]
                             ?: forceAllocLocal(part.variableName)
                         captureSlots.add(slot)

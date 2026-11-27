@@ -65,7 +65,7 @@ class RecordSpecCoverageTest : VariantSpecBase() {
             use std::int
             pub let f = { r: { x: Bool, y: Bool } } -> match r is
               { x = True,  y = True } -> 1
-              { x = _,     y = _    } -> 2
+              { ... } -> 2
             $MAIN
             """,
             "The ordinary escape, and the control for the rejection above: the same " +

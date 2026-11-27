@@ -44,7 +44,7 @@ class UserDecodeAbilityTest {
               let jr: Result { name: Str } DecodeError = "{\"name\":\"Ada\"}".from_json {}
               let jname = match jr is
                 Ok { val = { name } } -> name
-                Err { error = _ } -> "err"
+                Err { ... } -> "err"
               let tk: Token = { raw = 7 }
               if jname == "Ada" then via { x = tk } else 0 - 1
             main {}

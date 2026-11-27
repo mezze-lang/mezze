@@ -53,8 +53,8 @@ class NestedResultAliasInferenceTest {
                     xs = groups,
                     init = 0,
                     f = { acc, x } -> match x is
-                        Ok { val = _ } -> acc + 1
-                        Err { error = _ } -> acc
+                        Ok { ... } -> acc + 1
+                        Err { ... } -> acc
                 }
         """.trimIndent()
         val result = eval(code)
@@ -78,7 +78,7 @@ class NestedResultAliasInferenceTest {
                     init = 0,
                     f = { acc, x } -> match x is
                         Ok { val } -> acc + val
-                        Err { error = _ } -> acc
+                        Err { ... } -> acc
                 }
         """.trimIndent()
         val result = eval(code)
@@ -132,7 +132,7 @@ class NestedResultAliasInferenceTest {
                 init = 0,
                 f = { acc, x } -> match x is
                     Ok { val } -> acc + val
-                    Err { error = _ } -> acc
+                    Err { ... } -> acc
             }
         """.trimIndent()
         val result = eval(code)
@@ -151,7 +151,7 @@ class NestedResultAliasInferenceTest {
                 init = 0,
                 f = { acc, x } -> match x is
                     Ok { val } -> acc + val
-                    Err { error = _ } -> acc
+                    Err { ... } -> acc
             }
         """.trimIndent()
         val result = eval(code)
@@ -169,7 +169,7 @@ class NestedResultAliasInferenceTest {
                 init = 0,
                 f = { acc, x } -> match x is
                     Ok { val } -> acc + val
-                    Err { error = _ } -> acc
+                    Err { ... } -> acc
             }
         """.trimIndent()
         val result = eval(code)
@@ -192,7 +192,7 @@ class NestedResultAliasInferenceTest {
                 match seq::first { xs = results } is
                     Some { val } -> match val is
                         Ok { val = v } -> v
-                        Err { error = _ } -> -1
+                        Err { ... } -> -1
                     None -> -2
         """.trimIndent()
         val result = eval(code)
@@ -209,7 +209,7 @@ class NestedResultAliasInferenceTest {
                 let p = Async.spawn {f = {} -> 42}
                 match await { p = p } is
                     Ok { val } -> val
-                    Err { error = _ } -> -1
+                    Err { ... } -> -1
         """.trimIndent()
         val result = eval(code)
         assertEquals(42L, result)
@@ -241,7 +241,7 @@ class NestedResultAliasInferenceTest {
                     init = 0,
                     f = { acc, x } -> match x is
                         Ok { val } -> acc + val
-                        Err { error = _ } -> acc
+                        Err { ... } -> acc
                 }
 
                 seq::fold {
@@ -249,7 +249,7 @@ class NestedResultAliasInferenceTest {
                     init = 0,
                     f = { acc, x } -> match x is
                         Ok { val } -> acc + sum_arr { arr = val }
-                        Err { error = _ } -> acc
+                        Err { ... } -> acc
                 }
         """.trimIndent()
         val result = eval(code)

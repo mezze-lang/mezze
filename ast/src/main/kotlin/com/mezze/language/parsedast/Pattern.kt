@@ -89,14 +89,25 @@ sealed interface ParsedLiteralValue {
 }
 
 /**
- * Seq pattern: `[]`, `[x, y]`, `[head, ...tail]`
+ * Seq pattern: `[]`, `[x, y]`, `[head, ...tail]`, `[first, ...]`, `[first, ..., last]`.
+ *
+ * [restPattern] is null for a fixed-length pattern; otherwise the rest's name, or
+ * [IGNORED_REST] for an unnamed `...` (which binds nothing). [suffixCount] is how many
+ * of [elements] come AFTER the rest — they are read from the end. Only an unnamed `...`
+ * may have a suffix: a named rest is always last.
  */
 @Serializable
 data class ParsedSeqPattern(
     val elements: List<ParsedPattern>,
     val restPattern: String? = null,
-    override val loc: Loc
-) : ParsedPattern
+    override val loc: Loc,
+    val suffixCount: Int = 0,
+) : ParsedPattern {
+    companion object {
+        /** The rest name an unnamed `...` is recorded as. Never a binding. */
+        const val IGNORED_REST = "_"
+    }
+}
 
 /**
  * String interpolation pattern: `"prefix$(capture)suffix"`
@@ -136,7 +147,7 @@ fun ParsedPattern.extractBindings(): List<String> = when (this) {
     is ParsedNewtypePattern -> inner.extractBindings()
     is ParsedLiteralPattern -> emptyList()
     is ParsedSeqPattern -> {
-        // "_" is the tail-ignoring rest (`..._`) — it matches but binds nothing.
+        // "_" is the unnamed rest (`...`) — it matches but binds nothing.
         elements.flatMap { it.extractBindings() } + listOfNotNull(restPattern?.takeIf { it != "_" })
     }
     is ParsedStringInterpPattern -> parts.mapNotNull {
