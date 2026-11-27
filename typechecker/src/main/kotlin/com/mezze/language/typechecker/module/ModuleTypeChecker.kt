@@ -329,6 +329,7 @@ class ModuleTypeChecker(
             // The parse the resolver already has, not the kept one: reading that
             // would read the whole body for the exports' sake.
             module.parsedModule?.let { moduleResolver?.updateModuleExports(cached.modulePath, it, cached.typeContext) }
+            if (com.mezze.language.typechecker.Lowering.wanted()) bringInDependencies(module)
             return ModuleTypeCheckResult.Success(cached)
         }
 
@@ -399,6 +400,26 @@ class ModuleTypeChecker(
             }
         } finally {
             finishTypeChecking(world, module.modulePath)
+        }
+    }
+
+    /**
+     * A module read back from the cache never resolves its own imports — checking
+     * is what does that — so the modules under it never reached this run's module
+     * cache, and lowering, which compiles what that cache holds, left them out: a
+     * performer from another module was "Handler not found" (and a dependency's
+     * `CallDirectIR:target-not-compiled`) on every warm `mez dev`, never cold.
+     * When code is to be compiled, each module it was stamped against is checked
+     * too, as its import would have — read back from the cache in turn.
+     */
+    private fun bringInDependencies(module: LoadedModule) {
+        val resolver = moduleResolver ?: return
+        val stamped = ModuleResolver.snapshot(world)[module.modulePath]?.stampedAgainst ?: return
+        val loader = ModuleLoader(resolver)
+        for (dep in stamped.keys) {
+            if (ModulePathConventions.isStdlib(dep) || getFromGlobalCache(world, dep) != null) continue
+            val loaded = (loader.loadModule(dep) as? ModuleLoadResult.Success)?.module ?: continue
+            typeCheckModule(loaded)
         }
     }
 
