@@ -251,10 +251,10 @@ export const features = [
       'are records of functions. Learn records, variants, effects and abilities, and that is the language.',
   },
   {
-    title: 'Keep the ~lemon~libraries and code~ you already have',
+    title: 'Keep the ~mint~libraries~ you already have',
     body:
-      'Call your Java, Kotlin, JavaScript, Python and WebAssembly ~~lemon:existing code~~ directly on GraalVM. ' +
-      'Their errors come back as values, not crashes.',
+      'Call your ~~mint:existing code~~ written in Java, JavaScript or Python on GraalVM, ' +
+      'while keeping the type safety of Mezze.',
   },
   {
     title: 'Distributed computing^TBD^',
