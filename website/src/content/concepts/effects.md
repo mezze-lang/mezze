@@ -225,15 +225,14 @@ supplies an effect and `perform` decides which one is in scope.
 
 ## What a handler can do: `cont`
 
-A handler body is answering one call. Most of the time its value is simply the
-answer, as in `ToFile` above. When it needs more than that, it has one name to
-reach for, `cont`, and three things it can ask of it:
+When code performs an operation, the rest of that computation waits for the
+handler. The handler decides what happens to it, through one name, `cont`:
 
 | | |
 |---|---|
-| `cont.resume { val }` | answer the call with `val`. Falling off the body does the same, so it is rarely written. |
-| `cont.abort { val }` | do not answer. End the whole `perform` block, and make `val` its value. |
-| `cont.park { on, set }` | wait until something holds, and let other tasks run meanwhile. |
+| `cont.resume { val }` | **answer.** The waiting code carries on with `val`. Falling off the body does the same, so it is rarely written. |
+| `cont.abort { val }` | **stop.** The rest never runs: the whole `perform` block ends, and `val` is its value. |
+| `cont.park { on, set }` | **wait.** The task sleeps until something holds, other tasks run meanwhile, and it carries on afterwards. |
 
 <!--mezze-editor
 use std::effects::log::{ Console, println }
@@ -258,15 +257,25 @@ let main = {} -> perform Console in do
 -->
 
 The first `take` is answered with `2` and `order` carries on. The second is
-too large, so the handler aborts: `order` never reaches its last line, and the
+too large, so the handler stops it: `order` never reaches its last line, and the
 `perform` block's value is `"out of olive-oil"`. That one line is all an
-exception is. `cont.abort` and `cont.resume` must be the last thing a handler
-does, and `cont` itself cannot be stored or passed on: the runtime holds the
-rest of the program, a handler never does.
+exception is.
 
-`cont.park` is what makes async a library rather than a language feature.
-The [Handlers](/concepts#handlers) page covers all three in depth, including
-how `Async` is just an effect whose scheduler you choose.
+The runtime keeps the waiting computation; a handler only says what to do with
+it. That is what makes handlers dependable:
+
+- **A handler cannot forget it.** Every handler answers, stops, or waits, so
+  nothing is left hanging.
+- **It continues at most once.** No computation runs twice by accident.
+- **Answering is as cheap as a function call.** Nothing is captured to do it.
+- **Waiting is ordinary code too.** `cont.park` is how `Async` is written:
+  the scheduler is a library, and you choose which one runs.
+
+`cont.resume` and `cont.abort` are the last thing a handler does, because there
+is nothing left for it to do after them. Work that has to happen around a
+whole block, like opening and closing a resource, goes in a performer's
+`initialize_scope` and `finalize_scope`. The [Handlers](/concepts#handlers)
+page covers all of it in depth.
 
 ## The row can be a variable
 
