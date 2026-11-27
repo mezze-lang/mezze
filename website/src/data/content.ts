@@ -241,22 +241,20 @@ export const features = [
   {
     title: 'Control flow is ~olive~userland code~',
     body:
-      'Async, exceptions and early return are ~~olive:ordinary handlers~~, not syntax the language ' +
-      'had to grow. Write your own and it looks like everyone else\'s. A handler can answer, stop the ' +
-      'block, or wait. The runtime holds the rest of the program, so nothing leaks, and even the ' +
-      'scheduler is a library you can swap.',
+      'Async, exceptions and early return are ~~olive:ordinary handlers~~, not syntax. ' +
+      'Yours work the same way, and even the scheduler is a library you can swap.',
   },
   {
     title: 'A few small pieces, ~onion~reused everywhere~',
     body:
-      'Records at core, arguments are just ~~onion:records~~, so every call names its ' +
-      'fields. Effects are records of functions and so are Abilities. Learn record, variant, effect, ability, and you have the language covered.',
+      'Arguments are ~~onion:records~~, so every call names its fields. Effects and abilities ' +
+      'are records of functions. Learn records, variants, effects and abilities, and that is the language.',
   },
   {
-    title: 'Keep the libraries you already have',
+    title: 'Keep the ~lemon~libraries and code~ you already have',
     body:
-      'Mezze runs on GraalVM, so it calls the Java, Kotlin, JavaScript, Python and WebAssembly code ' +
-      'you already have. Guest errors come back as values, not crashes.',
+      'Call ~~lemon:Java, Kotlin, JavaScript, Python and WebAssembly~~ directly on GraalVM. ' +
+      'Their errors come back as values, not crashes.',
   },
   {
     title: 'Distributed computing^TBD^',
