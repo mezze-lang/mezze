@@ -251,6 +251,44 @@ class EvalServingTest {
         }
     }
 
+    /**
+     * Two DIFFERENT closures with the SAME request id on ONE engine, each in a fresh
+     * context — exactly what a warm `mez dev` session's sampling engine sees when
+     * `mez sample` and `mez eval` (both always request id 1) call it in turn. The
+     * second must run its own program. It used to get the first one's: the trigger
+     * source was served from the engine's source cache.
+     */
+    @Test
+    fun `a second eval on a shared engine runs its own program, not the first one's`() {
+        val first = compile("let v: Int = 6 * 7")
+        val second = compile("let v: Int = 1 + 1")
+        val root: Path = Paths.get(System.getProperty("mezze.project.root", "."))
+        val engine = Engine.newBuilder()
+            .allowExperimentalOptions(true)
+            .option("engine.WarnInterpreterOnly", "false")
+            .option("engine.Compilation", "false")
+            .build()
+        fun evalOn(functions: List<FunctionIR>): Any? {
+            val context = Context.newBuilder(MezzeLanguage.ID).engine(engine)
+                .allowAllAccess(true).allowCreateThread(true).allowExperimentalOptions(true).build()
+            return try {
+                val entry = functions.last().hash.hex
+                MezzeLanguage.setFunctionsForDirectExecution(functions, emptyList(), root, entry)
+                MezzeLanguage.clearLastResult()
+                context.eval(RuntimeServer.evalSource(1L, entry))
+                MezzeLanguage.getLastExecutionResult()
+            } finally {
+                try { context.close(true) } catch (_: Exception) {}
+            }
+        }
+        try {
+            assertEquals(42L, evalOn(first))
+            assertEquals(2L, evalOn(second), "the second eval ran the first eval's program")
+        } finally {
+            engine.close()
+        }
+    }
+
     @Test
     fun `a compiled expression evaluates and renders as a tree`() {
         val result = runClosure("let v: Int = 6 * 7")

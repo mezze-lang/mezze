@@ -48,19 +48,25 @@ let take_interesting: {} -> Bool <Sample> = {} -> do
   let percent = if at_stress {} then stress_percent else everyday_percent
   choose { bound = 100 } >= 100 - percent
 
-## The widest magnitude in bits the current size allows: three per size step, all 63 from `stress_size`.
+## The widest magnitude in bits the current size allows: two per size step (size 5 reaches
+## about ±1,000, a readable number), all 63 from `stress_size`.
 let magnitude_bits: {} -> Int <Sample> = {} -> do
   let s = current_size {}
-  if s >= stress_size then 63 else int::min { l = 3 * s, r = 62 }
+  if s >= stress_size then 63 else int::min { l = 2 * s, r = 62 }
 
 # `choose` draws `[0, bound)` and a 64-bit bound does not fit, so the widest
 # case draws below `int_max` (which is in the stress table).
-## A non-negative magnitude whose WIDTH is drawn uniformly up to `max_bits`.
+## A non-negative magnitude whose WIDTH is drawn uniformly from 1 up to `max_bits`, then a
+## value below `2^width`. The width starts at 1, not 0: a width of 0 was a 1-in-(max+1)
+## extra chance of 0 on top of the edge table, so small sizes were mostly zeros. The
+## all-zero choice sequence still gives 0 (width 1, value 0), so shrinking ends there,
+## and every value below `2^width` stays reachable by lowering one choice at a time.
 let draw_magnitude: { max_bits: Int } -> Int <Sample> = { max_bits } -> do
-  let bits = choose { bound = max_bits + 1 }
-  if bits >= 63 then choose { bound = int_max }
-  else if bits == 0 then 0
-  else choose { bound = core::pow_int { base = 2, exp = bits } }
+  if max_bits <= 0 then 0
+  else do
+    let bits = 1 + choose { bound = max_bits }
+    if bits >= 63 then choose { bound = int_max }
+    else choose { bound = core::pow_int { base = 2, exp = bits } }
 
 ## A sign, drawn separately so the magnitude draw stays non-negative.
 let negate_sometimes: { n: Int } -> Int <Sample> = { n } ->

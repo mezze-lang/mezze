@@ -110,7 +110,12 @@ class SampleCommand {
             is SampleTarget.Result.Ready -> withEvaluatedConstants(currentDir, moduleFile, t)
         }
 
-        val expression = buildExpression(target, seed, count, config)
+        // Drawn a few more than asked for, so the duplicates dropped below (small sizes
+        // collide: two rows of `{ n = 0 }` say nothing the first did not) still leave
+        // `count` rows. Row `i` is always seed + i at size `rowSize(i)`, so asking for
+        // more keeps the rows already shown: the prefix is the same.
+        val drawn = drawnFor(count)
+        val expression = buildExpression(target, seed, drawn, config)
 
         when (val compiled = EvalClosure.compile(
             currentDir, moduleFile, expression, imports(target), buildDecls(target), coverageOf = name,
@@ -168,9 +173,12 @@ class SampleCommand {
                         System.out.write(batchOut.toByteArray()); System.out.flush()
                         reached.addAll(batch.branchHits)
                         readRows(batch.value!!)
-                    } else recoverRowByRow(currentDir, moduleFile, target, seed, count, depth, items, timeoutMs, config, reached)
+                    } else recoverRowByRow(currentDir, moduleFile, target, seed, drawn, depth, items, timeoutMs, config, reached)
+                val kept = distinctRows(rows, count, pinned = target.branches.size)
+                val shown = kept.map { rows[it] }
+                val whyOf = { k: Int -> target.branches.getOrNull(kept[k])?.why }
 
-                if (rows.isEmpty()) {
+                if (shown.isEmpty()) {
                     System.err.println(
                         "${Glyphs.CROSS} `$name` produced no rows, and no row reported a reason — " +
                             "this is a defect in sample, not in `$name`"
@@ -179,15 +187,15 @@ class SampleCommand {
                 }
 
                 val unreached = compiled.sites.filter { it.id !in reached }
-                if (json) println(sampleJson(name, seed, rows, unreached, moduleFile, target.unwrapped.map { it.name }) { i -> target.branches.getOrNull(i)?.why })
+                if (json) println(sampleJson(name, seed, shown, unreached, moduleFile, target.unwrapped.map { it.name }, whyOf))
                 else {
-                    printSample(target, seed, rows)
+                    printSample(target, seed, shown, whyOf)
                     SampleCoverageReport.lines(name, moduleFile.readLines(), compiled.sites, unreached).forEach { println(it) }
                 }
 
                 // A crashed row is a real failure of the function under test, so the
                 // exit code says so even though the table printed.
-                if (rows.any { it is RowOutcome.Crashed }) kotlin.system.exitProcess(1)
+                if (shown.any { it is RowOutcome.Crashed }) kotlin.system.exitProcess(1)
             }
         }
         runtime?.close()
@@ -398,6 +406,36 @@ class SampleCommand {
      * sequence combinator over `<Sample>` in the user's module scope, which it has no
      * reason to import.
      */
+    /**
+     * The size row [row] is drawn at: 0, 1, 2, … up to the configured size. Simplest
+     * first — row 0 is `0`, `""`, `[]` — so a table reads from the obvious case to
+     * the larger ones, as QuickCheck grows its size over a run. Depends on the row
+     * alone, so "more rows" never changes a row already shown.
+     */
+    internal fun rowSize(row: Int, config: Config): Int = minOf(row, config.size)
+
+    /** How many rows to draw so [count] survive [distinctRows]. */
+    internal fun drawnFor(count: Int): Int = minOf(MAX_COUNT, count * 2 + 2).coerceAtLeast(count)
+
+    /**
+     * The indices of the rows to show: every pinned (branch) row, then drawn rows
+     * whose arguments differ from every row kept so far, in order, up to [count].
+     * A crashed row is always kept — it is a finding, not a repeat.
+     */
+    internal fun distinctRows(rows: List<RowOutcome>, count: Int, pinned: Int): List<Int> {
+        val seen = HashSet<String>()
+        val kept = ArrayList<Int>()
+        for ((i, r) in rows.withIndex()) {
+            if (kept.size >= count) break
+            val key = (r as? RowOutcome.Ran)?.args?.toText()
+            if (i < pinned || key == null || seen.add(key)) {
+                key?.let(seen::add)
+                kept.add(i)
+            }
+        }
+        return kept
+    }
+
     internal fun buildExpression(
         target: SampleTarget.Result.Ready,
         seed: Int,
@@ -523,7 +561,7 @@ class SampleCommand {
         // the `perform` is emitted only when the row actually draws.
         val head = if (draws) {
             "perform CoveringSampleWith { seed = $rowSeed, run = $row, " +
-                "config = { size = ${config.size}n, enumerate = ${config.enumerate}n } } in do"
+                "config = { size = ${rowSize(row, config)}n, enumerate = ${config.enumerate}n } } in do"
         } else "do"
         val text = "              let ${ROW}_$slot = $head\n" +
             (if (lets.isBlank()) "" else lets + "\n") +
@@ -557,7 +595,7 @@ class SampleCommand {
         EXTRA_IMPORTS + target.scripts.mapNotNull { it.importLine } +
             (if (target.scripts.any { sc -> sc.ops.any { it.valued } }) setOf(SampleScripts.IMPORT) else emptySet())
 
-    private fun printSample(target: SampleTarget.Result.Ready, seed: Int, rows: List<RowOutcome>) {
+    private fun printSample(target: SampleTarget.Result.Ready, seed: Int, rows: List<RowOutcome>, whyOf: (Int) -> String?) {
         // A pinned row says WHICH branch it was built to reach. Without it, a row
         // with `n = 101` reads as a coincidence; with it, as the `then` side of
         // `n > max_value (= 100)`. Shown only when some row is pinned.
@@ -569,7 +607,7 @@ class SampleCommand {
         val ctxLabels = target.scripts.flatMap { sc -> sc.ops.filter { it.shown }.map { sc.label(it) } }
         val headers = target.fieldNames + ctxLabels + "→ result" + (if (showWhy) listOf("why") else emptyList())
         val body = rows.mapIndexed { i, outcome ->
-            val why = if (showWhy) listOf(target.branches.getOrNull(i)?.why ?: "") else emptyList()
+            val why = if (showWhy) listOf(whyOf(i) ?: "") else emptyList()
             when (outcome) {
                 is RowOutcome.Ran -> {
                     val args = (outcome.args as? WireValue.Record)?.fields

@@ -392,10 +392,13 @@ class SampleExpressionTest {
     /** `--size` / `--enumerate` reach every row's `SampleConfig`. */
     @Test
     fun `generation settings are carried into each row's config`() {
+        // `enumerate` as given on every row; `size` growing 0, 1, 2, … and stopping at
+        // the configured size, so a table reads from the simplest row to larger ones.
         val out = command.buildExpression(
-            ready("f", mapOf("a" to MezzeType.IntType)), seed = 1, count = 2,
+            ready("f", mapOf("a" to MezzeType.IntType)), seed = 1, count = 23,
             config = SampleCommand.Config(size = 20, enumerate = 4),
         )
-        assertEquals(2, Regex("config = \\{ size = 20n, enumerate = 4n \\}").findAll(out).count(), out)
+        val sizes = Regex("config = \\{ size = (\\d+)n, enumerate = 4n \\}").findAll(out).map { it.groupValues[1].toInt() }.toList()
+        assertEquals((0..20).toList() + listOf(20, 20), sizes, out)
     }
 }

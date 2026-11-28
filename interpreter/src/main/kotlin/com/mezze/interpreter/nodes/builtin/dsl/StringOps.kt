@@ -38,11 +38,11 @@ object StringOps {
 
     private val TRIM_START = NativeOp("__native_string_trim_start",
         listOf(Param("s", SlotKind.OBJECT)), SlotKind.OBJECT, pure = true,
-    ) { args -> args.string(0).trimStart() }
+    ) { args -> args.string(0).trimStart { Character.isWhitespace(it) } }  // = Java's stripLeading, as the dispatch table; plain trimStart also strips U+00A0
 
     private val TRIM_END = NativeOp("__native_string_trim_end",
         listOf(Param("s", SlotKind.OBJECT)), SlotKind.OBJECT, pure = true,
-    ) { args -> args.string(0).trimEnd() }
+    ) { args -> args.string(0).trimEnd { Character.isWhitespace(it) } }    // = Java's stripTrailing, as the dispatch table; plain trimEnd also strips U+00A0
 
     private val REVERSE = NativeOp("__native_string_reverse",
         listOf(Param("s", SlotKind.OBJECT)), SlotKind.OBJECT, pure = true,
@@ -62,7 +62,10 @@ object StringOps {
     // ==================== String, Int -> String ====================
     private val REPEAT = NativeOp("__native_string_repeat",
         listOf(Param("s", SlotKind.OBJECT), Param("n", SlotKind.LONG)), SlotKind.OBJECT, pure = true,
-    ) { args -> args.string(0).repeat(args.long(1).toInt()) }
+    // The same implementation as the dispatch table's: `n <= 0` is "", as `str::repeat`
+    // documents. Kotlin's `repeat` threw on a negative count (a host exception, shown
+    // as "a bug in Mezze") and `.toInt()` silently wrapped counts past Int.MAX_VALUE.
+    ) { args -> PrimitiveNatives.stringRepeat(args.string(0), args.long(1)) }
 
     // ==================== String, String -> Bool ====================
     private val EQ = NativeOp("__native_string_eq",

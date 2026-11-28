@@ -191,7 +191,13 @@ object WireRunner {
             )
         }
 
+        // Created before the first session so a runtime that dies at any point —
+        // even before the watch loop starts — is reported to the loop.
+        val events = java.util.concurrent.LinkedBlockingQueue<DevEvent>()
+        fun watchRuntime(s: WireSession) = s.onUnexpectedExit { code -> events.add(DevEvent.RuntimeStopped(s, code)) }
+
         var session = WireSession.start(currentDir, timing, t0, devFlagsWithListen) ?: return 1
+        watchRuntime(session)
         var prevHashes: Set<Hash> = emptySet()
 
         // Ctrl-C in watch mode quits the whole session. We disable
@@ -200,9 +206,18 @@ object WireRunner {
         // the blocking `events.take()` throws and the loop returns cleanly.
         val watchThread = Thread.currentThread()
         val quitRequested = java.util.concurrent.atomic.AtomicBoolean(false)
-        fun installQuitHook() = session.onQuit {
-            quitRequested.set(true)
-            watchThread.interrupt()
+        fun installQuitHook() {
+            session.onQuit {
+                quitRequested.set(true)
+                watchThread.interrupt()
+            }
+            // SIGTERM quits the whole session, as Ctrl-C does. It used to be forwarded
+            // to the runtime only, so `kill` on `mez dev` stopped the program and left
+            // the watcher running.
+            session.onTerminate {
+                quitRequested.set(true)
+                watchThread.interrupt()
+            }
         }
         installQuitHook()
 
@@ -216,6 +231,7 @@ object WireRunner {
             session = fresh
             prevHashes = emptySet()  // child has no cached state anymore
             installQuitHook()        // new session → re-arm the quit hook
+            watchRuntime(fresh)
             return true
         }
 
@@ -255,6 +271,7 @@ object WireRunner {
             session = fresh
             prevHashes = emptySet()
             installQuitHook()
+            watchRuntime(fresh)
             return true
         }
 
@@ -285,8 +302,10 @@ object WireRunner {
             val watchedDirs = HashMap<java.nio.file.Path, java.nio.file.WatchKey>()
             syncWatchedDirs(watcher, watchedDirs, appFile, currentDir)
 
-            val events = java.util.concurrent.LinkedBlockingQueue<DevEvent>()
             startFileWatcherThread(watcher, events)
+            // When the runtime was last brought back after stopping on its own: one
+            // that stops again straight away is not restarted in a loop.
+            var lastRuntimeRestart = 0L
 
             // Carries how the PREVIOUS run ended so the NEXT reload separator
             // can fold it in (`… reloaded app.mz · prev exited 0 · 0.09s`).
@@ -304,6 +323,25 @@ object WireRunner {
                     break
                 }
                 when (event) {
+                    is DevEvent.RuntimeStopped -> {
+                        // Already replaced (a reload killed it, or an older report).
+                        if (event.session !== session) continue
+                        val now = System.nanoTime()
+                        if (lastRuntimeRestart != 0L && now - lastRuntimeRestart < 10_000_000_000L) {
+                            // It stopped again right after a restart: say so, and stop
+                            // advertising a session nothing answers, so the editor falls
+                            // back to a runtime of its own. A save tries again.
+                            System.err.println(console.separator("runtime stopped again (exit ${event.exitCode}) — save a file to retry"))
+                            if (hostsSession) try { sessionFile.delete() } catch (_: Exception) {}
+                            continue
+                        }
+                        lastRuntimeRestart = now
+                        if (!restartSession()) {
+                            System.err.println(console.separator("runtime stopped (exit ${event.exitCode}) and couldn't restart — exiting"))
+                            return 1
+                        }
+                        System.err.println(console.separator("runtime stopped (exit ${event.exitCode}) — restarted; save a file to run again"))
+                    }
                     is DevEvent.FilesChanged -> {
                         // Coalesce any events that arrived during the take().
                         val coalesced = mutableSetOf<String>().apply { addAll(event.files) }
@@ -415,6 +453,8 @@ object WireRunner {
 
     private sealed class DevEvent {
         data class FilesChanged(val files: Set<String>) : DevEvent()
+        /** [session]'s runtime ended on its own with [exitCode]. */
+        data class RuntimeStopped(val session: WireSession, val exitCode: Int) : DevEvent()
     }
 
     /**
@@ -750,6 +790,8 @@ internal class WireSession private constructor(
         signalHandler.install()
         winchForwarder.install()
         sigtermForwarder.install()
+        // SIGTERM to `mez` stops the runtime on purpose: not an exit to recover from.
+        sigtermForwarder.onTerm = { closing = true; terminateHook?.invoke() }
         // When the child exits (for any reason), record its exit code
         // and close fromChild so any blocked WireFrameCodec.read returns
         // promptly. Without this, a SIGKILL or OOM on the child can leave
@@ -758,7 +800,27 @@ internal class WireSession private constructor(
         process.onExit().thenAccept { p ->
             childExitCode = p.exitValue()
             try { fromChild.close() } catch (_: Exception) {}
+            if (!killing && !closing) unexpectedExitHook?.invoke(p.exitValue())
         }
+    }
+
+    /** Set by [close], as [killing] is by [kill]: the exit that follows is asked for. */
+    @Volatile private var closing: Boolean = false
+    @Volatile private var unexpectedExitHook: ((Int) -> Unit)? = null
+    @Volatile private var terminateHook: (() -> Unit)? = null
+
+    /** Run [hook] when `mez` itself is sent SIGTERM (after the runtime is told). */
+    fun onTerminate(hook: () -> Unit) { terminateHook = hook }
+
+    /**
+     * Run [hook] with the exit code if the runtime process ends WITHOUT being asked
+     * to (not [close], not [kill]): a crash, an OOM kill, a signal from outside.
+     * `mez dev` uses it to bring the runtime back, so the session it publishes for
+     * the editor never points at a dead port.
+     */
+    fun onUnexpectedExit(hook: (Int) -> Unit) {
+        unexpectedExitHook = hook
+        if (childExitCode != -1 && !killing && !closing) hook(childExitCode)
     }
 
     /** Result of one LOAD cycle. */
@@ -1125,6 +1187,7 @@ internal class WireSession private constructor(
     }
 
     fun close() {
+        closing = true
         try { signalHandler.uninstall() } catch (_: Exception) {}
         try { winchForwarder.uninstall() } catch (_: Exception) {}
         try { sigtermForwarder.uninstall() } catch (_: Exception) {}
@@ -1566,7 +1629,12 @@ private class SigtermForwarder(
     private val timeoutMs: Long =
         System.getenv("MEZZE_INTERRUPT_TIMEOUT_MS")?.toLongOrNull()?.coerceAtLeast(100L) ?: 5_000L
 
+    /** Run first on SIGTERM: the session marks the exit as asked for, and `mez dev`
+     *  quits instead of watching on with a stopped runtime. */
+    @Volatile var onTerm: (() -> Unit)? = null
+
     private val handler = sun.misc.SignalHandler {
+        try { onTerm?.invoke() } catch (_: Exception) {}
         try {
             val frame = WireFrame.of(MessageType.SIGNAL, com.mezze.wire.Signal(name = "SIGTERM"))
             synchronized(toChild) {

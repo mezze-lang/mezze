@@ -1111,6 +1111,22 @@ object RuntimeServer {
      * "which error is this" decision in one place instead of interleaved with the
      * evaluation.
      */
+    /**
+     * The source an EVAL is run through. It is only a trigger: what runs is the
+     * closure registered just before. It must never come from the engine's source
+     * cache. The sampling engine is shared by every eval, and a cached source gives
+     * back the CallTarget of the FIRST eval with the same text — `mez sample` and
+     * `mez eval` always send request id 1, so on a warm `mez dev` session every eval
+     * after the first ran the first one's program: seeds ignored, `1 + 1` failing to
+     * read a record as an Int, index errors from a stale closure on new arguments.
+     */
+    internal fun evalSource(requestId: Long, entryHash: String): Source =
+        Source.newBuilder(
+            MezzeLanguage.ID,
+            "# RuntimeServer eval $requestId $entryHash",
+            "__runtime_server_eval_${requestId}__.mz",
+        ).cached(false).buildLiteral()
+
     internal fun prepareEval(eval: Eval): EvalPrep {
         val fnsFile = File(eval.fnsCborPath)
         val metaFile = File(eval.metaCborPath)
@@ -1251,11 +1267,7 @@ object RuntimeServer {
             return
         }
 
-        val source = Source.newBuilder(
-            MezzeLanguage.ID,
-            "# RuntimeServer eval ${eval.requestId}",
-            "__runtime_server_eval_${eval.requestId}__.mz",
-        ).buildLiteral()
+        val source = evalSource(eval.requestId, meta.entryHash)
 
         // Cleared first: a stale result from an earlier run would otherwise be
         // indistinguishable from this expression returning that same value.
